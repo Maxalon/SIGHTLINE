@@ -2143,3 +2143,42 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
       guard covers the player turn only.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.
+
+---
+
+## PROGRAM CONTOUR — OPENED 2026-08-30 on base `17934ee`. THE SHAPE OF THE FIGHT.
+
+CROSSCUT measured the ladder and found its LEVEL was fine — five of six rungs in band. This
+program is about everything that measurement could not price: the ladder's *shape*, the
+opponent's *decisions*, the 45-point gap between objective *classes*, eight biomes that are
+*paint*, and a build nobody has ever launched the way a player would.
+
+Six waves, all from `17934ee`, each independently reviewed before merge:
+
+- [ ] **C1 THE FLAT MIDDLE** (`wave/flat-middle`) — `h4→h6` is the smallest step on all three
+      measured ladders and `h2→h4` joins it on the composed tree, while the ends buy 3-6× as much.
+      `Heat.Mods` explains it: rung 8 is the only entry carrying `DmgDelta` or `AiTier`, so the
+      middle rungs add bodies and stat points and only the apex changes KIND.
+- [ ] **C2 THE OPPONENT DECLINES** (`wave/opponent-declines`) — `Ai.cs:537` scores any available
+      shot at `100 + bestHit` against terrain terms bounded under ~64. The opponent always acts
+      and never *declines*, which is also why the enemy overwatch branch fired 3 times in 1589
+      turns. The handoff calls this the single biggest remaining gap in the fight.
+- [ ] **C3 THE TWO GAMES** (`wave/two-games`) — kill objectives 38.3% ±3.1 (n=248) vs 83.4% ±1.0
+      (n=1259) for the six with a non-combat win condition. A gap between objective *classes*.
+- [ ] **C4 BIOME MECHANICAL** (`wave/biome-mechanical`) — `grep -ci biome` is 0 in `Combat.cs`,
+      `Ai.cs`, `Grid.cs` and `Unit.cs`. W4 gave the biomes a visual identity; this is the half
+      that makes the place change the fight.
+- [ ] **C5 THE HARD EDGES** (`wave/hard-edges`) — `FITTEST` covers five surfaces, not the game;
+      the `UpdateEnemy` deadlock is bounded only by the frame cap; a dead branch should be a loud
+      coverage failure, not a discovery three programs later; plus a defect hunt on the composed
+      tree, which no wave has swept.
+- [ ] **C6 SHIPS LIKE A PRODUCT** (`wave/ships`) — "builds clean and passes autoplay" is a
+      development standard, not a product one. Nobody has launched this game from outside the
+      source tree with an empty profile. The one time anyone checked a neighbouring case, a
+      published build silently lost its font.
+
+**The rules carried in from CROSSCUT** (each learned by shipping the mistake): a pooled row can
+hide a 49.5-point artifact, so cross-tab; a rung is four slot sets or it is not a rung; a CRN
+round prices consequences and is blind to feel; count NAMES not line shapes; a test that cannot
+fail is not a test; and a correct assertion in the wrong scope is indistinguishable from no
+assertion.
