@@ -2076,3 +2076,70 @@ fixable, and what makes it worth a wave even though every rung is in band.
       chorus; it does not answer it.
 - [ ] **OPEN — the ammo read is unmeasured as an affordance.** Nothing shows a player or the
       autopilot ever *baits* a hostile dry; `Game.Autopilot.cs` has no term for enemy ammo at all.
+
+---
+
+## PROGRAM CROSSCUT — CLOSED 2026-08-30. WHAT THE NEXT SESSION SHOULD PICK UP.
+
+Eight waves merged, each independently reviewed, each sent back at least once. The composed-tree
+ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
+
+### The three best-evidenced open findings, in priority order
+
+- [ ] **THE FLAT MIDDLE — replicated on THREE disjoint trees, and it is the obvious next wave.**
+      `h4 → h6` is the smallest step on all three ladders (−3.8 / −2.5 / −3.8) and on the composed
+      tree `h2 → h4` joins it at −7.5, while the ends buy −23.8, −16.2 and −13.1. `Heat.Mods`
+      explains it exactly: **rung 8 is the only entry carrying either `DmgDelta` or `AiTier`**, so
+      the middle rungs add bodies and stats and only the apex changes KIND. The ladder's LEVEL is
+      fine — five of six rungs in band — its SHAPE is not, and the cause is a static table.
+      First candidate (the audit's `balance-3`): move `DmgDelta` to rung 6 and `AiTier 2` to rung 7.
+      **ONE lever, CRN-paired, against a fresh same-slot baseline on your own tree.**
+
+- [ ] **THE MID-RUN DECAPITATE — replicated three times, mechanism located, lever unspent.**
+      44.7% ±3.9 (n=161) against the finale's 68.0% (n=472): **23.3 points harder than the
+      climax.** W8 refuted the first hypothesis (the HVT buff — the buffed half is *easier*) and
+      located it in the **force**: `Mission.Build` de-stacks the finale by 3-4 bodies and resets
+      `bump`; no mid-run Decapitate gets that, and an ELITE node adds +2 bodies and +1 stat.
+      **The next lever belongs on the force de-stack, not on the target.**
+
+- [ ] **KILL OBJECTIVES ARE A DIFFERENT GAME FROM THE REST.** On mid-run node kinds, kill
+      objectives read **38.3% ±3.1 (n=248)** against **83.4% ±1.0 (n=1259)** for the six with a
+      non-combat win condition; at mission 5, Eliminate 25.6% and Sabotage 96.8%. That is a
+      45-point gap between objective *classes*, not between objectives.
+
+### The methodological rules this program had to learn the hard way
+
+1. **A pooled row can hide a 49.5-point artifact.** `Eliminate` reads 89.1% pooled and ~40% over
+   its mid-run cells, because the row is largely 960 mission-1s. **Always use W8's
+   `byObjectiveByNodeKind` / `byObjectiveByMission` cross-tab before concluding anything from a
+   per-objective table.**
+2. **A rung is four slot sets or it is not a rung.** Proposed by L1 on cost grounds *after* the
+   finding that motivated it was retracted — then it decided a shipped default in W2, where four
+   slot sets put a leg below the band floor and sixteen put it inside.
+3. **A CRN round prices CONSEQUENCES and is structurally blind to feel** in already-decided
+   states. W2 removed 320 actions and 319 audio pops from the bleed-out window and all 40 chunk
+   pairs came back byte-identical. If a change only affects a state where no soldier can act, the
+   flywheel cannot see it and you need eyes.
+4. **Count NAMES, not line shapes.** The sweep's test counter has been wrong six times, the last
+   two because a correct fix and a correct routing change composed into a broken one.
+5. **A test that cannot fail is not a test.** Three waves shipped one — `BANDTEST` pinned constants
+   but no additive-mode behaviour, `TRUTHTEST` asserted the values the HUD *should* read rather
+   than the panel, `BRIEFTEST` read the model predicate and never observed the draw. Every one was
+   caught by reverting the defect and watching the test still pass. **Do that to your own tests.**
+6. **A correct assertion in the wrong scope is indistinguishable from no assertion.** W5 wrote the
+   right guard for the longest string on the squad screen and placed it outside the scale loop.
+
+### Standing gaps, honestly declared
+
+- [ ] **W10's text-scale gate covers five surfaces, not the game.** Every other screen is still
+      asserted at 100% only. `FITTEST` is written so a sixth leg is an addition, not a rewrite.
+- [ ] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post.
+      W3's premise (overwatch as a real enemy choice) is therefore unexercised.
+- [ ] **W3 THE OPPONENT CHOOSES was never started.** `Ai.cs` still scores any shot at
+      `100 + bestHit` against terrain terms bounded under ~64, so the opponent now always ACTS but
+      still never DECLINES. That is the single biggest remaining gap in the fight.
+- [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
+      still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
+- [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
+      guard covers the player turn only.
+- [ ] **On-device audio** still needs the owner: nobody has heard this game.
