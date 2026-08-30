@@ -28,6 +28,32 @@ public partial class Game
     /// Harness hook (screenshot only): reveal all dormant enemies (fully alert).
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Alert = AlertLevel.Alert; }
 
+    /// W2 harness hook (screenshot only): SIGHTLINE_AIIDLESHOT — the enemy AMMO read. Wakes the
+    /// board and walks every live hostile's clip down a different amount, leaving the first one
+    /// DRY, so one frame shows the whole range of the token's read: a full mag, partial mags, and
+    /// the DRY chip on the hostile that must now spend an action reloading.
+    ///
+    /// It also puts a STATUS EFFECT on the first three hostiles, and that is the point of the hook,
+    /// not decoration. The W2 review found the original read overpainted: it drew its own pill and
+    /// pip row into p.Y+24..+42, which `DrawUnitStatusChips` owns and paints LATE, so on any hostile
+    /// carrying BRN/BLD/DAZ the pill lost 9 of its 15 px and the pip row vanished entirely — while
+    /// the ROADMAP claimed "it does not collide". The scene now STAGES that exact collision, so the
+    /// claim is checkable from one frame instead of taken on trust. Pair with SIGHTLINE_CB=1 for the
+    /// colorblind pass (the DRY state is carried by word + empty-magazine glyph, not hue).
+    public void DebugAmmoShot()
+    {
+        DebugWakeAll();
+        var statuses = new[] { StatusKind.Burning, StatusKind.Bleed, StatusKind.Disoriented };
+        int i = 0;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Weapon == null) continue;
+            e.Ammo = Math.Min(e.Weapon.Clip, i);       // 0 (DRY), 1, 2, ... rounds left across the board
+            if (i < statuses.Length) e.AddStatus(statuses[i], 3);   // DRY + BRN on the same token
+            i++;
+        }
+    }
+
     /// Harness hook (screenshot only): drive the anti-turtle pressure clock to its max rung so a
     /// single frame shows the PRESSURE meter filled in the top bar (and its escalation banner).
     public void DebugPressure()

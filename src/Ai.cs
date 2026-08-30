@@ -22,6 +22,9 @@ public class EnemyPlan
     public (int x, int y)? RelockTile;  // CUSTODIAN (W8): re-lock/re-arm the objective at this site (else null)
     public bool Brace;                  // PIKEMAN (FUL-8): plant a braced focus cone over a movement lane
     public int BraceDirX, BraceDirY;    // FUL-8: cone axis = anchor - plant tile (Math.Sign per component)
+    public bool Reload;                 // W2: the gun is empty — spend the action changing the mag
+    public bool IdleRepair;             // W2 (harness accounting): this plan's action exists only
+                                        // because of the wave's terminal else — dash or dig-in.
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -94,6 +97,13 @@ public static class Ai
         int bestCost = 0;
         float bestScore = float.NegativeInfinity;
         Unit bestShotTarget = null;
+        // W2 THE OPPONENT ACTS — the best FULL-BUDGET (two-action) destination, tracked by the same
+        // per-tile scorer in the same pass. It is the terminal else of the no-shot fallback: when a
+        // unit has a spare action and nothing to spend it on, it spends it on GROUND. Tracking it
+        // here rather than re-scoring later means no second traversal and — critically — no extra
+        // Util.Rng draw, so the CRN pairing the whole measurement methodology rests on is unmoved.
+        (int x, int y) bestDash = (-1, -1);
+        float bestDashScore = float.NegativeInfinity;
 
         Unit nearest = null; int nd = int.MaxValue;
         foreach (var p in players)
@@ -406,7 +416,16 @@ public static class Ai
             // best shootable target from this tile (must keep an action to fire)
             Unit shoot = null;
             float bestHit = -1f;
-            if (actionsToReach <= 1)
+            // W2 THE OPPONENT ACTS — the AMMO GATE. `Ammo` appeared in this file at exactly two
+            // lines (the PIKEMAN plant gate and the overwatch fallback), NEITHER of them here, so a
+            // hostile with an empty weapon still planned a ShootTarget. A non-null ShootTarget then
+            // suppressed the whole no-shot fallback block below, and Game.ActAfterMove's own
+            // `e.Ammo > 0` gate refused the shot — the unit stood there having spent nothing. Measured
+            // on this tree, counting only CONTESTED acts (at least one soldier still standing; an
+            // all-downed board idles every hostile by design and must not be counted): 69 of 755
+            // acts at n=16 campaigns and 39 of 1195 at n=32 were made on an empty weapon, and ~61%
+            // of those produced no action at all in BOTH frames.
+            if (actionsToReach <= 1 && (!Game.AiIdleFix || e.Ammo > 0))
             {
                 foreach (var p in players)
                 {
@@ -738,6 +757,8 @@ public static class Ai
                 bestCost = c;
                 bestShotTarget = shoot;
             }
+            // W2: best tile that costs BOTH actions to reach (same score, no re-scoring, no new draw).
+            if (actionsToReach >= 2 && score > bestDashScore) { bestDashScore = score; bestDash = (tx, ty); }
         }
 
         // build path
@@ -930,12 +951,74 @@ public static class Ai
                 // commanding perch it genuinely controls.
                 bool cmdOw = g.Grid.HeightAt(bestTile.x, bestTile.y) - g.Grid.HeightAt(nearest.X, nearest.Y) >= 2;
                 bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y, cmdOw);
-                if (sees && e.Ammo > 0 && !routing) plan.Overwatch = true;
+                // W2 THE OPPONENT ACTS — the AMMO ECONOMY (docs/DESIGN.md §5.1). A dry gun is the
+                // FIRST thing worth an action: every other branch here either needs ammo (overwatch)
+                // or is a way of surviving until the unit has some. Ordered ahead of hunker on
+                // purpose — a hostile digging in behind cover with an empty weapon is the statue
+                // this wave exists to remove.
+                if (Game.AiIdleFix && e.Ammo <= 0 && e.Weapon.Clip > 0) plan.Reload = true;
+                // W2: mirror ActAfterMove's own overwatch gate. A Disoriented unit's watch is refused
+                // by the exec, and the plan had no way of knowing — so it planned a watch, the exec
+                // declined it, and the unit stood still. Plan what the exec will actually accept.
+                else if (sees && e.Ammo > 0 && !routing
+                         && (!Game.AiIdleFix || !e.HasStatus(StatusKind.Disoriented))) plan.Overwatch = true;
                 else if (coverHere.Level > 0) plan.Hunker = true;
+                // W2 TERMINAL ELSE. `if (watch) ... else if (cover) ...` with no final branch meant a
+                // hostile that had lost line of sight to the squad AND was standing on open floor got
+                // neither, and froze in the open holding a live action. This is the SMALLER of the two
+                // contested causes and the wave's first write-up had it backwards: of the pre-wave
+                // contested idles it accounts for 5 of 47 at n=16 campaigns and 21 of 45 at n=32 (the
+                // rest are the dry weapon above). The split is not resolvable at these samples — both
+                // causes are real, neither dominates.
+                // It spends that action on GROUND — re-targeting the move at the best tile the same
+                // per-tile scorer ranked among those needing the FULL two-action budget — but ONLY
+                // when that tile is genuinely no worse.
+                //
+                // REVIEW FIX, and the first version had this exactly backwards. This arm is only
+                // reachable when `spent < 2`, i.e. `bestTile` cost 0 or 1 actions — and `bestTile`
+                // is the argmax over ALL tiles including the two-action ones, so `bestScore >=
+                // bestDashScore` BY CONSTRUCTION. The unconditional dash therefore moved the unit
+                // to a tile its own scorer ranked LOWER, every single time: measured 13 of 13
+                // dashes strictly worse, mean -12.7 points, against terrain terms bounded under
+                // ~64. The comment claimed the unit "closes, withdraws or seeks cover exactly as
+                // its archetype terms already say it should"; its archetype terms said the opposite.
+                //
+                // The comparison has to be MOVE-COST-NEUTRAL to mean anything here. Every tile's
+                // score carries `-actionsToReach * 6`, a term that exists to express "prefer the
+                // cheaper move, slightly" — a preference that is meaningless in this branch, where
+                // the spare action's only alternative use is nothing at all. So refund the
+                // differential (the dash paid 12, `bestTile` paid `spent * 6`) and require the dash
+                // to win on the terms that actually differ. If it does not, dig in instead: HUNKERED
+                // is a real mechanical state (-25 to hit against it, no crit) and the player's own
+                // HUNKER has no cover requirement either, so it is symmetric, not a consolation prize.
+                else if (Game.AiIdleFix && bestDash.x >= 0 && bestDash != bestTile
+                         && DashWins(bestDashScore, bestScore, spent))
+                {
+                    plan.Path = g.Grid.ReconstructPath(cameFrom, e.X, e.Y, bestDash.x, bestDash.y);
+                    plan.MoveActions = 2;
+                    plan.IdleRepair = true;
+                }
+                // no two-action tile exists, or none that survives the comparison above.
+                else if (Game.AiIdleFix) { plan.Hunker = true; plan.IdleRepair = true; }
             }
         }
 
         return plan;
+    }
+
+    /// W2 (review fix): is the best FULL-BUDGET tile worth the spare action, judged move-cost-
+    /// neutrally? Both scores carry a `-actionsToReach * 6` term; the dash paid 12 and the chosen
+    /// tile paid `spent * 6`. That term prices an action which, in this branch, has no other use —
+    /// so refund the difference and compare what is left. Ties go to the dash (a unit with nothing
+    /// else to do should take the ground); anything worse digs in where it stands.
+    /// `DashProbe` is harness-only and ALWAYS null in normal play.
+    public static Action<float, float, int, bool> DashProbe;
+    internal const float MoveCostPerAction = 6f;
+    static bool DashWins(float dashScore, float bestScore, int spent)
+    {
+        bool win = dashScore + (2 - spent) * MoveCostPerAction >= bestScore;
+        DashProbe?.Invoke(dashScore, bestScore, spent, win);
+        return win;
     }
 
     // Best smoke tile thrown from (fx,fy): find an overwatching player with LoS to the

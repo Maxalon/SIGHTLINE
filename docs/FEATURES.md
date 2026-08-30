@@ -809,3 +809,35 @@ branch point.
   tab lists 16 verbs with hotkeys plus selection/camera/global bindings — generated from
   `Hud.VerbTable` + `Hud.VerbHelp`, i.e. the same `ActionDesc` switch the action bar's hover
   tooltip reads, so help and manual cannot drift. CODEXTEST asserts every verb has a home.
+
+## PROGRAM RESONANCE — WAVE W2 "THE OPPONENT ACTS" (the enemy stops freezing mid-fight)
+
+- **No CONTESTED enemy act-opportunity ends with NO branch having fired.** `Ai.Plan`'s
+  reachable-tile shot search is gated on the unit's own ammo; the no-shot fallback has a **terminal
+  else** that re-targets the move at the best full-two-action-budget tile — same per-tile scorer, no
+  extra RNG draw, and only when that tile wins a **move-cost-neutral** comparison (every score
+  carries `-actionsToReach * 6`, a term pricing an action that in this branch has no alternative
+  use), otherwise the unit digs in; and `Game.ActAfterMove` carries a structural terminal guarantee
+  for the cases where the board moved out from under a plan. Scale: 14 reloads + 25 terminal-else
+  over 1589 act-opportunities = **2.5% of all enemy acts, 3.5% of contested ones**. Measured pre-wave at **6.2%** of contested act-opportunities (n=16
+  campaigns) / **3.8%** (n=32), **0.0%** after (`SIGHTLINE_AIIDLETEST`). Behind
+  `SIGHTLINE_AIIDLEFIX` (default ON; `=0` restores the pre-W2 opponent AND its read exactly).
+  **The bleed-out window is deliberately excluded and deliberately silent:** when every surviving
+  soldier is downed, `Ai.Plan` returns an empty plan by design, every hostile idles, and nothing
+  this wave added fires there — the test asserts it.
+- **Hostiles RELOAD.** One action, full clip, mirroring the player's `DoReload`. Before this,
+  hostiles were handed one clip at spawn and had no reload verb anywhere, so a hostile that emptied
+  its magazine stopped being a combatant for the rest of the mission: 9.1% of contested acts (n=16)
+  / 3.3% (n=32) were made on an empty weapon and ~61% of those produced nothing in both frames.
+  Reload-verb-over-clip-refresh is recorded with its reasoning in `docs/DESIGN.md` §5.1.
+- **Enemy ammo is readable** — enemy ammo appeared nowhere in `Hud.cs` or `Renderer.cs` before this
+  wave. A pip row sits in the 4px band between the HP pips and the top of the body, and **DRY is a
+  status CHIP** (empty-magazine glyph + the word, amber) in `DrawUnitStatusChips`' late opaque pass,
+  so it can never be buried — the wave's first attempt drew its own pill into the p.Y+24..+42 band
+  that pass owns and was silently overpainted on any hostile carrying a status effect. Drawn only
+  for hostiles already in contact (`AlertLevel.Alert`), so a dormant "?" pod gives nothing away.
+  `SIGHTLINE_AIIDLESHOT=1` stages a full/partial/DRY spread **with status effects on**, so the
+  no-collision claim is checkable from one frame.
+- **The enemy HUNKER is audible and visible** — it was the one branch of the eleven that fired in
+  complete silence. It now pops "HUNKERED" and plays the player's own hunker cue, **except during
+  the bleed-out window**, where it stays silent by design.

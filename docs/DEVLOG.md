@@ -8646,3 +8646,269 @@ any command that sets `XDG_CONFIG_HOME` or `HOME`**, which is exactly what CLAUD
 procedure tells every agent to export. Every run in this wave was made without it. Nothing
 collided, but that is luck, not procedure — the two rules contradict each other and one of them
 needs to change.
+
+# PROGRAM RESONANCE — Wave W2 "THE OPPONENT ACTS" (dev; worktree `agent-aec483dc62bf01706`, branch `wave/opponent-acts`)
+
+**Base commit: `4784803`** (the integration tip carrying W1 TRUE INSTRUMENT and TRUE BAND — NOT
+`main`).
+
+> ### ⚠ THIS WAVE'S FIRST WRITE-UP WAS WRONG ABOUT ITS OWN HEADLINE NUMBER
+>
+> It published **"32.4% of enemy act-opportunities end with an unspent action"** as combat
+> paralysis, and built its "REAL FINDING" and its default-ON argument on top of that. **86% of
+> that number was the bleed-out window** — act-opportunities on boards where every surviving
+> soldier was already on the floor. The review caught it; I reproduced the split independently
+> and it is exactly right. The corrected number is **6.2% (n=16 campaigns) / 3.8% (n=32)** during
+> live contact. Everything below is the re-measured version. The wave is not wrong that the enemy
+> idles; **it was wrong about when, why, and by how much**, and it shipped a feel regression into
+> the game's most dramatic beat while looking the other way.
+
+## THE DEFECT, MEASURED PROPERLY
+
+`Game.UpdateEnemy`'s `ActAfterMove` stage is a twelve-branch else-if chain (eleven before this
+wave added RELOAD). **Every branch in it changes `ActionsLeft`** — the shot and the reload decrement
+it, the other ten zero it — so "the unit still holds an action AND `ActionsLeft` is unchanged" is an
+exact structural test for *no branch fired*. That detector is sound and an independent probe
+reproduced it act-for-act. Two things about it, both from review:
+
+- **It tests "no branch fired", NOT "no action left".** An earlier comment claimed the stronger
+  invariant. It is false: 30 of 963 acts (3.1%) end holding exactly one action, via the SHOT branch
+  decrementing 2 → 1 and `TryEnemyReposition` declining at `curExp < 2.0f`. A covered shooter
+  holding its ground is intended behaviour — but it is a spent *branch*, not a spent *action*.
+- What the detector lacked was the only context that makes an idle count readable:
+
+**When every surviving soldier is DOWNED, `Ai.Plan` returns an empty plan by design.** `Ai.cs:78`
+removes downed soldiers (the FUL-7 LAST LIGHT rule that enemies do not execute bodies), and
+`players.Count == 0` returns immediately. Every hostile then idles, on a board where no soldier can
+act either and the bleed-out timers are running the mission out. **That is not a defect and it must
+not be "fixed".** So the invariant this wave actually enforces is *no **CONTESTED** act-opportunity
+ends unspent*, and every counter is split on standing-soldier count.
+
+`SIGHTLINE_AIIDLETEST` output, both frames (deterministic; reproduced byte-for-byte):
+
+**n=16 campaigns (`AIIDLETEST=1`, 86 missions)**
+
+| leg | regime | acts | actsDry | idle | idleDry | noTgt | acted |
+|---|---|---|---|---|---|---|---|
+| OFF | **contested** | 755 | 69 (9.1%) | **47 (6.2%)** | 42 | 5 | — |
+| OFF | all-downed | 293 | — | 293 (100%) | — | 293 | **0** |
+| ON | **contested** | 644 | 22 (3.4%) | **0 (0.0%)** | 0 | 0 | — |
+| ON | all-downed | 319 | — | 319 (100%) | — | 319 | **0** |
+
+**n=32 campaigns (`AIIDLETEST=2`, 168 missions)**
+
+| leg | regime | acts | actsDry | idle | idleDry | noTgt | acted |
+|---|---|---|---|---|---|---|---|
+| OFF | **contested** | 1195 | 39 (3.3%) | **45 (3.8%)** | 24 | 21 | — |
+| OFF | all-downed | 400 | — | 400 (100%) | — | 400 | **0** |
+| ON | **contested** | 1168 | 19 (1.6%) | **0 (0.0%)** | 0 | 0 | — |
+| ON | all-downed | 444 | — | 444 (100%) | — | 444 | **0** |
+
+The unsplit rates (32.4% / 27.9%) are printed too, labelled *do NOT quote this as a paralysis
+rate*. **`AIIDLETEST=1` is 16 campaigns, not 32** — the loop is `{heat 0, heat 4} × 8 objectives ×
+n`, and the first write-up mislabelled it in three documents.
+
+**The two contested causes, and the first write-up had their sizes backwards.** `idleDry` and
+`noTgt` partition the contested idles exactly (42+5 = 47; 24+21 = 45):
+
+- **A dry weapon** — `Ai.cs` touched `.Ammo` at exactly two lines, neither of them the
+  reachable-tile shot search, so a dry hostile planned a shot; a non-null `ShootTarget` suppresses
+  the whole no-shot fallback; `ActAfterMove`'s own `e.Ammo > 0` gate then refused it. **89% of
+  contested idles at n=16, 53% at n=32.**
+- **The missing terminal else** — no line of sight AND no cover got neither overwatch nor hunker.
+  **11% at n=16, 47% at n=32.**
+
+**The split is not resolvable at these samples.** Both causes are real; neither dominates; and the
+published "87.6% were units with no planned target" was an artifact of counting the bleed-out
+window, where the plan is empty by construction.
+
+## WHAT SHIPPED (`SIGHTLINE_AIIDLEFIX`, default ON)
+
+- **`src/Ai.cs` — the ammo gate.** The tile loop's shot search is gated on `e.Ammo > 0`.
+- **`src/Ai.cs` — the terminal else, WITH the guard review forced onto it.** When neither overwatch
+  nor hunker qualifies, the plan is re-targeted at `bestDash`, the best tile among those needing the
+  **full two-action budget**, tracked by the *same* per-tile scorer in the *same* pass — no new
+  policy and **no new `Util.Rng` draw**. But the first version dashed unconditionally, and that was
+  wrong by construction: this arm is only reachable when `bestTile` cost 0-1 actions, and `bestTile`
+  is the argmax over *all* tiles including the two-action ones, so `bestScore >= bestDashScore`
+  **always**. Measured: **13 of 13 dashes strictly worse, mean −12.7 points**, against terrain terms
+  bounded under ~64. The unit moved to a tile its own scorer ranked lower, every time, while a
+  comment claimed it moved "exactly as its archetype terms already say it should".
+  The comparison is now **move-cost-neutral**: every tile's score carries `-actionsToReach * 6`, a
+  term pricing an action that in *this* branch has no alternative use, so the differential is
+  refunded before comparing and a dash that still loses digs in instead. It now fires **5 of 9
+  times it is offered** (n=32 campaigns).
+- **`src/Ai.cs` — the plan mirrors the exec.** Overwatch is planned only when the exec would accept
+  it (`!Disoriented`). A plan the exec refuses is an idle by another name.
+- **`src/Game.cs` — the RELOAD branch.** One action, full clip, mirroring `Game.DoReload`.
+- **`src/Game.cs` — the terminal guarantee**, for the exec's side (a target that died, a `PINNED`
+  clamp that shortened the move out of range, a plan gone stale between planning and acting).
+- **`src/Game.cs` — the STANDING GATE, and it is the review's fix, not mine.** The terminal else,
+  the terminal guarantee and the new HUNKER pop/SFX are all gated on `standing > 0`. See the next
+  section for what happened without it.
+- **`src/Renderer.cs` + `DrawUnitStatusChips` — the ammo read.** Pip row in the 4px band between
+  the HP pips and the top of the body; **DRY is a status CHIP** (empty-magazine glyph + the word),
+  in the late opaque pass. Gated on `Game.AiIdleFix`. Honest size: a 2-line call site plus a
+  28-line helper, plus ~18 lines inside the chip row — an earlier draft called it "~15 lines in the
+  token draw". `src/Renderer.cs` **auto-merges clean against W4**; the real conflicts this wave
+  leaves are the docs, `scripts/qa-sweep.sh`, and an additive block in `Program.cs`.
+- **`docs/DESIGN.md` §5.1 — the ammo economy, decided.** Reload verb over per-turn clip refresh.
+
+## THE REGRESSION I SHIPPED AND THE REVIEW CAUGHT — and why no gate in this wave could see it
+
+The first build gated the terminal else on nothing. **319 of the 320 acts it produced were on
+all-downed boards**, each popping `HUNKERED` and playing the hunker cue. The player watched their
+whole squad bleed out while five to eight hostiles barked at them, in tails measured up to 28
+consecutive act-opportunities. That is a feel regression in the game's single most dramatic beat,
+straight against pillars 2 and 3.
+
+**And it is invisible to the price measurement by construction.** I re-ran the entire 800-campaign
+paired round on the corrected binary (`R3-*`) and diffed it against the first build's round
+(`R1-*`): **all 40 chunk pairs are byte-identical once the `harness` block is stripped.** Removing
+320 hostile actions and 319 audio/text pops changed the outcome of exactly zero of 800 campaigns —
+because no soldier can act in that window, so nothing the enemy does there can move a win rate.
+
+**The methodological lesson, and it generalises past this wave:** a CRN win-rate round prices
+*consequences*, and is structurally blind to any change confined to a state where the outcome is
+already determined. Feel changes in decided states need their own assertion. `AIIDLETEST` now
+carries one — `actedDuringBleedOut == 0` on **both** legs — and it fails the build I shipped.
+
+## THE HONEST SIZE OF THIS WAVE, STATED PLAINLY
+
+The adjudicator asked for this number and they were right to. Over 32 campaigns (`AIIDLETEST=2`,
+1589 act-opportunities on the ON leg), what the wave actually changes in live play is:
+
+| | count | share |
+|---|---|---|
+| RELOAD issued | 14 | |
+| terminal-else fired (5 dashes + 20 dig-ins) | 25 | |
+| **total behaviour change** | **39** | **2.5% of all acts, 3.5% of contested acts** |
+
+That is the wave. It is *not* "a quarter of the opposition's turns were invisible paralysis" — that
+claim was 86% bleed-out window and it is withdrawn. A contested idle rate of 6.2%/3.8% going to
+zero, plus an ammo economy that was never decided, is a real repair at a real but small scale, and
+it is the version that survives contact with the measurement.
+
+## GATE 3 — THE PRICE (round R4, the final binary)
+
+**Instrument first.** `R0diag`: the base commit's own binary (`git archive 4784803`) against this
+wave's at `SIGHTLINE_AIIDLEFIX=0`, at h0/b0 and h4/b10 — **empty diff** outside `harness`. The
+review's adjudicator independently rebuilt from `git archive` and reproduced it at slot base 940, a
+base nobody had used (their run, not mine). The dial-off leg is the pre-wave game.
+
+**The round.** 5 heat rungs × four disjoint CRN slot sets (bases 0/10/20/30, N=10) × greedy+sloppy
+= **80 campaigns per rung per leg, 800 campaigns**; all 40 chunks asserted their own `runs` field.
+
+```
+  rung    OFF%     ON%   delta     n  0->1  1->0  p(2-sided)
+    h0    47.5    43.8    -3.8    80     5     2       0.453
+    h2    26.2    23.8    -2.5    80     4     2       0.688
+    h4    22.5    23.8    +1.2    80     6     7       1.000
+    h6    17.5    20.0    +2.5    80     4     6       0.754
+    h8    12.5    10.0    -2.5    80     4     2       0.688
+  POOL    25.2    24.2    -1.0   400    23    19       0.644
+```
+
+### heat 0, taken seriously: sixteen slot sets, 320 campaigns per leg
+
+The review pooled four independent 80-campaign h0 sets and got three negatives (−5.0 / +0.0 / −6.2
+/ −7.5, discordant 30/15 ⇒ p≈0.036) and asked whether a 5-point cost at the rung most players are
+on was being filed as noise because no single set can resolve it. **That was the right challenge**
+and a 4-set answer was not good enough. h0 therefore gets three more slot-set families, all
+measured by me on the final binary (`queue_h0.sh`, `analyse_h0.py`):
+
+```
+                family     n    OFF%     ON%   delta  0->1  1->0        p
+    main round   b0-30    80    47.5    43.8    -3.8     5     2    0.453
+   extension    b40-70    80    46.2    48.8    +2.5     4     6    0.754
+   family C   b900-930    80    51.2    48.8    -2.5     8     6    0.791
+   family D   b940-970    80    56.2    48.8    -7.5    10     4    0.180
+  POOLED (all 16 sets)   320    50.3    47.5    -2.8    27    18    0.233
+
+  paired difference -2.8 points, SE 2.1, 95% CI [-6.9, +1.3]
+```
+
+**The answer: −2.8 points at heat 0, not distinguishable from zero (p=0.233), but a cost as large
+as ~7 points is not excluded.** Three of four families are negative and 60% of the informative
+worlds went against the fix, so the direction is more consistent than the significance — I am not
+going to call the sign noise, only the magnitude unresolved.
+
+Two things make it shippable anyway, and they are the reason the default stays ON:
+
+1. **Both legs are inside the band at h0.** Pooled over 320 campaigns the control reads **50.3%**
+   and the shipped leg **47.5%**, against a band of 55±8 (floor 47.0). The fix does not move any
+   rung out of its band. (My own earlier report had the ON leg at 42.5% and below the floor — that
+   was four slot sets; sixteen say otherwise, which is exactly why the deep round was needed.)
+2. **The finer-grained statistics agree with the null on ~10× the sample.** Mission win-rate
+   78.94% → 78.56% (n = 1410 / 1404 missions); soldier deaths per mission **1.340 → 1.340**.
+
+If the lead disagrees with that trade, `SIGHTLINE_AIIDLEFIX=0` is the whole revert — and since the
+review it genuinely reverts all of it, the ammo read included.
+
+## THE NUMBER I AM HANDING TO W7 — with the band arithmetic done correctly this time
+
+The dial-OFF control is a fresh n=80/rung read of the composition on the post-W1 tree. **The first
+write-up said "h4/h6/h8 are IN band and h0/h2 are not". That is wrong: the band is ±8, so h0's
+floor is 47.0 and the control reads 47.5 — inside.**
+
+| | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
+|---|---|---|---|---|---|
+| **control (dial OFF)** | **50.3** (n=320) | 26.2 | 22.5 | 17.5 | 12.5 |
+| **shipped (dial ON)** | **47.5** (n=320) | 23.8 | 23.8 | 20.0 | 10.0 |
+| band (centre ± tol) | 55±8 | 40±8 | 30±8 | 20±8 | 10±5 |
+| control vs band | in | **OUT** (−5.8 under the floor) | in | in | in |
+
+**Only h2 is convincingly outside**, at −13.8 from centre ≈ 2.5 rung-SE (a rung's binomial SE at
+n=80 is ~5.6). Every other rung is in band on both legs — including h0, once it is measured deeply
+enough: at four slot sets the control read 47.5 and the shipped leg 42.5 (below the 47.0 floor); at
+**sixteen** they read 50.3 and 47.5, both inside. That reversal is the single best argument in this
+write-up for the L1 method rule, and against reading a rung off one slot-set family.
+
+**"The curve is too FLAT" is a hypothesis, not a result.** The shortfall from band centre runs
+−4.7 / −13.8 / −7.5 / −2.5 / **+2.5** across the rungs, which is consistent with a curve flatter
+than the band — but only h2 clears 2 SE, so that is one rung out of band and a suggestive trend,
+nothing more. W7 owns the band; this is a control leg, not a ladder of record.
+
+## WHAT I DID NOT FIX, AND WHAT IT COST
+
+- **The enemy still cannot CHOOSE.** `Ai.cs` still scores any available shot at `100 + bestHit`
+  against terrain terms bounded under 64, so `plan.Overwatch` remains reachable only when no
+  reachable tile has any shot. **W3's, deliberately untouched** so this round stayed attributable.
+- **The idle repair is a floor, not a policy.** The terminal else spends the action on ground
+  scored by the existing function; the exec guarantee spends it on HUNKER. Neither is claimed to be
+  the *right* action — only that it is a real one.
+- **The dry/no-target split is unresolved** (89/11 at n=16, 53/47 at n=32). Both causes are real;
+  which dominates is not established, and I am not going to claim it from two frames.
+- **THE ENEMY OVERWATCH BRANCH IS ESSENTIALLY DEAD, and I touched it without noticing.** The review
+  found it firing zero times; re-measured here it is **0 of 1595 act-opportunities pre-wave and 3 of
+  1589 post-wave** (the 3 are a cascade of the ammo gate changing which boards occur, not a designed
+  effect). So the `!Disoriented` plan/exec mirror this wave added to that branch is essentially
+  **unexercised** — it is correct, and it is untested by any real play. Pre-existing, not caused
+  here, and it is W3's whole premise: `Ai.cs` scores any available shot at `100 + bestHit` against
+  terrain terms bounded under ~64, so a lane-hold is only reachable when no reachable tile has any
+  shot at all. Logged in the ROADMAP for W3.
+- **The ammo read is unmeasured as an affordance.** It draws correctly and no longer collides
+  (proved on a staged DRY+BRN token, below) — but nothing shows a player or the autopilot ever
+  *baits* a hostile dry. `Game.Autopilot.cs` has no term for enemy ammo at all.
+- **The all-downed window is now explicitly out of scope.** Hostiles stand silent over a dying
+  squad exactly as they did pre-wave. Whether that window should have *any* presentation is a real
+  design question and this wave does not answer it — it only refuses to answer it with a chorus.
+- **Container isolation was partial.** This agent's shell refused `XDG_CONFIG_HOME` and `HOME`, so
+  persistence self-tests ran against the shared `~/.config/Sightline`. The measured round is
+  unaffected (`run_chunk.sh` sets it itself).
+
+## VERIFICATION
+
+- `dotnet build -c Release` — 0 warnings / 0 errors.
+- `bash scripts/qa-sweep.sh --full` — every self-test PASS, COVERAGE GAP empty, FXSTREAM PASS,
+  **PAIRTEST PASS**, autoplay ×3 with no TIMEOUT and no exception.
+- `SIGHTLINE_AIIDLETEST=1` and `=2` — PASS. Four assertions, and three of them fail the build this
+  wave first shipped: contested idles == 0, contested dry idles == 0, **nothing acts during the
+  bleed-out window on either leg**, and the pre-wave leg must still idle in contested play (so the
+  probe cannot pass vacuously). It also now REPORTS, rather than asserts, the three numbers the
+  review had to derive by hand: the scale of the live repair, the dash guard's accept rate, and the
+  enemy overwatch count — so the next wave does not have to rebuild the probe to check this one.
+- Screenshots read and judged. `SIGHTLINE_AIIDLESHOT=1` now **stages the collision the review
+  found**: it walks each hostile's clip down and puts BRN/BLD/DAZ on the first three, so one frame
+  shows a DRY+BRN token. Both chips render side by side, fully opaque, with the ammo pip row clear
+  above the body — the claim is checkable from the frame instead of taken on trust.

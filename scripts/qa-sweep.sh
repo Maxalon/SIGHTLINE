@@ -94,6 +94,7 @@ echo -n "HEATLADDERTEST: "; verdict "$(SIGHTLINE_HEATLADDERTEST=1 run | grep -oE
 echo -n "SNAPTEST   : "; verdict "$(SIGHTLINE_SNAPTEST=1 run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOTEST  : "; verdict "$(SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1)"
+echo -n "AIIDLETEST : "; SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1
 # RESONANCE A3: the AUDIO CHECK audition screen's listing/label/measurement contract.
 echo -n "AUDITIONTEST: "; verdict "$(SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1)"
 echo -n "AMBIENTTEST: "; verdict "$(SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1)"

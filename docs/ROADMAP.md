@@ -1990,3 +1990,89 @@ fixable, and what makes it worth a wave even though every rung is in band.
       condition, and the autopilot's non-kill policies are written to skip the fight.
 - [ ] **`SIGHTLINE_HVTAIM` is dialled and unpriced.** The `+6` aim half of the HVT buff partly
       duplicates what `bump` already grants; nobody has spent a round on it.
+
+### PROGRAM RESONANCE — W2 "THE OPPONENT ACTS" (2026-08-30, details in DEVLOG §W2)
+
+- [x] **CONTESTED ENEMY PARALYSIS MEASURED AND FIXED TO ZERO — at 6.2% / 3.8%, NOT the 32.4% this
+      wave first published.** An idle count is unreadable without the standing-soldier split: when
+      every surviving soldier is DOWNED, `Ai.Plan` returns an empty plan **by design** (`Ai.cs:78`,
+      the FUL-7 rule that enemies do not execute bodies), so every hostile idles on a board where
+      nobody can act. **86% of the raw rate was that bleed-out window.** Split properly, base
+      `4784803`: pre-wave a CONTESTED act-opportunity idled **47/755 = 6.2%** at n=16 campaigns and
+      **45/1195 = 3.8%** at n=32; post-wave **0.0%** in both. Two causes, and the first write-up had
+      their sizes backwards — a dry weapon (89% of contested idles at n=16, 53% at n=32) and the
+      missing terminal else (11% / 47%). **The split is not resolvable at these samples; both are
+      real, neither dominates.**
+- [x] **THE FIX'S OWN FEEL REGRESSION WAS CAUGHT IN REVIEW AND IS NOW GATED AND TESTED.** The first
+      build's terminal else fired on all-downed boards too: **319 of 320 of its acts popped
+      HUNKERED + SFX over a squad bleeding out**, tails up to 28 consecutive act-opportunities.
+      Everything the wave added is now gated on `standing > 0`, and `SIGHTLINE_AIIDLETEST` asserts
+      `actedDuringBleedOut == 0` on **both** legs. **No price round could ever have caught this**:
+      the 800-campaign round re-run on the corrected binary is **byte-identical to the first
+      build's on all 40 chunk pairs** (harness block stripped), because nothing an enemy does in a
+      decided state can move a win rate. A CRN round prices consequences and is blind to feel
+      changes confined to states whose outcome is already settled.
+- [x] **THE TERMINAL ELSE ADDS NO POLICY AND NO RANDOMNESS — and now it also has to WIN.** The plan
+      is re-targeted at the best tile among those needing the FULL two-action budget, tracked by the
+      *same* per-tile scorer in the *same* pass (zero extra `Util.Rng` draws; PAIRTEST green with
+      the dial on). Review caught that the first version dashed **unconditionally**, which is wrong
+      by construction: the arm is only reachable when `bestTile` cost 0-1 actions, and `bestTile` is
+      the argmax over ALL tiles including two-action ones, so `bestScore >= bestDashScore` always —
+      **13 of 13 measured dashes were strictly worse, mean −12.7 points**, while the comment claimed
+      the unit moved "exactly as its archetype terms already say it should". The comparison is now
+      **move-cost-neutral** (every score carries `-actionsToReach * 6`, a term pricing an action
+      that in this branch has no alternative use), and a dash that still loses digs in instead. It
+      fires **5 of 9 offers** at n=32.
+- [x] **THE HONEST SCALE OF THE WAVE, MEASURED AND REPORTED BY THE TEST ITSELF.** Over 32 campaigns
+      / 1589 act-opportunities: 14 reloads + 25 terminal-else = **2.5% of all enemy
+      act-opportunities, 3.5% of contested ones**. That is what the wave changes in live play. It is
+      a real repair — a 6.2%/3.8% contested idle rate going to zero, plus an ammo economy that was
+      never decided — and it is a very different claim from the one this wave first made.
+- [x] **THE ENEMY AMMO ECONOMY IS A DECIDED DESIGN POSITION** (`docs/DESIGN.md` §5.1): a RELOAD verb
+      (1 action, mirroring `DoReload`) over a per-turn clip refresh, on symmetry + decision grounds
+      — **plus the read it requires**. Hostiles previously got one clip at spawn with no reload verb
+      anywhere, so dry was permanent. The read: a pip row in the 4px band between the HP pips and
+      the body, and **DRY as a status CHIP** (empty-magazine glyph + the word) in the late opaque
+      pass. It lives there because the review found the first version — a hand-rolled pill below the
+      body — **silently overpainted** by `DrawUnitStatusChips`, which owns p.Y+24..+42 and paints
+      last: on any hostile with a status effect the pill lost 9 of 15 px and the pip row vanished,
+      while this ROADMAP claimed "it does not collide". `SIGHTLINE_AIIDLESHOT` now STAGES that
+      collision (DRY + BRN on one token) so the claim is checkable from one frame.
+- [x] **THE READ IS GATED ON THE DIAL, so "one env var reverts the wave" is now true.** It was not:
+      the ammo read had no `AiIdleFix` term, so with the dial off hostiles never reloaded but still
+      wore a permanent DRY badge advertising a state the player could do nothing with — exactly what
+      §5.1's "the read and the reload are one decision" forbids.
+- [x] **THE PRICE IS SMALL, NOT ZERO, AND HEAT 0 WAS RE-PRICED ON 320 CAMPAIGNS BEFORE SAYING SO.**
+      Round of record `R4-*`: 800 CRN-paired campaigns (5 rungs × four disjoint slot sets, bases
+      0/10/20/30 × greedy+sloppy), base `4784803`, all 40 chunks asserting their own `runs`,
+      preceded by an `R0diag` pair proving the dial-off leg is byte-identical to the base commit's
+      own binary. Pooled run completion **25.2% → 24.2%** (p=0.644); no rung separates.
+      **heat 0 got three EXTRA slot-set families** (b40-70, b900-930, b940-970 — `queue_h0.sh`)
+      because review pooled four independent sets and found three negative: sixteen sets, **320
+      campaigns per leg**, gives **50.3% → 47.5%, −2.8 points, discordant 27/18, p=0.233, 95% CI
+      [−6.9, +1.3]**. The direction is more consistent than the significance and I will not call the
+      sign noise — but **both legs are inside the h0 band** (55±8, floor 47.0), the fix moves no rung
+      out of its band, and mission win-rate (78.94 → 78.56 over ~1400 missions) and soldier deaths
+      per mission (**1.340 → 1.340**) agree with the null on ~10× the sample. So the dial ships ON.
+      Raw data `docs/measurements/w2/`. **A four-slot-set read of h0 said 47.5 → 42.5 and put the
+      shipped leg below the floor; sixteen sets say 50.3 → 47.5 and both inside. That reversal is
+      the best argument in this wave for L1's method rule.**
+- [ ] **OPEN, HANDED TO W7 — h2 is out of band; every other rung is in it.** The dial-OFF control
+      reads **h0 50.3 (n=320) / h2 26.2 / h4 22.5 / h6 17.5 / h8 12.5 (n=80 each)**. The band is
+      ±8, so **only h2 is convincingly outside** (−13.8 from centre ≈ 2.5 rung-SE; a rung's binomial
+      SE at n=80 is ~5.6). The shortfall from centre runs −4.7 / −13.8 / −7.5 / −2.5 / **+2.5**,
+      consistent with a curve flatter than the band — a hypothesis, not a result. This is a control
+      leg, not a ladder of record.
+- [ ] **OPEN, HANDED TO W3 — the enemy OVERWATCH branch is measured DEAD, and W2's repair to it is
+      unexercised.** `Ai.cs` still scores any available shot at `100 + bestHit` against terrain terms
+      bounded under ~64, so a lane-hold is only reachable when no reachable tile has ANY shot.
+      Measured on this tree: an enemy act-opportunity ended holding an overwatch lane **0 times in
+      1595 pre-wave and 3 times in 1589 post-wave** (the 3 are a cascade of the ammo gate changing
+      which boards occur, not a designed effect). W2 added a `!Disoriented` plan/exec mirror to that
+      branch — correct, and untested by any real play, because the branch does not fire. W3's whole
+      premise is making it a real choice.
+- [ ] **OPEN — should the bleed-out window have ANY presentation?** Hostiles now stand silent over a
+      dying squad, exactly as pre-wave. This wave only refuses to answer that question with a
+      chorus; it does not answer it.
+- [ ] **OPEN — the ammo read is unmeasured as an affordance.** Nothing shows a player or the
+      autopilot ever *baits* a hostile dry; `Game.Autopilot.cs` has no term for enemy ammo at all.
