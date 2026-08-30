@@ -322,6 +322,19 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FITTEST=1 : wave THE FIT — the whole shipped TEXT SIZE range is a tested
+        // surface. Asserts that no string on the five screens this wave touched is painted outside
+        // its own chrome, or into another string's pixels, at ANY of the four scales the pause
+        // menu can select. Pure measurement, but it MUST have the real atlases loaded for the same
+        // reason CHROMETEST does — raylib's default face is narrower and every overflow vanishes.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FITTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "fittest");
+            LoadGameFonts();
+            Console.WriteLine(Game.FitSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRASTTEST") == "1")
         {
             Console.WriteLine(ContrastSelfTest());

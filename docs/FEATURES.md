@@ -785,6 +785,18 @@ branch point.
   beneath it. `[R]` re-rolls the pool. (`SIGHTLINE_CHROMETEST` covers all three chrome items and
   asserts the DEPLOY row is on screen for all 16 boons × all 4 text sizes;
   `SIGHTLINE_OLDCHROME=1` restores the pre-W5 chrome and turns it red.)
+- **The whole shipped TEXT SIZE range is a tested surface** (wave THE FIT). `SIGHTLINE_FITTEST`
+  asserts one contract — *no string is painted outside the box that owns it, and no two independent
+  strings are painted into the same pixels* — over five surfaces at **all four** scales
+  {0.90, 1.00, 1.10, 1.20}: the mid-run FIELD DOCTRINE card (all 16 boons), the ARMORY weapon rows
+  (5 weapons × 3 right-hand tags), the WAR ROOM HALL OF FAME legend rows (all 8 ranks × 5 classes,
+  not the 5 short staged ones), the draft's BACK/DEPLOY/RE-ROLL plates (all 5 DEPLOY state labels),
+  and the draft operator card's blurb + ABILITY columns. It prints its own tightest margin per leg.
+  `SIGHTLINE_OLDFIT=1` restores all five pre-fix geometries and turns it red (40 violations).
+  The corresponding chrome all sizes to its content now: `Hud.BoonOfferCardH`, `Hud.ArmoryTagY`
+  (the price/EQUIPPED tag shares the weapon NAME's band, never the blurb's), `Hud.WarLegendScore`
+  (kills + heat right-align into their own column), `Hud.DraftConfirmW`/`DraftRerollW` (sized from
+  the widest label the button can ever show) and `Hud.DraftCardW` (== the RUN CONTRACT row / 3).
 - **One registry owns the full-screen backdrops** (`Hud.BackdropPhase` + `Hud.DrawBackdropLayer`'s
   switch — every `DrawTacticalBackdrop` call in the project lives in that switch).
   `SIGHTLINE_BACKDROPTEST` drives every `Phase` through the chrome pass and fails if any screen

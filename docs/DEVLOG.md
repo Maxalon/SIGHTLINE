@@ -8411,3 +8411,238 @@ through it. `HVTTEST` pins that default, so it cannot drift silently.
 - **`SIGHTLINE_HVTAIM` was never spent.** The aim half of the buff (+6, which partly duplicates
   what `bump` already gives) is dialled and priced at zero rounds. One lever, one round, whenever
   someone wants it.
+
+---
+
+# PROGRAM RESONANCE — WAVE "THE FIT" (2026-08-30, dev on `wave/the-fit`)
+
+**Branch** `wave/the-fit`, base = the W5/W8/W9 integration tip (`6e55f8d`). Source: the five
+UI/layout defects held back from W9 because W5 was rewriting `src/Hud.cs` at the same time. Each
+had been found by an adversarial QA pass and then independently reproduced by a second agent.
+**Balance-inert by construction and by measurement** (§7).
+
+## 1. THE THESIS — the defects were one thing, and it was not five call sites
+
+Four of the five were the same structural gap, and it is worth stating plainly because it is the
+kind of gap this project keeps re-discovering under different names:
+
+> **No self-test in this project ran at any text size but 100%.**
+
+`SIGHTLINE_UISCALE` is a screenshot-only hook (`Program.cs`, gated on `shot`) that exists so a
+human can *photograph* the UI at another size; nothing asserts anything there. Meanwhile W5 ships
+**four** text scales — {0.90, 1.00, 1.10, 1.20} — against a lot of literally-typed pixel chrome.
+Two waves had already stepped on the edge of this: W5's `CHROMETEST` gated the draft's DEPLOY row
+across all four scales, and R2's `VOICETEST` leg 8 gated every *card body* across all four. Both
+were surface-specific. Everything else in the game was measured once, at 1.00, or not at all.
+
+So the deliverable is not five patches. It is **`SIGHTLINE_FITTEST`** — a standing gate that makes
+the whole shipped scale range a tested surface for the screens involved.
+
+## 2. RE-REPRODUCTION FIRST — and W5 had already fixed two of them
+
+The brief said to re-reproduce all five before touching anything, and that "already fixed by W5"
+is a perfectly good outcome. It was, for two of them:
+
+| # | defect as filed | status on this tree |
+|---|---|---|
+| 1 | FIELD DRILLS doctrine card overflows its 74 px frame **on the DRAFT screen** | **FIXED by W5-FIX-2** — the card is content-sized and CHROMETEST asserts it |
+| 1b | the same string on the **mid-run FIELD DOCTRINE screen** (`ch = 188`) | **REPRODUCES, at the DEFAULT text size** |
+| 2 | the draft's BACK/DEPLOY/RE-ROLL row runs off the bottom at 120% | **FIXED by W5-FIX-2** — `Hud.DraftLayout`; probed (640, 798) and (640, 799) = background |
+| 2b | RE-ROLL POOL's label spills past both edges of its 190 px plate | **REPRODUCES** — 201 px label at 120% |
+| 3 | ARMORY blurb overprinted by the right-aligned price at 110%/120% | **REPRODUCES** at 100%, 110% and 120% |
+| 4 | draft operator blurb drawn under the class-glyph disc at 100% | **FIXED by W5** (the disc dropped to the corner) — but **CHANGED SHAPE**: at 110%/120% the blurb now *ellipsizes* instead |
+| 5 | HALL OF FAME legend sub-line reaches the panel border at 120% | **REPRODUCES** — last ink x=821, cyan border x=823 |
+
+**Reproduction rate: 3 of 5 verbatim, 2 of 5 fixed by W5 with a live residue in the same family.**
+Both residues are worth having found, because both are the SAME defect one step over: #1's second
+call site draws the same sixteen strings from a box W5 never touched, and #2's plates were never
+measured at all — W5 fixed *where* that row sits, not *how wide* its buttons are.
+
+**#4 deserves its own note, because it is the thesis in miniature.** W5 fixed the overlap and added
+the assertion — `if (Cfg.Measure(bl, DraftBlurbFs, 1f).X > DraftBlurbWidth()) fails.Add(...)`. But
+it wrote that line **outside** the `foreach (float ui in Display.UiScaleLevels)` loop three lines
+above it. So the one guard on the longest sentence on the squad-selection screen ran at 100% only,
+where the measurement is **266.4 px in a 268 px column — two pixels**. At 110% it is 293 px and at
+120% 320 px, and the shipped `Clip()` quietly ate the last words. A correct fix, a correct test, and
+the test in the wrong scope.
+
+## 3. THE FIXES — grow the chrome, never drop below 12 px
+
+The house pattern (W5 sized the doctrine cards to content rather than ellipsizing; W9's review
+caught a "fix" that quietly pushed five WAR ROOM descriptions to 10 px). Nothing here shrinks a
+type size. Nothing here truncates a string that was not already truncated.
+
+**(a) The mid-run FIELD DOCTRINE card sizes to its text.** `Hud.BoonOfferCardH(lines)` mirrors
+`DraftBoonCardHeight`, and the row takes the height its tallest description needs. Measured: at
+100% FIELD DRILLS' body ink bottom is **160 px against a `[ CHOOSE ]` top of 158** — the collision
+the QA report described, at the default setting, arithmetically. Now 214 px of card and 15 px of
+clear air at the tightest scale.
+
+**(b) The ARMORY row's two strings stop sharing a band.** The diagnosis matters more than the fix:
+the blurb's origin was a literal `r.X + 48` while the tag's was `r.Width - 14 - Cfg.Measure(tag)`,
+i.e. **one end scaled and the other did not**, so they converged as the setting rose. At 100% that
+left ~20 px of slack, which is inside the noise of a font change. The tag moves onto the NAME's
+band (where the longest weapon name leaves ~240 px of air) and the card widens 560 -> 600 so the
+49-char SNIPER blurb keeps 69 px rather than 15. **Widening alone was not enough** — a source revert
+of just the band move, with the wider card in place, still fails FITTEST at 8 violations.
+
+**(c) The HALL OF FAME legend row splits.** Identity (`RANK CLASS`) left, score (`n K · Hn`)
+right-aligned to the panel's content edge. This is a reflow, not a shrink, and it pays a dividend:
+the score columnises down the list, so kills are scannable. **With the worst case actually staged**
+(LIEUTENANT SHARPSHOOTER, 327 px in a 290 px column) the pre-fix line is not "flush against the
+border" — it is painted *outside the panel*, on the War Room background.
+
+**(d) The draft's bottom-row plates are measured.** RE-ROLL POOL 190 -> 229 px, DEPLOY 280 -> 316 px
+at 120%. Both from the **widest label the button can ever show**, never the one it is currently
+showing: a plate that resized as the draft filled would move BACK and RE-ROLL under the player's
+cursor, which is precisely what CHROMETEST leg (A) exists to forbid on the action bar.
+
+**(e) The draft operator card widens 300 -> 394.** `DraftCardW()` now derives from the RUN CONTRACT
+row the same way `DraftBoonCardW()` does — 3 cards + 2 gaps == that row's 1230 px. The blurb column
+goes 268 -> 362 px, so 320 px fits with 42 to spare at 120%. This is also a composition fix in its
+own right and it is W5-FIX-2's own argument applied one row higher: the candidate grid was 948 px
+under two rows of 1230, the one mismatched width left on the screen.
+
+## 4. THE GATE — `SIGHTLINE_FITTEST`
+
+One contract, five legs, every leg run at **all four** shipped scales:
+
+> **No string is painted outside the box that owns it, and no two independent strings are painted
+> into the same pixels.**
+
+- **(A)** every boon's wrapped body clears `[ CHOOSE ]` and the card border; the block fits the canvas.
+- **(B)** every weapon row x every one of its three right-hand tags: the tag and the blurb may share
+  a *band* or a *column*, never both; the blurb fits its budget; the tag clears the name.
+- **(C)** every **rank x class** (8 x 5 — not the five short staged legends) with a three-digit kill
+  count: identity and score clear each other and the panel's inner border.
+- **(D)** all five DEPLOY state labels + RE-ROLL + BACK fit their plates; the row fits the canvas.
+- **(E)** every class blurb and every ABILITY line fits its column; the grid fits the canvas.
+
+It measures through the **real font atlases** (`LoadGameFonts()` before the first `Cfg.Measure`) for
+the same reason CHROMETEST does — raylib's default face is narrower and every overflow vanishes —
+and it measures through the renderer's **own** `WrapLines` (`Hud.WrapLinesForTest`), not a copy of
+it, because W5-FIX's lesson is that a test which re-implements the sizer's arithmetic cannot fail.
+
+The PASS line **states its own headroom** rather than merely asserting there is some:
+
+```
+FITTEST: PASS (16 doctrine cards, 5 weapon rows x 3 tags, 8x5 legend rows, 5 deploy labels and the
+operator card fit their chrome at all 4 shipped text sizes - tightest margins: doctrine 15px@FDR@120%,
+armory 69px@Sniperblurb@120%, legend 24px@RAname@120%, draftRow 24px@DEPLOY@110%, operatorCard 60px@blurb@120%)
+```
+
+**Proof it can fail.** `SIGHTLINE_OLDFIT=1` restores all five pre-fix geometries (the literal 188,
+the tag at `r.Y+20`, the joined legend line, the 190/280 plates, the 300 px card):
+
+```
+FITTEST: FAIL (40 violations; first 14: boonBodyHitsChoose:FDR@100%(160>158),
+armoryTagOverprintsBlurb:Sniper/- need intel -@100%, ... legendSubOverruns:LIEUTENANT
+SHARPSHOOTER@110%(303>290), rerollLabelOverruns@110%(186+8>190),
+draftBlurbEllipsizes@110%:Assault rifl(273>268), ... deployLabelOverruns@120%:DEPLOY  (PAY 999
+SALVAGE)(294>280))
+```
+
+40 distinct violations, every leg represented, at 100 / 110 / 120% (90% is clean, as it should be).
+`SIGHTLINE_OLDFIT=1` **also fails CHROMETEST now** (5 x `blurbEllipsizes@110%/@120%`), which is the
+proof that moving that assertion into the scale loop did something. And because a flag-driven revert
+is not the same as a real one, a **direct source revert** of one fix alone — `ArmoryTagY => 20`,
+leaving everything else fixed — fails FITTEST at 8 violations. Restored, PASS.
+
+## 5. THE INSTRUMENT DEFECT UNDERNEATH ALL FIVE: the hooks staged the EASY case
+
+The QA report for #5 said it plainly and it generalises: *"the staged Hall of Fame data is
+hard-coded to five short legends, so even a human eyeballing the shot at 100% sees ~50 px of slack
+and no reason to suspect the row is one text-size step from touching the frame."* The same is true
+of the other two hooks. So all three now stage the **worst** case:
+
+- `DebugBoon` leads the offer with the longest description in the catalogue. FIELD DRILLS is 98
+  chars against 60 for the next longest and is **1 of 16**, so an unseeded glance at that screen
+  showed it ~19% of the time — which is how it survived ten programs.
+- `DebugWarRoom`'s NOX is now `LIEUTENANT SHARPSHOOTER` with a nickname: the longest rank+class
+  pair the game can produce, on the longest name shape.
+- `DebugArmory` picks the SHARPSHOOTER (49-char SNIPER blurb) instead of `Squad.First(!IsVip)`,
+  which was an ASSAULT carrying the second-*shortest* blurb in the game.
+
+A screenshot hook that photographs the easy case is worse than no hook, because it produces
+evidence of a fit that was never tested.
+
+## 6. SCREENSHOTS — read and judged
+
+All at 1280x800, Release binary under xvfb, `SIGHTLINE_OLDFIT=1` for the BEFORE half so the two
+frames differ only in the geometry under test.
+
+- **FIELD DOCTRINE, 100%, before:** FIELD DRILLS wraps to four lines and the fourth, "turn)", sits
+  directly on `[ CHOOSE ]` with zero leading — the `)` descender crosses the `[`. Both strings
+  unreadable. **After:** the card is 214 px, the fourth line has its own row, `[ CHOOSE ]` has real
+  air above it, and all three cards keep a common height so the row still reads as a row. At 120%
+  the card grows again and the same thing holds.
+- **ARMORY, 120%, before (SHARPSHOOTER staged):** "high crit" is painted through "EQUIPPED" and
+  "4-round clip" through "[ 7 INTEL ]"; on both rows the two strings' strokes cross and neither
+  reads. **After:** the tag sits on the weapon name's baseline, right-aligned — which also reads
+  *better*, because a price belongs beside the item name — and both blurbs render in full.
+- **WAR ROOM, 120%, before:** NOX's sub-line runs through the cyan panel border and "H3" is painted
+  outside the panel entirely. **After:** the score column right-aligns and lines up across all five
+  legends; gold for run-winners, dim for the fallen, so it carries a second channel as well.
+- **DRAFT, 120%, before:** three blurbs read "…picks off th…", "…brutal up clos…", "…closes and
+  cl…" and RE-ROLL POOL's label hangs past both edges of its plate. **After:** every blurb complete,
+  the label inside its plate, and the whole screen now reads as one 1230 px column instead of a
+  narrow grid stacked on two wide rows. Checked at 90% and 100% too: clean.
+
+## 7. VERIFICATION
+
+- Release **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full`: **63/63 PASS** (63 exist in `src/`, 63 ran), COVERAGE GAP block
+  empty, `PAIRTEST: PASS`.
+- Autoplay x3: LOSE m4 / WIN m6 / LOSE m6. No TIMEOUT, no exception.
+- **Balance inertness.** `SIGHTLINE_BALANCE=5 SIGHTLINE_BALANCE_BASE=950`, Release binaries from
+  gitignored snapshots (`runbin/fit`, `runbin/base` built from the branch point), target JSON
+  `rm -f`'d first, **exit 0** and **`runs=10`** asserted on both sides.
+  `docs/measurements/w1/inert_diff.sh ... harness` -> **empty diff, IDENTICAL**: every per-slot
+  RunRec, win, loss, turn count and shots-per-kill byte-for-byte the same.
+
+## 8. WHAT I DID NOT FIX, AND WHAT IT COSTS
+
+- **The gate covers five surfaces, not the game.** Every other screen is still asserted at 100%
+  only (or, for card bodies, by VOICETEST leg 8). FITTEST is deliberately written as five
+  independent legs inside one scale loop so a sixth is an addition rather than a rewrite; the next
+  wave that touches a screen should add one. **Unmeasured: how many other screens overflow at
+  120%.** I did not sweep them, and I am not going to claim they are clean.
+- **The vet operator card is unexercised.** The recall-fee ribbon (`RECALL nn`, right-aligned on
+  the name row) and the veteran dossier line only appear when the reserve has veterans, which no
+  screenshot hook stages. The card got 94 px wider so both got *more* room, but FITTEST does not
+  assert them and I did not photograph them.
+- **The REQUISITION card is still sized for the whole roster in ARMORY step 2** (`armoryH` uses
+  `Run.RosterMax` regardless of how many weapon rows the chosen soldier has), so a SHARPSHOOTER
+  leaves ~250 px of dead panel. Pre-existing and cosmetic; out of scope for a wave about overflow.
+  It is now *visible* in every armory screenshot because the hook stages a SHARPSHOOTER.
+- **`WrapLines`' line pitch is still `size + 6`, unscaled.** At 120% a 14 px body is 16.8 px of
+  glyph in a 20 px step — 3.2 px of leading where 100% gets 6. It is tight, not broken, and it is
+  the convention every shipped card already uses (`DraftBoonLineH = 19` for 13 px type does the
+  same). Changing it would move every wrapped block in the game; it deserves its own pass.
+- **The 90% scale finds nothing, by construction.** Smaller type in fixed chrome cannot overflow.
+  FITTEST runs it anyway so that a future fix which *shrinks* chrome is caught, but the four-scale
+  headline is really a three-scale result.
+
+## 9. TWO THINGS I THINK THE BRIEF / THE BRANCH GOT WRONG
+
+1. **The `bugs-ui.md` dossier's "VERIFIER SAID" blocks are shuffled and truncated.** Entry #2's
+   verifier text describes the *armory* measurement (bug #3); entry #3's describes the *draft
+   class-glyph* (bug #4); entry #4's describes a `ShotAnim` downed-shooter bug that is not in the
+   dossier at all (it is W9's). Every block also ends mid-sentence. The *claims* were still worth
+   testing and four of the five measurements I could check reproduced within a pixel or two — but
+   the attribution in that file cannot be trusted, and I verified each entry against the tree
+   rather than against its verifier note.
+2. **The integration branch has committed, unresolved merge-conflict markers in three docs.**
+   `CLAUDE.md` (lines 214-236 and 302-307), `docs/ROADMAP.md` (1726-1938) and `docs/FEATURES.md`
+   (682-801) all carry live conflict blocks on
+   `origin/claude/game-dev-team-orchestration-5bbxg8`. The build is unaffected (docs only), but
+   `CLAUDE.md` is the continuity contract and it currently states the self-test count two
+   contradictory ways in the same section. I did **not** resolve them — that is the lead's merge to
+   arbitrate and a dev worktree resolving it would fight the next wave — but a fresh session
+   reading `CLAUDE.md` top to bottom will read a conflicted file.
+
+Also worth recording for the next agent in this container: the worktree isolation guard **refuses
+any command that sets `XDG_CONFIG_HOME` or `HOME`**, which is exactly what CLAUDE.md's house
+procedure tells every agent to export. Every run in this wave was made without it. Nothing
+collided, but that is luck, not procedure — the two rules contradict each other and one of them
+needs to change.

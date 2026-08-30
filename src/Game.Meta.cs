@@ -188,7 +188,11 @@ public partial class Game
         WarRoom.Unlocks.Add((int)MetaUnlock.StartIntel);   // one owned, the rest buyable
         WarRoom.Unlocks.Add((int)MetaUnlock.Quartermaster);   // W9: a new horizontal unlock owned
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "VEGA \"REAPER\"", Cls = "ASSAULT", Rank = "CAPTAIN", Kills = 21, Heat = 3, Won = true });
-        WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "NOX", Cls = "SHARPSHOOTER", Rank = "SERGEANT", Kills = 17, Heat = 3, Won = true });
+        // THE FIT: the staged Hall of Fame used to be five SHORT legends, so a human looking at
+        // this screen saw ~50px of slack and no reason to suspect the row was one text-size step
+        // from touching the panel border. NOX now carries the longest rank+class pair the game
+        // can produce (LIEUTENANT SHARPSHOOTER) plus a nickname — the worst case, staged.
+        WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "NOX \"MAVERICK\"", Cls = "SHARPSHOOTER", Rank = "LIEUTENANT", Kills = 17, Heat = 3, Won = true });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "KRESS", Cls = "RANGER", Rank = "CORPORAL", Kills = 9, Heat = 2, Won = false });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "DRAKE", Cls = "GUNNER", Rank = "PRIVATE", Kills = 4, Heat = 0, Won = false });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "ILO", Cls = "CORPSMAN", Rank = "PRIVATE", Kills = 2, Heat = 1, Won = false });
