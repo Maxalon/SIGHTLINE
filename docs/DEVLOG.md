@@ -9156,9 +9156,13 @@ wave changed no scoring; it owns the test that would have caught it.
 ## VERIFICATION
 
 - Release build **0 warnings / 0 errors**.
-- `bash scripts/qa-sweep.sh --full`: every line PASS, COVERAGE GAP empty, autoplay x3 clean,
-  PAIRTEST byte-identical, **SWEEP-EXIT=0**. Coverage: **69 hooks exist in `src/`, 69 run** (67 at
-  the base + ENEMYSTALLTEST + AICOVTEST + SAVEEDGETEST, less PAIRTEST when not `--full`).
+- `bash scripts/qa-isolated.sh --sweep --full` (the house sweep with the isolation exports the
+  contract requires, now a committed script instead of four lines a reader has to remember):
+  every line PASS, COVERAGE GAP empty, autoplay x3 clean (LOSE m3 / LOSE m1 / LOSE m5, no TIMEOUT),
+  PAIRTEST byte-identical, **SWEEP-EXIT=0**. FITTEST's final line: 40 screens, **13,914
+  assertions over 45 legs, every leg at all four scales**. Coverage, DERIVED (never typed — this footer has been
+  wrong six times): **67 hooks exist in `src/`, 67 run**, up from 64 at the base commit — this wave
+  adds ENEMYSTALLTEST, AICOVTEST and SAVEEDGETEST. COVERAGE GAP block empty.
 - **Every fix ships a test proven to FAIL on the pre-fix tree** (reverted, run, output pasted in the
   handoff): the ellipsis leg, the staging fingerprint, the scope guard, the enemy stall guard, both
   save shapes, and both AICOVTEST modes.

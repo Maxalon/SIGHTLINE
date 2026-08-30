@@ -352,6 +352,9 @@ public static class Program
             // Audio, exactly like BOARDTEST — the other self-test that runs the shipped draw path.
             Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fittest");
+            // C5: leg (F) DRAWS. Without a display that is a crash deep in raylib rather than an
+            // answer, so refuse the same way every other drawing self-test does (exit 2).
+            RequireWindow("FITTEST");
             Raylib.SetExitKey(KeyboardKey.Null);
             LoadGameFonts();
             Display.Init(false);          // post-FX OFF: this leg measures geometry, not bloom
