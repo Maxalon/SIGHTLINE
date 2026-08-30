@@ -282,6 +282,72 @@ public static class Stats
         _shotGapSum += gap;
     }
 
+    // ── C2 THE OPPONENT DECLINES: the ENEMY DECISION MIX ─────────────────────────
+    // What the opponent actually DID with each contested act-opportunity, and — for the acts
+    // where a shot was on the table — how good that shot was. Before this wave the enemy's
+    // decision surface was measured by exactly one number (W2's "did the act end unspent?"),
+    // which cannot distinguish "took a 12% shot" from "took an 82% shot" and cannot see a
+    // shot that was DECLINED at all, because none ever were.
+    //
+    // CONTESTED ONLY, the W2 rule: an act with every soldier down is Ai.Plan's empty-plan
+    // early return and idles by design (docs/DESIGN.md §5.1). Those are counted separately as
+    // `allDowned` so the denominator here is honest and never inflated by the bleed-out window.
+    //
+    // Two histograms over the SAME five hit-chance bands, so taken and declined shots are
+    // directly comparable: 0-19 / 20-39 / 40-59 / 60-79 / 80+.
+    // Expected damage (Combat.ExpectedDamage — graze-aware, armor-aware, PURE) is summed per
+    // band so the report can price a band in damage rather than in probability: it is the unit
+    // the decline bars are actually set in.
+    // Batch-global (the arena-funnel / action-mix precedent). ZERO RNG draws.
+    public const int ShotBands = 5;
+    public static int ShotBand(int hitPct)
+    {
+        int b = hitPct / 20;
+        return b < 0 ? 0 : b > ShotBands - 1 ? ShotBands - 1 : b;
+    }
+    static readonly Dictionary<string, int> _enemyDecisions = new();
+    static readonly int[] _enemyShotTaken = new int[ShotBands];
+    static readonly int[] _enemyShotDeclined = new int[ShotBands];
+    static readonly double[] _enemyShotTakenExp = new double[ShotBands];
+    static readonly double[] _enemyShotDeclinedExp = new double[ShotBands];
+    static int _enemyActsContested, _enemyActsAllDowned, _enemyActsWithShot, _enemyShotPreempted;
+
+    /// One contested enemy act-opportunity. `verb` is the branch that actually FIRED in
+    /// Game.UpdateEnemy's ActAfterMove chain (assigned at each branch — never re-derived from
+    /// state afterwards, which is how a "shoot then reposition" act would misclassify).
+    /// `shotHit`/`shotExp` describe the shot the planner had on the table from the tile it
+    /// chose: taken when verb=="shoot", DECLINED when it dropped one (verb is then whatever it
+    /// did instead). shotHit < 0 means no shot was available at all.
+    public static void RecordEnemyDecision(string verb, bool contested, int shotHit, float shotExp, bool declined)
+    {
+        if (!Enabled) return;
+        if (!contested) { _enemyActsAllDowned++; return; }
+        _enemyActsContested++;
+        Bump(_enemyDecisions, verb);
+        if (shotHit < 0) return;
+        _enemyActsWithShot++;
+        int b = ShotBand(shotHit);
+        // Three exits, and conflating any two of them is how a decline rate lies:
+        //   TAKEN     — the shot branch fired.
+        //   DECLINED  — the planner had it and dropped it for a better use of the action (C2).
+        //   PREEMPTED — a grenade / smoke / shove / sap / heal claimed the action instead, or
+        //               the exec refused a stale plan. Neither a decline nor a shot; counted
+        //               so the two histograms sum to `actsWithShot` and nothing hides.
+        if (verb == "shoot") { _enemyShotTaken[b]++; _enemyShotTakenExp[b] += shotExp; }
+        else if (declined)   { _enemyShotDeclined[b]++; _enemyShotDeclinedExp[b] += shotExp; }
+        else                 _enemyShotPreempted++;
+    }
+    /// C2: an ENEMY overwatch/brace lane that actually FIRED. The decline gate's one judgement
+    /// constant (DeclineWatchRatio) is a bet on how often a held lane pays off; this is the
+    /// counter that lets the bet be checked instead of asserted. Counted at the reaction site in
+    /// Game.OnUnitEnteredTile, so it counts SHOTS FIRED, not lanes that merely existed.
+    static int _enemyReactions;
+    public static void RecordEnemyReaction() { if (Enabled) _enemyReactions++; }
+
+    /// Band totals, used by the report and the aggregate JSON.
+    public static int EnemyShotsDeclined { get { int n = 0; foreach (int v in _enemyShotDeclined) n += v; return n; } }
+    public static int EnemyShotsTaken    { get { int n = 0; foreach (int v in _enemyShotTaken)    n += v; return n; } }
+
     // ── W1: HARNESS HEALTH ───────────────────────────────────────────────────────
     // The machine the batch ran on, stamped into the artifact itself. Every measurement wave
     // in docs/ so far has had to reconstruct "was the container busy?" from the wall-clock line
@@ -305,6 +371,11 @@ public static class Stats
         _arenaFunnel[0] = _arenaFunnel[1] = _arenaFunnel[2] = 0;
         _downs = _downExpired = _downFinished = _downRevived = _downRecovered = _corpsmanMissions = 0;   // FUL-7
         Array.Clear(_shotGapDeciles, 0, _shotGapDeciles.Length); _shotGapArmedTurns = 0; _shotGapSum = 0; // W1
+        _enemyDecisions.Clear();                                                           // C2
+        Array.Clear(_enemyShotTaken, 0, ShotBands); Array.Clear(_enemyShotDeclined, 0, ShotBands);
+        Array.Clear(_enemyShotTakenExp, 0, ShotBands); Array.Clear(_enemyShotDeclinedExp, 0, ShotBands);
+        _enemyActsContested = _enemyActsAllDowned = _enemyActsWithShot = _enemyShotPreempted = 0;
+        _enemyReactions = 0;
         _batchStartUtc = DateTime.UtcNow; _loadAtStart = ReadLoadAvg();                    // W1
         Slot = -1;
     }
@@ -846,6 +917,38 @@ public static class Stats
             sb.AppendLine($"  Defend dealt on the route    : {Pct(defendRuns, deckRuns.Count)} of runs (n={defendRuns})");
         }
 
+        // ── C2 THE OPPONENT DECLINES: ENEMY DECISION MIX ────────────────────────
+        // The other side of the ACTION MIX below. Contested acts only (an all-downed board is
+        // Ai.Plan's empty-plan early return and idles by design — W2/DESIGN §5.1); the
+        // all-downed count is printed beside it so the denominator is never in doubt.
+        if (_enemyActsContested > 0)
+        {
+            sb.AppendLine($"\nENEMY DECISION MIX (contested acts={_enemyActsContested}; all-downed acts not counted={_enemyActsAllDowned}):");
+            // ThenBy(Key): ties would otherwise break by Dictionary INSERTION order, which is not
+            // stable across runs — enough to make a paired inertness diff show a spurious non-empty
+            // `mix` block and send someone hunting a gameplay change that never happened.
+            foreach (var kv in _enemyDecisions.OrderByDescending(k => k.Value).ThenBy(k => k.Key))
+                sb.AppendLine($"  {kv.Key,-12}{kv.Value,7}  {Pct(kv.Value, _enemyActsContested)}");
+            int taken = EnemyShotsTaken, declined = EnemyShotsDeclined;
+            sb.AppendLine($"\n  the shot on the table (acts where the chosen tile HAD a shot = {_enemyActsWithShot}):");
+            sb.AppendLine("    hit% band     taken   share   E[dmg]/shot   declined   share   E[dmg]/shot");
+            string[] bands = { "  0-19", " 20-39", " 40-59", " 60-79", "  80+ " };
+            for (int b = 0; b < ShotBands; b++)
+            {
+                double te = _enemyShotTaken[b] == 0 ? 0 : _enemyShotTakenExp[b] / _enemyShotTaken[b];
+                double de = _enemyShotDeclined[b] == 0 ? 0 : _enemyShotDeclinedExp[b] / _enemyShotDeclined[b];
+                sb.AppendLine($"    {bands[b]}     {_enemyShotTaken[b],7}  {Pct(_enemyShotTaken[b], Math.Max(1, taken)),6}"
+                            + $"        {te,6:0.00}    {_enemyShotDeclined[b],7}  {Pct(_enemyShotDeclined[b], Math.Max(1, declined)),6}        {de,6:0.00}");
+            }
+            sb.AppendLine($"    TOTAL       {taken,7}                        {declined,7}");
+            sb.AppendLine($"  taken {Pct(taken, Math.Max(1, _enemyActsWithShot))} / DECLINED {Pct(declined, Math.Max(1, _enemyActsWithShot))}"
+                        + $" / preempted by another verb {Pct(_enemyShotPreempted, Math.Max(1, _enemyActsWithShot))}");
+            int lanes = _enemyDecisions.GetValueOrDefault("overwatch", 0) + _enemyDecisions.GetValueOrDefault("brace", 0);
+            sb.AppendLine($"  enemy lanes held (overwatch+brace) {lanes}; reaction shots fired {_enemyReactions}"
+                        + $"  -> {Pct(_enemyReactions, Math.Max(1, lanes))} of lanes paid off"
+                        + "   [C2: DeclineWatchRatio is a bet on this number]");
+        }
+
         // ── W2: ACTION MIX (verbs issued, split by policy) ───────────────────────────
         // What each policy actually DOES — makes the reactive verbs (FOCUS/BRACE) and the
         // support verbs (PATCH/DRAG/REARM/items) visible to measurement, and shows how the
@@ -1349,6 +1452,27 @@ public static class Stats
                 soleOrDominantPct = _shotGapArmedTurns == 0 ? 0.0
                     : Math.Round(100.0 * _shotGapDeciles[9] / _shotGapArmedTurns, 1),
                 deciles = (int[])_shotGapDeciles.Clone()
+            },
+            // C2: the ENEMY DECISION MIX. `mix` is the branch that fired on each CONTESTED
+            // act-opportunity; `shotTaken`/`shotDeclined` are the five hit-chance bands
+            // (0-19/20-39/40-59/60-79/80+) of the shot the planner had on the table, and the
+            // *Exp arrays the summed graze-aware expected damage of those same shots.
+            enemyDecisions = new
+            {
+                contestedActs = _enemyActsContested,
+                allDownedActs = _enemyActsAllDowned,
+                actsWithShot  = _enemyActsWithShot,
+                declinedPct = _enemyActsWithShot == 0 ? 0.0
+                    : Math.Round(100.0 * EnemyShotsDeclined / _enemyActsWithShot, 2),
+                preempted = _enemyShotPreempted,
+                lanesHeld = _enemyDecisions.GetValueOrDefault("overwatch", 0) + _enemyDecisions.GetValueOrDefault("brace", 0),
+                reactionShots = _enemyReactions,
+                mix = _enemyDecisions.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key)
+                        .Select(kv => new { verb = kv.Key, n = kv.Value }).ToList(),
+                shotTaken = (int[])_enemyShotTaken.Clone(),
+                shotDeclined = (int[])_enemyShotDeclined.Clone(),
+                shotTakenExp = _enemyShotTakenExp.Select(v => Math.Round(v, 2)).ToArray(),
+                shotDeclinedExp = _enemyShotDeclinedExp.Select(v => Math.Round(v, 2)).ToArray()
             },
             byMission = missions.GroupBy(m => m.Mission).OrderBy(g => g.Key).Select(g => new
             {

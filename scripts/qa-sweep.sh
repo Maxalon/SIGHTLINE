@@ -65,6 +65,7 @@ echo -n "BEACONTEST : "; verdict "$(SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACO
 echo -n "COMBATTEST : "; verdict "$(SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1)"
 echo -n "SAVETEST   : "; verdict "$(SIGHTLINE_SAVETEST=1 run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1)"
 echo -n "AITEST     : "; verdict "$(SIGHTLINE_AITEST=1 run | grep -oE "AITEST: (PASS|FAIL)" | head -1)"
+echo -n "DECLINETEST: "; verdict "$(SIGHTLINE_DECLINETEST=1 run | grep -oE "DECLINETEST: (PASS|FAIL)" | head -1)"
 echo -n "BANDTEST   : "; verdict "$(SIGHTLINE_BANDTEST=1 run | grep -oE "BANDTEST: (PASS|FAIL)" | head -1)"
 echo -n "ITEMTEST   : "; verdict "$(SIGHTLINE_ITEMTEST=1 run | grep -oE "ITEMTEST: (PASS|FAIL)" | head -1)"
 echo -n "STATUSTEST : "; verdict "$(SIGHTLINE_STATUSTEST=1 run | grep -oE "STATUSTEST: (PASS|FAIL)" | head -1)"

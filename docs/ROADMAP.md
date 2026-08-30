@@ -2162,6 +2162,16 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       non-combat win condition; at mission 5, Eliminate 25.6% and Sabotage 96.8%. That is a
       45-point gap between objective *classes*, not between objectives.
 
+### Handed on from C2's review (not C2's code, recorded so it is not lost)
+
+- [ ] **`Hud.DrawThreatCard` ignores the TEXT SIZE setting entirely.** It calls
+      `Raylib.MeasureTextEx`/`DrawTextEx` directly (`Hud.cs:2317-2331`) instead of going through
+      `Cfg.Text`/`Cfg.Measure`, so the INCOMING FIRE card renders pixel-identically at 90/110/120%.
+      It does NOT overflow — measure and draw are consistently unscaled — it simply never scales,
+      stranding its body at the 12px floor while every other surface grows. **Pre-existing at
+      `17934ee`, not introduced by C2**; found independently by two reviewers on the same card.
+      Routed to the wave that owns the text-scale surface.
+
 ### The methodological rules this program had to learn the hard way
 
 1. **A pooled row can hide a 49.5-point artifact.** `Eliminate` reads 89.1% pooled and ~40% over
@@ -2186,6 +2196,55 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
 ### Standing gaps, honestly declared
 
+- [ ] **A FOUR-SLOT-SET RUNG IS NOT INTERCHANGEABLE WITH ANOTHER FOUR-SLOT-SET RUNG — measured.**
+      C2 found this while checking its own baseline: because `src/` is byte-identical between
+      `d814f0c` and `17934ee`, its BASE arm turned out to be **L3's b0-b30 replayed bit for bit**,
+      which makes L3's two halves directly comparable. At heat 2 they disagree —
+      **b0-b30 reads 21.2% and b40-b70 reads 41.2%** (17/80 vs 33/80), difference +20.0, SE 7.16,
+      **z = 2.79, p = 0.0052**, and 0.031 after Bonferroni x6. **L3's slot space is heterogeneous
+      at heat 2 beyond binomial noise**, so the ladder-of-record's h2 = 31.2% is an average over
+      two populations twenty points apart. CLAUDE.md's rule "a rung is four slot sets or it is not
+      a rung" is about SIZE; this is about WHICH FOUR. An UNPAIRED comparison across different slot
+      sets can therefore be badly misleading at h2 even at n=80 — a CRN-PAIRED one is immune,
+      because the effect hits both arms in the same worlds and cancels. **Prefer paired designs;
+      if you must compare unpaired rungs, use the same bases.** Raw data `docs/measurements/l3/`.
+- [ ] **A CRN round's resolving power comes from its DISCORDANT count, not its n, and nobody had
+      been reporting it.** C2's 80-pair rungs can only detect swings of 11-14 points (17-19 family
+      wise), and its heat-8 rung had **4 discordant pairs** — an exact two-sided minimum p of
+      0.125, so nothing was reachable there at any effect size. A "p = 1.000, no change" row at a
+      hard rung is an absence of evidence. **Report n_discordant and the MDE beside every paired
+      ladder**, or the flat rows will keep being read as neutrality. `docs/measurements/c2/paired.py`.
+
+- [ ] **THE ENEMY OVERWATCH HAS NO LANE SELECTION, and that is now the binding constraint.**
+      C2 measured a held enemy lane FIRING **24-27%** of the time (n=457/461 lanes in the
+      maximal-decline diagnostic, of which 442/455 are genuine overwatch; the shipped round's own
+      lane counts are mostly PIKEMAN BRACE and do NOT corroborate this). *Fired*, not *paid off* —
+      at the reaction's −10 aim a fired shot often misses, so true payoff is lower. An overwatch is
+      therefore worth at most ~0.20 of the shot it replaces. A decline rate large enough to be
+      *felt* also looked like a weaker opponent (51% declines, run completion 55% → 75%), but that
+      probe is suggestive only: p = 0.29 on 20 paired worlds, and confounded by an interim binary.
+      The cause is that an enemy overwatch is a 360 degree watch
+      held from wherever the unit is standing; only the PIKEMAN's BRACE ever picks a cone. **A
+      hostile that chose WHERE to watch would be worth several times this, and would justify a
+      much higher `Ai.DeclineWatchRatio`.** This is the next wave in this area, not another pass
+      at the gate.
+- [ ] **The enemy kill-zone wash is below perceptual threshold, and covers the whole board.**
+      `Renderer` washes every tile an enemy overwatch threatens at **7-12% alpha**, which C2's
+      code review measured as invisible on a warm biome even at 2.6x contrast — so the one visual
+      that is supposed to communicate "this ground is denied" communicates nothing. It is also
+      **the same finding as the lane-selection gap seen from the other end**: because a plain
+      enemy overwatch has no cone, the wash covers nearly the entire open board, and a signal that
+      marks everything marks nothing. Fixing lane selection would fix the wash's *information*;
+      the alpha needs raising regardless. (C2's `SIGHTLINE_DECLINESHOT` doc comment claimed the
+      wash "lights the ground it now denies"; that claim is withdrawn in the code.)
+- [ ] **The flywheel is structurally blind to enemy area denial.**
+      `Game.Autopilot.TileExposure` carries `+18` for an enemy BRACE lane (`InEnemyBraceLane`) and
+      **no term at all** for an ordinary enemy overwatch — its "exposed to this gun" `+6` is
+      identical whether the hostile is watching or not. So the bot walks into enemy kill-zones and
+      the denial half of a lane cannot be priced. Fixing it changes the INSTRUMENT and therefore
+      invalidates every CRN world in the repo, so it must be a wave of its own with an R0diag and
+      a fresh ladder, never smuggled into a gameplay wave.
+
 - [ ] **W10's text-scale gate covers five surfaces, not the game.** Every other screen is still
       asserted at 100% only. `FITTEST` is written so a sixth leg is an addition, not a rewrite.
 - [ ] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post.
@@ -2196,6 +2255,20 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 - [ ] **W6 (biome mechanical) was never started.** `grep -ci biome` still returns 0 in
       `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
       (**W7 ships-like-a-product is now DONE** — CONTOUR wave C6, section at the end of this file.)
+
+- [x] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post;
+      CONTOUR C2 re-measured it at **0 of 1076** contested acts on `17934ee` and it is no longer
+      zero. **But see the new open item below: the branch is alive and the LANE is still bad.**
+- [x] **W3 THE OPPONENT CHOOSES** — shipped as PROGRAM CONTOUR wave **C2 "THE OPPONENT DECLINES"**
+      (`SIGHTLINE_AIDECLINE`, default ON; DEVLOG §C2, raw data `docs/measurements/c2/`). The flat
+      `100 + bestHit` is gone: the tile term is now `ShotSeat(18) + bestHit * P(hit)` and a decline
+      gate prices the shot against the same shot with the defender's cover stripped
+      (`Combat.AsIfExposed`), with the bar rising with the guns already trained on the tile.
+      **Read the DEVLOG before quoting the wave**: the brief's "shoots at ANY hit chance" half was
+      NOT supported by measurement (0 of 649 pre-change shots were under 20%; 88% were at 60%+) —
+      the defect was entirely positional, and that is what moved.
+- [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
+      still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
       guard covers the player turn only.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.

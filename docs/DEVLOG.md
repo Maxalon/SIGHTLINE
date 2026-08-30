@@ -9742,3 +9742,579 @@ C1's original char counts were also off by one: NO QUARTER was **58**, not 57; L
   mode 1 at six rungs).
 - **SKIRMISH at heat 6–7, the BRACE comeback economy, and the AddHeat directional bias are all
   unmeasured** and are now ROADMAP items rather than footnotes.
+
+# PROGRAM CONTOUR — Wave C2 "THE OPPONENT DECLINES" (dev; worktree `agent-a1c26e3c14d98312b`, branch `wave/opponent-declines`)
+
+**Base commit `17934ee`** (PROGRAM CROSSCUT composed). The CROSSCUT handoff calls this "the
+single biggest remaining gap in the fight": `Ai.cs:537` scored any tile that had a shot at
+`100 + bestHit`, while every terrain term in the same function is bounded well under ~64 —
+cover 36, height ~28, flank −25, fire −60, overwatch −26. A flat +100 for "a shot exists"
+dominated the whole planner.
+
+## 1. THE DEFECT IS REAL, BUT IT IS NOT THE ONE THE BRIEF DESCRIBES — and the difference decided the wave
+
+The brief's statement of the consequence is that the opponent "ALWAYS shoots if it can see
+anything, **at any hit chance**, from any position." The first thing this wave did was
+instrument that claim, because you cannot fix a decision surface you have never measured.
+
+**Pre-change enemy decision mix**, `SIGHTLINE_AIDECLINE=0`, heat 0, slot set b0, 20 campaigns /
+89 missions, 1076 CONTESTED act-opportunities (the W2 rule: an all-downed board is `Ai.Plan`'s
+empty-plan early return and idles by design — those 376 acts are counted separately and never
+enter the denominator):
+
+| verb | n | share |
+|---|---|---|
+| shoot | 649 | 60.3% |
+| hunker | 158 | 14.7% |
+| move (reposition, no shot) | 114 | 10.6% |
+| heal 47 / grenade 28 / siege 26 / reload 19 / item 16 / brace 10 / staleplan 5 / sap 3 / shove 1 | 155 | 14.4% |
+| **overwatch** | **0** | **0.0%** |
+
+and the shot that was on the table, by hit-chance band:
+
+| hit% band | 0-19 | 20-39 | 40-59 | 60-79 | 80+ |
+|---|---|---|---|---|---|
+| taken | **0** | 17 | 59 | 248 | 325 |
+| E\[dmg]/shot | — | 1.44 | 1.97 | 2.56 | 3.74 |
+
+**The "at any hit chance" half is not supported.** 88% of the opponent's shots land in the top
+two bands and **not one** of 649 was under 20%. On the full 960-campaign round below the bottom
+band is not literally empty but it is close: **54 of 15407 pre-change shots (0.4%)** were under
+20% and 83.7% were at 60%+. The reason is that `bestHit` already contains the hit chance, so the
+term that dominates tile choice also ranks targets sensibly once you are standing somewhere. (The
+smaller probe's exact zero is quoted as what that chunk measured; the pooled 0.4% is the number to
+use.)
+
+**The "from any position" half is exactly right, and it is the whole defect.** The +100 is a
+constant paid for *having* a line of fire, so it is invisible to the target's cover, to the
+shooter's own cover, to height, to a flank and to a player overwatch lane. The opponent will step
+out of full cover into the open for a marginal shot, every time, because 100 > 36.
+
+And the corroborating number the handoff supplied is confirmed dead-on: **the enemy OVERWATCH
+branch fired 0 times in 1076 contested acts.** Not because the branch is wrong — because a shot
+scores a constant and a branch that only runs when there is *no* shot can never compete with one.
+
+## 2. WHAT SHIPPED
+
+`SIGHTLINE_AIDECLINE` (default **ON**; `=0` restores the pre-C2 opponent exactly).
+
+**(a) The tile term.** `Ai.ShotTileValue(bestHit, hitPct)` replaces the constant:
+
+```
+ShotSeat + bestHit * (hitPct / 100)        //  ShotSeat = 18f
+```
+
+`bestHit` is a target-CHOICE comparator (hit chance plus what CONNECTING is worth — exposure,
+the finish band, the squad's focus, crossfire), so weighting it by the probability of actually
+connecting weights it by how likely that is. **It is NOT an expected value and an earlier draft
+of this section said it was.** `bestHit` already contains the hit chance, so the term expands to
+`ShotSeat + hit²/100 + bonuses·hit/100` — a hit-SQUARED weighting. A true EV term would weight
+only the consequence of connecting by `hit`, and would not re-multiply the hit chance by itself.
+The squaring is kept on purpose: it makes the opponent more hit-greedy than an EV maximiser,
+which is what a fight where a soldier dies in ~two connections wants (an EV maximiser is
+indifferent between one 80% shot and four 20% shots; an HP bar is not). But the honest name for
+it is the arithmetic, not "expectation". `ShotSeat` is the option value of holding a line of
+fire at all, priced deliberately at **~one level of cover** (`cover.Level * 18` in the same
+scorer), because that is the trade the term has to arbitrate: *stand in the open with a shot* vs
+*stand behind that wall without one*. **Target selection is untouched** — the loop above still
+ranks targets by `val` exactly as before, which is why AITEST's focus-fire legs still pass.
+
+**(b) The decline gate**, run once per plan, after the sap/grenade/item/shove blocks (those
+already price themselves against the real shot, so they must see it) and before W2's no-shot
+fallback. Dropping `ShootTarget` hands the unit straight to that fallback, which always assigns
+overwatch / hunker / reload / dash — so **a decline can never produce a dead turn**; the no-idle
+invariant is inherited structurally rather than re-argued, and `SIGHTLINE_AIIDLETEST` still covers
+it.
+
+The shot is priced against `Combat.AsIfExposed` — the same shot with the defender's cover taken
+away, which is what an overwatch reaction actually catches (the reaction resolves on every tile
+ENTERED, and a soldier crossing between cover blocks is uncovered on the way). HUNKER is
+deliberately **not** stripped: a hunkered soldier is one that chose not to move, so holding a lane
+against it buys nothing.
+
+```
+worth  = E[dmg now] * (finish band ? 1.6 : 1)
+bar    = max(canWatch ? 0.45 : 0, canDig ? 0.30 : 0) * (1 + 0.20 * min(guns, 3))
+decline if  bar > 0  &&  worth < 3.00 (abs keep)  &&  worth < bar * E[dmg if exposed]
+```
+
+`guns` is the number of soldiers already holding a firing solution on the tile — range and line
+of sight only, no `ComputeOdds`, a handful of Bresenham walks once per plan. It is there because
+**firing and standing still is not free**: Combat's EXPOSED BY FIRE rule hands every soldier that
+can see the unit +12 aim and +12 crit against it until it moves. Holding a lane or digging in does
+not. Under **two or more** guns with cover to hand, the freed action buys SURVIVAL — the one place
+the fallback's overwatch-first order is overridden. Rushers (BERSERKER / HOUND / STRIKER / DRONE /
+the Legion BREAKER's second rage) never decline; that is identity, not tactics, and it is also the
+tempo guard.
+
+**(c) `Combat.ShotOdds.CoverDef`** — the aim `ComputeOdds` actually subtracted for cover. Recorded
+so `AsIfExposed` is a *reconstruction from the model's own numbers* rather than a re-derivation of
+the cover rules that could silently drift from them.
+
+## 3. THE FIRST PRICING WAS WRONG AND THE INSTRUMENT CAUGHT IT
+
+The gate's first version used **absolute expected-damage bars** (1.45 / 0.90), set from the
+pre-wave band means above. On a 20-run probe it declined **35 shots at 80%+ hit chance**, because
+`Combat.ExpectedDamage` is armour-aware: a popgun against a hardened soldier is ~1.0 expected
+damage at *any* hit chance. Declining a clean 90% shot does not read as a smarter opponent, it
+reads as a broken one — and it is also wrong on the merits, because that unit's ALTERNATIVE is
+worth ~1.0 too. **The bar has to move with the unit's own ceiling**, which is what
+`AsIfExposed` gives it. That is why the shipped rule is a ratio.
+
+## 4. THE ONE JUDGEMENT CONSTANT, AND THE TWO MEASUREMENTS THAT BRACKET IT
+
+`Ai.cs` says of `DeclineWatchRatio = 0.45` that it is "the ONE number in this block that is a
+judgement rather than a measurement… declared, not hidden." **That is the accurate framing and
+this section now matches it.** An earlier heading here read "…AND THE MEASUREMENT THAT PRICES IT",
+which claims more than the evidence supports: the measurement prices the **lane** (~0.20), not the
+bar, and the second probe supplies a **ceiling** (1.10 is too high), not a value. The two
+**bracket** 0.45 from opposite sides. Neither pins it, and nothing in this wave does.
+
+**The floor: what a held lane is worth in damage the flywheel can see.**
+`Stats.RecordEnemyReaction` counts enemy lanes held against enemy reaction shots actually FIRED,
+and a deliberate **maximal-decline diagnostic** (`CAL-diag`: watch ratio 1.10, dig 0.00, no
+absolute guard — decline every shot whenever a lane exists) generated a population big enough to
+read:
+
+| chunk | lanes held | of which generic overwatch | reaction shots | **fired** |
+|---|---|---|---|---|
+| CAL-diag h0 b0 | 457 | **442** (15 brace) | 111 | **24%** |
+| CAL-diag h4 b0 | 461 | **455** (6 brace) | 124 | **27%** |
+
+**"Fired", not "paid off"** — the first draft used the latter in this table and in
+`ladder_table.py`, and `Stats.cs`'s own comment was the one that had it right: the counter counts
+*shots taken*, and at the reaction's −10 aim mod a fired reaction often misses. **True payoff is
+strictly below 24%**, which cuts in favour of the shipped bar and is exactly why the wrong word
+had to go.
+
+The diagnostic ran on an interim binary (before the threat-scaled bar and the dig-in preference —
+both change WHICH shots are declined, never what a lane is worth). Times the reaction aim mod, a
+held lane is worth roughly **0.20 of the open shot** in damage the flywheel can see. 0.45 is
+about twice that, and the excess is declared, not hidden. Two things push the other way and only
+one of them is arguable:
+
+1. **Measured, and a real property of the instrument.** `Game.Autopilot.TileExposure` has a term
+   for an enemy PIKEMAN BRACE lane (`InEnemyBraceLane`, +18) and **no term at all for an ordinary
+   enemy overwatch** — its generic "exposed to this gun" +6 is identical whether the hostile is
+   watching or not. The bot does not route around enemy overwatch, so the AREA-DENIAL half of a
+   lane is invisible to the flywheel by construction. Rule 3, checkable in eight lines of
+   `Game.Autopilot.cs`.
+2. **A judgement.** Against a human who reads the board, a held lane also costs tempo and routing.
+   Unmeasured, and stated as unmeasured.
+
+**Why the shipped round cannot corroborate any of this, and the first draft wrongly implied it
+could.** An earlier version of the table above carried two "for scale" rows from the ladder
+(L-BASE 53/194 = 27%, L-DECL 57/267 = 21%) as though they agreed with the diagnostic. **They are a
+different population and I did not disclose it.** `lanesHeld` is `overwatch + brace`, and in the
+shipped round the composition inverts: **L-BASE is 20 overwatch + 174 BRACE**, L-DECL is
+111 + 156. The BASE arm held **20 generic lanes in 26,841 contested acts** — it cannot corroborate
+anything about generic overwatch, and the rows were mostly measuring the PIKEMAN. They are removed
+rather than re-labelled; `CAL-diag`, where 442 of 457 lanes are genuine overwatch, is the only
+place in this wave that measures the thing the bar is about.
+
+**The ceiling: a decline rate large enough to be felt is a worse opponent — suggestive, not
+established.** At a 51% decline rate `CAL-diag` read run completion 55% → 75% on the same 20
+worlds, mission length 5.36 → 5.59 turns, shots/kill 3.211 → 3.307. **Two disclosures the first
+draft owed and did not pay.** (i) On 20 paired worlds that is b = 2, c = 6 discordant, **exact
+two-sided p = 0.29** — a 20-point swing is not even close to significant at that n, and I quoted
+it as though it were a finding. (ii) It is **confounded**: the BEFORE leg is the pre-change binary
+while `CAL-diag` carries BOTH the new tile term AND the maximal-decline gate, so the comparison
+cannot separate them. I disclosed the interim binary for the lane-payoff number and not for this
+one, which is inconsistent. Treat it as a **suggestive probe that a very high decline rate hurts
+the opponent**, direction only, and note that it agrees with the mechanism rather than proving it.
+
+**So the honest summary of this section:** the lane is worth ~0.20 or less (measured, n = 918
+lanes), 1.10 is too high (suggested, p = 0.29), and 0.45 sits between them as a declared
+judgement. The ladder is what prices whether the judgement was affordable, and §5 is that price.
+
+## 5. THE PRICE — the CRN-paired ladder, base `17934ee`, 960 campaigns
+
+One binary. Two arms. The **only** difference between them is `SIGHTLINE_AIDECLINE`, so the
+pairing is as tight as this project can make it: identical executable, identical slot seeds, one
+environment variable. 6 rungs x **4 disjoint slot sets** (`SIGHTLINE_BALANCE_BASE` 0/10/20/30) x
+greedy+sloppy x N=10 = **80 campaigns per rung per arm**. All 48 chunks printed `OK ... runs=20`;
+zero `BAD`. Raw data `docs/measurements/c2/`, table `ladder_table.py`, paired test `paired.py`.
+
+| rung | BASE (`=0`) | DECL (`=1`, shipped) | delta | McNemar p | band | verdict (DECL) |
+|---|---|---|---|---|---|---|
+| RECRUIT | 72.5 ±5.0 | **71.2** ±5.1 | −1.2 | 1.000 | 75 ±8 | in |
+| heat 0 | 42.5 ±5.5 | **41.2** ±5.5 | −1.2 | 1.000 | 55 ±8 | **below by 5.8** |
+| heat 2 | 21.2 ±4.6 | **36.2** ±5.4 | **+15.0** | **0.031** | 40 ±8 | in |
+| heat 4 | 25.0 ±4.8 | **23.8** ±4.8 | −1.2 | 1.000 | 30 ±8 | in |
+| heat 6 | 20.0 ±4.5 | **18.8** ±4.4 | −1.2 | 1.000 | 20 ±8 | in |
+| heat 8 | 10.0 ±3.4 | **7.5** ±2.9 | −2.5 | 0.617 | 10 ±5 | in |
+
+**The aggregate is near-inert. The per-world picture is not, and the second sentence is the
+interesting one.** Four rungs net exactly one discordant pair (−1.2 points); heat 8 nets two. But
+a NET is a difference of two counts, and the counts are large: **124 of 480 paired worlds (25.8%)
+came out differently** — RECRUIT 23/80, h0 29/80, h2 26/80, h4 25/80, h6 17/80, h8 4/80. This
+change is nowhere near inert per world; it is near-inert in aggregate **through cancellation**,
+which is a different and more honest claim. (An earlier draft of this line said "five of six rungs
+move by one discordant pair or less". That is false on its own terms — h8 nets two — and it
+described the net while reading as though it described the worlds.)
+
+**What this round could actually have detected.** McNemar's power is set by the DISCORDANT count,
+not by n, and the minimum detectable |b−c| is about 1.96·√n_d + 1 pairs:
+
+| rung | discordant | flipped | MDE (α=.05) | MDE (family-wise, α=.05/6) |
+|---|---|---|---|---|
+| RECRUIT | 23 | 28.8% | 13.0 pts | 17.1 pts |
+| heat 0 | 29 | 36.2% | 14.4 pts | 19.0 pts |
+| heat 2 | 26 | 32.5% | 13.7 pts | 18.1 pts |
+| heat 4 | 25 | 31.2% | 13.5 pts | 17.7 pts |
+| heat 6 | 17 | 21.2% | 11.4 pts | 14.8 pts |
+| **heat 8** | **4** | 5.0% | **nothing** | **nothing** |
+
+At heat 8 the exact two-sided minimum is 2·(1/2)^4 = **0.125**, so no result at that rung is
+reachable at α = 0.05 whatever the effect. **Every "−1.2, p = 1.000" row above is therefore an
+absence of evidence, not evidence of absence** — this round can exclude a double-digit swing and
+nothing smaller. The brief asked for the ladder to stay in band and it does; it did not, and could
+not, establish that the change is neutral.
+
+**The heat-2 cell, on the one ground that holds.** 19 DECL-only wins against 7 BASE-only,
+p = 0.031 nominal. **It is one of six tests, and 0.031 x 6 = 0.19 — it does not survive
+multiplicity, and I am not claiming it.** That is the whole argument, and it is sufficient.
+
+An earlier draft offered two further reasons and **both were wrong**, so they are recorded here
+rather than quietly deleted. (a) *"The BASE arm's own 21.2 is ten points below L3's h2, so it is
+the baseline that is odd on these slot sets."* A non-sequitur: **McNemar conditions entirely on
+the pairs.** A slot set that is hard hits BOTH arms in the SAME worlds, so it cancels exactly in
+the discordant counts and carries zero evidential weight against a paired result. (b) *"The
+missions-cleared margin is only +0.33."* Backwards. On these 80 h2 pairs a win averages **6.00**
+missions and a loss **2.89**, so a genuine net +12 wins PREDICTS a margin of
+12/80 × 3.11 = **+0.47**. The measured +0.33 is consistent with the effect being real, not
+evidence against it. The honest sentence is just: *one of six rungs produced a nominally
+significant cell that does not survive Bonferroni.*
+
+**The BASE arm is not a re-measurement of L3 — it IS L3, replayed.** `src/` is byte-identical
+between `d814f0c` (L3's base) and `17934ee` (mine), and L3 ran bases 0/10/…/70 while this round
+ran 0/10/20/30. Checked, not assumed: all **24 BASE chunks are byte-identical to L3's
+corresponding chunks** on every field outside `harness` and the new `enemyDecisions` block —
+every per-slot record, win, turn count and shots-per-kill. So all 480 BASE campaigns are L3's own
+first four slot sets, bit for bit.
+
+**An earlier draft claimed the BASE arm "reproduces L3 within 1.6 SE at every rung." That
+sentence is withdrawn.** Quoting a standard error on the difference between a set and its own
+subset is a category error — the difference is deterministic, not sampled, and no SE applies. It
+also failed on its own terms: the h2 gap is 1.71 SE treating the halves as independent, 2.79 SE
+computed correctly for the overlap, and 1.67 even under the draft's own rounded "~6"; 1.6 is the
+one threshold that would have made the sentence true.
+
+**And the deterministic fact exposes a project-level finding about the INSTRUMENT, which is worth
+more than the sentence it replaces.** If the BASE arm is L3's b0-b30, then L3's own two halves can
+be compared directly, and at heat 2 they disagree: **b0-b30 reads 21.2% and b40-b70 reads 41.2%**
+(17/80 vs 33/80). Difference +20.0, SE 7.16, **z = 2.79, p = 0.0052**, and 0.031 after Bonferroni
+×6. **L3's slot space is heterogeneous at heat 2 beyond binomial noise** — the ladder-of-record's
+h2 figure of 31.2% is an average over two populations that differ by twenty points. That is a
+result about the measuring instrument, not about this wave, and it belongs to whoever next quotes
+a four-slot-set rung as if slot sets were interchangeable. It does NOT explain this wave's h2 cell
+(see (a) above: a slot-set effect cancels inside a paired test), and I am not offering it as one.
+
+**heat 0 is below band in BOTH arms** (42.5 and 41.2 against a 47 floor), and the delta between
+them is −1.2 (one discordant pair, p = 1.000). **That miss predates this wave and is now provable
+rather than asserted**: the 42.5 is L3's own b0-b30 replayed bit for bit, and L3's eight-slot-set
+h0 reads 47.5, exactly at the floor. Recorded, not repaired: repairing a rung inside a wave that
+also changes gameplay is the mistake the measurement contract exists to prevent.
+
+## 5b. THE PASSIVITY TRIPWIRE — the fight did not get longer
+
+The brief's item 3 is the real risk in this wave: an opponent that dithers in cover is worse than
+one that shoots badly, and W2 already had to fix an enemy that did not act. Pooled over all 960
+campaigns / 3452 missions:
+
+| | BASE | DECL | delta |
+|---|---|---|---|
+| mission length (turns) | 5.738 | **5.563** | **−0.175** |
+| player shots per kill | 3.153 | **3.157** | +0.004 |
+| player shots / kills | 15911 / 5046 | 15443 / 4891 | — |
+| pooled run completion | 31.9% | 33.1% | +1.25 |
+
+**Fights are DIRECTIONALLY shorter, and I over-stated this in the first draft.** The pooled
+"−0.175 turns, 3% shorter" above treats 3452 missions as independent, and they are not: missions
+nest in campaigns, campaigns are paired, and the independent units are the **24 rung × slot
+cells**. Tested properly on those: **−0.186 ± 0.116 turns, t(23) = −1.60, p ≈ 0.12**, sign test
+14 of 24 cells shorter (p = 0.54). So the correct sentence is *directionally shorter by about
+0.18 turns, not significant at n = 24 cells* — and shots-per-kill is flat at +0.004.
+
+**The tripwire conclusion is untouched, because the tripwire was one-sided.** The failure mode the
+brief named is fights getting LONGER and less decisive; the point estimate is negative on both
+axes and the confidence interval excludes anything like the +0.23-turn lengthening the
+maximal-decline probe showed. Nor did the harness tripwire trip: zero `TIMEOUT`, zero `BAD` chunk,
+and `instrumentHealth.stalemateLosses` stayed 0 across all 48 chunks.
+
+## 5c. THE DECISION MIX, BEFORE AND AFTER, on the full 960-campaign round
+
+Pooled over all six rungs (contested acts only):
+
+| verb | BASE | | DECL | | |
+|---|---|---|---|---|---|
+| | n | share | n | share | |
+| shoot | 15407 | 57.4% | 14510 | **55.4%** | −2.0 pts |
+| hunker | 6176 | 23.0% | 6539 | **25.0%** | +2.0 pts |
+| move (reposition, no shot) | 2255 | 8.4% | 2143 | 8.2% | — |
+| **overwatch** | **20** | **0.07%** | **111** | **0.42%** | **x5.6** |
+| everything else | 2983 | 11.1% | 2869 | 11.0% | — |
+| contested acts | 26841 | | 26172 | | |
+| **acts where the chosen tile HAD a shot** | **17030** | **63.4%** | **16110** | **61.6%** | **−920** |
+| shots DECLINED | 0 | 0.00% | **105** | **0.65%** | — |
+| enemy lanes held / reaction shots | 194 / 53 | 27% | 267 / 57 | 21% | — |
+
+And the SHOT BANDS over the same round — the opponent's own shots got measurably better, which is
+the positional change showing up on the offensive side rather than a decline effect:
+
+| hit% band | 0-19 | 20-39 | 40-59 | 60-79 | 80+ | total |
+|---|---|---|---|---|---|---|
+| BASE taken | 54 (0.4%) | 480 (3.1%) | 1967 (12.8%) | 5750 (37.3%) | 7156 (**46.4%**) | 15407 |
+| DECL taken | 20 (0.1%) | 301 (2.1%) | 1524 (10.5%) | 5083 (35.0%) | 7582 (**52.3%**) | 14510 |
+| DECL declined | 16 | 52 | 33 | 4 | 0 | 105 |
+
+Every band under 60% shrinks and the 80%+ band gains **5.9 points**. E\[dmg] per shot within each
+band is unchanged to two decimals (0.63/1.13/1.75/2.51/3.64 vs 0.70/1.17/1.77/2.55/3.65), which is
+the check that this is a shift in WHICH shots get taken and not a change to the combat model. The
+declines sit where they should: 85 of 105 in the 20-59% bands, four in the 60-79% band (a shot
+whose open-cover reference was far better), none at 80%+.
+
+**The wave's real effect is HUNKERING, and the ×5.6 overwatch figure is the smaller story.** Only
+**105 of the 897 fewer shots** are gate declines; the rest come from the tile term steering units
+onto cover tiles that have no shot at all, where they dig in. So the honest headline is
+**+2.0 points of hunkering**, not +0.35 of overwatch — the overwatch number has the bigger
+multiplier and the smaller effect, and leading with it (as an earlier draft did) inverts their
+importance.
+
+**That matters because DESIGN §3.A's anti-turtle rule cuts at this wave.** "Kill the dominant
+defensive strategy" is written about the player, but an opponent that hunkers 2 points more is
+moving in the direction the section warns about. The mission-length tripwire says it has not cost
+tempo (§5b: directionally shorter, and certainly not longer), so this is not a defect today — but
+**"the opponent hunkers more" is the line a feel review should watch**, not the decline rate. The
+DECLINE itself is 0.65% of the shots on the table; §4 is the argument that small is correct.
+
+## 6. SCREENSHOTS — Rule 3, and what the frames actually show
+
+A CRN batch prices consequences and is blind to feel, so `SIGHTLINE_DECLINESHOT` stages the
+behaviour on the live board and runs the **real** `Ai.Plan`, applying exactly what
+`Game.UpdateEnemy`'s ActAfterMove would apply — the frame is a decision the shipped planner made,
+not a hand-set flag. One soldier behind one high-cover block; one hostile; everything else parked
+behind a high-cover wall down column 16 so the hostile's only shot in the world is the covered
+one. Both frames are `SIGHTLINE_SHOT=760 SIGHTLINE_MISSION=1`; the only difference is the dial.
+
+**Both frames are `SIGHTLINE_SEED=4242`**, so the pair is a genuine controlled contrast rather
+than two similar pictures — same arena, same roster, same shot, differing in the dial and nothing
+else. (An earlier version of these frames was unseeded and the two shots landed on different
+biomes; the write-up then carried a caveat about clock-seeded RNG that was entirely avoidable.
+`SIGHTLINE_SEED` existed the whole time.)
+
+`docs/measurements/c2/shots/decline-on.png` (`SIGHTLINE_AIDECLINE=1`, shipped) —
+`STALKER@(6,0) vs VEGA@(12,3) shotHit=25% E[dmg]=0.71 declined=True -> DECLINED - HOLDING THE LANE`.
+**What I see:** the blue industrial arena; the STALKER top-centre inside its low-cover ring; VEGA
+right-of-centre, gold-ringed, with the grey high-cover block hard against its west face; the
+parked units sealed behind the column-16 wall on the right edge. And the read that matters — the
+INCOMING FIRE card carries a **third** line: *"OVERWATCH LANE — entering draws a reaction."* The
+game itself tells the player the hostile is holding ground it now denies.
+
+`docs/measurements/c2/shots/decline-off.png` (`SIGHTLINE_AIDECLINE=0`) — `shotHit=25%
+E[dmg]=0.71 declined=False -> TOOK THE SHOT`. **Pixel-for-pixel the same board**: same arena, same
+STALKER on the same tile, same VEGA, same card header (`1 hostile bears · best 67% · ~2 dmg /
+worst gun: STALKER — SCOUT`). The single difference in the entire frame is that the third line is
+**gone**. The hostile spent its action on a shot worth 0.71 expected damage and holds nothing.
+
+**Two honest notes.** **(1)** That tooltip line is **pre-existing** — `Hud.cs` has drawn it since
+before this wave (`git diff 17934ee..HEAD -- src/Hud.cs` is empty). This wave did not add the
+read; it created the enemy state that makes the read appear, which is the better half of the deal
+but not the same claim, and the lead's review brief had it the other way round. **(2)** The
+hostile had to be PINNED (a ring of impassable low cover) to stage this at all. The first version
+of the hook left it free and it did something better than declining: **it walked around the block
+and took a 77% flanking shot.** That is the wave working — the tile term is what makes a flank
+outrank a frontal potshot — but it is a different frame, and it is worth recording that on open
+ground the planner's first answer to a covered target is now to out-position it, not to hold fire.
+
+**What the frames do NOT show, contrary to the hook's own former doc comment.**
+`Renderer`'s enemy kill-zone wash is 7-12% alpha and is **below perceptual threshold** on these
+biomes — the code review measured it invisible even at 2.6x contrast. The comment claimed it
+"lights the ground it now denies"; that claim is withdrawn in the code. Worse and more
+interesting: because a plain enemy overwatch has no lane selection, the wash covers nearly the
+whole open board, so even if it were visible it would carry no information. **That is this wave's
+no-lane-selection finding arriving from the render side**, and it is in ROADMAP as its own item.
+
+## 7. THE SELF-TEST, AND THE PROOF IT CAN FAIL
+
+`SIGHTLINE_DECLINETEST`, wired into `scripts/qa-sweep.sh`. Six groups of legs:
+
+1. **`Combat.AsIfExposed` ground-truthed against a REAL `ComputeOdds`** on a board whose cover
+   block has been *physically deleted* — low, high, diagonal-partial, plus an identity leg on an
+   already-exposed shot. This is the reconstruction the whole gate rests on; if it drifts from the
+   cover model the gate silently starts pricing against a fiction. The scene SEARCHES for an
+   attacker tile that both keeps line of sight and reads the requested cover level, and fails
+   loudly (`scene:...`) if it cannot find one.
+2. **`Ai.ShotTileValue` on BOTH sides of the dial.** The pre-C2 branch is pinned to the literal
+   `100 + bestHit`, *and* to the fact that it beat high cover (36) — the defect itself, pinned.
+   The shipped branch must put a 12% shot BELOW that wall, keep a strong shot dominant, and be
+   monotone in the hit chance.
+3. **The gate declines a bad shot** on a live `Ai.Plan` and still spends the action (the W2
+   invariant), on a pinned shooter looking at a high-cover soldier at 21% / E\[dmg] 1.36.
+4. **It does NOT decline** the same shot from the same tile when the target is simply not in cover.
+5. **A rusher never declines** (`Ai.NeverDeclines`).
+6. **Under two or more guns it DIGS IN** rather than offering a lane (`DeclineDigIn` + `Hunker`).
+
+Plus a forced pre-C2 contrast leg that exists only to prove the scene is a genuine decision and
+not a board where nobody would shoot anyway.
+
+**Every shipped-behaviour leg reads the AMBIENT `Game.AiDecline`, so the test fails when the
+feature is off.** Measured, not asserted:
+
+```
+$ SIGHTLINE_DECLINETEST=1 ...
+DECLINETEST: ambient SIGHTLINE_AIDECLINE=1; gate scene [...] shot hit=21% E[dmg]=1.36 -> OVERWATCH
+DECLINETEST: PASS (...)
+
+$ SIGHTLINE_AIDECLINE=0 SIGHTLINE_DECLINETEST=1 ...
+DECLINETEST: ambient SIGHTLINE_AIDECLINE=0; gate scene [...] shot hit=21% E[dmg]=1.36 -> SHOOT
+  gate:didNotDecline(hit=21 exp=1.36)
+  gate:declinedButStillShoots
+  gate:killBoxDidNotDecline
+DECLINETEST: FAIL (gate:didNotDecline(hit=21 exp=1.36),gate:declinedButStillShoots,gate:killBoxDidNotDecline)
+```
+
+**A second review then showed the test was much weaker than "it fails when the feature is off".**
+It perturbed each constant one at a time, rebuilding for each, and found **only two of seven were
+pinned at all**: `ShotSeat` could be set to **0** — deleting the "a line of fire has option value"
+concept DESIGN §5.2 point 1 is entirely about — and the whole suite stayed green. Worse, the
+kill-box leg did not test the kill box: `bar *= 1 + DeclineThreatScale * min(guns, cap)` could be
+**deleted outright** and all three of its assertions still passed, because they only exercised
+`DeclineDigIn = guns >= 2 && canDig`. **The most-argued piece of model in this wave had zero
+coverage.** Four legs were added in response (7-10 above), and every one was proven able to fail:
+
+| constant | lower pin | upper pin |
+|---|---|---|
+| `ShotSeat` 18 | **0 → FAIL** (leg 8) | **35 → FAIL** (leg 2) |
+| `DeclineThreatScale` 0.20 | **0.00 → FAIL** (leg 7) | **2.00 → FAIL** (leg 7) |
+| `DeclineWatchRatio` 0.45 | **0.35 → FAIL** (leg 3) | none |
+<!-- every cell above re-measured on this branch, not taken from the review -->
+| `DeclineDigRatio` 0.30 | **0.00 → FAIL** (leg 10) | none |
+| `DeclineThreatCap` 3 | **0 → FAIL** (leg 7) | none |
+| `DeclineAbsKeep` 3.00 | **0.50 → FAIL** (leg 3) | none — 10.00 passes |
+| `FinishPress` 1.6 | **1.0 → FAIL** (leg 9) | none — 9.0 passes |
+
+**Seven of seven now have at least a lower pin; two have both sides.** Every cell in that table
+was re-run on this branch rather than copied from the review — including the two the review had
+already measured, because a table published under this wave's name should be this wave's
+measurement. The straddle (leg 7) is the
+one that matters most: one scene, evaluated at one gun and at three, with the aim SEARCHED until
+the shot's ratio lands between the two bars. It reports what it found —
+`straddle: aim=82 1gun=SHOOT(58%,exp=2.96) 3gun=DECLINE` — so the archive shows the leg was live
+and not vacuous. Setting the scale to 0 or 2, or the cap to 0, collapses the window and the leg
+fails with `scene:noThreatStraddle` rather than passing quietly.
+
+**The test's own scene was wrong twice before it could fail for the right reason**, and both are
+the program's rule 6 (a correct assertion in the wrong scope is indistinguishable from no
+assertion): the first hand-picked shooting tile had **no line of sight at all**, so there was no
+shot to decline and four legs were failing vacuously; and the exec-site decision labelling put the
+terminal-else's `staleplan` tag inside its dry-weapon arm, so its hunker arm fell through
+unlabelled and reported as `idle`. Both were found by making the test PRINT its scene rather than
+trusting it.
+
+## 8. VERIFICATION
+
+- **Release build 0 warnings / 0 errors.**
+- **`bash scripts/qa-sweep.sh --full` — SWEEP-EXIT=0**, **65/65** self-tests PASS (incl. the new
+  `DECLINETEST`), COVERAGE GAP block empty, PAIRTEST byte-identical, autoplay x3 WIN/LOSE with no
+  TIMEOUT. Full output in `docs/measurements/c2/qa-sweep-full.txt`. (**Two earlier full sweeps
+  were run and DISCARDED**, as `qa-sweep-full.interim.txt` and `.interim2.txt`. Both were green,
+  and both are worthless as a gate for the same reason: `run()` is `dotnet run -c Debug`, which
+  REBUILDS per test, so a source edit landing mid-sweep — even a comment-only one — makes the run
+  span two binaries. The sweep of record was started only after the source tree was frozen, and
+  nothing but documentation changed after it began. A gate that spanned two builds is not a gate,
+  and noticing that twice cost two sweeps. A THIRD run was started after the review's ten
+  documentation fixes and then deliberately KILLED at the lead's instruction: those fixes changed
+  **no build input** —
+  `git diff <pre-fix>..HEAD -- src scripts/qa-sweep.sh Sightline.csproj assets` is empty — so the
+  binary under test was byte-identical to the one that produced the result above, and eleven
+  concurrent sweeps were saturating a four-core box. **No post-fix sweep result exists and none is
+  claimed.** Killing it also truncated `qa-sweep-full.txt` in place, which a routine `git add -A`
+  had already committed as a five-line stub; the log was restored from git and the trap is written
+  up in `docs/measurements/c2/README.md`. A FOURTH sweep then ran after the code review's D1/D3
+  fixes — which DID touch `src/` — and is the log archived above: **SWEEP-EXIT=0, 65/65 PASS,
+  COVERAGE GAP empty, PAIRTEST byte-identical, autoplay x3 LOSE/WIN/LOSE with no TIMEOUT.** It was
+  written to a scratch path and copied into place on success, which is the rule the truncation
+  trap taught.)
+  Notable passes for this diff specifically: `COMBATTEST` and `TRUTHTEST` (the new
+  `ShotOdds.CoverDef` field and the tooltip), `SAVETEST` (no persisted-enum or map-generator
+  movement), `AIIDLETEST` (the no-idle invariant survives declining), `HEATLADDERTEST` (the
+  difficulty axis is untouched), and `AITEST` (focus fire and target selection are untouched).
+- **`SIGHTLINE_DECLINETEST` FAILS with `SIGHTLINE_AIDECLINE=0`** — output in §7.
+- **The INSTRUMENT does not share this code path** — the brief's explicit WATCH OUT. Checked
+  rather than assumed: `grep -nE '\bAi\.[A-Z]' src/Game.Autopilot.cs` returns exactly three
+  hits, **all of them doc comments** ("the Ai.Plan trick", "Ai.Plan-style"). The player-side
+  autopilot re-implements its own scorer and calls nothing in `Ai.cs`, so changing enemy scoring
+  changes the WORLD but not the measuring stick, and the before/after are comparable. (The
+  R0diag above is the second, empirical half of the same check.)
+- **R0diag**: this tree with the dial off vs the base-commit binary, two disjoint slot sets
+  (h0/b0 and h4/b10), diffed to **EMPTY** on both — **1304 and 1216 leaf scalars** respectively
+  (1916 and 1786 lines of normalised JSON), covering every per-slot RunRec, win, loss, turn count
+  and shots-per-kill. The telemetry this wave adds — including the extra `ComputeOdds` +
+  `ExpectedDamage` per plan — is gameplay-inert. (An earlier draft said "2750 aggregate fields on
+  both". The diffs were and are empty, but that number reproduces under no convention I can find:
+  it is neither chunk's leaf count, and quoting one figure for two differently-sized artifacts was
+  wrong twice over.)
+- **48/48 ladder chunks `OK ... runs=20`**, three-layer completion contract on every one.
+- **The ladder binary is the shipped binary.** Three post-ladder tidies landed (comment
+  corrections, a redundant local in `ComputeOdds`, and the gate reusing the odds it had already
+  computed instead of calling `OddsFrom` twice). All three are provably behaviour-neutral, but
+  "provably" is the word this project asks you to check: two ladder chunks — one per ARM
+  (`L-DECL-h2-b0`, `L-BASE-h4-b10`) — were re-run on the final binary and diff **EMPTY** against
+  their archived JSON outside the `harness` block. Archived as `POST-*`.
+
+## 9. WHAT I DID NOT DO, AND WHAT IT COSTS
+
+- **I did not make declining common, and I will not pretend the shipped rate is large.** It is
+  **0.65%** of the shots on the table pooled over the 960-campaign round (1.0-1.4% on the heat-0
+  probe chunks, where the calibration was done). The board carries **15.53 / 15.18 contested enemy
+  acts per mission** (BASE / DECL), and 105 declines fall over 1724 missions — so a player sees
+  the opponent hold fire about **once every sixteen missions**. (An earlier draft wrote "~11.8
+  acts per mission" and "every several missions"; both were wrong and both flattered the wave.)
+  The rate is a deliberate consequence of pricing the gate against a lane measured to FIRE 24% of
+  the time rather than against a target rate; §4's ceiling probe points the same way but is
+  suggestive only (p = 0.29, and confounded). **If a later wave wants a felt decline rate, the
+  thing to fix first is the LANE, not the gate** — see the two open items below.
+- **The enemy overwatch has no lane selection at all.** It is a 360° watch held from wherever the
+  unit happens to be standing (only the PIKEMAN's BRACE picks a cone). That is very likely why
+  only 24% of held lanes ever FIRE — and fewer still connect — which makes the wave's own
+  alternative a weak one. A
+  hostile that chose *where* to watch — a chokepoint, the tile a soldier must cross to reach the
+  objective — would be worth several times what this one is, and would justify a much higher
+  `DeclineWatchRatio`. **Unstarted.**
+- **The instrument cannot see area denial, and I did not fix that either.**
+  `Game.Autopilot.TileExposure` has a `+18` term for an enemy BRACE lane and nothing for an
+  ordinary enemy overwatch. Teaching the bot to route around enemy overwatch would make the
+  flywheel able to price the lane properly — but it would also change the INSTRUMENT, which
+  invalidates every CRN world in the repository, so it is a wave of its own and must not be
+  smuggled into one that also changes gameplay.
+- **`DeclineDigIn` is unexercised in play, as far as I measured.** It is pinned by DECLINETEST
+  leg 6 on a constructed board, but the two probe chunks run with and without it
+  (`CAL-e` / `CAL-f`, same slots, same seeds) came back **identical on every field**, so the
+  "two or more guns AND cover to hand AND a bad shot" conjunction did not occur once in those 20
+  campaigns. **I did NOT instrument it separately over the 960-campaign round**, so "never fires"
+  is not a claim I can make — what I can say is that it did not move a paired probe and that no
+  counter exists for it. A follow-up that cares should add one.
+- **Four of seven constants are still pinned from ONE side only.** `DeclineWatchRatio`,
+  `DeclineDigRatio`, `DeclineThreatCap`, `DeclineAbsKeep` and `FinishPress` have lower pins but no
+  upper one: `DeclineAbsKeep` can be raised to 10.00 and `FinishPress` to 9.0 with the suite green.
+  Both are inert in that direction at the shipped ratios (a 0.45-ratio shot is weak by
+  construction, so the absolute guard cannot bind; and a finish-band target is rare), which is why
+  the missing pin costs nothing today — but a wave that RAISES the ratios inherits an untested
+  guard, and should add the upper legs before it does.
+- **NONE of the seven scoring constants is a measured optimum, `ShotSeat` least of all.** An
+  earlier draft said "the three decline constants were calibrated"; that over-states what the
+  `CAL-*` chunks did. They were a **swept ladder of candidate settings scored on a single
+  20-campaign slot set** — enough to reject an absolute-damage bar and to bound the rate, not
+  enough to locate a value, and no chunk was replicated across slot sets. `DeclineWatchRatio` is
+  the declared judgement §4 now frames correctly; `DeclineDigRatio` and `DeclineAbsKeep` were set
+  by the same reasoning and are, on the shipped round, largely inert (`AbsKeep` cannot bind at a
+  0.45 ratio); `ShotSeat = 18` was never swept at all — it is set to one level of cover because
+  that is the trade the term arbitrates. A wave that wants to move the positional behaviour
+  further should sweep `ShotSeat` across four slot sets before touching the gate.
+- **I did not touch the shot term for a ROUTING unit** (`bestHit * 0.25`, UNDERTOW W3) or the
+  target-selection loop. Both are load-bearing for other tests and neither is the defect.
+- **`byObjectiveByNodeKind` was not consulted for this wave's conclusions.** Nothing here is a
+  per-objective claim, so rule 1 does not bite — but if a follow-up wants to argue that declining
+  helps or hurts a particular objective, it must use the cross-tab.
+- **No CI, no test framework, no new dependency, no asset.** Nothing added that costs money.

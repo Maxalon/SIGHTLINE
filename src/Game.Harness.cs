@@ -54,6 +54,102 @@ public partial class Game
         }
     }
 
+    /// C2 harness hook (screenshot only): SIGHTLINE_DECLINESHOT — the OPPONENT DECLINES, staged
+    /// on the live board so one frame can be judged. Rule 3 of the program's own rules: a CRN
+    /// batch prices CONSEQUENCES and is structurally blind to FEEL, so this behaviour needs eyes.
+    ///
+    /// It clears a pocket of the real arena and seats two identical GRUNTs at the same range from
+    /// two identical soldiers. The only difference is a single HIGH COVER block: the LEFT pair's
+    /// soldier is behind it, the RIGHT pair's is in the open. Then it runs the REAL Ai.Plan for
+    /// each hostile and applies exactly what Game.UpdateEnemy's ActAfterMove would apply — so the
+    /// frame is a decision the shipped planner made, not a hand-set flag.
+    ///
+    /// With SIGHTLINE_AIDECLINE=1 (shipped) the left hostile declines its covered shot and wears
+    /// the accent "OW" badge, and the INCOMING FIRE card gains its "OVERWATCH LANE — entering
+    /// draws a reaction" line (which is PRE-EXISTING in Hud.cs, not added by this wave — the hook
+    /// only creates the state that makes it appear). An earlier version of this comment also
+    /// claimed Renderer's kill-zone wash "lights the ground it now denies"; it does not, visibly.
+    /// The wash is 7-12% alpha and sits below perceptual threshold on a warm biome — and because
+    /// a plain enemy overwatch has no lane selection, it covers nearly the whole open board, so
+    /// even seen it would carry no information. Both facts are C2 findings, in ROADMAP. With
+    /// SIGHTLINE_AIDECLINE=0 the SAME hostile on the SAME board takes the shot and holds no lane:
+    /// the two frames are the wave. Pair with SIGHTLINE_SHOT=760 (the briefing card holds ~11 s).
+    public void DebugDeclineShot()
+    {
+        DebugWakeAll();
+        // A clean pocket: floor everywhere, plus a HIGH-COVER wall down column 16 that everything
+        // NOT part of the scene is parked behind. Without it the staged hostile simply shot one of
+        // the parked soldiers instead (measured: both staged shooters reported hit=78% at a body
+        // 11 tiles away in the open) and the frame staged nothing.
+        for (int x = 1; x <= Grid.W - 2; x++)
+            for (int y = 0; y <= Grid.H - 1; y++) { Grid.Tiles[x, y] = TileType.Floor; Grid.Barrel[x, y] = false; }
+        for (int y = 0; y <= Grid.H - 1; y++) { Grid.Tiles[16, y] = TileType.HighCover; Grid.SetCoverHp(16, y); }
+        int park = 0;
+        foreach (var u in Players.Concat(Enemies))
+        {
+            if (!u.Alive) continue;
+            u.X = Grid.W - 1; u.Y = Math.Min(Grid.H - 1, park++); u.Bob = 0f; u.Facing = 0f; u.SyncPos();
+        }
+
+        var soldier = AlivePlayers().FirstOrDefault(u => !u.IsVip);
+        var foe = AliveEnemies().FirstOrDefault();
+        if (soldier == null || foe == null) return;
+
+        // ONE soldier, behind ONE high-cover block. Everything else is behind the wall, so the
+        // hostile's only shot in the world is the covered one — which is the decision on trial.
+        soldier.X = 12; soldier.Y = 3; soldier.Bob = 0f; soldier.Facing = 0f; soldier.SyncPos();
+        Grid.Tiles[11, 3] = TileType.HighCover; Grid.SetCoverHp(11, 3);
+
+        // Searched, not hand-picked: a hand-picked tile is one Bresenham detail away from having
+        // no line of sight at all, and then there is no shot to decline.
+        int ax = -1, ay = -1;
+        for (int y = 0; y < Grid.H && ax < 0; y++)
+            for (int x = 3; x <= 7 && ax < 0; x++)
+            {
+                if (!Grid.IsFloor(x, y)) continue;
+                if (!Grid.HasLineOfSight(x, y, 12, 3)) continue;
+                if (Grid.GetCover(12, 3, x, y).Level != 2) continue;
+                ax = x; ay = y;
+            }
+        if (ax < 0) { Console.WriteLine("DECLINESHOT: staging FAILED (no shooting tile)"); return; }
+        foe.X = ax; foe.Y = ay; foe.Bob = 0f; foe.Facing = 0f; foe.SyncPos();
+        foe.Aim = 65; foe.Ammo = foe.Weapon.Clip; foe.BeginTurn();
+        // Ring it in LOW cover. Two jobs: it makes DIGGING IN a real alternative, and it PINS the
+        // unit (Grid.IsFloor excludes any cover tile), which the first version of this hook needed
+        // and did not have — on open ground the planner's answer to a covered target is to FLANK
+        // it, and it duly walked around the block and took a 77% shot. That is the wave working,
+        // but it is a different frame. This one is the case where no better tile exists.
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = ax + dx, ny = ay + dy;
+                if (!Grid.InBounds(nx, ny)) continue;
+                Grid.Tiles[nx, ny] = TileType.LowCover; Grid.SetCoverHp(nx, ny);
+            }
+
+        _aiUnits = new System.Collections.Generic.List<Unit> { foe };
+        var all = new System.Collections.Generic.List<Unit>(Players); all.AddRange(Enemies);
+        Combat.AllUnits = all;
+        PlanEnemySquad();
+
+        // run the REAL planner and apply exactly what Game.UpdateEnemy's ActAfterMove would
+        var pl = Ai.Plan(this, foe);
+        if (pl.ShootTarget != null) { foe.FiredThisTurn = true; foe.MovedAfterFire = false; }
+        else if (pl.Overwatch) { foe.OnOverwatch = true; foe.ActionsLeft = 0; }
+        else if (pl.Hunker) { foe.Hunkered = true; foe.ActionsLeft = 0; }
+        string what = pl.ShootTarget != null ? "TOOK THE SHOT"
+                    : pl.Declined ? (pl.Hunker ? "DECLINED - HUNKERED" : "DECLINED - HOLDING THE LANE")
+                    : "NO SHOT";
+        int ex = pl.Path.Count > 0 ? pl.Path[^1].x : foe.X, ey = pl.Path.Count > 0 ? pl.Path[^1].y : foe.Y;
+        Console.WriteLine($"DECLINESHOT: {foe.Name}@({foe.X},{foe.Y})->({ex},{ey}) vs {soldier.Name}@(12,3) "
+                        + $"shotHit={pl.ShotHit}% E[dmg]={pl.ShotExp:0.00} declined={pl.Declined} "
+                        + $"ow={pl.Overwatch} hunker={pl.Hunker} -> {what}");
+        Fx.PopText(foe.Pos + new Vector2(0, -34), what, pl.ShootTarget != null ? Pal.Foe : Pal.Accent, 15f);
+        ShowBanner($"{pl.ShotHit}% SHOT AVAILABLE - {what}", true);
+        Selected = null;
+    }
+
     /// Harness hook (screenshot only): drive the anti-turtle pressure clock to its max rung so a
     /// single frame shows the PRESSURE meter filled in the top bar (and its escalation banner).
     public void DebugPressure()
@@ -7713,6 +7809,345 @@ public partial class Game
         sb.Append(fails.Count == 0
             ? "ROUTETEST: PASS ('first' is measurably skewed to branch 0; 'hash' deals within 8pts of uniform; both take zero Util.Rng draws)"
             : $"ROUTETEST: FAIL ({string.Join(",", fails.Take(8))})");
+        return sb.ToString();
+    }
+
+
+    // ── C2 THE OPPONENT DECLINES — SIGHTLINE_DECLINETEST ────────────────────────────────────
+    /// Pins the two halves of wave C2 on a CONSTRUCTED board, plus the reconstruction they both
+    /// rest on. Reads the AMBIENT Game.AiDecline for every shipped-behaviour leg, so running it
+    /// with SIGHTLINE_AIDECLINE=0 FAILS — which is the proof the test can fail at all.
+    ///
+    ///  (1) Combat.AsIfExposed is ground-truthed against a REAL ComputeOdds on a board whose
+    ///      cover has been physically removed — low, high and diagonal-partial. This is the
+    ///      reconstruction the decline gate's reference shot depends on; if it drifts from the
+    ///      cover model the gate silently starts pricing against a fiction.
+    ///  (2) Ai.ShotTileValue — the one scoring line the wave changed — on BOTH sides of the dial.
+    ///      The pre-C2 branch is the literal `100 + bestHit`; the shipped branch must put a 12%
+    ///      shot BELOW one level of high cover (the whole point) while leaving a strong shot
+    ///      dominant, and must be monotone in the hit chance.
+    ///  (3..6) The decline gate itself on a live Ai.Plan: it declines a bad shot and still spends
+    ///      the action; it does NOT decline the same shot when the target is exposed; a rusher
+    ///      never declines; and under two or more guns the freed action digs in rather than
+    ///      offering a lane.
+    /// No window needed; no persistence (NoPersist); no Util.Rng dependence in any assertion
+    /// (every margin is far outside Ai's 0-3 tie-break jitter, and the gate legs read plan flags).
+    public string DeclineSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        bool ambient = AiDecline;             // what the process was launched with — never forced
+
+        // ---- shared empty scene ------------------------------------------------------------
+        void Scene()
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            Vip = null; CaptiveLocked = false; EnemyFocus = null;
+            Objective = Objective.Eliminate; EvacZone.Clear();
+            Combat.MissionFaction = Faction.None; Combat.PrepFaction = Faction.None;
+            Ai.Tier = 0;
+        }
+        Unit MkP(string name, int x, int y, int hp = 8)
+        {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = hp, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y, string cls = "GRUNT")
+        {
+            var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y,
+                               Hp = 9, MaxHp = 9, Aim = 55, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ── (1) AsIfExposed vs a physically uncovered board ──────────────────────────────────
+        // The soldier stands at (12,5). A cover block west of it covers a dominantly-westward
+        // attack (Grid.GetCover's facing-side rule). We find an attacker tile that BOTH keeps
+        // line of sight AND reads the requested cover level, then compare AsIfExposed(covered)
+        // against ComputeOdds on the same board with the block deleted.
+        void CoverLeg(TileType kind, int wantLevel, bool wantPartial, string tag)
+        {
+            Scene();
+            var sol = MkP("SOL", 12, 5); Players.Add(sol);
+            Grid.Tiles[11, 5] = kind; Grid.SetCoverHp(11, 5);
+            Unit atk = null;
+            for (int y = 0; y < Grid.H && atk == null; y++)
+                for (int x = 2; x <= 8 && atk == null; x++)
+                {
+                    if (!Grid.HasLineOfSight(x, y, 12, 5)) continue;
+                    var c = Grid.GetCover(12, 5, x, y);
+                    if (c.Level != wantLevel || c.Partial != wantPartial) continue;
+                    atk = MkE("ATK", x, y);
+                }
+            if (atk == null) { fails.Add("scene:" + tag + ":noAttackerTile"); return; }
+            Enemies.Add(atk); Combat.AllUnits = new System.Collections.Generic.List<Unit> { sol, atk };
+
+            var covered = Combat.ComputeOdds(Grid, atk, sol);
+            if (covered.CoverLevel != wantLevel) fails.Add(tag + ":coverLevel=" + covered.CoverLevel);
+            int wantDef = (wantLevel == 2 ? 40 : wantLevel == 1 ? 20 : 0) / (wantPartial ? 2 : 1);
+            if (covered.CoverDef != wantDef) fails.Add($"{tag}:coverDef={covered.CoverDef} want {wantDef}");
+
+            Grid.Tiles[11, 5] = TileType.Floor;                 // physically remove the cover
+            var open = Combat.ComputeOdds(Grid, atk, sol);
+            if (open.CoverLevel != 0) fails.Add(tag + ":openStillCovered");
+            var recon = Combat.AsIfExposed(covered);
+            if (recon.HitChance != open.HitChance)
+                fails.Add($"{tag}:asIfExposedHit={recon.HitChance} truth={open.HitChance}");
+            if (recon.CritChance != open.CritChance)
+                fails.Add($"{tag}:asIfExposedCrit={recon.CritChance} truth={open.CritChance}");
+            // and the reconstruction must be a strict IMPROVEMENT for a real cover block, or the
+            // decline gate's ratio is a division by something meaningless.
+            if (wantDef > 0 && recon.HitChance <= covered.HitChance)
+                fails.Add(tag + ":asIfExposedNotBetter");
+        }
+        CoverLeg(TileType.LowCover, 1, false, "low");
+        CoverLeg(TileType.HighCover, 2, false, "high");
+        CoverLeg(TileType.HighCover, 2, true, "partialDiag");
+        // identity: an already-exposed shot must come back unchanged.
+        {
+            Scene();
+            var sol = MkP("SOL", 12, 5); Players.Add(sol);
+            var atk = MkE("ATK", 6, 5); Enemies.Add(atk);
+            Combat.AllUnits = new System.Collections.Generic.List<Unit> { sol, atk };
+            var o = Combat.ComputeOdds(Grid, atk, sol);
+            var r = Combat.AsIfExposed(o);
+            if (o.CoverLevel != 0) fails.Add("identity:sceneHadCover");
+            if (r.HitChance != o.HitChance || r.CritChance != o.CritChance) fails.Add("identity:mutatedExposedShot");
+        }
+
+        // ── (2) the scoring line, both sides of the dial ─────────────────────────────────────
+        // HIGH cover is worth 36 in the same scorer (cover.Level * 18). Pre-C2 a 12% shot was
+        // worth 100 + bestHit; post-C2 it must be worth LESS than that wall.
+        const float wall = 2 * 18f;
+        AiDecline = false;
+        float pre = Ai.ShotTileValue(40f, 12);
+        if (Math.Abs(pre - 140f) > 0.001f) fails.Add($"preC2TermMoved={pre}");
+        if (pre <= wall) fails.Add("preC2TermDidNotDominateCover");     // the defect, pinned
+        AiDecline = true;
+        float badShot = Ai.ShotTileValue(40f, 12);
+        float okShot  = Ai.ShotTileValue(60f, 55);
+        float goodShot = Ai.ShotTileValue(120f, 85);
+        if (badShot >= wall) fails.Add($"badShotStillBeatsHighCover={badShot}");
+        if (goodShot <= 100f) fails.Add($"goodShotNoLongerDominant={goodShot}");
+        if (!(badShot < okShot && okShot < goodShot)) fails.Add("shotTermNotMonotone");
+        AiDecline = ambient;                                            // restore: legs below read it
+
+        // ── (3..6) the gate on a live plan ───────────────────────────────────────────────────
+        // A lone GRUNT with a poor shot at a soldier behind HIGH cover, standing on its own
+        // LOW-cover tile so both alternatives (a lane and a dig-in) are genuinely available.
+        // Its aim is dropped so the covered shot is bad in RATIO terms, which is what the gate
+        // reads — an absolute hit percentage would not be a test of this wave's model.
+        string dbg = "", straddle = "(no straddle found)";
+        int gateGuns = 0;
+        // `wantCover` 0 = target exposed, 1 = LOW cover (a milder ratio, which is what the
+        // kill-box straddle needs), 2 = HIGH cover. `aim` and `targetHp` are parameterised so a
+        // leg can place the shot's ratio where it needs it instead of hoping.
+        EnemyPlan Gate(string cls, int wantCover, int extraSoldiers, int aim = 65, int targetHp = 8,
+                       bool disoriented = false)
+        {
+            Scene();
+            var sol = MkP("SOL", 12, 5, targetHp); Players.Add(sol);
+            if (wantCover > 0)
+            {
+                Grid.Tiles[11, 5] = wantCover == 2 ? TileType.HighCover : TileType.LowCover;
+                Grid.SetCoverHp(11, 5);
+            }
+            // Find a shooting tile that BOTH keeps line of sight to the soldier and reads the
+            // cover level this leg wants — searched rather than hand-picked, because a
+            // hand-picked tile is one Bresenham detail away from silently testing nothing (the
+            // first draft of this scene had exactly that: los=False, so there was no shot to
+            // decline and the "decline" legs were vacuously failing).
+            int ax = -1, ay = -1;
+            for (int y = 0; y < Grid.H && ax < 0; y++)
+                for (int x = 2; x <= 7 && ax < 0; x++)
+                {
+                    if (!Grid.HasLineOfSight(x, y, 12, 5)) continue;
+                    if (Grid.GetCover(12, 5, x, y).Level != wantCover) continue;
+                    ax = x; ay = y;
+                }
+            if (ax < 0) { dbg = "[scene: no shooting tile]"; return new EnemyPlan(); }
+
+            var e = MkE("E1", ax, ay, cls);
+            // DAZED is the only clean way to make `canWatch` false while `canDig` stays true: the
+            // decline gate and the no-shot fallback BOTH refuse a watch from a Disoriented unit,
+            // exactly as Game.ActAfterMove's own overwatch gate does. Without it every leg has
+            // canWatch == true, `Math.Max(watch, dig)` always resolves to the watch ratio, and
+            // DeclineDigRatio is unreachable at any value in [0, 0.45].
+            if (disoriented) e.AddStatus(StatusKind.Disoriented, 3);
+            e.Aim = aim;                                  // a real shooter, so a DECLINE is about
+            Enemies.Add(e);                               // the cover, not about a hopeless gun
+            // Ring it in LOW cover: impassable (Grid.IsFloor excludes any cover tile) so the unit
+            // is PINNED and the leg is about the ACTION, not about where it walks — and low cover
+            // does not block sight (Grid.BlocksSight is HighCover/smoke only), so the shot, the
+            // watch and the soldiers' own firing solutions all survive it. It also makes the
+            // dig-in alternative genuinely available, which is what the kill-box leg needs.
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = ax + dx, ny = ay + dy;
+                    if (!Grid.InBounds(nx, ny)) continue;
+                    Grid.Tiles[nx, ny] = TileType.LowCover; Grid.SetCoverHp(nx, ny);
+                }
+            // Extra guns for the kill-box leg: SNIPERS (range 20) parked with a clear line to the
+            // grunt's tile but BEYOND its own rifle range (15), so they count as guns trained on
+            // it without becoming better targets than the soldier the leg is actually about.
+            // Searched, for the same reason the shooting tile is.
+            int placed = 0;
+            for (int y = Grid.H - 1; y >= 0 && placed < extraSoldiers; y--)
+                for (int x = Grid.W - 1; x >= 8 && placed < extraSoldiers; x--)
+                {
+                    if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
+                    float d = Util.TileDist(x, y, ax, ay);
+                    if (d <= 16f || d > 20f) continue;                 // out of ITS reach, inside theirs
+                    if (!Grid.HasLineOfSight(x, y, ax, ay)) continue;  // must actually see the tile
+                    var s2 = MkP("S" + placed, x, y);
+                    s2.Weapon = Weapon.Make(WeaponKind.Sniper); s2.Ammo = s2.Weapon.Clip;
+                    Players.Add(s2); placed++;
+                }
+            if (placed < extraSoldiers) { dbg = "[scene: only " + placed + " extra guns placed]"; }
+            var all = new System.Collections.Generic.List<Unit>(Players);
+            all.AddRange(Enemies);
+            Combat.AllUnits = all;
+            _aiUnits = AliveEnemies().Where(u => u.Active).ToList();
+            PlanEnemySquad();
+            var pl = Ai.Plan(this, e);
+            gateGuns = 0;
+            foreach (var p in Players)
+                if (p.Ammo > 0 && Util.TileDist(p.X, p.Y, e.X, e.Y) <= p.Weapon.MaxRange
+                    && Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) gateGuns++;
+            var od = Combat.ComputeOdds(Grid, e, sol);
+            dbg = $"[from({e.X},{e.Y}) tgtCover={Grid.GetCover(12, 5, e.X, e.Y).Level} "
+                + $"hit={od.HitChance} openHit={Combat.AsIfExposed(od).HitChance} "
+                + $"selfCover={Grid.GetCover(e.X, e.Y, 12, 5).Level} guns={gateGuns} moved={pl.Path.Count}]";
+            return pl;
+        }
+
+        var declined = Gate("GRUNT", wantCover: 2, extraSoldiers: 0);
+        string dbgFirst = dbg;
+        if (declined.ShotHit < 0) fails.Add("gate:noShotOnTheTable");     // the scene must offer one
+        // ...and it must be a PLAUSIBLE bad shot, not a degenerate one. A 3%-clamped hopeless
+        // shot would make the decline trivial and the test meaningless.
+        else if (declined.ShotHit < 10 || declined.ShotHit > 45)
+            fails.Add("scene:shotOutOfBand=" + declined.ShotHit);
+        if (!declined.Declined) fails.Add($"gate:didNotDecline(hit={declined.ShotHit} exp={declined.ShotExp:0.00})");
+        if (declined.ShootTarget != null) fails.Add("gate:declinedButStillShoots");
+        bool spends = declined.Overwatch || declined.Hunker || declined.Reload
+                   || declined.Path.Count > 0 || declined.Grenade || declined.UseItem;
+        if (declined.Declined && !spends) fails.Add("gate:declineProducedADeadTurn");   // the W2 invariant
+
+        // the SAME shooter, same tile, target simply not in cover -> the shot is taken.
+        var kept = Gate("GRUNT", wantCover: 0, extraSoldiers: 0);
+        if (kept.Declined) fails.Add("gate:declinedAnExposedTarget");
+        if (kept.ShootTarget == null) fails.Add("gate:refusedAGoodShot");
+
+        // a rusher never declines: identity, not tactics (Ai.NeverDeclines).
+        var rush = Gate("BERSERKER", wantCover: 2, extraSoldiers: 0);
+        if (rush.Declined) fails.Add("gate:berserkerDeclined");
+        if (rush.ShootTarget == null) fails.Add("gate:berserkerHeldFire");
+
+        // under two or more guns the freed action buys SURVIVAL, not a lane.
+        var box = Gate("GRUNT", wantCover: 2, extraSoldiers: 2);
+        if (gateGuns < 2) fails.Add("scene:killBoxGuns=" + gateGuns);
+        if (!box.Declined) fails.Add("gate:killBoxDidNotDecline");
+        else
+        {
+            if (!box.DeclineDigIn) fails.Add("gate:killBoxDidNotDigIn");
+            if (!box.Hunker) fails.Add("gate:killBoxWatchedInsteadOfHunkering");
+        }
+
+        // ── (7) THE KILL BOX, tested as a STRADDLE — the leg the first draft was missing ─────
+        // The review found that `bar *= 1 + DeclineThreatScale * min(guns, cap)` could be DELETED
+        // and every kill-box assertion above still passed: they only exercise
+        // `DeclineDigIn = guns >= 2 && canDig`, never the bar scaling itself. "The guns on me" is
+        // the most-argued piece of model in this wave and it had zero coverage.
+        //
+        // A straddle fixes that. ONE scene, evaluated at ONE gun and at THREE, tuned so the shot's
+        // ratio falls BETWEEN the two bars (0.45x1.2 = 0.54 and 0.45x1.6 = 0.72). Then the extra
+        // guns are the ONLY thing that can flip the decision, which is exactly the claim.
+        //   scale -> 0.00 : both bars collapse to 0.45, the 3-gun leg SHOOTS   -> fails below
+        //   scale -> 2.00 : the 1-gun bar becomes 1.35, the 1-gun leg DECLINES -> fails below
+        //   cap   -> 0    : same collapse as scale 0                           -> fails below
+        // LOW cover, because a high-cover ratio (~0.36) sits under both bars and cannot straddle.
+        // The aim is SEARCHED, not hand-picked: the window is narrow and a hand-picked number is
+        // one damage-band change away from silently testing nothing.
+        {
+            int hitAim = -1; EnemyPlan one = null, three = null;
+            // (recorded in the verdict line so the archive shows the leg actually found a straddle)
+            for (int a = 90; a >= 40 && hitAim < 0; a--)
+            {
+                var p1 = Gate("GRUNT", wantCover: 1, extraSoldiers: 0, aim: a);
+                if (gateGuns != 1 || p1.ShotHit < 0 || p1.Declined) continue;   // must SHOOT at 1 gun
+                var p3 = Gate("GRUNT", wantCover: 1, extraSoldiers: 2, aim: a);
+                if (gateGuns < 3 || !p3.Declined) continue;                     // must DECLINE at 3
+                hitAim = a; one = p1; three = p3;
+            }
+            if (hitAim < 0)
+                fails.Add("scene:noThreatStraddle");     // loud: this leg would be testing nothing
+            else
+            {
+                if (one.ShootTarget == null) fails.Add("guns:oneGunHeldFire");
+                if (three.ShootTarget != null) fails.Add("guns:threeGunsStillShot");
+                if (!three.DeclineDigIn) fails.Add("guns:threeGunsDidNotDigIn");
+                straddle = "straddle: aim=" + hitAim + " 1gun=SHOOT(" + one.ShotHit + "%,exp="
+                         + one.ShotExp.ToString("0.00") + ") 3gun=DECLINE";
+            }
+        }
+
+        // ── (8) ShotSeat has a LOWER pin, not only an upper one ──────────────────────────────
+        // The review found `ShotSeat = 0` left the whole suite green — i.e. the "a line of fire
+        // has option value at all" concept that DESIGN §5.2 point 1 is entirely about could be
+        // deleted without a single failure. The upper pin (35 fails) already existed; this is the
+        // other side. A marginal shot must still be worth about two-thirds of a LOW cover level
+        // (18), which is false at seat 0, where a 12% shot is worth 4.8.
+        if (badShot < 12f) fails.Add("seat:marginalShotHasNoOptionValue=" + badShot.ToString("0.0"));
+
+        // ── (9) FinishPress actually fires, and is pinned from below ─────────────────────────
+        // The review found FinishPress could be set to 1.0 or 9.0 with the suite still green: no
+        // leg put a target in the finish band at all (Hp 8 > rifle DmgMax). The SAME scene that
+        // declines at full HP must NOT decline when the target is one shot from dead, because the
+        // 1.6x press lifts the shot back over the bar. At 1.0 it declines again -> fails below.
+        var finish = Gate("GRUNT", wantCover: 2, extraSoldiers: 0, targetHp: 2);
+        if (finish.ShotHit < 0) fails.Add("scene:finishNoShot");
+        else if (finish.Declined) fails.Add("finish:declinedAKillingBlow(exp=" + finish.ShotExp.ToString("0.00") + ")");
+
+        // ── (10) DeclineDigRatio is reachable at all — the last unpinned constant ────────────
+        // The review found DeclineDigRatio could be set to 0.00 OR 0.95 with the suite green,
+        // because `bar = Math.Max(canWatch ? watch : 0, canDig ? dig : 0)` and every leg above has
+        // canWatch == true, so the dig ratio is masked at any value below the watch ratio. A DAZED
+        // shooter cannot hold a lane (the gate and the fallback both refuse it), so the dig ratio
+        // becomes the only bar in play — and the freed action must buy cover, not a watch.
+        //   dig -> 0.00 : bar collapses to 0, the gate's `bar > 0f` guard blocks it, SHOOTS -> fails
+        var dazed = Gate("GRUNT", wantCover: 2, extraSoldiers: 0, disoriented: true);
+        if (dazed.ShotHit < 0) fails.Add("scene:dazedNoShot");
+        else
+        {
+            if (!dazed.Declined) fails.Add("dig:dazedDidNotDecline(exp=" + dazed.ShotExp.ToString("0.00") + ")");
+            if (dazed.Overwatch) fails.Add("dig:dazedHeldALaneItCannotHold");
+            if (dazed.Declined && !dazed.Hunker) fails.Add("dig:dazedDeclinedButDidNotDigIn");
+        }
+
+        // ── the pre-C2 contrast, forced (passes on BOTH settings by construction) ────────────
+        // Not the failing leg — the legs above are. This one exists to show the SAME scene is a
+        // shot for the pre-C2 opponent, i.e. that the scene is genuinely a decision and not a
+        // board where nobody would shoot anyway.
+        AiDecline = false;
+        var preC2 = Gate("GRUNT", wantCover: 2, extraSoldiers: 0);
+        if (preC2.ShootTarget == null) fails.Add("contrast:preC2AlsoDeclined");
+        if (preC2.Declined) fails.Add("contrast:preC2SetDeclinedFlag");
+        AiDecline = ambient;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"DECLINETEST: ambient SIGHTLINE_AIDECLINE={(ambient ? 1 : 0)}; "
+                    + $"gate scene {dbgFirst} shot hit={declined.ShotHit}% E[dmg]={declined.ShotExp:0.00} -> "
+                    + (declined.Declined ? (declined.Hunker ? "HUNKER" : declined.Overwatch ? "OVERWATCH" : "other") : "SHOOT"));
+        sb.AppendLine("DECLINETEST: " + straddle);
+        foreach (var f in fails.Take(10)) sb.AppendLine("  " + f);
+        sb.Append(fails.Count == 0
+            ? "DECLINETEST: PASS (AsIfExposed ground-truthed vs a physically uncovered board on low/high/partial + identity; the shot term is hit-WEIGHTED, bounded above AND below, and a 12% shot now scores under high cover; the gate declines a bad shot, still spends the action, keeps an exposed shot, presses a killing blow, exempts rushers, digs in when dazed, and a 3-gun kill box flips a shot the same unit takes at 1 gun)"
+            : "DECLINETEST: FAIL (" + string.Join(",", fails.Take(10)) + ")");
         return sb.ToString();
     }
 

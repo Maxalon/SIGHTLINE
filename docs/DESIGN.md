@@ -679,6 +679,77 @@ behaviour — and, since the review, the pre-W2 *read* — exactly.
 
 ---
 
+## 5.2 What the opponent's SHOT is worth (decided 2026-08-30, wave C2 "THE OPPONENT DECLINES")
+
+§3.A says a decision is interesting only when **no option dominates**. That test was being applied
+to the player and not to the opponent. `Ai.Plan` scored any reachable tile that offered a shot at
+`100 + bestHit`, while every terrain term in the same function is bounded well under ~64 — cover
+36, height ~28, flank −25, standing in fire −60, ending in a player overwatch lane −26. **A flat
++100 for "a shot exists" is a dominant option in the literal §3.A sense**, and it made every
+positional term in the planner advisory: the opponent would step out of full cover, into a
+flanked tile, into a watched lane, for a marginal shot, because 100 > 36.
+
+**What the measurement corrected.** The claim inherited from the CROSSCUT handoff was that the
+opponent therefore "shoots at any hit chance". It does not: instrumented on `17934ee`, **0 of 649
+of its shots were under 20% and 88% were at 60%+**, because `bestHit` already contains the hit
+chance and so ranks targets sensibly once the unit is standing somewhere. The defect was never
+shot QUALITY. It was that the opponent never paid attention to what the firing position COST. That
+distinction decided the shape of the fix and it is the reason this section exists.
+
+**The decision.** Weight the shot by the chance it connects, and price the alternative honestly:
+
+1. **The tile term is a hit-weighted value, not a constant.** `ShotSeat + bestHit x P(hit)`, with
+   **one piece of arithmetic worth naming honestly**: `bestHit` already contains the hit chance,
+   so the term expands to `ShotSeat + hit^2/100 + bonuses x hit/100` — a hit-SQUARED weighting,
+   not an expected value, and an earlier draft of this section called it one. The squaring is kept
+   deliberately: it makes the opponent more hit-greedy than an EV maximiser, which suits a fight
+   where a soldier dies in about two connections (an EV maximiser is indifferent between one 80%
+   shot and four 20% shots; an HP bar is not). With
+   `ShotSeat = 18` — deliberately **one level of cover**, because the trade the term arbitrates is
+   *stand in the open with a shot* vs *stand behind that wall without one*, and those should be
+   comparable, not one of them free.
+2. **A shot may be declined, but only against a reference the unit could actually reach.** The
+   bar is a RATIO against `Combat.AsIfExposed` — the same shot with the defender's cover taken
+   away, which is what an overwatch reaction catches. The first draft used an ABSOLUTE
+   expected-damage bar and declined 35 shots at 80%+ hit chance, because a popgun against armour
+   is ~1.0 expected damage at any hit chance; declining a clean 90% shot does not read as a
+   smarter opponent, it reads as a broken one, and it is wrong on the merits because that unit's
+   alternative is worth ~1.0 too.
+3. **Firing has a price and it is already in the model.** EXPOSED BY FIRE gives every soldier who
+   can see a unit that fired and stayed put +12 aim and +12 crit against it until it moves.
+   Holding a lane or digging in does not. So the decline bar rises with the guns already trained
+   on the tile, and under two or more of them the freed action buys survival rather than a lane.
+4. **The chargers are exempt.** BERSERKER / HOUND / STRIKER / DRONE and the Legion BREAKER's
+   second rage never decline. §3.A's anti-turtle rule cuts both ways: the force needs a shape that
+   closes, and an opponent whose chargers took cover would not read as smarter, it would read as
+   broken.
+
+**The honest cost, and it is the interesting half.** A held enemy lane was measured to FIRE
+**24-27% of the time** (n=457/461 lanes, of which 442/455 are genuine overwatch rather than the
+PIKEMAN's braced cone) — and *fired* is the word, not *paid off*: at the reaction's −10 aim mod a
+fired shot often misses, so the true payoff is lower still. An overwatch is therefore worth at
+most ~0.20 of the shot it replaces. A decline rate large enough for a player to *feel* also looks
+like a worse opponent — at 51% declines, run completion read 55% → 75% on the same 20 worlds —
+though that probe is **suggestive only** (b=2, c=6 discordant, exact two-sided p = 0.29, and
+confounded: its baseline is the pre-change binary while the probe carries both the new tile term
+and the maximal-decline gate). **So the shipped gate declines about 0.65% of the shots on the
+table, and on the evidence available that is the right answer for this game as it currently
+stands, not a hedge.** The binding constraint is not the gate: it is that an enemy
+overwatch is a 360-degree watch held from wherever the unit happens to be, with no lane selection
+at all (only the PIKEMAN's BRACE picks a cone). **Give the opponent a reason to watch a particular
+piece of ground and the decline becomes worth taking; until then it is not.** Recorded as the next
+wave in `docs/ROADMAP.md`.
+
+`SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly. Round: `docs/measurements/c2/`,
+960 CRN-paired campaigns on base `17934ee`. **Four rungs net one discordant pair and heat 8 nets
+two — but 124 of 480 paired worlds (25.8%) came out differently, so the round is near-inert in
+AGGREGATE, through cancellation, not per world.** Mission length is directionally shorter
+(−0.19 turns, chunk-paired t(23) = −1.60, p ≈ 0.12) and shots-per-kill is flat (3.153 → 3.157).
+At 4 discordant pairs the heat-8 rung could not have detected anything at all, so the flat rows
+are an absence of evidence rather than evidence of neutrality; see DEVLOG §5.
+
+---
+
 ## 6. Encounter-design intent (feeds Phase 4)
 
 Design intent only — the build checklist lives in `CLAUDE.md` → **ROADMAP — PHASE 4**.

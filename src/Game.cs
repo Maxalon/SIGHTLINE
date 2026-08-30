@@ -2885,6 +2885,8 @@ public partial class Game
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
+            // C2: an enemy lane that actually paid off (see Stats.RecordEnemyReaction).
+            if (w.Team == Team.Enemy) Stats.RecordEnemyReaction();
             // overwatch reaction aim: base -10; Reflexes makes it near-certain, Guardian adds a
             // precision bump. ADDITIVE (not a ternary) so a soldier with BOTH gets both (review
             // S7: the old ternary silently discarded Guardian whenever Reflexes was also held).
@@ -6688,6 +6690,10 @@ public partial class Game
             // the auditor's definition of an idle act — without a `fired` flag threaded through all
             // twelve branch bodies.
             int actionsBefore = e.ActionsLeft, ammoBefore = e.Ammo;
+            // C2: the branch that actually FIRES below, named at the branch rather than
+            // re-derived from state afterwards (a shot that then repositions into cover would
+            // misclassify under any after-the-fact reading). Feeds Stats' enemy decision mix.
+            string dec = null;
             // W2 REVIEW FIX — the BLEED-OUT WINDOW, and it is the whole shape of this wave's number.
             // When every surviving soldier is on the floor, Ai.Plan takes its `players.Count == 0`
             // early return (Ai.cs:78, after the FUL-7 LAST LIGHT downed filter): there is nothing to
@@ -6706,6 +6712,7 @@ public partial class Game
             {
                 if (_aiPlan.SiegeCharge != null && e.HasSiege && e.ChargeTurns == 0 && e.ActionsLeft > 0)
                 {
+                    dec = "siege";
                     // SIEGE charges a telegraphed strike: NO damage now — the 3x3 danger zone IS the
                     // telegraph (drawn for the whole next player turn); it lands at the top of the
                     // following enemy turn (TickSiegeStrikes). Spends the action -> no dead turn.
@@ -6722,6 +6729,7 @@ public partial class Game
                     Grid.IsCover(_aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) &&
                     Util.ChebyDist(e.X, e.Y, _aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) <= 1)
                 {
+                    dec = "sap";
                     e.ActionsLeft = 0;
                     var (sx, sy) = _aiPlan.SapTile.Value;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "BREACH", Pal.Foe, 16f);
@@ -6733,6 +6741,7 @@ public partial class Game
                 else if (_aiPlan.RelockTile != null && e.ActionsLeft > 0 &&
                     CanRelock(e, _aiPlan.RelockTile.Value))
                 {
+                    dec = "relock";
                     // SIGNAL W8 — CUSTODIAN: standing at the objective, spend the action undoing
                     // one step of the player's progress (validated NOW, post-move — a re-blown
                     // charge or a dead keeper mid-path falls through to the generic branches).
@@ -6745,6 +6754,7 @@ public partial class Game
                     Util.TileDist(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y) <= Ai.HealRange &&
                     Grid.HasLineOfSight(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y))
                 {
+                    dec = "heal";
                     e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "MEDIC", Pal.Good, 16f);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
@@ -6753,6 +6763,7 @@ public partial class Game
                 else if (_aiPlan.Grenade && e.Grenades > 0 && e.ActionsLeft > 0 &&
                     Util.TileDist(e.X, e.Y, _aiPlan.GrenX, _aiPlan.GrenY) <= GrenadeRange)
                 {
+                    dec = "grenade";
                     e.Grenades--;
                     e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "FRAG OUT", Pal.Foe, 16f);
@@ -6763,6 +6774,7 @@ public partial class Game
                     Grid.InBounds(_aiPlan.ItemTx, _aiPlan.ItemTy) &&
                     Util.TileDist(e.X, e.Y, _aiPlan.ItemTx, _aiPlan.ItemTy) <= ItemRange)
                 {
+                    dec = "item";
                     e.ItemCharge--;
                     // item use takes one action but does NOT necessarily end the turn,
                     // so the enemy can still shoot after laying smoke (if ShootTarget != null).
@@ -6781,6 +6793,7 @@ public partial class Game
                     !_aiPlan.ShoveTarget.IsVip &&
                     Util.ChebyDist(e.X, e.Y, _aiPlan.ShoveTarget.X, _aiPlan.ShoveTarget.Y) == 1)
                 {
+                    dec = "shove";
                     // AI SHOVE (Wave 5): slam an adjacent covered soldier 1 tile to expose it (or deal
                     // collision damage if it's pinned). Reuses the player's ShoveAnim verbatim; the action
                     // is spent here (no TIMEOUT). The exposed soldier is then a soft target for the pod.
@@ -6793,6 +6806,7 @@ public partial class Game
                 }
                 else if (_aiPlan.Brace && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
                 {
+                    dec = "brace";
                     // FUL-8 PIKEMAN: plant the braced lane — the exact flag set the player's own BRACE+FOCUS
                     // arms, so OnUnitEnteredTile reacts through the identical (COMBATTEST-pinned) path: the
                     // first soldier through the cone eats a halved, no-crit, STAGGERING reaction. The plant
@@ -6810,6 +6824,7 @@ public partial class Game
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
                 {
+                    dec = "shoot";
                     e.Ammo--;
                     // TEMPO: the enemy shot is 1 action and does NOT end the turn (mirrors the player).
                     e.FiredThisTurn = true;
@@ -6822,12 +6837,14 @@ public partial class Game
                 }
                 else if (_aiPlan.Overwatch && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
                 {
+                    dec = "overwatch";
                     e.OnOverwatch = true; e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
                     Audio.Play("over");
                 }
                 else if (_aiPlan.Reload && e.ActionsLeft > 0 && e.Ammo < e.Weapon.Clip)
                 {
+                    dec = "reload";
                     // W2 THE OPPONENT ACTS — the enemy AMMO ECONOMY, decided rather than defaulted
                     // into (docs/DESIGN.md §5.1). Hostiles used to be handed exactly one clip at spawn
                     // with no reload verb anywhere, so "dry" was PERMANENT. Measured on this tree over
@@ -6849,6 +6866,7 @@ public partial class Game
                 }
                 else if (_aiPlan.Hunker && e.ActionsLeft > 0)
                 {
+                    dec = "hunker";
                     e.Hunkered = true; e.ActionsLeft = 0;
                     // W2: the enemy hunker was the one branch that fired in COMPLETE silence — no pop,
                     // no sound, only a small diamond in the status row. It reads identically to the
@@ -6879,6 +6897,7 @@ public partial class Game
                 // action, and the two are not the same claim.
                 else if (AiIdleFix && standing > 0 && e.ActionsLeft > 0 && e.ActionsLeft == actionsBefore)
                 {
+                    dec = "staleplan";
                     if (e.Ammo <= 0 && e.Weapon.Clip > 0)
                     {
                         e.Ammo = e.Weapon.Clip;
@@ -6899,6 +6918,12 @@ public partial class Game
             // the unit's pre-chain action/ammo counts, so the harness can classify idle / dry / no-target
             // without the game itself carrying a counter.
             if (ActProbe != null && e.Alive) ActProbe(e, _aiPlan, actionsBefore, ammoBefore, standing);
+            // C2: the enemy decision mix. `dec == null` means no branch fired at all — the W2
+            // terminal guarantee only covers CONTESTED acts, so during the bleed-out window that
+            // is the correct and expected reading, and Stats files it under all-downed.
+            if (Stats.Enabled && e.Alive)
+                Stats.RecordEnemyDecision(dec ?? (_aiPlan.Path.Count > 0 ? "move" : "idle"), standing > 0,
+                                          _aiPlan.ShotHit, _aiPlan.ShotExp, _aiPlan.Declined);
             _aiIdx++;
             _aiStage = AiStage.PickNext;
         }
@@ -6920,6 +6945,17 @@ public partial class Game
     ///
     /// Mutable so SIGHTLINE_AIIDLETEST can run BOTH legs in one process.
     public static bool AiIdleFix = true;
+
+    // ── C2 THE OPPONENT DECLINES ────────────────────────────────────────────────────────────
+    /// SIGHTLINE_AIDECLINE — this wave's single dial. `=0` restores the pre-C2 opponent EXACTLY:
+    /// Ai.cs's per-tile shot term goes back to the flat `100 + bestHit` constant that dominated
+    /// every terrain term in the scorer, and the decline gate never runs, so a hostile pays ANY
+    /// positional price for a line of fire and never holds one. (Note what `=0` does NOT restore:
+    /// a wild-odds shooter. Measured over 15407 pre-change shots, only 0.4% were under 20% — the
+    /// constant's damage was positional, not shot quality. See docs/DEVLOG.md §C2.)
+    /// Shipped ON. Mutable so SIGHTLINE_DECLINETEST can run BOTH legs in one process, and so an
+    /// R0diag chunk can prove the wave's telemetry inert.
+    public static bool AiDecline = true;
 
     /// SIGHTLINE_AIIDLETEST probe (harness-only; ALWAYS null in normal play). Called once per
     /// enemy act-opportunity, immediately after the ActAfterMove branch chain:
