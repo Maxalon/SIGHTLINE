@@ -888,11 +888,12 @@ public static class Ai
         // was plainly there. PURE: ComputeOdds has been side-effect free since W9 and
         // ExpectedDamage takes no RNG draw, so this cannot move a CRN-paired world (proven by the
         // C2 R0diag chunks, which diff 2750 aggregate fields to empty).
+        ShotOdds shotOdds = default;     // the odds behind ShotHit/ShotExp; reused by the gate below
         if (bestShotTarget != null)
         {
+            shotOdds = OddsFrom(g, e, bestTile.x, bestTile.y, bestShotTarget);
             plan.ShotHit = bestShotHit;
-            plan.ShotExp = Combat.ExpectedDamage(bestShotTarget,
-                               OddsFrom(g, e, bestTile.x, bestTile.y, bestShotTarget));
+            plan.ShotExp = Combat.ExpectedDamage(bestShotTarget, shotOdds);
         }
 
         // COORDINATION 2 (feedback): telegraph a genuine fall-back — the unit was low, found
@@ -1094,10 +1095,10 @@ public static class Ai
                 if (p.Ammo > 0 && Util.TileDist(p.X, p.Y, bestTile.x, bestTile.y) <= p.Weapon.MaxRange
                     && g.Grid.HasLineOfSight(p.X, p.Y, bestTile.x, bestTile.y)) guns++;
             bar *= 1f + DeclineThreatScale * Math.Min(guns, DeclineThreatCap);
-            // The reference: this same shot with the target's cover taken away. Computed from the
-            // odds already captured for the decision mix, so the gate costs no extra ComputeOdds.
-            var fo = OddsFrom(g, e, bestTile.x, bestTile.y, plan.ShootTarget);
-            float expOpen = Combat.ExpectedDamage(plan.ShootTarget, Combat.AsIfExposed(fo));
+            // The reference: this same shot with the target's cover taken away. Built from
+            // `shotOdds`, the odds already computed above for the decision mix — the gate adds no
+            // ComputeOdds of its own (the plan pays exactly one, whether or not it declines).
+            float expOpen = Combat.ExpectedDamage(plan.ShootTarget, Combat.AsIfExposed(shotOdds));
             float worth = plan.ShotExp
                         * (plan.ShootTarget.Hp <= e.Weapon.DmgMax ? FinishPress : 1f);
             if (bar > 0f && expOpen > 0f && worth < DeclineAbsKeep && worth < bar * expOpen)
