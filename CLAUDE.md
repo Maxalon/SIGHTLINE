@@ -532,6 +532,18 @@ paired batches, **zero** non-choice fields moved on every one).
 this tree reads 2.389 / 3.738 at h0, but the thresholds were set on the old instrument, so nobody
 may claim them until they are restated. DEVLOG §TRUE BAND; raw chunks `docs/measurements/tb/`.
 
+**PROGRAM CONTOUR** (current) is the eleventh. Wave **C2 "THE OPPONENT DECLINES"** closed the
+CROSSCUT handoff's "single biggest remaining gap in the fight": `Ai.cs` scored any tile with a
+shot at a flat `100 + bestHit` against terrain terms bounded under ~64, so the opponent paid any
+positional price for a line of fire and its overwatch branch fired 20 times in 26841 contested
+acts. The term is now `Ai.ShotTileValue` (an expectation) plus a decline gate priced against
+`Combat.AsIfExposed`; `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly. **It changes
+gameplay, so the L3 ladder above is now a pre-C2 ladder** — C2's own 960-campaign CRN round on
+`17934ee` is in `docs/measurements/c2/` and moved five of six rungs by one discordant pair or
+less. Its two open findings (an enemy overwatch has NO lane selection and pays off only 21-27% of
+the time; the autopilot has no term for enemy overwatch at all, so the flywheel cannot price area
+denial) are in `docs/ROADMAP.md`. DEVLOG §C2; rationale `docs/DESIGN.md` §5.2.
+
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:
 1. Make sure `main` builds and passes autoplay.

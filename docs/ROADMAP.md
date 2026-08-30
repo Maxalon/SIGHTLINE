@@ -2131,13 +2131,36 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
 ### Standing gaps, honestly declared
 
+- [ ] **THE ENEMY OVERWATCH HAS NO LANE SELECTION, and that is now the binding constraint.**
+      C2 measured a held enemy lane at **24-27% payoff** (n=457/461 lanes, maximal-decline
+      diagnostic) — so an overwatch is worth only ~0.20 of the shot it replaces, and a decline
+      rate large enough to be *felt* makes the opponent measurably weaker (51% declines cost it
+      20 points of run completion). The cause is that an enemy overwatch is a 360 degree watch
+      held from wherever the unit is standing; only the PIKEMAN's BRACE ever picks a cone. **A
+      hostile that chose WHERE to watch would be worth several times this, and would justify a
+      much higher `Ai.DeclineWatchRatio`.** This is the next wave in this area, not another pass
+      at the gate.
+- [ ] **The flywheel is structurally blind to enemy area denial.**
+      `Game.Autopilot.TileExposure` carries `+18` for an enemy BRACE lane (`InEnemyBraceLane`) and
+      **no term at all** for an ordinary enemy overwatch — its "exposed to this gun" `+6` is
+      identical whether the hostile is watching or not. So the bot walks into enemy kill-zones and
+      the denial half of a lane cannot be priced. Fixing it changes the INSTRUMENT and therefore
+      invalidates every CRN world in the repo, so it must be a wave of its own with an R0diag and
+      a fresh ladder, never smuggled into a gameplay wave.
+
 - [ ] **W10's text-scale gate covers five surfaces, not the game.** Every other screen is still
       asserted at 100% only. `FITTEST` is written so a sixth leg is an addition, not a rewrite.
-- [ ] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post.
-      W3's premise (overwatch as a real enemy choice) is therefore unexercised.
-- [ ] **W3 THE OPPONENT CHOOSES was never started.** `Ai.cs` still scores any shot at
-      `100 + bestHit` against terrain terms bounded under ~64, so the opponent now always ACTS but
-      still never DECLINES. That is the single biggest remaining gap in the fight.
+- [x] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post;
+      CONTOUR C2 re-measured it at **0 of 1076** contested acts on `17934ee` and it is no longer
+      zero. **But see the new open item below: the branch is alive and the LANE is still bad.**
+- [x] **W3 THE OPPONENT CHOOSES** — shipped as PROGRAM CONTOUR wave **C2 "THE OPPONENT DECLINES"**
+      (`SIGHTLINE_AIDECLINE`, default ON; DEVLOG §C2, raw data `docs/measurements/c2/`). The flat
+      `100 + bestHit` is gone: the tile term is now `ShotSeat(18) + bestHit * P(hit)` and a decline
+      gate prices the shot against the same shot with the defender's cover stripped
+      (`Combat.AsIfExposed`), with the bar rising with the guns already trained on the tile.
+      **Read the DEVLOG before quoting the wave**: the brief's "shoots at ANY hit chance" half was
+      NOT supported by measurement (0 of 649 pre-change shots were under 20%; 88% were at 60%+) —
+      the defect was entirely positional, and that is what moved.
 - [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
       still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle

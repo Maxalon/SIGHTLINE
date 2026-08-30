@@ -810,6 +810,35 @@ branch point.
   `Hud.VerbTable` + `Hud.VerbHelp`, i.e. the same `ActionDesc` switch the action bar's hover
   tooltip reads, so help and manual cannot drift. CODEXTEST asserts every verb has a home.
 
+## PROGRAM CONTOUR — WAVE C2 "THE OPPONENT DECLINES" (the enemy's shot competes on its merits)
+
+- **A shot is no longer worth a constant.** `Ai.Plan`'s per-tile term was `100 + bestHit` against
+  terrain terms bounded under ~64 (cover 36, height ~28, flank −25, fire −60, player-overwatch
+  −26), so the opponent paid ANY positional price for a line of fire. It is now
+  `Ai.ShotTileValue` = `ShotSeat` (18, deliberately one level of cover) plus the target's choice
+  value weighted by the REAL probability of connecting. Target SELECTION is untouched. Measured
+  over 960 CRN-paired campaigns: the opponent chooses a tile with a shot **920 fewer times**,
+  shoots on 55.4% of contested acts instead of 57.4% and hunkers on 25.0% instead of 23.0%.
+- **The opponent can DECLINE.** After the sap/grenade/item/shove blocks and before W2's no-shot
+  fallback, a shot is dropped when it is worth less than a bar times **the same shot with the
+  defender's cover taken away** (`Combat.AsIfExposed` — what an overwatch reaction actually
+  catches; HUNKER is deliberately not stripped). The bar rises with the guns already trained on
+  the tile, because firing and standing still hands each of them Combat's EXPOSED BY FIRE
+  +12 aim / +12 crit. Under **two or more** guns with cover to hand the freed action digs in
+  rather than offering a lane. Rushers (BERSERKER/HOUND/STRIKER/DRONE/the Legion BREAKER's second
+  rage) never decline. Dropping the target hands the unit to W2's fallback, so a decline can never
+  produce a dead turn.
+- **The enemy OVERWATCH branch is no longer dead** — 20 of 26841 contested acts before, **111 of
+  26172** after. Still small, and the reason is recorded in ROADMAP: an enemy overwatch is a
+  360-degree watch held from wherever the unit stands, and only 21-27% of held lanes ever fire.
+- **The ENEMY DECISION MIX is instrumented** (`Stats.RecordEnemyDecision`): the branch that
+  actually fired on every CONTESTED act, named at the branch rather than re-derived from state,
+  plus the shot that was on the table split taken / DECLINED / preempted across five hit-chance
+  bands with graze- and armour-aware expected damage per band; and `Stats.RecordEnemyReaction`
+  counts lanes held against reaction shots fired. Prints in the `SIGHTLINE_BALANCE` report and the
+  aggregate JSON. `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly (proven inert:
+  2750 aggregate fields diffed to empty against the base-commit binary on two slot sets).
+
 ## PROGRAM RESONANCE — WAVE W2 "THE OPPONENT ACTS" (the enemy stops freezing mid-fight)
 
 - **No CONTESTED enemy act-opportunity ends with NO branch having fired.** `Ai.Plan`'s
