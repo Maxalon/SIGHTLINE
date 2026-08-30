@@ -112,6 +112,12 @@ public static class Program
         // docs/DEVLOG.md §W2 for the shipped default. =0 restores the pre-W2 opponent exactly.
         string aiIdleEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIIDLEFIX");
         if (aiIdleEnv == "1") Game.AiIdleFix = true; else if (aiIdleEnv == "0") Game.AiIdleFix = false;
+        // C2 THE OPPONENT DECLINES — SIGHTLINE_AIDECLINE=0/1: the enemy's shot competes on its
+        // expected value instead of on a flat +100 that dominated every terrain term in the
+        // planner, and it may drop a bad shot for an overwatch lane or for cover. =0 restores the
+        // pre-C2 opponent exactly (constant term, no decline gate). See docs/measurements/c2/.
+        string aiDeclineEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIDECLINE");
+        if (aiDeclineEnv == "1") Game.AiDecline = true; else if (aiDeclineEnv == "0") Game.AiDecline = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -702,6 +708,18 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_DECLINETEST=1 : C2 THE OPPONENT DECLINES. Ground-truths Combat.AsIfExposed
+        // against a physically uncovered board, pins Ai.ShotTileValue on both sides of the
+        // SIGHTLINE_AIDECLINE dial (the pre-C2 branch is the literal `100 + bestHit` constant),
+        // and drives the decline gate on a live Ai.Plan. It reads the AMBIENT dial, so
+        // `SIGHTLINE_AIDECLINE=0 SIGHTLINE_DECLINETEST=1` FAILS — that is the proof it can.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DECLINETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "declinetest");   // Unit.SyncPos uses tile->px math
+            Console.WriteLine(new Game().DeclineSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_BANDTEST=1 : TRUE BAND — the decision-density INSTRUMENT as a contract.
         // Pins the choice-band constants, proves SIGHTLINE_CHOICEBAND=mult still reproduces the
         // pre-wave counts exactly against a literal transcription over 120 constructed boards,
@@ -928,6 +946,7 @@ public static class Program
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DECLINESHOT") == "1") game.DebugDeclineShot();   // C2: the opponent declines (pair with SIGHTLINE_SHOT=760 and flip SIGHTLINE_AIDECLINE for the contrast)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();
