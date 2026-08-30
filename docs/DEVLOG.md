@@ -6672,8 +6672,9 @@ it is the version that survives contact with the measurement.
 ## GATE 3 — THE PRICE (round R4, the final binary)
 
 **Instrument first.** `R0diag`: the base commit's own binary (`git archive 4784803`) against this
-wave's at `SIGHTLINE_AIIDLEFIX=0`, at h0/b0 and h4/b10 — **empty diff** outside `harness`. An
-independent rebuild at slot base 940 reproduced it. The dial-off leg is the pre-wave game.
+wave's at `SIGHTLINE_AIIDLEFIX=0`, at h0/b0 and h4/b10 — **empty diff** outside `harness`. The
+review's adjudicator independently rebuilt from `git archive` and reproduced it at slot base 940, a
+base nobody had used (their run, not mine). The dial-off leg is the pre-wave game.
 
 **The round.** 5 heat rungs × four disjoint CRN slot sets (bases 0/10/20/30, N=10) × greedy+sloppy
 = **80 campaigns per rung per leg, 800 campaigns**; all 40 chunks asserted their own `runs` field.
