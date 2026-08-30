@@ -202,16 +202,24 @@ if [ "$_autofail" = 1 ]; then
   echo "   if it fired, something regressed. DO NOT MERGE."
 fi
 echo "=== DONE ==="
-# W5: DERIVED, not typed. This footer's number has now been wrong FIVE times (41 / 46 / 49 / 51
-# all claimed while a different count ran — and then W5's own DERIVATION was wrong too, which is
-# the joke this comment has to carry). The 2026 audit's wildcard-4 finding is exactly this class of
-# hand-maintained registry drift. Count the invocation lines in this file instead.
+# DERIVED, not typed. This footer's number has now been wrong SIX times (41 / 46 / 49 / 51 / 53
+# claimed while a different count ran, and then TWO successive "derivations" that were themselves
+# wrong). The 2026 audit's wildcard-4 finding is exactly this class of hand-maintained registry
+# drift, and it keeps recurring because each fix counted a LINE SHAPE.
 #
-# W5-FIX: the anchor is '^ *echo', not '^echo'. PAIRTEST's invocation is INDENTED inside the
-# --full block, so anchoring at column 0 silently missed it: --full printed 53 while 54 ran, and
-# plain printed 52 while 53 ran. A derived counter that skips indented lines is a hand-maintained
-# counter wearing a grep.
-_ran=$(grep -cE '^ *echo -n "[A-Z0-9]+ *: "; SIGHTLINE_' "$_SELF")
+# W5 anchored on '^ *echo ... ; SIGHTLINE_' to catch PAIRTEST's indented invocation. W9 then
+# routed every invocation through `verdict "$(SIGHTLINE_...)"` so one exit code covers the whole
+# sweep — and W5's pattern, which requires `; SIGHTLINE_`, stopped matching ANYTHING. The footer
+# printed "0 self-tests ran" while 56 of them passed.
+#
+# LEAD, at the W5 merge — the lesson, and why this version should survive the next routing change:
+# COUNT NAMES, NOT LINES. A hook is identified by its SIGHTLINE_<NAME>(TEST|GATE) env var, and that
+# name is stable no matter how the invocation is wrapped. Both halves are counted on the same
+# basis, from their own file, so the two are directly comparable and the COVERAGE GUARD block above
+# — which lists any hook in src/ this file never names — remains the real check.
+_have=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l)
+_ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' "$_SELF" | sort -u | wc -l)
 [ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is the only --full-gated one
-echo "($_ran self-tests ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped"). Every line above"
-echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+echo "($_have self-tests exist in src/; this sweep ran $_ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped")."
+echo " Both counts are derived from env-var NAMES, not line shapes. Every line above must read"
+echo " PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
