@@ -5843,3 +5843,20 @@ in flight or not, which is the intended rule. (b) The frame-cap raise makes the 
 residual — a deadlock inside `UpdateEnemy`, which the within-turn idle guard does not cover — **6×
 slower to surface** (120,000 frames instead of 20,000). The censoring went down and the detection
 cost went up; both are real and neither was noted before.
+
+### VERIFICATION AFTER THE REVIEW FIXES
+
+* **Release build:** 0 warn / 0 err (full `--no-incremental` rebuild).
+* **`bash scripts/qa-sweep.sh --full`:** **52/52 PASS**, PAIRTEST **PASS**, COVERAGE GAP block
+  empty, `SWEEP-EXIT=0` — and that exit code now covers the WHOLE sweep, not just autoplay.
+* **Autoplay ×3:** `WIN mission=6 frame=7384 turns=20` / `LOSE mission=4 frame=8535 turns=26` /
+  `LOSE mission=5 frame=8938 turns=62`. No TIMEOUT, no blank. The 62-turn run is the longest seen
+  on this tree and sits well inside the 150-turn cap.
+* **The two reverts the adjudicator used to falsify the first TRUTHTEST now FAIL** (table in R1
+  above), and restoring them returns PASS.
+* **Every new assertion was proven against the implementation it rejects:** the bench-identity leg
+  fails on the unconditional `AutoDeploy` (`4a2:benchClobbered`), the floor leg fails on the old
+  sizing (`warUnlockSubFloorBody owned=0 size=10 rows=1`), and the sweep's `verdict` helper plus its
+  exit block were driven through their full truth tables.
+* **Not re-measured, and not claimed:** the balance ladder. W9's declared draw-order changes stand;
+  the review fixes add none.
