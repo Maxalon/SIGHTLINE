@@ -8912,3 +8912,68 @@ nothing more. W7 owns the band; this is a control leg, not a ladder of record.
   found**: it walks each hostile's clip down and puts BRN/BLD/DAZ on the first three, so one frame
   shows a DRY+BRN token. Both chips render side by side, fully opaque, with the ammo pip row clear
   above the body — the claim is checkable from the frame instead of taken on trust.
+
+---
+
+# PROGRAM CROSSCUT — L3 "THE COMPOSED-TREE LADDER" (2026-08-30, lead) — THE PROGRAM'S CLOSE
+
+**Base commit `d814f0c`** — all eight waves merged. 960 campaigns, 6 rungs x 8 disjoint slot sets
+x greedy+sloppy = **160 per rung**, all 48 chunks `OK runs=20`. Full tables and method:
+`docs/measurements/l3/README.md`.
+
+**The first ladder this project has measured on a tree carrying every wave of its own program.**
+X2 closed by finding that fourteen consecutive waves had each published a ladder measured on their
+own branch point and nobody had ever measured the composition. This is the standing answer.
+
+| rung | L3 | +-SE | L2 | delta | band | verdict | step |
+|---|---|---|---|---|---|---|---|
+| RECRUIT | **71.2** | 3.6 | 72.5 | -1.2 | 75+-8 | in | - |
+| heat 0 | **47.5** | 3.9 | 46.9 | +0.6 | 55+-8 | in (at the floor) | -23.8 |
+| heat 2 | **31.2** | 3.7 | 36.9 | -5.6 | 40+-8 | below by 0.8 | -16.2 |
+| heat 4 | **23.8** | 3.4 | 23.1 | +0.6 | 30+-8 | in | -7.5 |
+| heat 6 | **20.0** | 3.2 | 20.6 | -0.6 | 20+-8 | in, on target | -3.8 |
+| heat 8 | **6.9** | 2.0 | 8.8 | -1.9 | 10+-5 | in | -13.1 |
+
+## 1. The headline is how LITTLE moved
+
+Five of six rungs in band, monotone at every step, and **the largest move at any rung across eight
+waves is 5.6 points** — four of six moved by under 2. A program that repaired sixteen defects,
+severed the gameplay RNG from the frame rate, restructured the post-FX pipeline, changed enemy
+behaviour and reshaped four screens moved the difficulty ladder almost not at all.
+
+That is not luck. Every wave that touched gameplay priced itself against a fresh same-slot baseline
+on its own tree, and every wave that claimed inertness proved it. The composition confirms each of
+them. **The discipline was the deliverable; the ladder is the receipt.**
+
+## 2. The flat middle, replicated a THIRD time
+
+`h4 -> h6` is the smallest step on all three ladders (-3.8 / -2.5 / -3.8), measured on three
+disjoint world sets by two different instruments, and on the composed tree `h2 -> h4` joins it at
+-7.5 while the ends buy -23.8, -16.2 and -13.1. `Heat.Mods`: **rung 8 is the only entry carrying
+`DmgDelta` or `AiTier`.** The ladder's LEVEL is fine; its SHAPE is not, and the cause is a static
+table. This is the best-replicated open finding in the project and the obvious next wave.
+
+## 3. The within-run curve became a ramp
+
+m1 98 / m2 83 / m3 77 / m4 78 / m5 73 / **m6 68** — monotone apart from a 1-point wobble inside its
+own error. L1's was **U-shaped**; X2's entire finding was a mission-1 failure hiding behind a rung
+average. The opening is safe and difficulty climbs to the finale, which is the shape DESIGN 3.D
+asks for.
+
+## 4. The mid-run Decapitate, replicated a third time
+
+Finale 68.0% (n=472) against mid-run **44.7% +-3.9** (n=161) — **23.3 points harder than the
+climax**, after L1's 48.9/70.1 and L2's 46.0/69.7. W8 refuted the mechanism the lead proposed (the
+buffed half is *easier*) and located it in the FORCE: `Mission.Build` de-stacks the finale by 3-4
+bodies and resets `bump`; no mid-run Decapitate gets that. **Unspent, and it is the next lever.**
+
+## 5. What this round did NOT do
+
+- **No lever, no game code.** Same discipline as L1 and L2.
+- **A pooled objective row is not safe to read.** W8 proved one can hide a 49.5-point artifact
+  (`Eliminate` reads 89.1% pooled and ~40% over its mid-run cells). Use the cross-tab.
+- **heat 2's 0.8-point miss is unexplained** and is a fifth of a standard error. Recorded, not
+  repaired — repairing it inside a measurement round is the mistake this round exists to avoid.
+- **The first attempt produced ZERO chunks** because a shared-scratchpad copy of the runner had
+  been overwritten by another agent. It failed loudly and wrote no data. The runner now lives in
+  the repo, and that is the wider lesson: a shared path is not storage.

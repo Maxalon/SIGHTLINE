@@ -433,39 +433,42 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
 >
 >
-> **THE LADDER OF RECORD (wave X2 "TRUE NORTH II", base commit `a61ef42` + X2's own repair,
-> n=40 campaigns per rung, `runs=20` asserted in all 12 chunks, raw data in
-> `docs/measurements/x2/`):**
+> **THE LADDER OF RECORD — PROGRAM CROSSCUT wave L3, base commit `d814f0c`, n=160 campaigns per
+> rung (960 total), all 48 chunks `runs=20` asserted, raw data in `docs/measurements/l3/`.**
+>
+> **This is the first ladder in the project's history measured on a tree carrying every wave of
+> its own program** rather than on the tree one wave branched from — the standing answer to X2's
+> closing finding that fourteen consecutive waves had each published a branch-point ladder.
 >
 > | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
 > |---|---|---|---|---|---|
-> | **75.0%** | **57.5%** | **35.0%** | **30.0%** | **20.0%** | **17.5%** |
+> | **71.2** | **47.5** | **31.2** | **23.8** | **20.0** | **6.9** |
 >
-> Published band: **RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8 (h8 ±5, hard floor
-> ≥5)** — FUL-13's, kept after X2 re-argued it, plus the RECRUIT row X2 added. Five of six
-> rungs are in band; **heat 8 is out at +2.5 over its ceiling.**
+> ±SE 3.6 / 3.9 / 3.7 / 3.4 / 3.2 / 2.0. Band: RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10,
+> ±8 (h8 ±5). **Five of six in band and monotone at every step**; heat 2 misses its floor by 0.8,
+> a fifth of a standard error.
 >
-> **This table supersedes every ladder published before it** — X1's 52.5/27.5/15.0 (base
-> `2100858`), W5's on-ramp pair (base `b68f38a`), W4's 35.0/20.0 and FUL-13's
-> 52.5/35/30/22.5/10. Those were each measured on the tree their wave branched from, **never
-> on the merged tree**, and the composition was 20 points below its own band at heat 0 until
-> X2 measured it and repaired the cause.
+> **SUPERSEDES EVERY EARLIER LADDER, and they are not merely stale — they are INCOMPARABLE.** Wave
+> W1 severed presentation from the shared `Util.Rng` stream, which re-rolled every CRN world in the
+> repository: the same slot seed now plays a different world (measured 10/10 slots reproducing up
+> to W1's break, 3/10 after). `x1/`, `x2/`, `w4/` and `l1/` remain valid as history. **Re-measure;
+> do not rescale.**
 >
-> **W9 THE REPAIR VOIDED THIS TABLE AGAINST THE CURRENT TREE — re-measure before quoting it.**
-> W9 fixed three defects that change RNG DRAW ORDER (the grapple no longer env-damages its own
-> grappler, so it no longer draws its FX; a downed unit's queued shot no longer rolls; the
-> autopilot returns after a GRAPPLE and takes an extra `Util.Roll(45)` next step) and two that
-> change composition without changing draw order (the skirmish/daily heat gate, the post-event
-> `AutoDeploy`). It also raised the batch frame cap 20000 -> 120000, which REMOVES the
-> right-censoring that had been scoring the longest campaigns as losses. W9 deliberately did not
-> price any of it. The table above remains the last MEASURED ladder and its base commit; it is no
-> longer a description of this tree.
+> **THE OPEN FINDING, replicated on three disjoint trees.** The `h4 → h6` step is the smallest on
+> ALL THREE ladders (−3.8 / −2.5 / −3.8) and on the composed tree `h2 → h4` joins it at −7.5, while
+> the ends buy −23.8, −16.2 and −13.1. `Heat.Mods` explains it exactly: **rung 8 is the only entry
+> carrying either `DmgDelta` or `AiTier`**, so the middle rungs add bodies and stats and only the
+> apex changes KIND. The ladder's LEVEL is fine; its SHAPE is not.
 >
-> **The rule this wave exists to enforce: a balance number without a base commit is not a
-> number.** Quote the base, or re-measure. And note the precision — a 40-campaign rung carries
-> **±6-8 points of standard error**, which is the same size as the band's ±8 tolerance and
-> larger than the 10-point step between rungs, so **rung ORDER is not resolvable at n=40**;
-> pool adjacent rungs, or raise N, before spending a lever on an inversion.
+> **A pooled objective row can hide a 49.5-point artifact** — W8 proved it on `Eliminate`, whose
+> 89.1% row is largely 960 mission-1s and reads ~40% over its mid-run cells. Use the
+> `byObjectiveByNodeKind` / `byObjectiveByMission` cross-tab before concluding anything from a
+> per-objective table.
+>
+> **The rule this program kept enforcing on itself: a balance number without a base commit and an
+> n is not a number** — and a rung is four slot sets or it is not a rung. That rule decided a
+> shipped default in W2, where four slot sets put a leg below the band floor and sixteen put it
+> inside.
 
 RESONANCE **W4 "THE SECOND AXIS"** then made the OPENING GEOMETRY a variable: four deployment
 shapes (FRONTAL / PINCER / CROSSFIRE / **ENVELOP**, a centre-deploy surrounded opening gated to
