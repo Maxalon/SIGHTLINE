@@ -539,10 +539,15 @@ positional price for a line of fire and its overwatch branch fired 20 times in 2
 acts. The term is now `Ai.ShotTileValue` (an expectation) plus a decline gate priced against
 `Combat.AsIfExposed`; `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly. **It changes
 gameplay, so the L3 ladder above is now a pre-C2 ladder** — C2's own 960-campaign CRN round on
-`17934ee` is in `docs/measurements/c2/` and moved five of six rungs by one discordant pair or
-less. Its two open findings (an enemy overwatch has NO lane selection and pays off only 21-27% of
-the time; the autopilot has no term for enemy overwatch at all, so the flywheel cannot price area
-denial) are in `docs/ROADMAP.md`. DEVLOG §C2; rationale `docs/DESIGN.md` §5.2.
+`17934ee` is in `docs/measurements/c2/`. **Read its §5 before quoting it**: the round is near-inert
+in AGGREGATE (four rungs net one discordant pair, h8 nets two) but 124 of 480 paired worlds — 25.8%
+— came out differently, and at 4 discordant pairs the h8 rung could not have detected anything at
+all. **The BASE arm is not an independent baseline: all 24 of its chunks are byte-identical to L3's
+b0-b30**, which is also how C2 found that L3's own slot space is heterogeneous at heat 2
+(b0-30 21.2% vs b40-70 41.2%, z=2.79, p=0.0052) — a caution for anyone quoting a four-slot-set
+rung. Its two open findings (an enemy overwatch has NO lane selection and only FIRES on 24-27% of
+lanes held; the autopilot has no term for enemy overwatch at all, so the flywheel cannot price
+area denial) are in `docs/ROADMAP.md`. DEVLOG §C2; rationale `docs/DESIGN.md` §5.2.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

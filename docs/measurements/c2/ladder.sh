@@ -6,7 +6,10 @@
 #   x 2 arms x N=10 (greedy+sloppy = 20 runs per chunk) = 80 campaigns per rung per arm.
 # A rung is FOUR slot sets or it is not a rung (CLAUDE.md); n=80 carries roughly +/-5 points.
 set -u
-ROOT=/home/user/SIGHTLINE/.claude/worktrees/agent-a1c26e3c14d98312b
+# Repo root is derived from THIS SCRIPT's location (docs/measurements/c2/), not hardcoded.
+# The first version pinned an agent worktree path and `exit 1`d anywhere else, which made the
+# README's "Reproducing" block dead on every other checkout. Override with ROOT=... if needed.
+ROOT=${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
 cd "$ROOT" || exit 1
 for H in -1 0 2 4 6 8; do
   RUNG=$([ "$H" = "-1" ] && echo R || echo "$H")

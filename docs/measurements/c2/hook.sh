@@ -3,7 +3,10 @@
 #   bash docs/measurements/c2/hook.sh DECLINETEST=1 [MORE_ENV=...]
 # Everything before the command is passed through as SIGHTLINE_<name>=<value>.
 set -u
-ROOT=/home/user/SIGHTLINE/.claude/worktrees/agent-a1c26e3c14d98312b
+# Repo root is derived from THIS SCRIPT's location (docs/measurements/c2/), not hardcoded.
+# The first version pinned an agent worktree path and `exit 1`d anywhere else, which made the
+# README's "Reproducing" block dead on every other checkout. Override with ROOT=... if needed.
+ROOT=${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
 cd "$ROOT" || exit 1
 export PATH="$PATH:/usr/lib/dotnet" LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 mkdir -p "$ROOT/.xdg"

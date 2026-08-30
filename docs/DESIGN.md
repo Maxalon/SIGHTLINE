@@ -718,12 +718,17 @@ distinction decided the shape of the fix and it is the reason this section exist
    closes, and an opponent whose chargers took cover would not read as smarter, it would read as
    broken.
 
-**The honest cost, and it is the interesting half.** A held enemy lane was measured to pay off
-**24-27% of the time** (n=457/461 lanes), so an overwatch is worth only ~0.20 of the shot it
-replaces — and a decline rate large enough for a player to *feel* makes the opponent measurably
-weaker (at 51% declines, run completion 55% → 75% on the same 20 worlds). **So the shipped gate
-declines about 0.65% of the shots on the table, and that is the correct answer for this game as it
-currently stands, not a hedge.** The binding constraint is not the gate: it is that an enemy
+**The honest cost, and it is the interesting half.** A held enemy lane was measured to FIRE
+**24-27% of the time** (n=457/461 lanes, of which 442/455 are genuine overwatch rather than the
+PIKEMAN's braced cone) — and *fired* is the word, not *paid off*: at the reaction's −10 aim mod a
+fired shot often misses, so the true payoff is lower still. An overwatch is therefore worth at
+most ~0.20 of the shot it replaces. A decline rate large enough for a player to *feel* also looks
+like a worse opponent — at 51% declines, run completion read 55% → 75% on the same 20 worlds —
+though that probe is **suggestive only** (b=2, c=6 discordant, exact two-sided p = 0.29, and
+confounded: its baseline is the pre-change binary while the probe carries both the new tile term
+and the maximal-decline gate). **So the shipped gate declines about 0.65% of the shots on the
+table, and on the evidence available that is the right answer for this game as it currently
+stands, not a hedge.** The binding constraint is not the gate: it is that an enemy
 overwatch is a 360-degree watch held from wherever the unit happens to be, with no lane selection
 at all (only the PIKEMAN's BRACE picks a cone). **Give the opponent a reason to watch a particular
 piece of ground and the decline becomes worth taking; until then it is not.** Recorded as the next

@@ -2132,10 +2132,14 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 ### Standing gaps, honestly declared
 
 - [ ] **THE ENEMY OVERWATCH HAS NO LANE SELECTION, and that is now the binding constraint.**
-      C2 measured a held enemy lane at **24-27% payoff** (n=457/461 lanes, maximal-decline
-      diagnostic) — so an overwatch is worth only ~0.20 of the shot it replaces, and a decline
-      rate large enough to be *felt* makes the opponent measurably weaker (51% declines cost it
-      20 points of run completion). The cause is that an enemy overwatch is a 360 degree watch
+      C2 measured a held enemy lane FIRING **24-27%** of the time (n=457/461 lanes in the
+      maximal-decline diagnostic, of which 442/455 are genuine overwatch; the shipped round's own
+      lane counts are mostly PIKEMAN BRACE and do NOT corroborate this). *Fired*, not *paid off* —
+      at the reaction's −10 aim a fired shot often misses, so true payoff is lower. An overwatch is
+      therefore worth at most ~0.20 of the shot it replaces. A decline rate large enough to be
+      *felt* also looked like a weaker opponent (51% declines, run completion 55% → 75%), but that
+      probe is suggestive only: p = 0.29 on 20 paired worlds, and confounded by an interim binary.
+      The cause is that an enemy overwatch is a 360 degree watch
       held from wherever the unit is standing; only the PIKEMAN's BRACE ever picks a cone. **A
       hostile that chose WHERE to watch would be worth several times this, and would justify a
       much higher `Ai.DeclineWatchRatio`.** This is the next wave in this area, not another pass

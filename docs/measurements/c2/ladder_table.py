@@ -72,6 +72,10 @@ for arm in ("BASE", "DECL"):
         ln += p["lanes"]; rc += p["reacts"]
         for k, v in p["dec"].items(): tot[k] = tot.get(k, 0) + v
     print(f"  {arm}: contested={con}  shotsOnTable={ws}  declined={dcl} ({100.0*dcl/max(1,ws):.2f}%)"
-          f"  lanesHeld={ln}  reactionShots={rc} ({100.0*rc/max(1,ln):.0f}% paid off)")
+          f"  lanesHeld={ln}  reactionShots={rc} ({100.0*rc/max(1,ln):.0f}% FIRED)")
+    print("      NB lanesHeld = overwatch + brace. On the shipped round it is mostly PIKEMAN BRACE")
+    print("      (BASE 20 overwatch + 174 brace; DECL 111 + 156), so this ratio is NOT a reading on")
+    print("      generic enemy overwatch — see docs/measurements/c2/CAL-diag, where 442 of 457 are.")
+    print("      'FIRED', not 'paid off': at the reaction's -10 aim a fired shot often misses.")
     for k, v in sorted(tot.items(), key=lambda kv: -kv[1]):
         print(f"      {k:<12}{v:>7}  {100.0*v/max(1,con):>5.1f}%")

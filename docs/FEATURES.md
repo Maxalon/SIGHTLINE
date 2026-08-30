@@ -830,14 +830,16 @@ branch point.
   produce a dead turn.
 - **The enemy OVERWATCH branch is no longer dead** — 20 of 26841 contested acts before, **111 of
   26172** after. Still small, and the reason is recorded in ROADMAP: an enemy overwatch is a
-  360-degree watch held from wherever the unit stands, and only 21-27% of held lanes ever fire.
+  360-degree watch held from wherever the unit stands, and only 24-27% of held lanes ever FIRE
+  (measured where the lanes are genuinely overwatch rather than the PIKEMAN's braced cone; at the
+  reaction's −10 aim a fired shot often misses, so true payoff is lower still).
 - **The ENEMY DECISION MIX is instrumented** (`Stats.RecordEnemyDecision`): the branch that
   actually fired on every CONTESTED act, named at the branch rather than re-derived from state,
   plus the shot that was on the table split taken / DECLINED / preempted across five hit-chance
   bands with graze- and armour-aware expected damage per band; and `Stats.RecordEnemyReaction`
   counts lanes held against reaction shots fired. Prints in the `SIGHTLINE_BALANCE` report and the
   aggregate JSON. `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly (proven inert:
-  2750 aggregate fields diffed to empty against the base-commit binary on two slot sets).
+  1304 and 1216 leaf scalars diffed to empty against the base-commit binary on two slot sets).
 
 ## PROGRAM RESONANCE — WAVE W2 "THE OPPONENT ACTS" (the enemy stops freezing mid-fight)
 
