@@ -62,7 +62,8 @@ public static class Stats
         // objective, 0 when the HVT was an ELITE (DesignateHvt's exemption — the campaign finale's
         // named boss, or the m3/m5 mid-boss) and 1 when a rank-and-file body took the statline
         // buff. HvtMaxHp is the target's MaxHp AFTER any buff. Without these the objective's row
-        // pools a capstone with a mid-run node, which is how a 24-point gap hid for ten waves.
+        // pools a capstone with a mid-run node — which is how a 23.7-point gap survived every wave
+        // until L1 spent 480 campaigns on a ladder and stumbled over it.
         public int HvtKind = -1;
         public int HvtMaxHp;
         public int DamageDealt, DamageTaken;
@@ -1282,8 +1283,8 @@ public static class Stats
             }).ToList(),
             // W8 THE HALF WALL: objective x campaign NODE KIND. byObjective alone pools a capstone
             // with a mid-run node — for Decapitate it always does (one Boss node, always the map's
-            // last, always Decapitate), which hid a 23.7-point split for ten waves. Sparse by
-            // construction; pool cells, never read an n=2 one.
+            // last, always Decapitate), which hid a 23.7-point split until L1 stumbled over it.
+            // Sparse by construction; pool cells, never read an n=2 one.
             byObjectiveByNodeKind = missions
                 .GroupBy(m => new { m.Objective, NodeKind = string.IsNullOrEmpty(m.NodeKind) ? "?" : m.NodeKind })
                 .OrderBy(g => g.Key.Objective).ThenBy(g => g.Key.NodeKind)

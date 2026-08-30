@@ -1530,7 +1530,7 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
 
-### PROGRAM CROSSCUT — W8 "THE HALF WALL" (2026-08-29, details in DEVLOG §W8)
+### PROGRAM CROSSCUT — W8 "THE HALF WALL" (2026-08-30, details in DEVLOG §W8)
 
 - [x] **THE DECOMPOSITION IS VERIFIED FROM DATA, not only from reading `Run.cs`.** Pooled over
       L2's 48 archived chunks, `byNodeKind` Boss is **n=479 / 334 wins** and `byMission` m6 is
@@ -1562,8 +1562,9 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       and one stat point. One dial, one paired round.
 - [ ] **THE BIGGER DEFECT: `Eliminate`'s 89.6% row is 960 mission-1s.** Every campaign opens on a
       Start node and a Start node is always Eliminate, at 97.5%. Strip the opener and Eliminate
-      reads **42.3% on Combat nodes (n=104)** and **33.3% on Elite nodes (n=33)** — worse than
-      Decapitate's mid-run cells. Pooled on mid-run node kinds, the two KILL objectives read
+      reads **42.3% on Combat nodes (n=104)** and **33.3% on Elite nodes (n=33)**, pooling to
+      **40.1% ±4.2 (n=137)** — a **49.5-point** composition artifact, twice Decapitate's 23.7, and
+      worse than Decapitate's own mid-run cells. Pooled on mid-run node kinds, the two KILL objectives read
       **38.3% ±3.1 (n=248)** against the six with a non-combat win condition at **83.4% ±1.0
       (n=1259)** — **45.1 points**. At mission 5, Eliminate is **25.6% (n=43)** and Sabotage is
       **96.8% (n=31)**. Six of eight objectives let a squad decline the encounter and still win.

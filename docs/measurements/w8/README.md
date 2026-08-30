@@ -82,7 +82,8 @@ The policy costs about nine points on this objective and costs them on both side
 identical at 14.4 — **more than the game lever in (3)**.
 
 **(4) The bigger defect the cross-tab found.** `Eliminate`'s 89.6% flat row is 960 mission-1s; its
-mid-run cells are **42.3% on Combat nodes (n=104)** and **33.3% on Elite nodes (n=33)**. Pooled on
+mid-run cells are **42.3% on Combat nodes (n=104)** and **33.3% on Elite (n=33)**, pooling to
+**40.1% ±4.2 (n=137)** — a **49.5-point** composition artifact against Decapitate's 23.7. Pooled on
 mid-run node kinds, the two KILL objectives read **38.3% ±3.1 (n=248)** against the six with a
 non-combat win condition at **83.4% ±1.0 (n=1259)** — 45.1 points. Full tables in DEVLOG §W8.
 

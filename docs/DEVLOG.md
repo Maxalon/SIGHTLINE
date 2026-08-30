@@ -6601,7 +6601,7 @@ expression to test and it is now the best-evidenced open defect in the project.
   RNG draw order and composition. **This table will need re-running once they land** — it is the
   post-W1 ladder, not the final one.
 
-# PROGRAM CROSSCUT — W8 "THE HALF WALL" (2026-08-29)
+# PROGRAM CROSSCUT — W8 "THE HALF WALL" (2026-08-30)
 
 **Base commit `dfa7c0f`** — the integration tip carrying W1 TRUE INSTRUMENT, TRUE BAND and the
 L1/L2 ladders. The wave's instrument is `ee5a85c`, its autopilot probe `95b127a`. Raw data,
@@ -6622,8 +6622,8 @@ turned out to be the EASIER half. A second probe asked how much of the gap belon
 bot rather than the game, and returned a clean null: the bot's HVT-focus policy costs about nine
 points on a Decapitate but costs them on BOTH sides, leaving the gap at 20.3 → 20.4. And the
 cross-tab built to check all this found a larger defect of exactly the same shape one row above.
-The wave therefore ships **an instrument, a self-test, three priced-and-unspent dials, and a
-finding** — no balance change.
+The wave therefore ships **an instrument, a self-test, four default-off dials (one of them
+priced), and a finding** — and no balance change.
 
 ## 1. THE DECOMPOSITION VERIFIES — from data, not only from reading the code
 
@@ -6695,8 +6695,9 @@ that was never trimmed.
 Round B's node-kind cells price that directly. Decapitate by node kind: **Supply 67.3% (n=52)** (a
 node that fields **one fewer body** and −1 stat), **Combat 32.9% (n=73)**, **Elite 42.1% (n=38)**,
 **Boss 69.7% (n=479)**. One body and one stat point separate the Supply cell from the Combat cell
-and they are **34 points apart** — consistent with X2's finding that mission 1 moved 25 points on a
-single body.
+and they are **34 points apart**. That is the same order as the 25-point mission-1 move X2 got from
+one body — quoted as a prior on the SIZE of a body, not as a current number (X2's figures predate
+W1 and are formally incomparable to this tree).
 
 ## 5. THE BIGGER DEFECT THE CROSS-TAB FOUND: the two KILL objectives
 
@@ -6716,10 +6717,11 @@ it was hiding behind a 89.6% headline:
 | Sabotage | 83.5 | — | 84.7 (n=118) | 73.5 (n=34) | 100.0 (n=12) | — |
 
 **Eliminate's flat row is 89.6% because 960 of its 1158 rows are mission 1.** Every campaign opens
-on a Start node, and a Start node is always Eliminate (`Run.ObjectiveFor(1)`), and mission 1 wins
-97.5% of the time. Strip the opener and Eliminate is the **worst** objective in the game, not the
-best. That is the same composition artifact the wave was chartered to fix for Decapitate, one row
-up, in the opposite direction, and **larger**: 47 points of it against Decapitate's 24.
+on a Start node, a Start node is always Eliminate (`Run.ObjectiveFor(1)`), and mission 1 wins 97.5%
+of the time. Pooled over its mid-run cells Eliminate reads **40.1% ±4.2 (n=137)** — strip the opener
+and the game's best-looking objective is its **worst**. That is the same composition artifact the
+wave was chartered to fix for Decapitate, one row up, in the opposite direction, and **larger**:
+**49.5 points of it against Decapitate's 23.7.**
 
 Pooled over the mid-run node kinds (Combat + Elite), the split is not by objective at all — it is
 by **whether the objective can be won without winning the fight**:
@@ -6730,7 +6732,7 @@ by **whether the objective can be won without winning the fight**:
 | **NON-KILL** (the other six) | **83.4** | 1.0 | 1259 |
 
 **45.1 points, SE 3.3.** At mission 5, `Eliminate` reads **25.6% (n=43)** and `Sabotage` reads
-**96.8% (n=31)** — the same depth, the same squad, a 71-point spread. Six of the game's eight
+**96.8% (n=31)** — the same mission depth, a 71.2-point spread. Six of the game's eight
 objectives end when you reach a tile, hold a timer or set a charge; two end only when bodies fall.
 `docs/DESIGN.md` §A wants objectives that "force movement" and break the turtle — they do, and the
 measurement says they also let a squad **decline the encounter entirely**. Whether that is the
@@ -6819,7 +6821,9 @@ At mission 1 — identical worlds, identical squad, an identical 14.4-HP target,
 the brief proposed (+3.1 at the same cell).**
 
 **Unpinned (B vs BP, the same 24 chunks / 480 campaigns per arm on bases 0-30) — and this is the
-result that matters:**
+result that matters.** The B column here is round B's four-slot-set SUBSET, so its mid-run cell reads
+47.7% (n=86) rather than the full round's 46.0% (n=163); the pairing is chunk-for-chunk and only
+over chunks both rounds completed.
 
 | unpinned | focus ON | focus OFF | Δ |
 |---|---|---|---|
