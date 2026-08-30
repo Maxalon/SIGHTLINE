@@ -1513,10 +1513,15 @@ public partial class Game
     /// so the BENCH toggle buttons are visible (S3-A).
     public void DebugBench()
     {
-        // wound two soldiers so the BENCH button appears in their rows
-        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
+        // C5 THE HARD EDGES — DEFECT: this hook staged NOTHING. It set Wound = 2 and then called
+        // DebriefSurvivors, whose recovery step takes an unhurt soldier's wound DOWN BY TWO
+        // (Run.cs) — so both soldiers were healed by the very call that follows, and
+        // `SIGHTLINE_BENCH=1` photographed the plain barracks. FITTEST's screen audit found it as
+        // a frame byte-identical to SIGHTLINE_CAMPAIGN's. The wound is now applied AFTER the
+        // debrief, which is the order the docstring always claimed.
         _run.JumpTo(2);
         _run.DebriefSurvivors();
+        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
         _run.PendingPerks.Clear();
         _run.PendingSpecs.Clear();
         _shopDone = true;
@@ -5393,11 +5398,29 @@ public partial class Game
         void Tight(ref float best, ref string tag, float v, string what)
         { if (v < best) { best = v; tag = what; } }
 
+        // -- C5 THE HARD EDGES - THE SCOPE GUARD -------------------------------------------
+        // CROSSCUT rule 6: "a correct assertion in the wrong scope is indistinguishable from no
+        // assertion" - W5 wrote the right guard for the longest string on the squad screen and
+        // put it OUTSIDE the scale loop, and CHROMETEST's own blurb leg sat outside its loop for
+        // a wave. Prose cannot enforce that, so this test now COUNTS the assertions it evaluates,
+        // per leg, per scale: an assertion that has drifted out of the loop records checks at one
+        // scale index only, and the tally below FAILS on it by name. Every leg (A-E, and one row
+        // per audited screen) must record at least one check at EVERY shipped scale.
+        int scaleIdx = 0;
+        var legChecks = new Dictionary<string, int[]>();
+        void Bump(string leg)
+        {
+            if (!legChecks.TryGetValue(leg, out var row)) legChecks[leg] = row = new int[Display.UiScaleLevels.Length];
+            row[scaleIdx]++;
+        }
+        int screens = 0;
+
         try
         {
             foreach (float ui in Display.UiScaleLevels)
             {
                 Cfg.UiScale = ui;
+                scaleIdx = Array.IndexOf(Display.UiScaleLevels, ui);
                 string S = $"@{(int)(ui * 100)}%";
 
                 // ---- (A) the MID-RUN FIELD DOCTRINE card ------------------------------------
@@ -5411,20 +5434,24 @@ public partial class Game
                         float ink = Hud.BoonOfferInkBottom(b);
                         float chooseTop = ch - Hud.BoonOfferChooseUp;
                         Tight(ref mA, ref tA, chooseTop - ink, $"{BoonDef.Code(b)}{S}");
+                        Bump("A");
                         if (ink + pad > chooseTop)
                             fails.Add($"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
                         // ...and no wrapped line may exceed the column it was wrapped to
                         foreach (var (line, _) in Hud.WrapLinesForTest(BoonDef.Desc(b), Hud.BoonOfferBodyW, Hud.BoonOfferFs))
+                        {
+                            Bump("A");
                             if (Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1)
                                 fails.Add($"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                        }
                     }
                     // [ CHOOSE ] itself must land inside the card
                     float cbot = ch - Hud.BoonOfferChooseUp + Cfg.Measure("[ CHOOSE ]", Hud.BoonOfferFs, 1f).Y;
-                    if (cbot + pad > ch) fails.Add($"chooseBelowCard{S}({cbot:0}>{ch})");
+                    Bump("A"); if (cbot + pad > ch) fails.Add($"chooseBelowCard{S}({cbot:0}>{ch})");
                     // and the whole block (title 92px above, ACTIVE strip 40px below) fits the canvas
                     int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
-                    if (y0 - 92 < 8) fails.Add($"boonTitleOffTop{S}({y0 - 92})");
-                    if (y0 + ch + 40 > Cfg.ScreenH) fails.Add($"boonBlockOffBottom{S}({y0 + ch + 40})");
+                    Bump("A"); if (y0 - 92 < 8) fails.Add($"boonTitleOffTop{S}({y0 - 92})");
+                    Bump("A"); if (y0 + ch + 40 > Cfg.ScreenH) fails.Add($"boonBlockOffBottom{S}({y0 + ch + 40})");
                 }
 
                 // ---- (B) the ARMORY weapon row ---------------------------------------------
@@ -5442,8 +5469,8 @@ public partial class Game
                         float bw = Cfg.Measure(blurb, Hud.ArmoryBlurbFs, 1f).X;
                         float budget = Hud.ArmoryBlurbWidth();
                         Tight(ref mB, ref tB, budget - bw, $"{k}blurb{S}");
-                        if (bw > budget) fails.Add($"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
-                        if (blurbBot + pad > Hud.ArmoryRowH) fails.Add($"armoryBlurbBelowRow{S}");
+                        Bump("B"); if (bw > budget) fails.Add($"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
+                        Bump("B"); if (blurbBot + pad > Hud.ArmoryRowH) fails.Add($"armoryBlurbBelowRow{S}");
                         float nameRight = Hud.ArmoryTextX + Cfg.Measure(name, Hud.ArmoryNameFs, 1f).X;
                         foreach (var (tag, fs) in new[] { ("EQUIPPED", Hud.ArmoryTagFs),
                                                           ($"[ {Game.ArmoryCost} INTEL ]", Hud.ArmoryTagFs),
@@ -5455,12 +5482,14 @@ public partial class Game
                             // two independent strings may share a BAND or a COLUMN, never both
                             bool xOverlapBlurb = tagLeft < Hud.ArmoryTextX + bw + pad;
                             bool yOverlapBlurb = tagBot + pad > blurbTop && tagTop < blurbBot + pad;
+                            Bump("B");
                             if (xOverlapBlurb && yOverlapBlurb)
                                 fails.Add($"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
+                            Bump("B");
                             if (tagLeft < nameRight + 12)
                                 fails.Add($"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
-                            if (tagBot + pad > Hud.ArmoryRowH) fails.Add($"armoryTagBelowRow:{k}{S}");
-                            if (tagTop < 2) fails.Add($"armoryTagAboveRow:{k}{S}");
+                            Bump("B"); if (tagBot + pad > Hud.ArmoryRowH) fails.Add($"armoryTagBelowRow:{k}{S}");
+                            Bump("B"); if (tagTop < 2) fails.Add($"armoryTagAboveRow:{k}{S}");
                         }
                     }
                 }
@@ -5480,6 +5509,7 @@ public partial class Game
                             { Name = worstName, Cls = cls, Rank = rank, Kills = 999, Heat = 8, Won = true };
                             float subW = Cfg.Measure(Hud.WarLegendSub(l), Hud.WarLegendSubFs, 1f).X;
                             Tight(ref mC, ref tC, textW - subW, $"{rank[0]}{cls[0]}sub{S}");
+                            Bump("C");
                             if (subW > textW)
                                 fails.Add($"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
                             string score = Hud.WarLegendScore(l);
@@ -5488,9 +5518,10 @@ public partial class Game
                             float scoreLeft = colW - Hud.WarLegendPadR - scw;
                             float nameRight = Hud.WarLegendTextX + nameW;
                             Tight(ref mC, ref tC, scoreLeft - nameRight, $"{rank[0]}{cls[0]}name{S}");
+                            Bump("C");
                             if (score.Length > 0 && scoreLeft < nameRight + 12)
                                 fails.Add($"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
-                            if (scw > textW) fails.Add($"legendScoreOverruns{S}");
+                            Bump("C"); if (scw > textW) fails.Add($"legendScoreOverruns{S}");
                         }
                 }
 
@@ -5501,15 +5532,16 @@ public partial class Game
                     {
                         float lw = Cfg.Measure(dl, Hud.DraftDeployFs, 1f).X;
                         Tight(ref mD, ref tD, dbw - lw, $"DEPLOY{S}");
-                        if (lw + 8 > dbw) fails.Add($"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
+                        Bump("D"); if (lw + 8 > dbw) fails.Add($"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
                     }
                     float rw = Cfg.Measure(Hud.DraftRerollLabel, Hud.DraftRerollFs, 1f).X;
                     Tight(ref mD, ref tD, rrw - rw, $"REROLL{S}");
-                    if (rw + 8 > rrw) fails.Add($"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
+                    Bump("D"); if (rw + 8 > rrw) fails.Add($"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
                     float bw2 = Cfg.Measure("BACK", Hud.DraftBackFs, 1f).X
                               + Cfg.Measure("[Esc]", Hud.DraftBackHintFs, 1f).X;
                     Tight(ref mD, ref tD, bkw - bw2, $"BACK{S}");
-                    if (bw2 + 12 > bkw) fails.Add($"backLabelOverruns{S}({bw2:0}>{bkw})");
+                    Bump("D"); if (bw2 + 12 > bkw) fails.Add($"backLabelOverruns{S}({bw2:0}>{bkw})");
+                    Bump("D");
                     if (Hud.DraftBtnRowW() > Cfg.ScreenW - 24)
                         fails.Add($"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
                 }
@@ -5521,21 +5553,39 @@ public partial class Game
                     {
                         float w2 = Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X;
                         Tight(ref mE, ref tE, bw - w2, $"blurb{S}");
-                        if (w2 > bw) fails.Add($"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
+                        Bump("E"); if (w2 > bw) fails.Add($"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
                     }
                     foreach (var ab in new[] { "RUN&GUN", "BLITZ", "STEADY", "SUPPRESS", "PATCH",
                                                "MARK", "GRAPPLE", "SLIPSTREAM", "SUPPR. FIRE" })
                     {
                         float w2 = Cfg.Measure("ABILITY: " + ab, Hud.DraftAbilityFs, 1f).X;
                         Tight(ref mE, ref tE, aw - w2, $"ability{S}");
-                        if (w2 > aw) fails.Add($"draftAbilityClips{S}:{ab}");
+                        Bump("E"); if (w2 > aw) fails.Add($"draftAbilityClips{S}:{ab}");
                     }
                     int gridW = 3 * Hud.DraftCardW() + 2 * Hud.DraftGridGap;
-                    if (gridW > Cfg.ScreenW - 24) fails.Add($"draftGridOffCanvas{S}({gridW})");
+                    Bump("E"); if (gridW > Cfg.ScreenW - 24) fails.Add($"draftGridOffCanvas{S}({gridW})");
                 }
+
+                // ---- (F) THE SCREEN AUDIT - every screen the game can draw, on a LIVE FRAME ---
+                // W10's gate covered five surfaces; the rest of the product was asserted at 100%
+                // or not at all. This leg stages each screen, DRAWS it, and reads the ink and the
+                // control plates back from the draw calls themselves (Cfg.InkProbe /
+                // Hud.PlateProbe) - so it observes what the game paints rather than a
+                // transcription of the layout arithmetic, and a screen that throws while drawing
+                // is a failure too. Inside the loop by construction: it takes the scale.
+                screens = ScreenAudit(S, fails, Bump);
             }
         }
-        finally { Cfg.UiScale = savedScale; }
+        finally { Cfg.UiScale = savedScale; Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+
+        // THE SCOPE GUARD's verdict (see the note above the counter).
+        foreach (var kv in legChecks)
+            for (int i = 0; i < kv.Value.Length; i++)
+                if (kv.Value[i] == 0)
+                    fails.Add($"legOutsideScaleLoop:{kv.Key}@{(int)(Display.UiScaleLevels[i] * 100)}%(0 checks)");
+        int totalChecks = 0;
+        foreach (var kv in legChecks) foreach (int n in kv.Value) totalChecks += n;
+        if (legChecks.Count < 6) fails.Add($"scopeGuardVacuous(legs={legChecks.Count})");
 
         notes.Add($"doctrine {mA:0}px@{tA}");
         notes.Add($"armory {mB:0}px@{tB}");
@@ -5546,11 +5596,318 @@ public partial class Game
             ? $"FITTEST: PASS ({BoonDef.All.Length} doctrine cards, 5 weapon rows x 3 tags, "
               + $"{Run.Ranks.Length}x5 legend rows, 5 deploy labels and the operator card fit their "
               + $"chrome at all {Display.UiScaleLevels.Length} shipped text sizes - tightest margins: "
-              + string.Join(", ", notes) + ")"
+              + string.Join(", ", notes)
+              + $"; C5 leg F: {screens} screens DRAWN and audited at every scale - every control "
+              + $"plate contains its label (tightest {_fitPlateMargin:0.0}px @{_fitPlateTag}), no "
+              + $"visible string leaves the canvas (nearest {_fitEdgeMargin:0.0}px @{_fitEdgeTag}), "
+              + $"nothing is ellipsized, smallest type {_fitMinSize:0.#}px authored / "
+              + $"{_fitMinRendered:0.#}px rendered @{_fitMinTag}, {_fitFloors} shrink-to-fit calls "
+              + $"reach their floor; {totalChecks} assertions over {legChecks.Count} legs, every "
+              + $"leg evaluated at all {Display.UiScaleLevels.Length} scales)"
             : $"FITTEST: FAIL ({fails.Distinct().Count()} violations; first 14: "
               + string.Join(",", fails.Distinct().Take(14)) + ")";
     }
 
+
+
+    // ─── C5 THE HARD EDGES — THE SCREEN AUDIT (FITTEST leg F) ──────────────────────────────────
+    /// Every screen the game can draw, drawn for real at every shipped text size, with the ink and
+    /// the control plates read back FROM THE DRAW CALLS (`Cfg.InkProbe` / `Hud.PlateProbe`).
+    ///
+    /// WHY A LIVE FRAME. W10's five legs measure layout arithmetic the test re-derives from the
+    /// same constants the renderer uses. That is fine for the five surfaces someone thought to
+    /// transcribe, and it is exactly the shape CROSSCUT's rule 5 warns about everywhere else: the
+    /// screen the test describes and the screen the game paints can differ, and nothing notices.
+    /// This leg cannot drift, because it IS the draw: it stages a screen, calls `Hud.Draw`, and
+    /// audits what came out.
+    ///
+    /// WHAT IT ASSERTS, per screen per scale:
+    ///   1. CONTROL PLATES CONTAIN THEIR LABELS. Every button/plate in the game reports (label,
+    ///      plate, painted box); the box must lie inside the plate. A label that has outgrown its
+    ///      chrome is unreadable — and a control the player cannot read is a control they will
+    ///      not press.
+    ///   2. NOTHING IS PAINTED OFF THE CANVAS. Any visible string whose box leaves 1280x800 has
+    ///      lost information the player was meant to have. Screens with a real scroll region
+    ///      (the CODEX) are exempt BY NAME, not by silence.
+    ///   3. THE SCREEN ACTUALLY DREW. A stager that throws, or paints fewer than three strings,
+    ///      is a failed audit rather than a quiet pass — the vacuity trap that lets a screen
+    ///      "pass" because it was never on screen.
+    /// Returns the number of screens audited so the PASS line can state its own coverage.
+    static int ScreenAudit(string S, List<string> fails, Action<string> bump)
+    {
+        var ink = new List<(string text, Rectangle box, float alpha)>();
+        var plates = new List<(string label, Rectangle plate, Rectangle box)>();
+        var seen = new Dictionary<string, string>();     // frame fingerprint -> the screen that drew it
+        var clips = new List<string>();                  // strings the renderer ellipsized away
+        var floors = new List<string>();                 // shrink-to-fit calls that hit their floor
+
+        int n = 0;
+        foreach (var sc in ScreenCases)
+        {
+            ink.Clear(); plates.Clear();
+            string tag = sc.Name + S;
+            float minSize = 99f; string minWhat = "-";
+            try
+            {
+                // DETERMINISM: several stagers roll (the shop slate, the event, the draft pool),
+                // and Util.Rng is clock-seeded by default — the first version of this leg reported
+                // a different worst-case string on consecutive runs, which is a flaky gate rather
+                // than a gate. One fixed seed per screen, so a FAIL reproduces verbatim.
+                Util.Reseed(FitScreenSeed);
+                var g = new Game { NoPersist = true };
+                sc.Stage(g);
+                // Let the game settle exactly as it does before a screenshot: several stagers
+                // (the hover tooltip's odds, the briefing card's timer) only produce their state
+                // inside Update, and a draw-only audit photographs the frame before them.
+                for (int f = 0; f < 3; f++) g.Update(1f / 60f);
+                Hud.AnimPin = 1f;              // audit the SETTLED frame, deterministically
+                Hud.TimePin = 1000.0; Renderer.TimePin = 1000.0;   // ...and at a FIXED clock
+                var fp = new System.Text.StringBuilder();
+                Cfg.InkProbe = (t, pos, box, size, alpha) =>
+                    {
+                        if (string.IsNullOrEmpty(t)) return;
+                        fp.Append(t).Append('|').Append((int)pos.X).Append(',').Append((int)pos.Y).Append(';');
+                    };
+                Raylib.BeginDrawing();
+                Raylib.ClearBackground(Pal.Bg);
+                // The BOARD pass counts toward the frame FINGERPRINT (so two screens that differ
+                // only on the board are not "the same screen") but not toward the geometry audit:
+                // it paints inside a Camera2D, so its ink is in world space, not screen space.
+                g.DrawBoardLayer();
+                Cfg.InkProbe = (t, pos, box, size, alpha) =>
+                    {
+                        if (string.IsNullOrEmpty(t)) return;
+                        fp.Append(t).Append('|').Append((int)pos.X).Append(',').Append((int)pos.Y).Append(';');
+                        ink.Add((t, new Rectangle(pos.X, pos.Y, box.X, box.Y), alpha));
+                        // CLAUDE.md's own rule: 12px is the small-text floor. The size recorded here
+                        // is the AUTHORED one, which is what that rule is written against.
+                        if (alpha >= 0.06f && size < minSize) { minSize = size; minWhat = Short(t); }
+                        if (FitDumpSmall && alpha >= 0.06f && size < 12f)
+                            Console.WriteLine($"FITSMALL {tag} {size:0.#}px rendered={Cfg.Scaled(size):0.#}px '{Short(t)}'");
+                    };
+                Hud.PlateProbe = (l, p, b) =>
+                    { plates.Add((l, p, b)); fp.Append('[').Append(l).Append((int)p.X).Append(',').Append((int)p.Y).Append(']'); };
+                Hud.ClipProbe = (t, sz, w) => clips.Add($"{tag}:'{Short(t)}'@{sz}px/{w}px");
+                Hud.FloorProbe = (t, sz, w) => floors.Add($"{tag}:'{Short(t)}'@{sz}px/{w}px");
+                g.DrawHudLayer();
+                Raylib.EndDrawing();
+                _fitPhase = g.Phase.ToString() + (g.Paused ? "+paused" : "");
+                _fitFrameFp = fp.Length.ToString() + ":" + fp.ToString().GetHashCode().ToString("x8");
+            }
+            catch (Exception ex) { fails.Add($"screenThrew:{tag}:{ex.GetType().Name}"); continue; }
+            finally
+            {
+                Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.ClipProbe = null; Hud.FloorProbe = null;
+                Hud.AnimPin = -1f; Hud.TimePin = -1.0; Renderer.TimePin = -1.0;
+            }
+            n++;
+
+            // (1) every control plate contains its own label
+            foreach (var (label, plate, box) in plates)
+            {
+                bump("scr:" + sc.Name);
+                if (plate.Width < 2 || plate.Height < 2) continue;          // a collapsed/hidden control
+                float overL = plate.X - box.X, overR = (box.X + box.Width) - (plate.X + plate.Width);
+                float overT = plate.Y - box.Y, overB = (box.Y + box.Height) - (plate.Y + plate.Height);
+                float worst = MathF.Max(MathF.Max(overL, overR), MathF.Max(overT, overB));
+                if (-worst < _fitPlateMargin) { _fitPlateMargin = -worst; _fitPlateTag = $"{tag}:{Short(label)}"; }
+                if (worst > PlateSlack)
+                    fails.Add($"labelLeavesPlate:{tag}:'{Short(label)}'by{worst:0}px");
+            }
+
+            // (2) nothing visible is painted off the canvas
+            if (!sc.Scrolls)
+                foreach (var (text, box, alpha) in ink)
+                {
+                    bump("scr:" + sc.Name);
+                    if (alpha < 0.06f) continue;                            // an entrance fade paints nothing
+                    float edge = MathF.Min(MathF.Min(box.X, box.Y),
+                                           MathF.Min(Cfg.ScreenW - (box.X + box.Width), Cfg.ScreenH - (box.Y + box.Height)));
+                    if (edge < _fitEdgeMargin) { _fitEdgeMargin = edge; _fitEdgeTag = $"{tag}:{Short(text)}"; }
+                    if (box.X < -CanvasSlack || box.Y < -CanvasSlack
+                        || box.X + box.Width > Cfg.ScreenW + CanvasSlack
+                        || box.Y + box.Height > Cfg.ScreenH + CanvasSlack)
+                        fails.Add($"inkOffCanvas:{tag}:'{Short(text)}'@({box.X:0},{box.Y:0},{box.Width:0}x{box.Height:0})");
+                }
+
+            // (3) THE SMALL-TEXT FLOOR, as a REGRESSION BOUND rather than as the rule.
+            //     CLAUDE.md declares 12px the floor. The shipped UI does not meet it: this leg
+            //     measured 10px authored on the AUDIO CHECK screen and 11px on seventeen others at
+            //     100% (`SIGHTLINE_FITDUMP=small` lists every one). Asserting 12 here would fail a
+            //     tree nobody in this wave is authorised to re-lay-out, and asserting nothing would
+            //     let the next fitter step take it lower still. So the gate is the MEASURED worst,
+            //     which makes any further shrink a failure, and the breach itself is recorded as an
+            //     open finding rather than quietly normalised.
+            bump("scr:" + sc.Name);
+            if (minSize < 99f && minSize <= _fitMinSize)
+            { _fitMinSize = minSize; _fitMinRendered = Cfg.Scaled(minSize); _fitMinTag = $"{tag}:{minWhat}"; }
+            if (minSize < SmallTextAuthoredFloor)
+                fails.Add($"belowSmallTextFloor:{tag}:'{minWhat}'@{minSize:0.#}px");
+            if (minSize * 1f < 99f && Cfg.Scaled(minSize) < SmallTextRenderedFloor - 0.01f)
+                fails.Add($"rendersBelowFloor:{tag}:'{minWhat}'@{Cfg.Scaled(minSize):0.#}px");
+
+            // (4) NOTHING WAS ELLIPSIZED. A geometry audit cannot see this: the box a clipped
+            //     string paints FITS — losing the tail is what made it fit. Clip is the renderer's
+            //     last-resort backstop, so a live screen reaching it means a column and its content
+            //     have drifted apart. This found the WAR ROOM ellipsizing an achievement
+            //     description at the 110% text size over a sub-pixel disagreement between the
+            //     wrapper and the clipper (fixed in Hud.Clip; this assertion is what caught it).
+            foreach (var c in clips) { bump("scr:" + sc.Name); fails.Add("textEllipsized:" + c); }
+            bump("scr:" + sc.Name);
+
+            // (5) the screen actually drew, and drew ITS OWN screen. Two cases that paint an
+            //     identical frame mean one of them never staged — the vacuity trap that would
+            //     otherwise let this leg "cover" a screen it has never seen. (Found three:
+            //     WOUND / TRAITS / ENDLESSOFFER all photographed the main menu.)
+            bump("scr:" + sc.Name);
+            if (ink.Count < 3) fails.Add($"screenDrewNothing:{tag}(strings={ink.Count})");
+            bump("scr:" + sc.Name);
+            if (seen.TryGetValue(_fitFrameFp, out string twin)) fails.Add($"screenNotStaged:{tag}(identical frame to {twin})");
+            else seen[_fitFrameFp] = sc.Name;
+            if (FitDump && (clips.Count > 0 || floors.Count > 0))
+                Console.WriteLine($"FITDUMP {tag}: clipped={clips.Count} atFloor={floors.Count} "
+                    + string.Join(" ", clips.Concat(floors)));
+            if (FitDump)
+                Console.WriteLine($"FITDUMP {tag}: phase={_fitPhase} strings={ink.Count} plates={plates.Count} "
+                    + $"minSize={minSize:0.#}px('{minWhat}') "
+                    + $"tightestPlate={_fitPlateMargin:0.0}px@{_fitPlateTag} nearestEdge={_fitEdgeMargin:0.0}px@{_fitEdgeTag}");
+            _fitClips += clips.Count; _fitFloors += floors.Count;
+            clips.Clear(); floors.Clear();
+        }
+        return n;
+    }
+
+    // Diagnostics for the PASS line: the tightest label-in-plate margin and the closest any
+    // visible string came to the canvas edge, over every screen x every scale.
+    static int _fitClips, _fitFloors;
+    static float _fitMinSize = 99f, _fitMinRendered = 99f;
+    static string _fitMinTag = "-";
+    static string _fitFrameFp = "";
+    static float _fitPlateMargin = 9999f, _fitEdgeMargin = 9999f;
+    static string _fitPlateTag = "-", _fitEdgeTag = "-", _fitPhase = "-";
+    public static void FitAuditReset() { _fitPlateMargin = 9999f; _fitEdgeMargin = 9999f; _fitPlateTag = "-"; _fitEdgeTag = "-"; }
+
+    static string Short(string s) => s == null ? "" : (s.Length <= 22 ? s : s.Substring(0, 22) + "~");
+
+    /// Push a staged screen's squad to the longest strings the GAME can hand it: the widest
+    /// callsign+nickname shape the generator makes, the tag editor's own 14-character cap on every
+    /// soldier, and a rank/kill count at the top of their ranges. Nothing here is hypothetical —
+    /// each field is bounded by the code that produces it (Game.UpdateTagEditor caps the tag at 14;
+    /// Run.Ranks bounds the rank; the kill counter is a 3-digit field on the hall-of-fame row).
+    /// The longest identity the GENERATOR can actually deal, derived from its own pools rather
+    /// than invented: `Mission.Callsigns`' longest entry and `Nicknames`' longest entry. A stress
+    /// case built from unreachable content reports defects the player can never see — the first
+    /// version of this helper assigned "KESTREL \"MAVERICK\"" into `Unit.Name`, which no code path
+    /// produces, and duly "found" a 9px shop line that cannot occur.
+    internal static string FitWorstCallsign => Mission.LongestCallsign;
+    internal static string FitWorstNickname => Nicknames.Longest;
+
+    static void FitStressSquad(Game g)
+    {
+        var squad = g.RunState != null ? g.RunState.Squad : null;
+        if (squad != null)
+            foreach (var u in squad)
+            {
+                if (u == null || u.IsVip) continue;
+                u.Name = FitWorstCallsign; u.Nickname = FitWorstNickname;
+                u.CustomTag = "WMWMWMWMWMWMWM";      // 14 chars, the widest glyphs in the face
+                u.Rank = Run.Ranks.Length - 1;
+                u.Kills = 999;
+            }
+        foreach (var u in g.Players)
+        {
+            if (u == null || u.IsVip) continue;
+            u.Name = FitWorstCallsign; u.Nickname = FitWorstNickname;
+            u.CustomTag = "WMWMWMWMWMWMWM";
+            u.Rank = Run.Ranks.Length - 1;
+            u.Kills = 999;
+        }
+    }
+
+    /// Slack in px. A plate's label may kiss its border (rounded corners hide a pixel); ink may
+    /// touch the canvas edge. Anything past this is ink the player cannot read.
+    const float PlateSlack = 1.5f, CanvasSlack = 1.5f;
+    /// The measured worst authored/rendered type size in the shipped UI (see the note at the
+    /// assertion). Not the 12px rule — the bound that keeps the breach from getting worse.
+    /// 9px is what the tightest shipped fitter declares as its own minimum
+    /// (`FitSize(effect, 12, 9, ...)` on the REQUISITION card); 9px rendered is the smallest the
+    /// four shipped scales can produce from a 10px authored size. Neither is the 12px rule — see
+    /// the note at the assertion, and the open finding in DEVLOG.
+    const float SmallTextAuthoredFloor = 9f, SmallTextRenderedFloor = 9f;
+    /// The fixed seed every audited screen is staged under.
+    const int FitScreenSeed = 20260830;
+    static readonly bool FitDump = Environment.GetEnvironmentVariable("SIGHTLINE_FITDUMP") == "1";
+    /// SIGHTLINE_FITDUMP=small lists every string the game paints below the 12px small-text floor
+    /// CLAUDE.md declares, with its RENDERED size — the survey behind this wave's open finding.
+    static readonly bool FitDumpSmall = Environment.GetEnvironmentVariable("SIGHTLINE_FITDUMP") == "small";
+
+    /// The screens. Each entry stages a real `Game` and names itself; `Scrolls` marks a surface
+    /// with a genuine scroll region, where ink outside the canvas is the SCROLLBAR's job to
+    /// resolve rather than a defect. Adding a screen here is the whole cost of covering it.
+    struct ScreenCase
+    {
+        public string Name; public Action<Game> Stage; public bool Scrolls;
+        public ScreenCase(string name, Action<Game> stage, bool scrolls = false)
+        { Name = name; Stage = stage; Scrolls = scrolls; }
+    }
+
+    static readonly ScreenCase[] ScreenCases =
+    {
+        new ScreenCase("INTRO",        g => { }),
+        new ScreenCase("MISSION",      g => { g.StartMission(1); g.BriefLines = null; }),
+        new ScreenCase("PAUSE",        g => { g.StartMission(1); g.Paused = true; }),
+        new ScreenCase("TOOLTIP-AIM",  g => { g.StartMission(1); g.DebugTooltip(false); }),
+        new ScreenCase("TOOLTIP-HOVER",g => { g.StartMission(1); g.DebugTooltip(true); }),
+        new ScreenCase("THREATCARD",   g => { g.StartMission(1); g.DebugThreatShot(); }),
+        new ScreenCase("TUTORIAL",     g => { g.StartMission(1); g.ShowTutorialStep(0); }),
+        new ScreenCase("TRAINING",     g => g.BeginTraining()),
+        new ScreenCase("VERBS",        g => { g.StartMission(1); g.DebugVerbs(); }),
+        new ScreenCase("STATUS",       g => { g.StartMission(1); g.DebugStatus(); }),
+        new ScreenCase("TAGEDIT",      g => { g.StartMission(1); g.DebugTagEditor(); }),
+        new ScreenCase("INTENT",       g => { g.StartMission(1); g.DebugIntent(); }),
+        new ScreenCase("SHOP",         g => g.DebugShop()),
+        new ScreenCase("SHOP-PREP",    g => g.DebugPrep()),
+        new ScreenCase("ARMORY",       g => g.DebugArmory()),
+        new ScreenCase("CAMPAIGNMAP",  g => g.DebugCampaignMap()),
+        new ScreenCase("BENCH",        g => g.DebugBench()),
+        new ScreenCase("PERKCHOOSER",  g => g.DebugBarracksPerk()),
+        new ScreenCase("DEPLOYCARDS",  g => g.DebugDeployCards()),
+        new ScreenCase("BOONOFFER",    g => g.DebugBoon()),
+        new ScreenCase("EVENT",        g => g.DebugEvent()),
+        new ScreenCase("DRAFT",        g => g.BeginDraft()),
+        new ScreenCase("VETDRAFT",     g => g.DebugVetDraft()),
+        new ScreenCase("WIN",          g => g.DebugSummary(false)),
+        new ScreenCase("LOSE",         g => g.DebugSummary(true)),
+        new ScreenCase("KIA",          g => { g.StartMission(1); g.DebugKia(); }),
+        new ScreenCase("WARROOM",      g => g.DebugWarRoom()),
+        new ScreenCase("CODEX",        g => g.DebugCodex(), true),
+        new ScreenCase("AUDIOCHECK",   g => g.DebugAudition()),
+        new ScreenCase("SKIRMISHSETUP",g => g.DebugSkirmishSetup()),
+        new ScreenCase("ENDLESSOFFER", g => { g.BeginEndless(); g.DebugEndlessOffer(); }),
+        new ScreenCase("WOUND",        g => { g.StartMission(1); g.DebugWound(); }),
+        new ScreenCase("TRAITS",       g => { g.StartMission(1); g.DebugTraits(); }),
+        new ScreenCase("ROSTERFULL",   g => { Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", "6");
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", "8");
+                                              g.DebugCampaignMap();
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", null);
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", null); }),
+        new ScreenCase("ENDLESSHUD",   g => { g.BeginEndless(); }),
+        new ScreenCase("BRIEF",        g => g.StartMission(1)),   // the briefing card is up for 11 s
+        // THE WORST-CASE CONTENT, which is where the last two waves' text defects actually lived:
+        // W10's ARMORY hook photographed the SECOND-SHORTEST blurb in the game for four waves.
+        // Default staging paints default-length strings; these three paint the longest strings a
+        // player can actually produce (a 14-char custom tag - the editor's own cap - on a
+        // full-length callsign+nickname, a full roster, and a padded debrief).
+        new ScreenCase("MISSION-WORST", g => { g.StartMission(1); FitStressSquad(g); }),
+        new ScreenCase("ROSTER-WORST",  g => { Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", "6");
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", "8");
+                                               g.DebugCampaignMap();
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", null);
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", null);
+                                               FitStressSquad(g); }),
+        new ScreenCase("WIN-WORST",     g => { g.DebugSummary(false); FitStressSquad(g); }),
+        new ScreenCase("SHOP-WORST",    g => { g.DebugShop(); FitStressSquad(g); }),
+    };
 
     // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
     /// The two ways OUT of a screen that the audit found missing, pinned together because they are

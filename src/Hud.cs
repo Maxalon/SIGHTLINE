@@ -159,11 +159,38 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     static readonly System.Collections.Generic.HashSet<string> _animTouched = new();
     static double _animLastPrune;
 
+    /// C5 THE HARD EDGES — the HUD's CLOCK, in one place. Twelve draw sites read the wall clock
+    /// directly (pulses, blinks, the backdrop phase), which is exactly why CLAUDE.md says a test
+    /// that reads pixels must pin the clock: `Renderer.TimePin` has done this for the board since
+    /// W4, and the chrome had no equivalent — so FITTEST's screen audit was reproducible only up
+    /// to whatever second it ran in, and a blinking cursor could change a frame's fingerprint.
+    /// -1 in play: `Now()` is `Raylib.GetTime()` verbatim.
+    public static double TimePin = -1.0;
+    static double Now() => TimePin >= 0.0 ? TimePin : Raylib.GetTime();
+
+    /// C5 THE HARD EDGES — harness-only entrance-animation PIN. `>= 0` makes every panel
+    /// entrance report that progress instead of reading the wall clock, so a self-test can audit
+    /// a SETTLED frame (1f) deterministically rather than waiting real seconds for 60 screens x
+    /// 4 text scales to slide in. -1 in every normal run: PanelAnim is untouched in play.
+    public static float AnimPin = -1f;
+
+    /// C5 — the PLATE PROBE: every fixed-size control reports (label, its plate, the box the
+    /// label actually paints into). FITTEST's screen audit asserts containment on the LIVE
+    /// frame, so a button whose label outgrew its chrome at a text scale is a failure at the
+    /// draw call rather than in a transcription of it. Null in every normal run.
+    public static Action<string, Rectangle, Rectangle> PlateProbe;
+
+    static void Plate(string label, Rectangle plate, Vector2 at, Vector2 box)
+    {
+        if (PlateProbe != null) PlateProbe(label, plate, new Rectangle(at.X, at.Y, box.X, box.Y));
+    }
+
     /// Eased 0..1 entrance progress for the element identified by `key`. `dur` is the
     /// settle time (seconds). `delay` staggers the start (e.g. roster rows cascade).
     static float PanelAnim(string key, float dur = 0.22f, float delay = 0f)
     {
-        float now = (float)Raylib.GetTime();
+        if (AnimPin >= 0f) return AnimPin;
+        float now = (float)Now();
         _animTouched.Add(key);
         if (!_animSeen.TryGetValue(key, out float t0)) { t0 = now; _animSeen[key] = now; }
         float t = (now - t0 - delay) / MathF.Max(0.0001f, dur);
@@ -174,7 +201,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// keys that weren't drawn this frame so they re-animate next time they appear.
     static void PruneAnims()
     {
-        double now = Raylib.GetTime();
+        double now = Now();
         // Prune a few times a second — cheap and avoids churn within a single frame.
         if (now - _animLastPrune < 0.05) { _animTouched.Clear(); return; }
         _animLastPrune = now;
@@ -366,7 +393,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         var box = new Rectangle(x + 30, y + 64, w - 60, 40);
         Raylib.DrawRectangleRounded(box, 0.2f, 6, Pal.RGBA(10, 15, 21));
         Raylib.DrawRectangleLinesEx(box, 1.5f, Pal.PanelBd);
-        string shown = g.TagBuffer + (((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : " ");
+        string shown = g.TagBuffer + (((int)(Now() * 2) % 2 == 0) ? "_" : " ");
         Cfg.Text(shown, new Vector2((int)box.X + 12, (int)box.Y + 11), 20, 1f, Pal.Txt);
         if (g.TagBuffer.Length == 0)
             Cfg.Text("(blank = auto tags)", new Vector2((int)box.X + 12, (int)box.Y + 46), 12, 1f, Pal.TxtDim);
@@ -739,7 +766,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // luma-sum in the label box swung 2.2x (193/206/418/237) at CONSTANT game state.
             // It still breathes — 0.78 +- 0.22, i.e. 56%..100% — but the state never disappears,
             // and the border no longer takes an extra 0.5x on top of the trough.
-            float pulse = ConcealPulse((float)Raylib.GetTime());
+            float pulse = ConcealPulse((float)Now());
             float cw = Cfg.Measure("CONCEALED", 14, 1f).X + 26;
             var cpill = new Rectangle(lx, cy - 15, cw, 30);
             Raylib.DrawRectangleRounded(cpill, 0.4f, 8, Pal.Panel);
@@ -944,7 +971,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Cfg.Text(lbl, new Vector2((int)(x + w / 2 - lw / 2), cy - 14), 12, 1f, live ? Pal.Foe : Pal.TxtDim);
         const int pipW = 9, pipH = 12, gap = 3;
         float px = x + w / 2 - (max * (pipW + gap) - gap) / 2f;
-        float pulse = 0.6f + 0.4f * (float)Math.Sin(Raylib.GetTime() * 5.0);
+        float pulse = 0.6f + 0.4f * (float)Math.Sin(Now() * 5.0);
         for (int i = 0; i < max; i++)
         {
             var r = new Rectangle(px + i * (pipW + gap), cy + 1, pipW, pipH);
@@ -1164,10 +1191,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// RESONANCE V1 — largest size in [minSize, maxSize] at which `text` fits `maxW`.
     /// Preferred over Clip for short proper names (shop titles): shrinking a couple of points
     /// keeps the WHOLE name readable, where an ellipsis throws information away.
+    /// C5 — the FLOOR PROBE: fires when a shrink-to-fit falls all the way to its minimum, i.e.
+    /// the point at which the next step is losing words. VOICETEST asserts this statically for the
+    /// shop / war-room card bodies; this reports it for every fitter on a LIVE frame.
+    public static Action<string, int, int> FloorProbe;
+
     static int FitSize(string text, int maxSize, int minSize, int maxW)
     {
         for (int s = maxSize; s > minSize; s--)
             if (Cfg.Measure(text, s, 1f).X <= maxW) return s;
+        if (FloorProbe != null) FloorProbe(text, minSize, maxW);
         return minSize;
     }
 
@@ -1182,6 +1215,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     {
         for (int sz = maxSize; sz > minSize; sz--)
             if (WrapText(text, sz, maxW).Count <= rows) return sz;
+        if (FloorProbe != null) FloorProbe(text, minSize, maxW);
         return minSize;
     }
 
@@ -1196,10 +1230,25 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// Card-body type: authored size, the smallest size the fitter may fall to, and the row budget.
     public const int CardBodySize = 12, CardBodyMinSize = 10, CardBodyRows = 2;
 
+    /// C5 — the TRUNCATION PROBE: fires whenever Clip actually throws characters away, with the
+    /// original string. Ellipsis is the one failure mode a geometry audit cannot see (the painted
+    /// box FITS — that is what Clip did), and it is information the player was meant to have.
+    /// Null in every normal run.
+    public static Action<string, int, int> ClipProbe;
+
     static string Clip(string text, int size, int maxW)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        if (Cfg.Measure(text, size, 1f).X <= maxW) return text;
+        // C5 THE HARD EDGES — DEFECT: the WRAPPER and the CLIPPER disagreed by less than a pixel,
+        // and the player paid three characters for it. WrapText decides a line fits with
+        // `(int)Measure(...) > maxW` — the int cast lets up to a pixel of overflow through — while
+        // this used to decide with the raw float. So a 224.7px string in a 224px column was ONE
+        // line to FitWrap (which therefore stopped shrinking) and TOO WIDE to Clip (which then ate
+        // the tail): the WAR ROOM painted "Win a run with no soldier l…" at the 110% text size,
+        // and VOICETEST could not see it because its assertion goes through WrapCount — the same
+        // int-cast path that called the string fine. Both now ask the width question the same way.
+        if ((int)Cfg.Measure(text, size, 1f).X <= maxW) return text;
+        if (ClipProbe != null) ClipProbe(text, size, maxW);
         while (text.Length > 1 && Cfg.Measure(text + "…", size, 1f).X > maxW)
             text = text.Substring(0, text.Length - 1);
         return text + "…";
@@ -1549,6 +1598,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int lw = (int)Cfg.Measure(label, fs, 1f).X;
         int startX = (int)r.X + iconZone;
         int ty     = (int)(r.Y + r.Height / 2 - fs / 2);
+        // C5: the action bar's plates are SIZED to this content (W10) — so if a label plus its
+        // key badge ever leaves the plate, the sizing rule and the drawing rule have drifted.
+        int kwid = string.IsNullOrEmpty(key) ? 0 : 8 + (int)Cfg.Measure(key, 12, 1f).X + 6;
+        Plate(label, r, new Vector2(startX, ty), new Vector2(lw + kwid, Cfg.Measure(label, fs, 1f).Y));
         Cfg.Text(label, new Vector2(startX, ty), fs, 1f, Raylib.Fade(tc, a));
         if (!string.IsNullOrEmpty(key))
         {
@@ -2399,7 +2452,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawIntro(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
+        float t = (float)Now();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
 
         int W = Cfg.ScreenW, H = Cfg.ScreenH;
 
@@ -2593,7 +2646,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// spent this wave punching the board's bloom through its own opaque screen).
     public static void DrawBackdropLayer(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         switch (g.Phase)
         {
             case Phase.Intro:
@@ -2778,7 +2831,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawEndScreen(Game g, bool win)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         Color accent = win ? Pal.Good : Pal.Foe;
         // backdrop + win/lose colour wash drawn by DrawBackdropLayer (post-FX pass)
 
@@ -3048,7 +3101,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawSkirmishSetup(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
+        float t = (float)Now();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
         int W = Cfg.ScreenW;
 
         // title
@@ -3132,7 +3185,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawWarRoom(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
+        float t = (float)Now();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
         var p = g.WarRoom;
         if (p == null) return;
 
@@ -3237,7 +3290,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawCodex(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
+        float t = (float)Now();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
         CodexTabBtns.Clear();
 
         var cats = g.CodexCats;
@@ -4345,7 +4398,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         DraftBoonBtns.Clear();
         DraftContractBtns.Clear();
 
-        float t = (float)Raylib.GetTime();   // backdrop + dim wash drawn by DrawBackdropLayer
+        float t = (float)Now();   // backdrop + dim wash drawn by DrawBackdropLayer
 
         int W = Cfg.ScreenW;
         var mouse = Raylib.GetMousePosition();
@@ -5945,14 +5998,18 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         if (hover) Raylib.DrawRectangleRounded(new Rectangle(rr.X - 3, rr.Y - 3, rr.Width + 6, rr.Height + 6), 0.3f, 8, Raylib.Fade(hi, 0.25f));
         Raylib.DrawRectangleRounded(rr, 0.3f, 8, Raylib.Fade(hover ? hi : baseCol, a));
         var lz = Cfg.Measure(label, 18, 1f);
-        Cfg.Text(label, new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 9)), 18, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
+        var lat = new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 9));
+        Plate(label, r, lat, lz);
+        Cfg.Text(label, lat, 18, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
         if (keyHint != null)
         {
             // right-align the hint inside the button (measured, 6px inset) — the old fixed
             // rr.Width - 30 offset bled multi-char hints ("[Esc]") past narrow buttons' edge.
             string kh = "[" + keyHint + "]";
             float khw = Cfg.Measure(kh, 12, 1f).X;
-            Cfg.Text(kh, new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16)), 12, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
+            var kat = new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16));
+            Plate(kh, r, kat, Cfg.Measure(kh, 12, 1f));
+            Cfg.Text(kh, kat, 12, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
         }
     }
 
@@ -5969,14 +6026,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleRounded(rr, 0.3f, 8, Raylib.Fade(Pal.RGBA(13, 19, 27), 0.88f * a));
         Raylib.DrawRectangleLinesEx(rr, 1.4f, Raylib.Fade(hover ? Pal.Friend : Pal.PanelBd, a));
         var lz = Cfg.Measure(label, 16, 1f);
-        Cfg.Text(label, new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 8)), 16, 1f,
-            Raylib.Fade(hover ? Pal.Friend : Pal.Txt, a));
+        var lat = new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 8));
+        Plate(label, r, lat, lz);
+        Cfg.Text(label, lat, 16, 1f, Raylib.Fade(hover ? Pal.Friend : Pal.Txt, a));
         if (keyHint != null)
         {
             string kh = "[" + keyHint + "]";
             float khw = Cfg.Measure(kh, 12, 1f).X;
-            Cfg.Text(kh, new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16)), 12, 1f,
-                Raylib.Fade(Pal.TxtDim, 0.8f * a));
+            var kat = new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16));
+            Plate(kh, r, kat, Cfg.Measure(kh, 12, 1f));
+            Cfg.Text(kh, kat, 12, 1f, Raylib.Fade(Pal.TxtDim, 0.8f * a));
         }
     }
 
@@ -6002,6 +6061,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int kw = string.IsNullOrEmpty(key) ? 0 : (int)Cfg.Measure(key, 12, 1f).X + 8;
         int startX = (int)(r.X + r.Width / 2 - (lw + kw) / 2);
         int ty = (int)(r.Y + r.Height / 2 - fs / 2);
+        // C5: the label AND its key badge share one plate — report the whole run, so a label
+        // that fits alone but is shoved out by the badge still reads as a violation.
+        Plate(label, r, new Vector2(startX, ty), new Vector2(lw + kw, Cfg.Measure(label, fs, 1f).Y));
         Cfg.Text(label, new Vector2(startX, ty), fs, 1f, Raylib.Fade(tc, enabled ? 1f : 0.5f));
         if (!string.IsNullOrEmpty(key))
         {
@@ -6015,6 +6077,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     static void CenterText(string text, Rectangle r, int fs, Color c)
     {
         int w = (int)Cfg.Measure(text, fs, 1f).X;
-        Cfg.Text(text, new Vector2((int)(r.X + r.Width / 2 - w / 2), (int)(r.Y + r.Height / 2 - fs / 2)), fs, 1f, c);
+        var at = new Vector2((int)(r.X + r.Width / 2 - w / 2), (int)(r.Y + r.Height / 2 - fs / 2));
+        Plate(text, r, at, Cfg.Measure(text, fs, 1f));
+        Cfg.Text(text, at, fs, 1f, c);
     }
 }

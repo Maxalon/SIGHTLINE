@@ -1174,6 +1174,13 @@ public static class Mission
     // name, silently merging two soldiers' histories. Kept terse/ASCII in the game's codename
     // voice; deliberately avoids every enemy archetype name, the fixed NewRunSquad names and the
     // Nicknames.Pool entries so "KRESS 'VIPER'" style overlaps can't read as two different units.
+    /// C5: the longest callsign the generator can deal — derived from the pool, so a worst-case
+    /// text stress can never be built from a name the game cannot produce.
+    internal static string LongestCallsign
+    {
+        get { string best = ""; foreach (var c in Callsigns) if (c.Length > best.Length) best = c; return best; }
+    }
+
     static readonly string[] Callsigns =
     {
         "HAWK", "ECHO", "RAVEN", "SLATE", "ONYX", "FOX", "WREN", "ASH", "CIPHER", "JINX",

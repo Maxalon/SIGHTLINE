@@ -347,9 +347,20 @@ public static class Program
         // reason CHROMETEST does — raylib's default face is narrower and every overflow vanishes.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FITTEST") == "1")
         {
-            Raylib.InitWindow(64, 64, "fittest");
+            // C5 THE HARD EDGES: leg (F) DRAWS every screen the game can put up, so this needs the
+            // FULL-SIZE window (the layouts are authored against Cfg.ScreenW/H) plus Display and
+            // Audio, exactly like BOARDTEST — the other self-test that runs the shipped draw path.
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fittest");
+            Raylib.SetExitKey(KeyboardKey.Null);
             LoadGameFonts();
+            Display.Init(false);          // post-FX OFF: this leg measures geometry, not bloom
+            Raylib.SetTargetFPS(0);
+            Audio.Init();                 // staging a screen can pop a cue; the device may be absent
             Console.WriteLine(Game.FitSelfTest());
+            Display.Shutdown();
+            Audio.Shutdown();
+            Renderer.UnloadNoise();
             Raylib.CloseWindow();
             return;
         }

@@ -1149,6 +1149,13 @@ public static class StatusDef
 /// A pool of earned nicknames, assigned with a soldier's first feat.
 public static class Nicknames
 {
+    /// C5: the longest nickname in the pool (worst-case text staging derives its identity from
+    /// the generator instead of inventing one).
+    internal static string Longest
+    {
+        get { string best = ""; foreach (var c in Pool) if (c.Length > best.Length) best = c; return best; }
+    }
+
     public static readonly string[] Pool =
     {
         "REAPER", "GHOST", "MAVERICK", "DOC", "ACE", "VIPER", "BULLDOG", "HAWKEYE",
