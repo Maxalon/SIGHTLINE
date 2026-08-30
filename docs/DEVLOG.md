@@ -9320,6 +9320,12 @@ trusting it.
   (h0/b0 and h4/b10), **2750 aggregate fields diffed to EMPTY** on both. The telemetry this wave
   adds — including the extra `ComputeOdds` + `ExpectedDamage` per plan — is gameplay-inert.
 - **48/48 ladder chunks `OK ... runs=20`**, three-layer completion contract on every one.
+- **The ladder binary is the shipped binary.** Three post-ladder tidies landed (comment
+  corrections, a redundant local in `ComputeOdds`, and the gate reusing the odds it had already
+  computed instead of calling `OddsFrom` twice). All three are provably behaviour-neutral, but
+  "provably" is the word this project asks you to check: two ladder chunks — one per ARM
+  (`L-DECL-h2-b0`, `L-BASE-h4-b10`) — were re-run on the final binary and diff **EMPTY** against
+  their archived JSON outside the `harness` block. Archived as `POST-*`.
 
 ## 9. WHAT I DID NOT DO, AND WHAT IT COSTS
 

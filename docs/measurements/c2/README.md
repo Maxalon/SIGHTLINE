@@ -17,6 +17,9 @@
 | `CAL-*.` | the calibration chunks. `CAL-diag` is the **maximal-decline diagnostic** — the one that priced the lane. |
 | `R0diag-*` | logic-identity: the base-commit binary vs this tree with `AIDECLINE=0`, two slot sets. |
 | `L-{BASE,DECL}-h*-b*.*` | the ladder chunks. |
+| `POST-*` | one ladder chunk per ARM re-run on the FINAL binary after three behaviour-neutral tidies; both diff empty against their archived `L-*` JSON outside `harness`, which is the proof the ladder binary is the shipped binary. |
+| `paired.py` | McNemar over the identical slot seeds — the honest test for a CRN round, since the two arms play the same worlds. |
+| `qa-sweep-full.txt` | the pre-merge gate on the final tree. `qa-sweep-full.interim.txt` is an earlier full sweep DISCARDED because comment-only edits landed mid-run and `run()` rebuilds per test, so it spanned two binaries. |
 | `shots/` | the two staged frames (`SIGHTLINE_DECLINESHOT`), flag on and off. |
 | `ladder.progress.prelim.txt` | a first 48-chunk pass on an interim binary, kept for provenance. **The round of record is `ladder.progress.txt`**, run on the final binary. |
 
