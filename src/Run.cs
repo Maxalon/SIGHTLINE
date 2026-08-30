@@ -1594,8 +1594,8 @@ public class Run
         u.Perks.Add(p);
         switch (p)
         {
-            case Perk.Tank: u.MaxHp += 3; u.Hp += 3; break;
-            case Perk.Sprinter: u.Mobility += 1; break;
+            case Perk.Tank: u.MaxHp += Unit.TankHp; u.Hp += Unit.TankHp; break;
+            case Perk.Sprinter: u.Mobility += Unit.SprinterMob; break;
             // the rest are passive modifiers read at combat/refill time
         }
     }

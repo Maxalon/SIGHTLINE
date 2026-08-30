@@ -5613,6 +5613,219 @@ public partial class Game
 
 
 
+
+    // ─── C5 THE HARD EDGES — THE PERK CARD'S NUMBERS, MEASURED (a TRUTHTEST leg) ───────────────
+    /// W9's finding was that the shot tooltip's numbers were a transcription of what the resolver
+    /// was SUPPOSED to do. The PERK CHOOSER is the same shape one screen over: fourteen
+    /// "before > after" lines the player picks a permanent upgrade from, every number typed by
+    /// hand beside the resolver's constant. They agreed. Nothing bound them, and nothing would
+    /// have said so — the card is the only place in the game those numbers appear, so a retune of
+    /// `Unit.PerkAim` would have left fourteen cards quietly lying.
+    ///
+    /// This leg DRAWS the real chooser, captures the line it PAINTS (`Cfg.CaptureText`, the same
+    /// seam TooltipTruthFails uses), and compares the numbers in it against a MEASUREMENT taken
+    /// through the shipped code path for that perk:
+    ///   * TANK / SPRINTER  — `Run.ApplyPerk` on a real soldier: the stat afterwards IS the claim.
+    ///   * BANDOLIER        — a real mission setup, which is where grenades are refilled.
+    ///   * the aim perks    — `Combat.ComputeOdds` in the stated condition, minus the same shot
+    ///                        without the perk.
+    ///   * the crit perks   — the same, on `CritChance`.
+    ///   * HARDENED/BULWARK — `Combat.HardenedReduce`, the one source of truth for damage taken.
+    ///   * COOLHEADED       — the attacker's hit% against a defender who has it.
+    /// A perk with no painted line and no measurable claim is fine; a perk with a line whose
+    /// numbers do not match the measurement is a lie on the card.
+    public string PerkCardTruthFails()
+    {
+        var fails = new List<string>();
+        var grid = new Grid();   // a fresh Grid is all floor at height 0 (see Grid())
+
+        Unit Soldier(int aim = 60, int x = 3, int y = 5)
+            => new Unit { Name = "PROBE", Cls = "ASSAULT", Team = Team.Player, Aim = aim, Mobility = 7,
+                          Hp = 10, MaxHp = 10, Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true, X = x, Y = y };
+        Unit Foe(int x, int y, int hp = 10, int maxHp = 10)
+            => new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, Aim = 60, Mobility = 6,
+                          Hp = hp, MaxHp = maxHp, Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true, X = x, Y = y };
+
+        /// hit% delta a perk buys the ATTACKER on this exact shot.
+        int AimDelta(Perk p, Unit a, Unit d)
+        {
+            int plain = Combat.ComputeOdds(grid, a, d).HitChance;
+            a.Perks.Add(p);
+            int perked = Combat.ComputeOdds(grid, a, d).HitChance;
+            a.Perks.Remove(p);
+            return perked - plain;
+        }
+        int CritDelta(Perk p, Unit a, Unit d, bool highGround = false)
+        {
+            if (highGround) { grid.Height[a.X, a.Y] = 2; }
+            int plain = Combat.ComputeOdds(grid, a, d).CritChance;
+            a.Perks.Add(p);
+            int perked = Combat.ComputeOdds(grid, a, d).CritChance;
+            a.Perks.Remove(p);
+            if (highGround) grid.Height[a.X, a.Y] = 0;
+            return perked - plain;
+        }
+
+        // THE MEASUREMENTS. Each entry answers "what does the shipped code actually do?" as a
+        // function of the soldier the card is offered to — never as a literal.
+        //   stat  : the value the perk changes, before -> after, through Run.ApplyPerk
+        //   delta : the aim/crit/damage swing ComputeOdds or HardenedReduce actually produces
+        //   gate  : the RANGE at which a range-gated perk stops applying, found by scanning
+        var deltas = new Dictionary<Perk, List<int>>();
+
+        // -- aim perks: measure the swing AND, for the range-gated pair, the gate itself ---------
+        {
+            var a = Soldier(); var d = Foe(a.X + 2, a.Y);
+            int cq = AimDelta(Perk.CloseQuarters, a, d);
+            // the gate: the largest distance at which CLOSE QUARTERS still fires
+            int cqGate = 0;
+            for (int dist = 1; dist <= 10; dist++)
+            {
+                var dd = Foe(a.X + dist, a.Y);
+                if (AimDelta(Perk.CloseQuarters, a, dd) > 0) cqGate = dist;
+            }
+            deltas[Perk.CloseQuarters] = new List<int> { cq, cqGate };
+
+            var a2 = Soldier(); int mk = 0, mkGate = 99;
+            for (int dist = 1; dist <= 12; dist++)
+            {
+                var dd = Foe(a2.X + dist, a2.Y);
+                int sw = AimDelta(Perk.Marksman, a2, dd);
+                if (sw > 0 && dist < mkGate) { mkGate = dist; mk = sw; }
+            }
+            deltas[Perk.Marksman] = new List<int> { mk, mkGate };
+
+            var a3 = Soldier(); var d3 = Foe(a3.X + 3, a3.Y); d3.Hunkered = true;
+            deltas[Perk.Siegebreaker] = new List<int> { AimDelta(Perk.Siegebreaker, a3, d3) };
+
+            // LOCK-ON fires on FLANKED, and the shared predicate is the same one W9 bound the
+            // tooltip badge to.
+            var a4 = Soldier(); a4.Perks.Add(Perk.LockOn);
+            deltas[Perk.LockOn] = new List<int> { Combat.LockOnAim(a4, flanked: true) };
+        }
+        // -- crit perks --------------------------------------------------------------------------
+        {
+            var a = Soldier();
+            deltas[Perk.Executioner] = new List<int> { CritDelta(Perk.Executioner, a, Foe(a.X + 3, a.Y, hp: 3)) };
+            deltas[Perk.GiantSlayer] = new List<int> { CritDelta(Perk.GiantSlayer, a, Foe(a.X + 3, a.Y)) };
+            deltas[Perk.Vantage] = new List<int> { CritDelta(Perk.Vantage, a, Foe(a.X + 3, a.Y), highGround: true) };
+            var ds = Foe(a.X + 3, a.Y); ds.Suppress = 1;
+            deltas[Perk.Breaker] = new List<int> { CritDelta(Perk.Breaker, a, ds) };
+        }
+        // -- damage-taken perks, through the ONE reduction path ----------------------------------
+        {
+            var d = Soldier();
+            int plain = Combat.HardenedReduce(d, 9, crit: false, telegraph: false);
+            d.Perks.Add(Perk.Hardened);
+            int flat = plain - Combat.HardenedReduce(d, 9, crit: false, telegraph: false);
+            int onCrit = plain - Combat.HardenedReduce(d, 9, crit: true, telegraph: false);
+            d.Perks.Remove(Perk.Hardened);
+            deltas[Perk.Hardened] = new List<int> { flat, onCrit };
+
+            var b = Soldier();                                    // full HP => Bulwark active
+            int bPlain = Combat.HardenedReduce(b, 9, crit: false, telegraph: false);
+            b.Perks.Add(Perk.Bulwark);
+            deltas[Perk.Bulwark] = new List<int> { bPlain - Combat.HardenedReduce(b, 9, crit: false, telegraph: false) };
+        }
+        {
+            var atk = Foe(3, 5); var def = Soldier(60, 6, 5);
+            int plain = Combat.ComputeOdds(grid, atk, def).HitChance;
+            def.Perks.Add(Perk.CoolHeaded);
+            deltas[Perk.CoolHeaded] = new List<int> { plain - Combat.ComputeOdds(grid, atk, def).HitChance };
+        }
+        // -- the two STAT BUMPS, through the real applier ----------------------------------------
+        {
+            var u = Soldier(); int hp0 = u.MaxHp; Run.ApplyPerk(u, Perk.Tank);
+            deltas[Perk.Tank] = new List<int> { u.MaxHp - hp0 };
+            var v = Soldier(); int mob0 = v.Mobility; Run.ApplyPerk(v, Perk.Sprinter);
+            deltas[Perk.Sprinter] = new List<int> { v.Mobility - mob0 };
+        }
+        // -- BANDOLIER through the path that actually hands out grenades: a real mission ---------
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            var s = g.Players.FirstOrDefault(u => u != null && !u.IsVip);
+            if (s == null) fails.Add("noSoldierForBandolier");
+            else
+            {
+                int before = s.Grenades;
+                s.Perks.Add(Perk.Bandolier);
+                g.DebugResetupMission();
+                var s2 = g.Players.FirstOrDefault(u => u != null && u.Name == s.Name);
+                if (s2 == null) fails.Add("bandolierSoldierVanished");
+                else deltas[Perk.Bandolier] = new List<int> { s2.Grenades - before };
+            }
+        }
+
+        // ---- now READ THE CARD, for real -------------------------------------------------------
+        // TWO assertions per perk, and they are different assertions:
+        //   (i)  the chooser PAINTS the string its own formatter returns — the observation binding
+        //        W9's review demanded (a test that only checks the formatter proves nothing about
+        //        the panel);
+        //   (ii) the numbers IN that string are the ones the measurement above produced.
+        foreach (var kv in deltas)
+        {
+            var perk = kv.Key;
+            var swing = kv.Value;
+            var cap = new List<(string text, float size)>();
+            Unit who;
+            var g2 = new Game { NoPersist = true };
+            who = g2.DebugStagePerkOffer(perk);
+            if (who == null) { fails.Add("noOfferedSoldier:" + perk); continue; }
+            string formatted = Hud.PerkDeltaLineForTest(who, perk);
+            if (string.IsNullOrEmpty(formatted)) { fails.Add("noDeltaLineForOfferedPerk:" + perk); continue; }
+            try
+            {
+                Cfg.CaptureText = cap;
+                Raylib.BeginDrawing();
+                g2.DrawHudLayer();
+                Raylib.EndDrawing();
+            }
+            finally { Cfg.CaptureText = null; }
+
+            if (!cap.Any(c => c.text == formatted))
+                fails.Add($"perkCardDidNotPaintItsOwnLine:{perk}:'{formatted}'");
+
+            var got = System.Text.RegularExpressions.Regex.Matches(formatted, @"\d+")
+                .Select(m => int.Parse(m.Value)).ToList();
+            // The claim the line makes, rebuilt from the OFFERED soldier and the MEASURED swing.
+            var want = new List<int>();
+            switch (perk)
+            {
+                case Perk.Tank: want.Add(who.MaxHp); want.Add(who.MaxHp + swing[0]); break;
+                case Perk.Sprinter: want.Add(who.Mobility); want.Add(who.Mobility + swing[0]); break;
+                case Perk.LockOn:
+                case Perk.Siegebreaker: want.Add(who.Aim); want.Add(who.Aim + swing[0]); break;
+                case Perk.CloseQuarters:
+                case Perk.Marksman: want.Add(who.Aim); want.Add(who.Aim + swing[0]); want.Add(swing[1]); break;
+                case Perk.Bandolier: want.Add(1 + who.BonusGrenades); want.Add(1 + who.BonusGrenades + swing[0]); break;
+                case Perk.Hardened: want.Add(swing[0]); want.Add(swing[1]); break;
+                default: want.Add(swing[0]); break;
+            }
+            foreach (int n in want)
+                if (!got.Contains(n))
+                    fails.Add($"perkCardLies:{perk}:'{formatted}' has no {n} (measured {string.Join("/", want)})");
+        }
+
+        return fails.Count == 0 ? "" : string.Join(",", fails.Distinct());
+    }
+
+    /// Harness: stage the barracks PERK CHOOSER on a real run with `p` as the left offer and a
+    /// no-delta perk on the right, so exactly one delta line is painted.
+    public Unit DebugStagePerkOffer(Perk p)
+    {
+        if (_run == null || _run.Squad == null || _run.Squad.Count == 0) { _run = new Run(); _run.Start(); }
+        _shopDone = true;
+        _run.PendingSpecs.Clear();
+        _run.BoonOffer.Clear();
+        _run.PendingPerks.Clear();
+        var who = _run.Squad.FirstOrDefault(u => u != null && !u.IsVip) ?? _run.Squad[0];
+        who.Perks.Remove(p);
+        _run.PendingPerks.Add(new PerkOffer { Unit = who, A = p, B = Perk.Reflexes });
+        Phase = Phase.Barracks;
+        return who;
+    }
+
     // ─── C5 THE HARD EDGES — SIGHTLINE_SAVEEDGETEST: THE HOSTILE SAVE ─────────────────────────
     /// W9 asked "what does a hand-edited meta.json do to the game?" and found three shapes that
     /// each killed a screen outright. It never asked the same question of `save.json`, whose guard

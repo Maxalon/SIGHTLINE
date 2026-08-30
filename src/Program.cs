@@ -391,17 +391,25 @@ public static class Program
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "sightline-truthtest");
             Raylib.SetExitKey(KeyboardKey.Null);
             Cfg.Font = Raylib.GetFontDefault();
+            LoadGameFonts();      // C5: the perk-card leg reads PAINTED strings; the default face
+                                  // measures narrower and its own draw path must be the real one.
             string mathFails = Combat.TruthFails();
             string uiFails = new Game().TooltipTruthFails();
+            // C5: the PERK CHOOSER's fourteen "before > after" lines, measured against the shipped
+            // code path for each perk rather than re-derived from the constants they print.
+            string perkFails = new Game().PerkCardTruthFails();
             Raylib.CloseWindow();
-            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails }, x => !string.IsNullOrEmpty(x)));
+            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails, perkFails }, x => !string.IsNullOrEmpty(x)));
             Console.WriteLine(all.Length == 0
                 ? "TRUTHTEST: PASS (UI-OBSERVED: the tooltip's PAINTED DMG row equals the damage Resolve "
                   + "deals to that same defender on a plain foe AND a guarded HVT, moves when the defender "
                   + "does, and agrees with the GRAZE row beneath it; the PAINTED LOCK-ON badge appears iff "
                   + "the perk moved the hit% and shows that exact delta; no tooltip string is painted below "
                   + "12px. MATH: the raw band stays raw for ExpectedDamage/threat; armor moves the shown "
-                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs)"
+                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs. "
+                  + "PERK CARD (C5): every painted before>after line agrees with the shipped path that "
+                  + "grants it — ApplyPerk for the stat bumps, a real mission refill for BANDOLIER, "
+                  + "ComputeOdds for the aim/crit perks, HardenedReduce for the damage cuts)"
                 : "TRUTHTEST: FAIL (" + all + ")");
             return;
         }

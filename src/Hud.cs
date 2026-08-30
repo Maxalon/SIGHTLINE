@@ -5645,24 +5645,35 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// Only OFFERED perks (PerkDef.All) get an arm — the retired crit cluster (Deadeye /
     /// Opportunist / PointBlank / Vanguard) is no longer read by ComputeOdds, so it must never
     /// show an authoritative-looking number if some future change re-offers it.
+    /// C5 THE HARD EDGES: every number below now comes from the CONSTANT the resolver reads, not
+    /// from a literal typed next to it. They agreed when this line was written and nothing bound
+    /// them: a wave retuning `Unit.PerkAim` to 12 would have left fourteen cards promising +15,
+    /// which is the displayed-hit%-was-not-the-hit-probability class of defect one layer up.
+    /// TRUTHTEST's perk-card leg then MEASURES the painted line against the resolver, so the
+    /// binding is asserted rather than merely intended.
     static string PerkDeltaLine(Unit u, Perk p) => p switch
     {
-        Perk.Tank => $"HP {u.MaxHp} > {u.MaxHp + 3}",
-        Perk.Sprinter => $"MOB {u.Mobility} > {u.Mobility + 1}",
-        Perk.LockOn => $"AIM {u.Aim} > {u.Aim + 15} vs flanked",   // review fix: fires on FLANKED, not merely exposed
-        Perk.CloseQuarters => $"AIM {u.Aim} > {u.Aim + 15} inside 4 tiles",
-        Perk.Marksman => $"AIM {u.Aim} > {u.Aim + 15} at 7+ tiles",
-        Perk.Siegebreaker => $"AIM {u.Aim} > {u.Aim + 15} vs hunkered",
-        Perk.Bandolier => $"GRENADES {1 + u.BonusGrenades} > {2 + u.BonusGrenades} / mission",
-        Perk.Executioner => "CRIT +25 vs sub-half-HP",
-        Perk.GiantSlayer => "CRIT +15 vs full-HP",
-        Perk.Vantage => "CRIT +15 from high ground",
-        Perk.Breaker => "CRIT +20 vs suppressed / pinned",
-        Perk.Hardened => "DMG TAKEN -1  (crits -4)",
-        Perk.Bulwark => "DMG TAKEN -2 at half HP or above",
-        Perk.CoolHeaded => "ENEMY AIM -8 against you",
+        Perk.Tank => $"HP {u.MaxHp} > {u.MaxHp + Unit.TankHp}",
+        Perk.Sprinter => $"MOB {u.Mobility} > {u.Mobility + Unit.SprinterMob}",
+        Perk.LockOn => $"AIM {u.Aim} > {u.Aim + Unit.PerkAim} vs flanked",   // review fix: fires on FLANKED, not merely exposed
+        Perk.CloseQuarters => $"AIM {u.Aim} > {u.Aim + Unit.PerkAim} inside {Unit.CloseRange} tiles",
+        Perk.Marksman => $"AIM {u.Aim} > {u.Aim + Unit.PerkAim} at {Unit.LongRange}+ tiles",
+        Perk.Siegebreaker => $"AIM {u.Aim} > {u.Aim + Unit.SiegebreakerAim} vs hunkered",
+        Perk.Bandolier => $"GRENADES {1 + u.BonusGrenades} > {1 + u.BonusGrenades + 1} / mission",
+        Perk.Executioner => $"CRIT +{Unit.ExecutionerCrit} vs sub-half-HP",
+        Perk.GiantSlayer => $"CRIT +{Unit.FirstStrikeCrit} vs full-HP",
+        Perk.Vantage => $"CRIT +{Unit.VantageCrit} from high ground",
+        Perk.Breaker => $"CRIT +{Unit.BreakerCrit} vs suppressed / pinned",
+        Perk.Hardened => $"DMG TAKEN -{Unit.HardenedFlat}  (crits -{Unit.HardenedFlat + Unit.HardenedCrit})",
+        Perk.Bulwark => $"DMG TAKEN -{Unit.BulwarkFlat} at half HP or above",
+        Perk.CoolHeaded => $"ENEMY AIM -{Unit.CoolHeadedEvade} against you",
         _ => null,
     };
+
+    /// Harness seam: the perk card's delta line, so TRUTHTEST can compare the PAINTED string
+    /// against a MEASUREMENT rather than re-deriving it. (The test reads the painted string; this
+    /// exists so a missing line can be told apart from a perk that has none by design.)
+    public static string PerkDeltaLineForTest(Unit u, Perk p) => PerkDeltaLine(u, p);
 
     /// W2 CLASS SPECIALIZATION FORK chooser (a one-time pick at Corporal). Near-copy of DrawPerkChooser:
     /// a framed card, the soldier dossier, and two fork cards (Name + flavour + word-wrapped mechanics).

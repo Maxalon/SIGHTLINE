@@ -2131,15 +2131,53 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
 ### Standing gaps, honestly declared
 
-- [ ] **W10's text-scale gate covers five surfaces, not the game.** Every other screen is still
-      asserted at 100% only. `FITTEST` is written so a sixth leg is an addition, not a rewrite.
-- [ ] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post.
-      W3's premise (overwatch as a real enemy choice) is therefore unexercised.
+- [x] **CLOSED by C5 "THE HARD EDGES" — W10's text-scale gate now covers the game.** `FITTEST`
+      leg (F) stages **40 screens**, DRAWS each at all four shipped text sizes, and reads the
+      geometry back from the draw calls (`Cfg.InkProbe` / `Hud.PlateProbe` / `Hud.ClipProbe` /
+      `Hud.FloorProbe`) rather than re-deriving layouts in the test. Asserts plate containment, no
+      ink off canvas, **no ellipsis**, the type floor, and that each screen drew its own frame.
+      FITTEST also gained **THE SCOPE GUARD** (rule 6, made mechanical): it counts assertions per
+      leg per scale and fails by name on any leg that did not run at every scale — 13,898
+      assertions over 45 legs today.
+- [ ] **The enemy OVERWATCH branch is effectively dead — and C5 corrected the number while
+      building the test for it.** Measured on the composed tree over **8083 enemy acts**: overwatch
+      fires **8 times, 0.10%** — not zero, but once per thousand acts, which is a verb no player
+      will see. The CAUSE is still open and belongs to C2/W3. What C5 added is
+      `SIGHTLINE_AICOVTEST`, the enemy DECISION CENSUS: every branch of the enemy exec chain tags
+      itself, the gate is a RATE (once per 1000 acts, because a zero gate would not have caught
+      this), and the effectively-dead branches are a declared registry that fails by name when an
+      UNDECLARED branch goes quiet.
 - [ ] **W3 THE OPPONENT CHOOSES was never started.** `Ai.cs` still scores any shot at
       `100 + bestHit` against terrain terms bounded under ~64, so the opponent now always ACTS but
       still never DECLINES. That is the single biggest remaining gap in the fight.
 - [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
       still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
-- [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
-      guard covers the player turn only.
+- [x] **CLOSED by C5 — the enemy turn has a deadlock guard.** `Game.EnemyStallGuard` runs from
+      `Update` BEFORE the animation pump (a guard inside `UpdateEnemy` is structurally blind to an
+      animation that never completes, because `Update` returns before the phase switch while the
+      queue is non-empty). After 480 updates with nothing moving it prints the unit, class, stage,
+      planner branch, queue head, turn and mission, then forfeits the stalled unit so the turn
+      ends. It runs in REAL PLAY, not only in autoplay. `SIGHTLINE_ENEMYSTALLTEST` wedges a real
+      enemy turn to prove all of it, including the leg that makes the rest mean something: the same
+      wedge with the guard off still hangs.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.
+
+### Left open by C5 "THE HARD EDGES" (found, reproduced, deliberately not fixed)
+
+- [ ] **The 12px small-text floor is not met at the DEFAULT text size.** Measured at 100%: 10px on
+      the AUDIO CHECK screen and 11px on seventeen others (in-mission HUD, end cards, WAR ROOM,
+      EVENT card). Repro: `SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small` lists every string with its
+      authored and rendered size. Meeting the rule is a re-layout of half the chrome, so C5 shipped
+      a regression BOUND at the measured worst (9px, which is what the tightest shipped fitter
+      declares as its own minimum) and the survey. The next wave that wants the rule starts here.
+- [ ] **Six shrink-to-fit calls reach their floor at 120%** (three WAR ROOM achievement
+      descriptions, one shop body, one prep body). Nothing is lost yet; they are one authored
+      character from losing a word. Counted in FITTEST's PASS line on every run.
+- [ ] **The pause card is unreachable outside a mission.** `Update`'s Escape handler is gated on
+      `PlayerTurn || EnemyTurn`, so QUIT TO DESKTOP and every comfort setting (text size, anim
+      speed, volume, colourblind) cannot be opened from the BARRACKS, DRAFT, WAR ROOM, CODEX or
+      AUDIO CHECK. Each of those screens has its own exit, so it is not a trap — it is W5's "the
+      two ways OUT" wave stopping at the mission phases.
+- [ ] **`terminal-reload` fired 0 times in 8083 enemy acts.** That is a BACKSTOP working as
+      designed (the planner's own reload branch gets there first), not a hole — recorded so the
+      next reader does not re-discover it as a defect.

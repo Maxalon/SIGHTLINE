@@ -647,6 +647,10 @@ public class Unit
 
     // perk magnitudes (kept here so Combat/Mission/Hud read one source)
     public const int PerkAim = 15;       // LockOn / CloseQuarters / Marksman
+    // C5: the two STAT-BUMP perks. Run.ApplyPerk applied literals and Hud printed literals; the
+    // two agreed by hand. Named here so the applier and the card read the same number.
+    public const int TankHp = 3;         // Tank: +MaxHp (and +Hp, so the bump is immediate)
+    public const int SprinterMob = 1;    // Sprinter: +Mobility
     public const int CloseRange = 4;     // CloseQuarters threshold (tiles)
     public const int LongRange = 7;      // Marksman threshold (tiles)
     // Executioner: FINISHER crit vs targets already below half HP. Set higher than Deadeye's
