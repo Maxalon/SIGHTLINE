@@ -674,6 +674,7 @@ seeds (mix of WIN/LOSE, no exceptions):
   `count = base + missionNum`). `Mission.HostileToughness` / `HostileDamageTrim` became static
   fields pinnable from `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM`, so one binary serves every round.
 
+<<<<<<< HEAD
 ## PROGRAM RESONANCE — WAVE W4 "THE BOARD BECOMES A PLACE" (the board stops being a texture)
 
 Rendering only; provably gameplay-inert (`PAIRTEST` byte-identical + a pinned-slot balance chunk
@@ -722,3 +723,74 @@ field-for-field identical to the branch point). Details + every number in `docs/
   `SIGHTLINE_MOVEDASH=1`, `SIGHTLINE_COVERSEED=0` (re-derive the volume identity every frame — the
   pre-review behaviour), `SIGHTLINE_COVER=1 [+SIGHTLINE_COVERKILL=1]` (the cover-destruction A/B),
   `SIGHTLINE_MARKERS=1` (the occluded awareness-marker cases).
+=======
+## PROGRAM RESONANCE — WAVE W5 "THE FIRST HOUR AND THE FRONT DOOR"
+
+Six things a first-time player meets and the bot never can. **Balance-inert:** `PAIRTEST`
+byte-identical, and a pinned-slot `SIGHTLINE_BALANCE=5` JSON field-for-field identical to the
+branch point.
+
+- **The mission-1 briefing is a PRE-FIGHT BEAT.** On a first-ever campaign run the briefing card
+  could not draw at all — `BriefAllowed` requires `TutorialText == null`, the lesson strip armed
+  on the same frame the card composed, and `UpdateBriefing` destroys the card the instant
+  `Stats.CombatLog` fills. Measured at **0.00 s of 11 s**. The strip now arms PENDING
+  (`Game.TutPending`) and opens the frame the card retires; verb staging counts the pending state
+  so the action bar does not flicker whole-then-staged. `TutStepFire` gained the turn-count
+  patience fallback (9) its three siblings already had.
+  (`SIGHTLINE_BRIEFTEST` — the one self-test that drives the LIVE persisting path;
+  `SIGHTLINE_BRIEFFIRST=0` restores the old order; `SIGHTLINE_FIRSTRUN=1` arms the strip under
+  the screenshot harness so a first-ever mission 1 can be photographed.)
+- **The HUD is out of the BLOOM.** `Display.RenderFrame(board, hud)` renders the board, the
+  death-flash and the overlay screens' animated backdrop (`Hud.DrawBackdropLayer`, split out of
+  the six screen builders) into `_target`, runs `BuildBloom` on **that**, and only then paints the
+  chrome into the same target — so no plate can flood its own label, while brightness, gamma, the
+  biome grade and the vignette stay uniform across the whole frame. `Hud.BackdropOwnsFrame` skips
+  the in-mission chrome on the **eight** screens with an opaque backdrop — Intro, Win, Lose,
+  Skirmish setup, War Room, Codex, Draft and **AUDIO CHECK**, which W5 missed and W5-FIX added
+  (it drew its own backdrop from the chrome pass, so the composite added the live board's glow
+  straight through it: 17,010 px brightened >20 luma against a `d350416` build, now 0).
+  Main-menu TRAINING OP:
+  **2.19:1 → 10.76:1** glyph-vs-plate with post-FX ON. (`SIGHTLINE_CONTRASTTEST` boots a real
+  1280x800 window and reads the framebuffer back; `SIGHTLINE_HUDINFX=1` puts the chrome back in
+  the bloom source and turns it red.)
+- **Both end cards have a third door.** **WAR ROOM [W]** (`Hud.EndWarRoomBtn`, its own rect so a
+  stale end-card rect can never alias the intro's LAST STAND), a "spend it in the WAR ROOM" line
+  under the SALVAGE slab, and a **"N JOIN THE RESERVE - recallable at the next draft"** header on
+  SURVIVING SQUAD with each survivor's `MetaProg.RecallCost`. `Game.EndReserve` is the DELTA of
+  `SaveGame.VeteranCount()` across the award, so the card can never over-claim.
+- **QUIT TO DESKTOP.** `[Q]` on the pause card (arm-then-confirm, with "the current mission
+  restarts from its start") and on the main menu (no confirm). `Game.QuitRequested` breaks the
+  frame loop; the path writes nothing, deletes nothing and leaves the mission-start checkpoint and
+  `meta.json` untouched. The mid-mission-checkpoint question is answered on the record in
+  `docs/DESIGN.md` §5.1 (deferred, with the argument and the revisit conditions).
+  (`SIGHTLINE_QUITTEST`.)
+- **RECRUIT is the DEFAULT on a never-played profile.** `Game.FirstTimeProfile` (from
+  `SaveGame.LoadRunTotals`) dials the intro to rung −1 and rewrites level 0's hint; "< RECRUIT"
+  names the rung below zero on every profile. A default, not a rung — no measured heat number
+  moves, and the harness sets heat explicitly under `NoPersist`.
+- **A fixed-slot action bar with one backing plate.** Verbs whose PRESENCE can change between two
+  turns of one mission (BEACON, STABILIZE, SHOW ALL) live at the tail, where the greedy
+  bottom-row-first wrap means appending cannot move anything already placed; the ability slot
+  reserves its " (N)" cooldown suffix. A single quiet plate under the whole bar.
+- **The CONCEALED pill breathes 0.56–1.00** instead of 0.10–1.00 (`Hud.ConcealPulse`, read by both
+  the renderer and the test).
+- **Doctrine cards size to their content** (`Hud.DraftBoonCardHeight`) and the operator blurb's row
+  clears the class-glyph disc. The whole draft screen is laid out by **one** clamped stack
+  (`Hud.DraftLayout`), which reclaims a taller card's height from the gaps rather than pushing the
+  DEPLOY row off the bottom, and the doctrine row spans the same width as the RUN CONTRACT row
+  beneath it. `[R]` re-rolls the pool. (`SIGHTLINE_CHROMETEST` covers all three chrome items and
+  asserts the DEPLOY row is on screen for all 16 boons × all 4 text sizes;
+  `SIGHTLINE_OLDCHROME=1` restores the pre-W5 chrome and turns it red.)
+- **One registry owns the full-screen backdrops** (`Hud.BackdropPhase` + `Hud.DrawBackdropLayer`'s
+  switch — every `DrawTacticalBackdrop` call in the project lives in that switch).
+  `SIGHTLINE_BACKDROPTEST` drives every `Phase` through the chrome pass and fails if any screen
+  builder paints a backdrop of its own, then checks the registry and the switch are the same set,
+  then that the modal scrim doubles only where the composite runs. (`SIGHTLINE_AUDBACKDROP=1`
+  restores the AUDIO CHECK defect and turns it red.)
+- **Teaching layer:** both "glowing tile" prompts rewritten to name the CYAN OUTLINE, the corner
+  ticks and the DASHED outer ring; **FIELD CRAFT** gains **SHOVE** and **UTILITY ITEMS** rows (the
+  two verbs whose only explanation was a one-shot 9-second tip); and a new **VERBS & KEYS** codex
+  tab lists 16 verbs with hotkeys plus selection/camera/global bindings — generated from
+  `Hud.VerbTable` + `Hud.VerbHelp`, i.e. the same `ActionDesc` switch the action bar's hover
+  tooltip reads, so help and manual cannot drift. CODEXTEST asserts every verb has a home.
+>>>>>>> wave/first-hour

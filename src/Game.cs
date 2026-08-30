@@ -603,7 +603,12 @@ public partial class Game
         // FUL-12: the opening CONCEALED state was the one core rule the onboarding never named —
         // a new player read the quiet board as "no threat" and walked into the first pod blind.
         "WELCOME, COMMANDER. The squad opens CONCEALED - the enemy pods ahead are dormant and blind to you. Position freely: your first attack from hiding is an AMBUSH (bonus aim + crit), so you choose where the fight starts.",
-        "Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
+        // W5 (audit newplayer-5): this used to point the player at "a glow". Wave V deliberately
+        // replaced the old flood-fill with a thin cyan CONTOUR plus corner ticks the code itself
+        // describes as ~0.6% of a tile's area — measured at a 5/255 modal inner lift, a ~2% luma
+        // change. The visual was right; the copy was never updated with it, so the very first
+        // sentence of instruction in the game pointed at a cue that had been reduced to a whisper.
+        "Click inside the CYAN OUTLINE to MOVE the selected soldier - the corner ticks mark each tile you can reach, and the DASHED outer ring costs both actions. Cover (the raised blocks) shields you from fire: end your move beside one.",
         "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
         "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
         "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Press [K] anytime for the FIELD MANUAL - every enemy, verb and rule lives there. Good hunting.",
@@ -623,10 +628,53 @@ public partial class Game
     };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
 
+    // ── W5 THE FIRST HOUR: the briefing goes FIRST on mission 1 ───────────────────────────────
+    // The defect (audit newplayer-1, pinned by SIGHTLINE_BRIEFTEST): on a FIRST-EVER campaign run
+    // the mission-1 briefing could not draw at all. `BriefAllowed` requires TutorialText == null,
+    // the strip was non-null from the frame SetupMission armed it, and `UpdateBriefing` destroys
+    // the card outright the moment Stats.CombatLog fills — which the strip's own FIRE lesson does.
+    // So the card HELD for the whole strip (never burning its 11 s clock) and was then killed by
+    // the first exchange, or by BriefHoldMax at 45 s. Measured before the fix: 0.00 s of 11 s.
+    //
+    // The repair is ORDERING, not content (DESIGN.md §1.1 caps the narrative frame: this makes an
+    // EXISTING card reachable, it does not write more of it). The board is not yet contested on
+    // turn 1, so the briefing is a genuine PRE-FIGHT beat: arm the strip PENDING, let the card
+    // play, open the strip the frame it retires. Any key or click still dismisses the card, so a
+    // player who wants to move immediately reaches the lesson in one input.
+    //
+    // THIS INVERTS A STATED PRIORITY AND IS RECORDED AS ONE: docs/DESIGN.md §1.2 is the amendment
+    // (§1.1 says the briefing yields to the teaching layers ABSOLUTELY; here, for mission 1 of a
+    // first-ever campaign only, teaching waits up to 11 s behind it). The never-simultaneous
+    // invariant is untouched — read §1.2's limits before widening this to any other mission.
+    bool _tutPending;
+    /// True while the mission-1 lesson strip is armed but yielding to the pre-fight briefing.
+    public bool TutPending => _tutPending;
+    /// Turn at which the FIRE lesson yields anyway. Its three siblings have had a patience
+    /// fallback for waves (CONCEAL 2, MOVE 3, OVERWATCH 6); FIRE was the one lesson whose only
+    /// exit was performing the verb, which is also the action that destroyed the briefing.
+    public const int TutFirePatience = 9;
+    /// Off-switch for the reordering (SIGHTLINE_BRIEFFIRST=0 restores the pre-W5 behaviour), so
+    /// BRIEFTEST is falsifiable without reverting the tree. Default ON.
+    static readonly bool BriefFirst = Environment.GetEnvironmentVariable("SIGHTLINE_BRIEFFIRST") != "0";
+
+    /// Harness seam (SIGHTLINE_FIRSTRUN=1, screenshot only). The NoPersist gate below is EXACTLY
+    /// what hid the W5 defect for ten programs: every SHOT/AUTOPLAY path sets NoPersist, so the
+    /// strip never armed and every mission-1 screenshot ever taken showed the briefing precisely
+    /// because the tutorial was not running. This override arms the strip under NoPersist so a
+    /// frame can show what a FIRST-EVER player actually sees. Disk stays untouched (CompleteTutorial
+    /// keeps its own !NoPersist gate), and it is inert unless the variable is set -> PAIRTEST-safe.
+    static readonly bool FirstRunShot = Environment.GetEnvironmentVariable("SIGHTLINE_FIRSTRUN") == "1";
+
     void StartTutorialMaybe()
     {
-        if (NoPersist || _run.Mission != 1 || Display.TutorialSeen) return;
-        TutStep = 0;
+        if (_run.Mission != 1) return;
+        if (NoPersist ? !FirstRunShot : Display.TutorialSeen) return;
+        // SetupMission calls this BEFORE BeginBriefing, so "will there be a card?" is not knowable
+        // here — arm PENDING and let UpdateTutorial open the strip on the first frame the card is
+        // gone. When no briefing composes (BriefLines stays null) that is the very next tick, so a
+        // non-campaign or briefing-less path is unchanged in everything but one frame of latency.
+        _tutPending = BriefFirst;
+        TutStep = BriefFirst ? -1 : 0;
         _tutMoved = _tutOver = _tutShot = _tutGrenade = _tutAbility = false;
         RevealedVerbs.Clear();
         ApplyReveal(TutReveal[0]);
@@ -636,6 +684,13 @@ public partial class Game
 
     void UpdateTutorial(float dt)
     {
+        if (_tutPending)
+        {
+            if (BriefLines != null) return;      // the pre-fight card still owns the slot
+            _tutPending = false;
+            TutStep = 0;
+            ApplyReveal(TutReveal[0]);
+        }
         if (TutStep < 0) return;
         switch (TutStep)
         {
@@ -651,7 +706,12 @@ public partial class Game
             // never arms a watch would otherwise park here below the reached-FIRE "seen" gate and
             // get the whole onboarding re-offered every future run.
             case TutStepOverwatch: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
-            case TutStepFire: if (_tutShot) AdvanceTutorial(); break;
+            // W5: the patience fallback the other three lessons already had. FIRE was the one step
+            // whose ONLY exit was performing the verb — and performing it wrote the combat-log
+            // entry that destroyed the briefing, so the action that ended the lesson was the same
+            // action that killed the card. A player who wins mission 1 on overwatch reactions
+            // alone (their soldier never takes an aimed shot) used to hold this card all mission.
+            case TutStepFire: if (_tutShot || (BriefFirst && _turnCount >= TutFirePatience)) AdvanceTutorial(); break;
             case TutStepDone: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
     }
@@ -670,6 +730,7 @@ public partial class Game
     public void ShowTutorialStep(int step)
     {
         TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
+        _tutPending = false;   // W5: forcing a step IS opening the strip — drop the pre-fight arm
         if (TutStep == TutStepDone) _tutDoneTimer = 7f;
         RevealedVerbs.Clear();
         for (int i = 0; i <= TutStep && i < TutReveal.Length; i++) ApplyReveal(TutReveal[i]);
@@ -684,6 +745,7 @@ public partial class Game
     void CompleteTutorial()
     {
         TutStep = -1;
+        _tutPending = false;   // W5: a strip that never opened is still finished
         RevealedVerbs.Clear();      // staging ends with the lessons: the full bar is the graduation
         if (!NoPersist) Display.MarkTutorialSeen();
     }
@@ -708,7 +770,9 @@ public partial class Game
     {
         new Lesson { Code = "MOVE", Patience = 3,
             Reveal = new string[0],
-            Text = "TRAINING OP. Two recruits, four dormant targets, no consequences - nothing here touches your campaign. Select a soldier and click a glowing tile to MOVE. Move costs 1 of 2 actions; a far (dashed) tile costs both.",
+            // W5 (audit newplayer-5): same repair as the campaign strip's MOVE card — name the
+            // outline and the corner ticks the board actually draws, not a glow it does not.
+            Text = "TRAINING OP. Two recruits, four dormant targets, no consequences - nothing here touches your campaign. Select a soldier and click inside the CYAN OUTLINE to MOVE; the corner ticks mark each reachable tile. Move costs 1 of 2 actions; a tile in the DASHED outer ring costs both.",
             Done = g => g._tutMoved },
         new Lesson { Code = "COVER", Patience = 4,
             Reveal = new string[0],
@@ -841,8 +905,10 @@ public partial class Game
             if (Mode == GameMode.Training) return TrainStep >= 0 && TrainStep < TrainLessons.Length - 1;
             // Mission 1 only, and only while the callout strip is actually running. TutStepDone is
             // the wrap-up card ("that's the basics") — the bar is whole from there.
+            // W5: _tutPending counts. The strip is armed and about to open; without this the bar
+            // would draw WHOLE for the briefing's 11 s and then visibly collapse to one button.
             return Mode == GameMode.Campaign && _run != null && _run.Mission <= 1
-                   && TutStep >= 0 && TutStep < TutStepDone;
+                   && (_tutPending || (TutStep >= 0 && TutStep < TutStepDone));
         }
     }
 
@@ -1533,6 +1599,11 @@ public partial class Game
         }
         // keyboard: Enter deploys when the draft is complete
         if (DraftReady && Raylib.IsKeyPressed(KeyboardKey.Enter)) ConfirmDraft();
+        // W5-FIX (review blocker 2): [R] re-rolls the pool. RE-ROLL POOL was the one control on
+        // this screen with NO keyboard route, which is why a layout that pushed it off the bottom
+        // made it unreachable rather than merely awkward. R is free in this phase (the draft reads
+        // only Esc and Enter) and is the same mnemonic RELOAD uses in the fight.
+        if (Raylib.IsKeyPressed(KeyboardKey.R)) TryRerollDraftPool();
     }
 
     /// True when exactly DraftCap soldiers and one boon are chosen (CONFIRM/Enter enabled).
@@ -1591,9 +1662,12 @@ public partial class Game
         // at the mode seam too means a future second IsBoss spawn point can't silently turn
         // "once per sighting ceremony" into a stale carry-over across mode entries.
         _bossSighted = false;
+        // W5: the mission-1 strip's PENDING arm is per-run state too — a new mode entry must never
+        // inherit an arm from a run that ended before the briefing retired.
+        _tutPending = false;
         // FUL-12: the end-card meta payoff is per-RUN — a new mode entry must not inherit the
         // previous run's SALVAGE slab / HEAT UNLOCKED line / achievement roll.
-        EndSalvage = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
+        EndSalvage = 0; EndReserve = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
         // Harness affordance (screenshot only, mirrors the SIGHTLINE_HEAT pattern): pre-seed the
         // cause-of-death tally, e.g. SIGHTLINE_DEATHS=SNIPER:2,GRUNT:1 — so the lose-card line can
         // be framed without playing a full losing run. Inert when unset -> plain shots byte-stable.
@@ -1720,12 +1794,33 @@ public partial class Game
     /// exists). The intro heat panel shows it as a FIELD SUPPORT chip — the easing was invisible.
     /// 0 headless (streak never loads under NoPersist), so plain intro shots stay byte-stable.
     public int AssistPreview => PendingHeat > 0 ? 0 : Math.Min(Run.AssistMax, _metaLossStreak);
+
+    // ── W5 THE ON-RAMP (audit newplayer-4) ────────────────────────────────────────────────────
+    /// True when this profile has never finished a run. The intro uses it twice: it DEFAULTS the
+    /// difficulty dial to RECRUIT, and it changes level 0's hint so the rung below is named
+    /// instead of hidden behind an unlabelled "-".
+    ///
+    /// The game already built a proper beginner rung and then defaulted every first-time player
+    /// off it, with copy ("standard difficulty - the designed fight") that framed 0 as the floor.
+    /// The archived X2 ladder (n=40/rung, base a61ef42, docs/measurements/x2/) puts RECRUIT at
+    /// 75.0% run completion against heat 0's 57.5% — a 17.5-point gap, outside the +-6-8 error
+    /// bar. Roughly two in five first campaigns were ending in a loss the on-ramp exists to
+    /// prevent. This moves a DEFAULT, not a rung: every heat number in docs/ is untouched, and
+    /// the measurement harness sets heat explicitly (SIGHTLINE_HEAT / SIGHTLINE_BALANCE_HEAT)
+    /// under NoPersist, which returns from EnsureMetaLoaded before this can be read.
+    public bool FirstTimeProfile;
+
     void EnsureMetaLoaded()
     {
         if (_metaLoaded) return;
         _metaLoaded = true;
         if (NoPersist)
         {
+            // W5: SIGHTLINE_FIRSTRUN=1 (the same flag that arms the mission-1 strip under the
+            // harness) also simulates a NEVER-PLAYED profile here, so the intro's on-ramp default
+            // can be photographed headless. An explicit SIGHTLINE_HEAT below still overrides it.
+            // Inert unless the variable is set -> plain shots and PAIRTEST stay byte-stable.
+            if (FirstRunShot) { FirstTimeProfile = true; PendingHeat = Sightline.Heat.Recruit; }
             // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
             // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
             // a plain shot byte-stable.
@@ -1744,6 +1839,13 @@ public partial class Game
             return;
         }
         UnlockedHeat = SaveGame.LoadMetaHeat();
+        var (metaRuns, _, _) = SaveGame.LoadRunTotals();
+        FirstTimeProfile = metaRuns == 0;
+        // W5 THE ON-RAMP: a profile that has never finished a run opens on RECRUIT. One-shot —
+        // EnsureMetaLoaded runs once per process (_metaLoaded), so every later stepper press is
+        // the player's and sticks. The Min() below still applies, and clamps to -1 at UnlockedHeat
+        // 0, so this can never dial a rung the player has not earned.
+        if (FirstTimeProfile) PendingHeat = Sightline.Heat.Recruit;
         PendingHeat = Math.Min(PendingHeat, UnlockedHeat);
         _metaLossStreak = SaveGame.LoadMetaLossStreak();
     }
@@ -2276,7 +2378,9 @@ public partial class Game
         // W11: mark "seen" only if the player actually reached the FIRE lesson — someone who never
         // got past MOVE hasn't been onboarded; let the tutorial re-offer next run. (FUL-12: the
         // named TutStepFire constant keeps this gate on the same SEMANTIC step across renumbers.)
-        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
+        // W5: a strip still PENDING behind the briefing never opened, so it can never have
+        // reached FIRE — clear the arm and let the onboarding re-offer next run.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else { TutStep = -1; _tutPending = false; }
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -2428,6 +2532,24 @@ public partial class Game
         }
     }
 
+    // ── W5 THE DOORS (audit wildcard-3) ───────────────────────────────────────────────────────
+    /// Set when the player has confirmed QUIT TO DESKTOP; Program's frame loop breaks on it.
+    /// The quit path is deliberately INERT with respect to persistence: it writes nothing, deletes
+    /// nothing, and touches neither save.json nor meta.json. The campaign checkpoint is written at
+    /// MISSION START (SetupMission), so quitting mid-mission resumes that mission from its start —
+    /// which is exactly what the confirm text says out loud. SIGHTLINE_QUITTEST pins all of it.
+    public bool QuitRequested;
+    /// One-click-arms, two-clicks-quits. Disarmed by any other pause interaction and by closing the
+    /// pause card, so a stray click can never take the window down mid-fight.
+    public bool QuitArmed;
+
+    /// The QUIT verb. Arms on the first press, quits on the second.
+    public void RequestQuit()
+    {
+        if (!QuitArmed) { QuitArmed = true; Audio.Play("select"); return; }
+        QuitRequested = true;
+    }
+
     // run-over screen text (set by LoseRun so the cause reads accurately)
     public string LoseTitle = "RUN OVER";
     public string LoseReason = "";
@@ -2437,6 +2559,12 @@ public partial class Game
     // UnlockHeatOnWin / TryAchievement / AwardMetaEndless), so every harness end card stays
     // byte-stable (fields sit at defaults there); reset per mode entry in ResetModeState.
     public int EndSalvage;                                  // salvage banked at run end (0 = no slab)
+    // W5 THE DOORS: how many survivors NEWLY joined the persistent reserve at run end. Measured as
+    // the DELTA of SaveGame.VeteranCount() across EnshrineVeterans — never as vets.Count — so the
+    // end card structurally cannot over-claim: a survivor who was already a reserve record does not
+    // "join" twice, and the MERCENARY CLAUSE run (which enshrines nobody) reads 0 without a special
+    // case. SIGHTLINE_METATEST pins that identity.
+    public int EndReserve;
     public int EndHeatUnlocked;                             // freshly-opened heat rung (0 = no line)
     public readonly List<string> EndAchievements = new();   // display names of NEW unlocks this run-end
 
@@ -2458,7 +2586,9 @@ public partial class Game
         // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
         // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
         // W11: same reached-the-FIRE-lesson gate as EnterBarracks — an early washout re-offers.
-        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
+        // W5: a strip still PENDING behind the briefing never opened, so it can never have
+        // reached FIRE — clear the arm and let the onboarding re-offer next run.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else { TutStep = -1; _tutPending = false; }
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -2533,7 +2663,12 @@ public partial class Game
         // (promoted-at-least-once) gate keeps green rookies out so the reserve stays a roster of legends.
         var vets = _run.Squad.Where(u => u.Alive && !u.IsVip && u.Rank >= 1).ToList();
         // FUL-10 MRC: cheap recalls now, no pipeline later — this run's survivors never enshrine.
+        // W5: measure the reserve DELTA around the enshrine (before LGD's RemoveVeterans below can
+        // touch it) so the end card's "N JOIN THE RESERVE" line is the count that actually landed
+        // on disk — a name already in the reserve updates its record and does not re-join.
+        int vetsBefore = SaveGame.VeteranCount();
         if (vets.Count > 0 && _run.Contract != Contract.MercenaryClause) SaveGame.EnshrineVeterans(vets);
+        EndReserve = Math.Max(0, SaveGame.VeteranCount() - vetsBefore);
         // FUL-10 LGD: a KIA whose name matches a reserve record ERASES it — veterans are mortal
         // across runs, not just priced. Name-keyed exactly like EnshrineVeterans' dedupe.
         if (_run.Contract == Contract.LivingLegends && _run.Fallen.Count > 0)
@@ -3612,8 +3747,14 @@ public partial class Game
         //            Tab cycle · Enter end turn · Space act · WASD/arrows cursor
         // — no other key appears twice in one context. The other contexts (Intro, skirmish setup,
         // codex, barracks/shop, tag editor) are each internally unique and are reached only when
-        // UpdatePlayer is not, so a letter may safely mean different things across them. Free
-        // letters remaining, for whoever binds next: I J O Q U Z.
+        // UpdatePlayer is not, so a letter may safely mean different things across them.
+        //
+        // W5, and read this before you trust the line that used to follow: this list and
+        // CLAUDE.md's disagreed with each other AND with the binary (audit wildcard-4 — N/P/U/V
+        // were advertised as free and were bound). DERIVE the set instead:
+        //     grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u
+        // W5 bound Q (QUIT TO DESKTOP — the pause card and the main menu; not an in-mission verb,
+        // so it does not collide with UpdatePlayer's set above). Free letters as of W5: I J O Z.
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
@@ -3652,7 +3793,7 @@ public partial class Game
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
                 if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode || DragMode || VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
-                else Paused = !Paused;
+                else { Paused = !Paused; QuitArmed = false; }   // W5: closing the card disarms QUIT
             }
             if (Paused) { HandlePauseMenu(); return; }
             HandleCamera();
@@ -4752,6 +4893,9 @@ public partial class Game
     void HandlePauseMenu()
     {
         var m = Raylib.GetMousePosition();
+        // W5 THE DOORS: [Q] is the pause card's quit shortcut (arms, then quits — same two-step as
+        // the button). Q was verified unbound in every context before being claimed.
+        if (Raylib.IsKeyPressed(KeyboardKey.Q)) { RequestQuit(); return; }
         // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
         // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
         if (_volDrag >= 0)
@@ -4769,6 +4913,8 @@ public partial class Game
                 Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
                 return;
             }
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseQuit)) { RequestQuit(); return; }
+        QuitArmed = false;   // any other pause control disarms the confirm
         if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
@@ -4796,7 +4942,8 @@ public partial class Game
     void AbandonRun()
     {
         Paused = false;
-        if (TutStep >= 0) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
+        QuitArmed = false;
+        if (TutStep >= 0 || _tutPending) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
         if (Mode == GameMode.Training) { EndTraining(false); return; }   // T1: abandoning a drill is just leaving it
         if (Mode == GameMode.Skirmish) { EndSkirmish(false); return; }
         if (Mode == GameMode.Endless) { EndEndless(); return; }
@@ -7532,6 +7679,13 @@ public partial class Game
                           Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn9))
                          || Raylib.IsKeyPressed(KeyboardKey.U);
             if (audio) { BeginAudition(); return; }
+
+            // W5 THE DOORS: QUIT from the main menu. No confirm here — nothing is in flight on the
+            // title screen, and a campaign in progress is already on disk at its last mission start.
+            bool quit = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.IntroQuitBtn))
+                        || Raylib.IsKeyPressed(KeyboardKey.Q);
+            if (quit) { QuitRequested = true; return; }
         }
 
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without
@@ -7540,6 +7694,18 @@ public partial class Game
         // daily-forced arena) into whatever is picked next.
         if (Phase == Phase.Win || Phase == Phase.Lose)
         {
+            // W5 THE DOORS (audit newplayer-2): the end card banks salvage and never named the
+            // room that spends it. WAR ROOM [W] is the third plate; BACK from there lands on the
+            // main menu, which is where MAIN MENU would have gone anyway.
+            bool war = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                        Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.EndWarRoomBtn))
+                       || Raylib.IsKeyPressed(KeyboardKey.W);
+            if (war)
+            {
+                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);   // no stale rect into the next screen
+                BeginWarRoom();
+                return;
+            }
             bool menu = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn2))
                         || Raylib.IsKeyPressed(KeyboardKey.Escape);
@@ -7552,6 +7718,7 @@ public partial class Game
                 // same OverlayBtn2, so a stale end-card rect could otherwise turn a second click
                 // at this position into an accidental CONTINUE before the next Draw republishes it.
                 Hud.OverlayBtn2 = new Rectangle(0, 0, 0, 0);
+                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);
                 Phase = Phase.Intro;
                 Audio.Play("select");
                 return;
@@ -7594,7 +7761,20 @@ public partial class Game
         };
     }
 
-    public void Draw()
+    // W5 THE FIRST HOUR: the frame is drawn in TWO passes so `Display.RenderFrame` can build the
+    // BLOOM from the board alone and NOT from the type (audit visual-2 — a saturated UI plate was
+    // flooding its own label; TRAINING OP measured 2.19:1 with post-FX on against 8.67:1 with it
+    // off). The seam is atmosphere-vs-chrome, not board-vs-menu: the overlay screens' full-screen
+    // animated backdrop rides in the bloom-source pass and keeps its glow, while every plate,
+    // glyph and number is painted on top of it afterwards, contributing nothing to the bright
+    // pass. Both passes still land in the SAME render target, so brightness, gamma, the biome
+    // grade and the vignette stay uniform across the whole frame — an earlier version of this
+    // wave drew the chrome after the composite and stranded the accessibility settings on the
+    // board (Display.RenderFrame's header records that, and why). Nothing here changes WHAT is
+    // drawn or in what order — only which pass it lands in.
+
+    /// Pass 1 — the bloom source. Board, death-flash, overlay-screen atmosphere.
+    public void DrawBoardLayer()
     {
         Raylib.ClearBackground(Pal.Bg);
 
@@ -7606,6 +7786,12 @@ public partial class Game
         if (DeathFlash > 0)
             Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.Foe, DeathFlash * 0.35f));
 
-        Hud.Draw(this);
+        Hud.DrawBackdropLayer(this);
     }
+
+    /// Pass 2 — the chrome. Every plate, label and number, drawn after the bright pass has run.
+    public void DrawHudLayer() => Hud.Draw(this);
+
+    /// Single-pass draw, kept for callers that don't split (and as the definition of the order).
+    public void Draw() { DrawBoardLayer(); DrawHudLayer(); }
 }

@@ -1650,6 +1650,9 @@ public partial class Game
         // NoPersist), so the SALVAGE slab / HEAT UNLOCKED line / achievement roll can be framed.
         // Fixed values -> the SUMMARY shot stays byte-stable; a lose card shows the consolation only.
         EndSalvage = lose ? 18 : 79;
+        // W5: the reserve line + per-survivor recall prices. Derived from the staged squad rather
+        // than hard-coded, so the header count and the priced rows can never disagree on the card.
+        EndReserve = squad.Count(u => u != null && !u.IsVip && u.Rank >= 1);
         EndHeatUnlocked = lose ? 0 : 4;
         EndAchievements.Clear();
         if (!lose) { EndAchievements.Add("TURNING UP"); EndAchievements.Add("THE LONG WAR"); }   // HEAT3 + DEEP: both true of this staged run (3 KIA -> never FLAWLESS)
@@ -5135,6 +5138,302 @@ public partial class Game
             : "TUTTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
+
+    // ─── W5 THE FIRST HOUR — the CHROME self-test (SIGHTLINE_CHROMETEST=1) ─────────────────────
+    /// Three audit findings that all reduce to "a thing the player is reading moved, or vanished,
+    /// or fell out of its box". Each leg fails on the pre-W5 tree; SIGHTLINE_BARREFLOW=1 restores
+    /// the old action-bar order so the first one is falsifiable without reverting.
+    ///
+    ///  (A) visual-7 — THE ACTION BAR RE-FLOWED BETWEEN TURNS. The auditor measured OVERWATCH
+    ///      moving from bottom-row slot 8 to TOP-row slot 1 purely because a squadmate went down
+    ///      and STABILIZE appeared ahead of it in the list. Drive one soldier through three
+    ///      states — full verbs / no ammo / squadmate down — and assert every verb present in all
+    ///      three has a BYTE-IDENTICAL rect. Also asserts the ability slot's width absorbs its
+    ///      " (N)" cooldown suffix, which is the same defect wearing a different hat.
+    ///  (B) newplayer-3 — THE CONCEALED PILL FADED TO 10% ALPHA, so the opening state read as
+    ///      "off" for part of every 1.8 s cycle. Asserts the pulse envelope's floor and its
+    ///      peak/trough ratio directly, at the four fixed phases the auditor sampled.
+    ///  (C) newplayer-6 — DOCTRINE CARD TEXT OVERFLOWED ITS BOX on the first screen a new player
+    ///      touches. Asserts `body top + lines*lineH + pad <= card height` for EVERY boon in the
+    ///      catalogue, not just the three in one offer, and that the operator blurb column clears
+    ///      the class-glyph disc.
+    public string ChromeSelfTest()
+    {
+        var fails = new List<string>();
+
+        // ---- (A) the fixed slot map ----------------------------------------------------------
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            var u = g.Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+            var mate = g.Players.FirstOrDefault(p => p != u && p.Alive && !p.IsVip);
+            if (u == null || mate == null) fails.Add("noSquadForBarProbe");
+            else
+            {
+                g.Selected = u;
+                Dictionary<string, Rectangle> Snap()
+                {
+                    Raylib.BeginDrawing();
+                    var bar = Hud.ProbeActionBar(g);
+                    Raylib.EndDrawing();
+                    var d = new Dictionary<string, Rectangle>();
+                    foreach (var b in bar) d[b.Id] = b.Rect;
+                    return d;
+                }
+                int ammo = u.Ammo;
+                var full = Snap();                            // state 1: everything available
+                u.Ammo = 0; var dry = Snap();                 // state 2: no ammo
+                u.Ammo = ammo;
+                mate.Downed = true; var down = Snap();        // state 3: a squadmate is bleeding out
+                mate.Downed = false;
+
+                if (full.Count < 8) fails.Add("barTooSmall:" + full.Count);
+                if (!down.ContainsKey("stabilize")) fails.Add("stabilizeNeverSurfaced");
+                if (dry.Count != full.Count) fails.Add("dryChangedTheVerbSet");
+                foreach (var id in full.Keys)
+                {
+                    if (!dry.TryGetValue(id, out var rd) || !SameRect(full[id], rd))
+                        fails.Add("moved(noAmmo):" + id);
+                    if (!down.TryGetValue(id, out var rw) || !SameRect(full[id], rw))
+                        fails.Add("moved(mateDown):" + id);
+                }
+                // the ability slot must already be wide enough for its cooldown suffix
+                if (u.Ability != AbilityKind.None && full.ContainsKey("ability"))
+                {
+                    var before = full["ability"];
+                    u.AbilityCd = 3;
+                    var cd = Snap();
+                    u.AbilityCd = 0;
+                    if (!cd.TryGetValue("ability", out var ra) || !SameRect(before, ra))
+                        fails.Add("abilitySlotGrewOnCooldown");
+                    foreach (var id in full.Keys)
+                        if (cd.TryGetValue(id, out var r2) && !SameRect(full[id], r2))
+                            fails.Add("moved(abilityCd):" + id);
+                }
+            }
+        }
+
+        // ---- (B) the CONCEALED pill's pulse envelope ------------------------------------------
+        {
+            // The exact expression Hud draws with, sampled at the four phases the audit used.
+            float lo = 2f, hi = -1f;
+            foreach (float t in new[] { 0.5f, 1.0f, 1.5f, 2.5f })
+            {
+                float pulse = Hud.ConcealPulse(t);
+                lo = MathF.Min(lo, pulse); hi = MathF.Max(hi, pulse);
+            }
+            // measured floor across the whole cycle, not just those four samples
+            float trueLo = Hud.ConcealPulseFloor;
+            if (trueLo < 0.5f) fails.Add($"pillFloor={trueLo:0.00}");
+            if (Hud.ConcealPulseCeil / MathF.Max(0.001f, trueLo) > 2.0f)
+                fails.Add($"pillSwing={Hud.ConcealPulseCeil / trueLo:0.00}x");
+            if (hi <= lo) fails.Add("pillDoesNotPulse");   // it must still BREATHE, not go static
+        }
+
+        // ---- (C) the doctrine card fits its own text, for every boon in the catalogue ---------
+        //
+        // W5-FIX (review): the original form of this leg was TAUTOLOGICAL. It compared
+        //     need = BodyTop + lines*LineH + PadB      against      DraftBoonCardHeight(lines)
+        // which IS Math.Max(74, need) — the assertion could not fail for any string whatsoever.
+        // It now measures where the last line's INK actually lands, through the real font at the
+        // live UI scale (Hud.DraftBoonInkBottom), against the height the RENDERER uses. That can
+        // fail: shrink DraftBoonLineH, or raise DraftBoonFs past the 19 px step, and it does.
+        {
+            foreach (var b in BoonDef.All)
+            {
+                int lines = Hud.DraftBoonLineCount(b);
+                int bch = Hud.DraftBoonCardHeight(lines);   // the renderer's own card height
+                float ink = Hud.DraftBoonInkBottom(b);
+                if (ink + 4f > bch) fails.Add($"boonOverflow:{BoonDef.Code(b)}@{ink:0}>{bch}");
+                if (lines >= 3 && bch <= 74)
+                    fails.Add("boonCardStillFixed:" + BoonDef.Code(b));
+            }
+            // ...and the DEPLOY row must be ON SCREEN, for every boon in the catalogue, at every
+            // text size the pause menu can select. This is review blocker 2: the content-sized
+            // card pushed BACK / DEPLOY / RE-ROLL POOL through the bottom of the screen at the
+            // DEFAULT 100%, and clean off it at 120% — and RE-ROLL POOL has no keyboard
+            // alternative, so a control became unreachable. Nothing observed it, because nothing
+            // observed the layout below the card it grew.
+            float savedScale = Cfg.UiScale;
+            try
+            {
+                foreach (float ui in Display.UiScaleLevels)
+                {
+                    Cfg.UiScale = ui;
+                    int conH = Hud.DraftContractH();
+                    foreach (var b in BoonDef.All)
+                    {
+                        var st = Hud.DraftLayout(Hud.DraftBoonLineCount(b), conH);
+                        string tag = $"{BoonDef.Code(b)}@{(int)(ui * 100)}%";
+                        int margin = Cfg.ScreenH - Hud.DraftBottomPad - st.Bottom;
+                        if (margin < _draftWorstMargin) { _draftWorstMargin = margin; _draftWorstTag = tag; }
+                        _draftWorstSqueeze = Math.Max(_draftWorstSqueeze, st.Squeeze);
+                        if (st.Overflow > 0) fails.Add($"draftStackOverflows:{tag}by{st.Overflow}px");
+                        if (st.Bottom > Cfg.ScreenH - Hud.DraftBottomPad)
+                            fails.Add($"deployRowOffScreen:{tag}@{st.Bottom}");
+                        // the doctrine card must still clear the contract header below it
+                        if (st.BoonY + st.BoonH > st.ConHeadY) fails.Add("doctrineEatsContractHead:" + tag);
+                        if (st.ConY + st.ConH > st.InfoY) fails.Add("contractEatsInfoLine:" + tag);
+                    }
+                }
+            }
+            finally { Cfg.UiScale = savedScale; }
+            // ...and the operator blurb must clear the class-glyph disc VERTICALLY (the disc
+            // dropped into the corner) and fit its column HORIZONTALLY (so nothing ellipsizes —
+            // the sentence is the whole point of the row).
+            if (Hud.DraftGlyphTop() < Hud.DraftBlurbBottom())
+                fails.Add($"glyphOverlapsBlurb({Hud.DraftGlyphTop():0}<{Hud.DraftBlurbBottom()})");
+            foreach (var bl in Hud.ClassBlurbsForTest())
+                if (Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X > Hud.DraftBlurbWidth())
+                    fails.Add("blurbEllipsizes:" + bl);
+        }
+
+        return fails.Count == 0
+            ? "CHROMETEST: PASS (action-bar rects identical across full/no-ammo/mate-down + ability "
+              + $"cooldown, CONCEALED pulse {Hud.ConcealPulseFloor:0.00}-{Hud.ConcealPulseCeil:0.00} "
+              + $"({Hud.ConcealPulseCeil / Hud.ConcealPulseFloor:0.00}x), {BoonDef.All.Length} doctrine "
+              + "cards fit their text, blurb column clears the glyph, DEPLOY row on screen for all "
+              + $"{BoonDef.All.Length} x {Display.UiScaleLevels.Length} text sizes - tightest "
+              + $"{_draftWorstTag} with {_draftWorstMargin}px to spare, max gap squeeze "
+              + $"{_draftWorstSqueeze}px)"
+            : "CHROMETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // W5-FIX: diagnostics for CHROMETEST's draft-stack leg — the tightest DEPLOY-row margin over
+    // the whole doctrine catalogue x every text size, so the PASS line states the headroom
+    // instead of merely asserting there is some.
+    static int _draftWorstMargin = int.MaxValue, _draftWorstSqueeze;
+    static string _draftWorstTag = "-";
+
+    static bool SameRect(Rectangle a, Rectangle b)
+        => MathF.Abs(a.X - b.X) < 0.01f && MathF.Abs(a.Y - b.Y) < 0.01f
+        && MathF.Abs(a.Width - b.Width) < 0.01f && MathF.Abs(a.Height - b.Height) < 0.01f;
+
+
+    // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
+    /// The two ways OUT of a screen that the audit found missing, pinned together because they are
+    /// the same problem: a route the player needed and could not find.
+    ///
+    ///  (A) wildcard-3 — QUIT TO DESKTOP. The pause card carried 18 controls and no exit; the main
+    ///      menu 9 entries and no exit; and `SetExitKey(KeyboardKey.Null)` means ESC deliberately
+    ///      cannot close the window either. The only sanctioned ways out were ABANDON RUN (which
+    ///      destroys the run) or alt-F4. Asserts the arm-then-confirm contract, and — the part
+    ///      that matters — that the quit path is PERSISTENCE-INERT: it writes nothing, deletes
+    ///      nothing, and leaves the mission-start checkpoint and meta.json byte-identical. That is
+    ///      what makes the confirm text ("the current mission restarts from its start") TRUE.
+    ///  (B) newplayer-2 — the end card's third door. Asserts DrawSummary publishes THREE distinct,
+    ///      non-overlapping hit-test rects, and that the third one's handler reaches the War Room.
+    ///
+    /// Runs the LIVE (non-NoPersist) path, so it stashes and restores save.json / meta.json.
+    public string QuitSelfTest()
+    {
+        var fails = new List<string>();
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadSave = false, hadMeta = false;
+        string saveStash = null, metaStash = null;
+        try
+        {
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+
+        try
+        {
+            // ---- (A1) arm, then quit. One press must never take the window down --------------
+            {
+                var g = new Game { NoPersist = true };
+                if (g.QuitArmed || g.QuitRequested) fails.Add("quitArmedAtBoot");
+                g.RequestQuit();
+                if (!g.QuitArmed) fails.Add("firstPressDidNotArm");
+                if (g.QuitRequested) fails.Add("firstPressQuit");
+                g.RequestQuit();
+                if (!g.QuitRequested) fails.Add("secondPressDidNotQuit");
+            }
+
+            // ---- (A2) the quit path is PERSISTENCE-INERT ------------------------------------
+            {
+                var g = new Game();                     // live path
+                g.StartMission(1);                      // writes the mission-start checkpoint
+                if (!System.IO.File.Exists(sp)) fails.Add("noCheckpointAtMissionStart");
+                string saveAt = System.IO.File.ReadAllText(sp);
+                bool metaAt = System.IO.File.Exists(mp);
+                string metaBody = metaAt ? System.IO.File.ReadAllText(mp) : null;
+
+                // play forward a little so the LIVE state has diverged from the checkpoint, then quit
+                g.DebugSetTurn(4);
+                foreach (var u in g.Players) u.Hp = Math.Max(1, u.Hp - 2);
+                g.RequestQuit(); g.RequestQuit();
+                if (!g.QuitRequested) fails.Add("quitNotRequested");
+
+                if (!System.IO.File.Exists(sp)) fails.Add("quitDeletedTheCheckpoint");
+                else if (System.IO.File.ReadAllText(sp) != saveAt) fails.Add("quitRewroteTheCheckpoint");
+                if (System.IO.File.Exists(mp) != metaAt) fails.Add("quitTouchedMetaExistence");
+                else if (metaAt && System.IO.File.ReadAllText(mp) != metaBody) fails.Add("quitWroteMeta");
+
+                // and the checkpoint it kept is the MISSION-START one, so the confirm text is true
+                var resumed = SaveGame.Load();
+                if (resumed == null) fails.Add("checkpointUnreadable");
+                else if (resumed.Mission != 1) fails.Add("checkpointNotMissionStart:" + resumed.Mission);
+            }
+
+            // ---- (A3) the confirm disarms rather than latching -------------------------------
+            {
+                var g = new Game { NoPersist = true };
+                g.RequestQuit();
+                g.QuitArmed = false;                    // what closing the pause / any other control does
+                g.RequestQuit();
+                if (g.QuitRequested) fails.Add("disarmDidNotResetTheConfirm");
+            }
+
+            // ---- (B) the end card publishes THREE doors, and the third is the War Room --------
+            {
+                var g = new Game { NoPersist = true };
+                g.DebugSummary(false);                  // the staged VICTORY card
+                Raylib.BeginDrawing();
+                Hud.Draw(g);
+                Raylib.EndDrawing();
+                var a = Hud.OverlayBtn; var b = Hud.OverlayBtn2; var c = Hud.EndWarRoomBtn;
+                if (a.Width < 20 || b.Width < 20 || c.Width < 20) fails.Add("endCardMissingADoor");
+                if (Raylib.CheckCollisionRecs(a, b) || Raylib.CheckCollisionRecs(b, c) || Raylib.CheckCollisionRecs(a, c))
+                    fails.Add("endCardDoorsOverlap");
+                if (!(a.X < b.X && b.X < c.X)) fails.Add("endCardDoorOrder");
+                if (g.EndReserve < 0) fails.Add("endReserveNegative");
+                // the third door's handler
+                g.BeginWarRoom();
+                if (g.Phase != Phase.WarRoom) fails.Add("warRoomDoorDoesNotOpen");
+
+                // ...and the LOSE card, which is the one the audit called the highest-leverage
+                // retention moment in the product, publishes the same three.
+                var gl = new Game { NoPersist = true };
+                gl.DebugSummary(true);
+                Raylib.BeginDrawing();
+                Hud.Draw(gl);
+                Raylib.EndDrawing();
+                if (Hud.EndWarRoomBtn.Width < 20) fails.Add("loseCardMissingWarRoom");
+                if (gl.EndSalvage <= 0) fails.Add("loseCardBanksNoSalvage");   // the slab the subtitle explains
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            try
+            {
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "QUITTEST: PASS (quit arms then confirms and disarms; the quit path keeps the "
+              + "mission-start checkpoint byte-identical and never touches meta.json; both end "
+              + "cards publish three non-overlapping doors and the third opens the War Room)"
+            : "QUITTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
     /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end
     /// check, without reaching into private state from the test body. Harness-only.
     public void DebugSetTutFlag(string which)
@@ -5165,7 +5464,316 @@ public partial class Game
         _eventNode = null;
         ResolveEvent(0);
     }
+    /// W5 ONRAMPTEST seam: run the once-per-process meta load on THIS instance (EnsureMetaLoaded
+    /// is private and idempotent per Game), so the test can read the profile defaults it sets.
+    public void DebugLoadMeta() => EnsureMetaLoaded();
     public void DebugCheckEnd() => CheckEnd();
+
+    // ─── W5 THE FIRST HOUR — the mission-1 briefing (SIGHTLINE_BRIEFTEST=1) ────────────────────
+    /// BRIEFTEST seam: tick EXACTLY the teaching/briefing chain `Game.Update` runs, in Update's
+    /// order (Game.cs, the four calls under the global-key block). No window, no input device, no
+    /// turn flow — this is the observation instrument the W5 audit finding had no way to build,
+    /// because every existing harness path sets NoPersist and NoPersist makes StartTutorialMaybe
+    /// return before the strip ever arms.
+    public void DebugTeachTick(float dt) { UpdateTutorial(dt); UpdateTraining(dt); UpdateFieldTips(dt); UpdateBriefing(dt); }
+
+    /// BRIEFTEST seam: the tutorial half of EndPlayerTurn (Game.cs) plus the turn bump, so the
+    /// test can drive a player who is ENDING TURNS without staging a whole enemy phase.
+    public void DebugEndTurnTutorial() { if (TutStep >= 0 && TutStep < TutStepDone) AdvanceTutorial(); _turnCount++; }
+
+    /// SIGHTLINE_BRIEFTEST — PROGRAM RESONANCE W5 "THE FIRST HOUR".
+    ///
+    /// THE DEFECT THIS TEST EXISTS TO PIN. On a FIRST-EVER campaign run, mission 1's briefing —
+    /// RESONANCE C1's entire narrative frame, the faction, the region, the reason the squad is on
+    /// this field — could not draw. `BriefAllowed` requires `TutorialText == null`; the mission-1
+    /// lesson strip is non-null from the moment `SetupMission` arms it; `UpdateBriefing` nulls the
+    /// card outright the instant `Stats.CombatLog` fills, and the log fills on the first shot by
+    /// either side. So the card spent the whole strip HOLDING (never burning its 11 s clock) and
+    /// was then destroyed by the first exchange — or by `BriefHoldMax` (45 s), whichever came
+    /// first. Mission 1 is the only mission a first-time player is guaranteed to see.
+    ///
+    /// The fix is an ORDERING one: on mission 1 the briefing is a PRE-FIGHT beat and goes FIRST —
+    /// `StartTutorialMaybe` arms the strip PENDING (`TutPending`), and `UpdateTutorial` opens it
+    /// the moment the card retires. Verb staging is live throughout, so the action bar does not
+    /// flicker between whole and staged. `TutStepFire` also gains the turn-count patience fallback
+    /// its three siblings already had.
+    ///
+    /// Every leg runs a LIVE (NoPersist == false) game — that is the whole point — so the real
+    /// display.json / save.json / meta.json are stashed and restored around the body.
+    public string BriefingSelfTest()
+    {
+        var fails = new List<string>();
+        const float Dt = 1f / 60f;
+
+        string dispPath = Display.SettingsPathPublic;
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadDisp = false, hadSave = false, hadMeta = false;
+        string dispStash = null, saveStash = null, metaStash = null;
+        try
+        {
+            hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath);
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+        bool savedTut = Display.TutorialSeen, savedShow = Display.ShowAllVerbs;
+        int savedTips = Display.TipsSeen;
+
+        // Drive `secs` seconds of an IDLE, READING player and return (a) how many of them the
+        // briefing card spent burning its own clock — the MODEL — and (b) on how many of those
+        // frames Hud.DrawBriefCard actually RAN — the DRAW.
+        //
+        // W5-FIX (review blocker 5): (b) is new and it is the point. This test certified "the
+        // briefing plays its full 11 s" while observing only `Game.BriefTimer` and `BriefLines`,
+        // i.e. the model's own `BriefAllowed` predicate re-read back. A reviewer put a one-line
+        // `&& false` on the dispatch in Hud.Draw so the card is never drawn; it built clean and
+        // still PASSed with the full 11 s. A test that cannot see the thing it certifies is not a
+        // test — so every watched frame now paints a REAL frame through Hud.Draw and counts the
+        // card's own paints. (The window is 64x64; raylib clips, and the cost is the reason the
+        // watch runs at the tick rate and not faster.)
+        (float shown, int drawn) Watch(Game g, float secs)
+        {
+            float shown = 0f; int drawn = 0;
+            for (int i = 0; i < (int)(secs * 60); i++)
+            {
+                float before = g.BriefLines != null ? g.BriefTimer : -1f;
+                g.DebugTeachTick(Dt);
+                Hud.BriefCardDraws = 0;
+                Raylib.BeginDrawing();
+                Hud.Draw(g);
+                Raylib.EndDrawing();
+                if (Hud.BriefCardDraws > 0) drawn++;
+                if (before >= 0f && g.BriefLines != null && g.BriefTimer < before) shown += before - g.BriefTimer;
+            }
+            return (shown, drawn);
+        }
+
+        try
+        {
+            Display.TipsSeen = ~0;        // burn every just-in-time field tip: this test is about
+            Display.ShowAllVerbs = false; // the LESSON strip, and a tip would be a second variable
+
+            // ---- (A) THE FIRST-EVER RUN. The card must play, in full, before the strip opens ----
+            Display.TutorialSeen = false;
+            var g = new Game();                       // NoPersist deliberately FALSE — the live path
+            g.StartMission(1);
+            if (g.BriefLines == null) fails.Add("briefNotComposed");
+            if (g.BriefHead == null) fails.Add("briefHeadMissing");
+            if (Stats.CombatLog.Count != 0) fails.Add("logNotEmptyAtMissionStart");
+            // The strip is ARMED but DEFERRED, and the bar is staged the whole time (no flicker
+            // between a whole bar during the briefing and a staged one after it).
+            if (!g.TutPending) fails.Add("stripNotArmedPending");
+            if (g.TutorialText != null) fails.Add("stripOpenedOverTheBriefing");
+            if (!g.OnboardingActive) fails.Add("stagingOffDuringBriefing");
+            if (!g.VerbStagingActive) fails.Add("verbStagingOffDuringBriefing");
+
+            // 12 s of a player reading: the card is 11 s (BriefShowSeconds) and must burn nearly
+            // all of it. THIS IS THE HEADLINE ASSERTION and it measured 0.00 s before the fix.
+            var (shown, drawn) = Watch(g, 12f);
+            if (shown < BriefShowSeconds - 0.5f)
+                fails.Add($"briefShownOnlyFor{shown:0.00}sOf{BriefShowSeconds:0}s");
+            // ...and the card was PAINTED on those frames. Model and draw, separately observed.
+            int wantFrames = (int)((BriefShowSeconds - 0.5f) * 60f);
+            if (drawn < wantFrames)
+                fails.Add($"briefCardDrawnOnOnly{drawn}framesOf{wantFrames}");
+            if (g.BriefLines != null) fails.Add("briefNeverRetired");
+            // ...and the strip opens the moment the card retires — the lesson is not lost, it is
+            // re-ordered. TutStepConceal holds while the squad is concealed on turn 1.
+            if (g.TutPending) fails.Add("stripStillPendingAfterBrief");
+            if (g.TutStep != TutStepConceal) fails.Add("stripDidNotOpenAfterBrief:" + g.TutStep);
+            if (g.TutorialText == null) fails.Add("stripTextNullAfterBrief");
+
+            // ---- (B) the strip still RUNS and still COMPLETES (the fix reorders, never removes) --
+            for (int t = 0; t < 6 && g.TutStep >= 0 && g.TutStep < TutStepDone; t++)
+            { g.DebugEndTurnTutorial(); g.DebugTeachTick(Dt); }
+            if (g.TutStep != TutStepDone) fails.Add("stripDidNotReachDone:" + g.TutStep);
+            for (int i = 0; i < 60 * 9; i++) g.DebugTeachTick(Dt);   // the 7 s wrap-up dwell
+            if (g.TutStep != -1) fails.Add("stripDidNotComplete:" + g.TutStep);
+            if (!Display.TutorialSeen) fails.Add("completionDidNotMarkSeen");
+
+            // ---- (C) TutStepFire's patience fallback (its three siblings have had one for waves) --
+            {
+                Display.TutorialSeen = false;
+                var pg = new Game();
+                pg.StartMission(1);
+                pg.ShowTutorialStep(TutStepFire);
+                pg.DebugSetTurn(TutFirePatience - 1);
+                pg.DebugTeachTick(Dt);
+                if (pg.TutStep != TutStepFire) fails.Add("fireStepYieldedEarly");   // not before its turn
+                pg.DebugSetTurn(TutFirePatience);
+                pg.DebugTeachTick(Dt);
+                if (pg.TutStep == TutStepFire) fails.Add("fireStepHasNoPatienceFallback");
+                // and the shot still ends it immediately, whatever the turn count
+                Display.TutorialSeen = false;
+                var sg = new Game();
+                sg.StartMission(1);
+                sg.ShowTutorialStep(TutStepFire);
+                sg.DebugSetTutFlag("shot");
+                sg.DebugTeachTick(Dt);
+                if (sg.TutStep == TutStepFire) fails.Add("fireStepIgnoredTheShot");
+            }
+
+            // ---- (D) THE CONTROL. A RETURNING player (TutorialSeen) has no strip, so the card has
+            //          always worked for them. If this leg ever failed, the test would be measuring
+            //          something other than the tutorial interaction.
+            {
+                Display.TutorialSeen = true;
+                var rg = new Game();
+                rg.StartMission(1);
+                if (rg.TutPending || rg.TutStep >= 0) fails.Add("stripArmedForReturningPlayer");
+                var (rshown, rdrawn) = Watch(rg, 12f);
+                if (rshown < BriefShowSeconds - 0.5f) fails.Add($"controlBriefShownOnlyFor{rshown:0.00}s");
+                if (rdrawn < (int)((BriefShowSeconds - 0.5f) * 60f))
+                    fails.Add($"controlBriefCardDrawnOnOnly{rdrawn}frames");
+            }
+
+            // ---- (E) the combat log still retires the card — the pre-fight contract is intact ----
+            {
+                Display.TutorialSeen = true;
+                var lg = new Game();
+                lg.StartMission(1);
+                Stats.Log(1, (int)Team.Player, "BRIEFTEST synthetic exchange");
+                lg.DebugTeachTick(Dt);
+                if (lg.BriefLines != null) fails.Add("logDidNotRetireTheCard");
+                Stats.ClearLog();
+            }
+
+            // ---- (F) non-campaign modes still say nothing (the briefing is campaign vocabulary) --
+            {
+                var tg = new Game { NoPersist = true };
+                tg.BeginTraining();
+                if (tg.BriefLines != null) fails.Add("drillComposedABriefing");
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            Display.TutorialSeen = savedTut; Display.ShowAllVerbs = savedShow; Display.TipsSeen = savedTips;
+            Stats.ClearLog();
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "BRIEFTEST: PASS (live first-ever mission 1: briefing plays AND IS DRAWN for its full "
+              + $"{BriefShowSeconds:0}s pre-fight, strip opens after it with staging unbroken, strip still "
+              + $"completes, FIRE lesson yields at turn {TutFirePatience}, returning-player control + "
+              + "combat-log retirement + drill silence)"
+            : "BRIEFTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── W5-FIX — the BACKDROP registry (SIGHTLINE_BACKDROPTEST=1) ─────────────────────────────
+    /// SIGHTLINE_BACKDROPTEST — the STRUCTURAL gate for review blocker 1.
+    ///
+    /// THE DEFECT THIS TEST EXISTS TO PIN. W5-2 split the frame so the animated full-screen
+    /// backdrops render into the BLOOM SOURCE (before `Display.BuildBloom`) and the chrome renders
+    /// after it. `Hud.DrawBackdropLayer` was made the home of every backdrop... except AUDIO
+    /// CHECK's, which stayed inside `Hud.DrawAudition`, i.e. in the CHROME pass. The composite
+    /// then added `glow * 1.45` computed from the LIVE BOARD on top of an opaque audition screen:
+    /// measured against a d350416 build with post-FX on, 17,010 px brightened by more than 20
+    /// luma, 8,640 by more than 40, peak +154 — worst over the MASTER and MUSIC fader rows. The
+    /// screen ships reachable from the intro AND from the pause card mid-mission, and
+    /// `Display.PostFX` defaults true, so it shipped to everyone.
+    ///
+    /// WHY NOTHING CAUGHT IT. Three source comments and the DEVLOG all asserted that AUDIO CHECK
+    /// "draws no backdrop". CONTRASTTEST reads nine main-menu labels and could never have seen it,
+    /// and cannot see the NEXT phase added without a `DrawBackdropLayer` entry either. So this
+    /// test does not check a screen — it checks the INVARIANT, over every Phase that exists:
+    ///
+    ///   (A) NO phase paints a full-screen backdrop from the CHROME pass. Ever. This is the one
+    ///       that fails on the pre-fix tree (`SIGHTLINE_AUDBACKDROP=1` restores the defect).
+    ///   (B) `Hud.BackdropPhase` and `DrawBackdropLayer`'s switch agree exactly — a phase in the
+    ///       registry must paint, a phase out of it must not. A future screen with a backdrop and
+    ///       no registry entry paints its chrome over the main menu; one in the registry with no
+    ///       backdrop loses its top bar entirely.
+    ///   (C) the modal scrim is laid in the bloom-source pass ONLY when the composite is actually
+    ///       running — with post-FX off there is no bright pass to attenuate, and the second wash
+    ///       cost 40% of the board's luminance under the pause card for nothing.
+    ///
+    /// The observation point is `Hud.BackdropPaints`, incremented inside `DrawTacticalBackdrop`
+    /// itself — the draw, not a predicate about the draw.
+    public string BackdropSelfTest()
+    {
+        var fails = new List<string>();
+        var phases = (Phase[])Enum.GetValues(typeof(Phase));
+        bool savedFx = Display.PostFX, savedEn = Display.Enabled;
+        try
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            g.BeginDraft();          // populate the draft pool/offer so DrawDraft has content
+            g.Phase = Phase.PlayerTurn;
+
+            // ---- (A) the chrome pass paints NO backdrop, for any phase ------------------------
+            foreach (var p in phases)
+            {
+                g.Phase = p;
+                Hud.BackdropPaints = 0;
+                try
+                {
+                    Raylib.BeginDrawing();
+                    Hud.Draw(g);
+                    Raylib.EndDrawing();
+                }
+                catch (Exception ex) { fails.Add($"chromeThrew:{p}:{ex.GetType().Name}"); continue; }
+                if (Hud.BackdropPaints != 0) fails.Add($"backdropFromChromePass:{p}");
+            }
+
+            // ---- (B) the registry and the switch are the same set -----------------------------
+            foreach (var p in phases)
+            {
+                g.Phase = p;
+                Hud.BackdropPaints = 0;
+                try
+                {
+                    Raylib.BeginDrawing();
+                    Hud.DrawBackdropLayer(g);
+                    Raylib.EndDrawing();
+                }
+                catch (Exception ex) { fails.Add($"backdropThrew:{p}:{ex.GetType().Name}"); continue; }
+                bool painted = Hud.BackdropPaints > 0;
+                bool owns = Hud.BackdropPhase(p);
+                if (painted && !owns) fails.Add($"paintsButNotInRegistry:{p}");
+                if (owns && !painted) fails.Add($"inRegistryButPaintsNothing:{p}");
+            }
+            // AUDIO CHECK by name — this is the whole point, and a name is harder to delete by
+            // accident than a set membership.
+            if (!Hud.BackdropPhase(Phase.AudioCheck)) fails.Add("audioCheckNotInRegistry");
+
+            // ---- (C) the modal scrim only doubles up where the bright pass exists -------------
+            {
+                // BARRACKS, not PAUSE: the pause wash is multiplied by a time-based entrance tween
+                // that reads 0 on its first frame, so it is not a fixed quantity to assert on.
+                // The barracks family's wash is a constant and covers the same code path.
+                g.Phase = Phase.Barracks;
+                float lit = Hud.BloomScrimAlpha(g, true);
+                float dark = Hud.BloomScrimAlpha(g, false);
+                g.Phase = Phase.PlayerTurn;
+                if (lit <= 0f) fails.Add($"scrimMissingUnderPostFx:{lit:0.00}");
+                if (dark != 0f) fails.Add($"scrimDoubledWithPostFxOff:{dark:0.00}");
+                // ...and a phase with its own opaque backdrop must not also be scrimmed.
+                g.Phase = Phase.Intro;
+                if (Hud.BloomScrimAlpha(g, true) != 0f) fails.Add("scrimOverAnOpaqueBackdrop");
+                g.Phase = Phase.PlayerTurn;
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally { Display.PostFX = savedFx; Display.Enabled = savedEn; }
+
+        return fails.Count == 0
+            ? $"BACKDROPTEST: PASS (all {phases.Length} phases: none paints a backdrop from the chrome "
+              + "pass; DrawBackdropLayer's switch == Hud.BackdropPhase exactly, AUDIO CHECK included; "
+              + "modal scrim doubles only when the composite runs)"
+            : "BACKDROPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
 
     /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:
     ///
@@ -5461,8 +6069,57 @@ public partial class Game
             Display.AnimSpeedIdx = savedAnim; Display.UiScaleIdx = savedScale; Cfg.UiScale = savedCfg;
         }
 
+
+        // ── (C) W5 THE FIRST HOUR: the on-ramp is now the DEFAULT on a never-played profile ────
+        // Audit newplayer-4: RECRUIT was always selectable and always unlabelled, so nothing at
+        // level 0 hinted anything existed below it, and the copy framed 0 as the floor. The
+        // archived X2 ladder (n=40/rung, base a61ef42) puts RECRUIT at 75.0% run completion
+        // against heat 0's 57.5% — a 17.5-point gap outside the +-6-8 error bar, i.e. roughly two
+        // in five first campaigns ended in a loss the on-ramp exists to prevent.
+        //
+        // This asserts a DEFAULT, not a rung: (A) above is what pins the rung's actual numbers,
+        // and they are untouched. It runs the LIVE (non-NoPersist) path — the whole point is what
+        // a real profile does — so it stashes and restores save.json / meta.json.
+        {
+            string sp2 = SaveGame.SavePathPublic, mp2 = SaveGame.MetaPathPublic;
+            bool hadS = false, hadM = false; string sStash = null, mStash = null;
+            try
+            {
+                hadS = System.IO.File.Exists(sp2); if (hadS) sStash = System.IO.File.ReadAllText(sp2);
+                hadM = System.IO.File.Exists(mp2); if (hadM) mStash = System.IO.File.ReadAllText(mp2);
+                if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);   // a never-played profile
+
+                var fresh = new Game { NoPersist = false };
+                fresh.DebugLoadMeta();
+                if (!fresh.FirstTimeProfile) fails.Add("freshProfileNotFlagged");
+                if (fresh.PendingHeat != Sightline.Heat.Recruit)
+                    fails.Add("freshProfilePendingHeat=" + fresh.PendingHeat);
+                if (fresh.UnlockedHeat != 0) fails.Add("freshProfileUnlocked=" + fresh.UnlockedHeat);
+
+                // ...and a profile that HAS finished a run keeps the standard rung. The default is
+                // an on-ramp for a first-timer, never a silent difficulty drop for a returning one.
+                SaveGame.RecordRunTotals(false, 2);
+                var seasoned = new Game { NoPersist = false };
+                seasoned.DebugLoadMeta();
+                if (seasoned.FirstTimeProfile) fails.Add("seasonedProfileFlaggedFresh");
+                if (seasoned.PendingHeat != 0) fails.Add("seasonedProfilePendingHeat=" + seasoned.PendingHeat);
+            }
+            catch (Exception ex) { fails.Add("onRampDefaultThrew:" + ex.GetType().Name); }
+            finally
+            {
+                try
+                {
+                    if (hadS) System.IO.File.WriteAllText(sp2, sStash);
+                    else if (System.IO.File.Exists(sp2)) System.IO.File.Delete(sp2);
+                    if (hadM) System.IO.File.WriteAllText(mp2, mStash);
+                    else if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);
+                }
+                catch { }
+            }
+        }
+
         return fails.Count == 0
-            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile; W5: a zero-run profile DEFAULTS to RECRUIT and a played one does not)"
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 

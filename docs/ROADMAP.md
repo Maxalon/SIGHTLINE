@@ -1470,6 +1470,131 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       cols 16-17 extraction corner and gets scattered by the spawn-collision loop. Gating it
       off evac objectives the way ENVELOP is gated is the cheap fix, unmeasured.
 
+### PROGRAM RESONANCE — W5 "THE FIRST HOUR AND THE FRONT DOOR" (2026-08-29, details in DEVLOG §W5)
+
+Balance-inert by construction *and* by measurement: `PAIRTEST` byte-identical, and a pinned-slot
+`SIGHTLINE_BALANCE=5` (`runs=10` asserted, `SIGHTLINE_BALANCE_BASE=120`, heat 0) whose JSON is
+**field-for-field identical** to the same batch on the branch point `d350416`.
+
+- [x] **THE HEADLINE DEFECT — mission 1's briefing could not draw, and it REPRODUCES.** The audit
+      traced the chain by code-read and said it could not be reproduced; `SIGHTLINE_BRIEFTEST`
+      (the one self-test that drives the LIVE, persisting path, because `NoPersist` is what hid
+      it) measures **0.00 s of 11 s** on the pre-fix tree. Fixed by ORDERING: the briefing is a
+      pre-fight beat and the mission-1 lesson strip arms PENDING behind it (`Game.TutPending`),
+      opening the frame the card retires. `TutStepFire` gains the turn-count patience fallback its
+      three siblings had. `SIGHTLINE_BRIEFFIRST=0` restores the old order and turns the test red.
+- [x] **THE BLOOM STOPS EATING THE TYPE** (`visual-2`). `Display.RenderFrame` splits the frame
+      on the **bloom source**: board + overlay-screen backdrop are the bright-pass input, the
+      chrome is painted on top of it into the same target. Main-menu TRAINING OP measured
+      **2.19:1 → 10.76:1** glyph-vs-plate with post-FX ON (method stated in DEVLOG §W5-2). The
+      first attempt drew the HUD after the composite and **stranded BRIGHTNESS and GAMMA on the
+      board** — that is recorded in DEVLOG §W5-2 and in `Display.RenderFrame`'s header, because
+      the colour-grade seam and the bloom seam are not the same seam. The board's own bloom is
+      unchanged: every sampled patch sits inside its own frame-to-frame animation swing (the gold
+      objective marker alone spans 18.9 luma across four adjacent frames of one build), and every
+      glowing object's peak is identical. `SIGHTLINE_CONTRASTTEST` is the standing gate;
+      `SIGHTLINE_HUDINFX=1` falsifies it.
+- [x] **THE DOORS** (`newplayer-2`, `wildcard-3`). A third **WAR ROOM [W]** plate on both end
+      cards, a "spend it in the WAR ROOM" line under the SALVAGE slab, and an "N JOIN THE RESERVE"
+      header with per-survivor recall prices — where N is the *delta* of `SaveGame.VeteranCount()`
+      so the card cannot over-claim (METATEST pins it). **QUIT TO DESKTOP [Q]** on the pause card
+      (arm-then-confirm, with the honest cost stated) and **QUIT [Q]** on the main menu.
+      `SIGHTLINE_QUITTEST` asserts the quit path keeps the mission-start checkpoint byte-identical
+      and never touches `meta.json`.
+- [x] **THE ON-RAMP IS THE DEFAULT** (`newplayer-4`). A zero-run profile opens on RECRUIT
+      (`Game.FirstTimeProfile`) and "< RECRUIT" names the rung below zero on every profile. This
+      moves a DEFAULT, not a rung — every archived heat number is untouched, and the measurement
+      harness sets heat explicitly under `NoPersist`. ONRAMPTEST asserts the default *and* the
+      control (a played profile keeps heat 0).
+- [x] **THE CHROME** (`visual-7`, `newplayer-3`, `newplayer-6`). A fixed slot map keyed by verb
+      stability (volatile verbs at the tail, where appending cannot move anything) plus one
+      backing plate; the CONCEALED pill's pulse floor raised from **0.10 to 0.56** (a 10.0× swing
+      to 1.79×); doctrine cards sized to content — **ten of sixteen boons overflowed** the old
+      fixed 74px height — and the class-glyph disc moved out of the operator blurb's row.
+      `SIGHTLINE_CHROMETEST`, falsified by `SIGHTLINE_OLDCHROME=1`.
+- [x] **THE WORDS** (`newplayer-5`, `newplayer-7`). Both "glowing tile" prompts now name the
+      outline, the corner ticks and the dashed ring the renderer actually draws. FIELD CRAFT gains
+      SHOVE and UTILITY ITEMS, and a **VERBS & KEYS** tab is generated from `Hud.VerbTable` +
+      `Hud.VerbHelp` — the same switch the action bar's tooltip reads, so help and manual cannot
+      drift. CODEXTEST asserts every verb has a permanent home (`shove` and `item` failed before).
+
+- [ ] **NOT DONE — `visual-6`: unify the intro's four button families onto one system.** Marked
+      droppable-last in the brief and dropped. Its *measurable* half (labels washing out) is fixed
+      by the post-FX split; the rest is a substantial aesthetic redesign of the storefront screen
+      that this wave could only review with its own screenshots. **Still true:** three button
+      styles across four widths on five rows with three gutters, hotkey badges inside the corner
+      radius, LAST STAND spending the reserved danger red on a menu affordance, and a frame whose
+      top-1% chroma is ~189 against a board at ~100.
+- [ ] **Residual (recorded, not fixed): the HUD still receives the composite's chromatic
+      aberration and vignette.** The audit's *primary* visual-2 finding (contrast collapse) is
+      fixed; its smaller secondary one — edge colour-fringing on HUD text up 16-66%, edge
+      luminance down ~14% — is not, because the chrome is deliberately still inside the colour
+      grade so BRIGHTNESS and GAMMA keep working on it. Fixing it properly means a third pass:
+      composite with `uBright`/`uGamma` neutral into a second target, draw the chrome, then blit
+      through a small grade-only shader that writes `alpha = 1`. Costs one full-screen RT and one
+      blit per frame, on a game with no frame-time instrument yet (`wildcard-7`).
+- [ ] **Residual (recorded, not fixed): `SIGHTLINE_POSTFX=1`'s "demo bloom" comment is stale.**
+      The boot-time `BloomIntensity = 0.85` / `ChromaIntensity = 0.6` injection is overwritten on
+      frame 1 by `Game.Update`'s own `SetPostFxParams(_postFxBloom = 0, …)`, so the hook has been
+      photographing the RESTING configuration for waves. That is *better* for W5's purposes (the
+      contrast numbers above are what every player sees on the menu, every time) but the hook does
+      not do what its comment says. One-liner for whoever next touches that path.
+
+### PROGRAM RESONANCE — W5-FIX "THE REVIEW BLOCKERS" (2026-08-29, details in DEVLOG §W5-FIX)
+
+Five blockers from a four-reviewer pass, plus four cheap evidenced items. Every load-bearing
+safety claim from W5 was re-verified by the reviewers and held; none of it was touched here.
+
+- [x] **AUDIO CHECK was left behind by the render split, and three comments asserted the
+      opposite.** `Hud.DrawAudition` painted its own `DrawTacticalBackdrop` in the CHROME pass,
+      i.e. after `BuildBloom`, so the composite added the **live board's** glow through an opaque
+      screen that ships post-FX ON and is reachable from the pause card mid-mission. Against
+      `d350416`, post-FX ON: **17,010 px > +20 luma, 8,640 > +40, peak +154.1** (mid-mission
+      17,214 / 8,899 / +166.0). After: **0 px > +20, peak +7.0**, with the post-FX-OFF pair still
+      byte-identical. `Phase.AudioCheck` joins `Hud.BackdropPhase` and `DrawBackdropLayer`'s
+      switch (off `g.AudClock`, never `GetTime`); all three false sentences now name BARRACKS
+      alone.
+- [x] **A STRUCTURAL gate for the whole class — `SIGHTLINE_BACKDROPTEST`.** Drives every `Phase`
+      through the chrome pass and asserts none paints a full-screen backdrop there
+      (`Hud.BackdropPaints`, incremented inside `DrawTacticalBackdrop` itself), then through
+      `DrawBackdropLayer` and asserts the switch and the registry are the same set, then that the
+      modal scrim doubles only where the composite runs. CONTRASTTEST reads nine main-menu labels
+      and could never have caught this. `SIGHTLINE_AUDBACKDROP=1` falsifies it.
+- [x] **The content-sized doctrine card no longer pushes the DEPLOY row off the screen.** At the
+      default 100% the BACK / DEPLOY / RE-ROLL POOL row was sliced at y=800; at 120% it was off
+      entirely, and RE-ROLL POOL had no keyboard route. `Hud.DraftLayout` computes the whole stack
+      up front and reclaims the height from the gaps (floors set by the type each gap carries at
+      120%), and the doctrine row widened to the RUN CONTRACT row's width — the one mismatched
+      width on the screen, and the change that turns FIELD DRILLS' four lines back into three.
+      CHROMETEST asserts the row is on screen for **16 boons × 4 text sizes**; `[R]` re-rolls.
+- [x] **CHROMETEST leg (C)'s overflow assertion was TAUTOLOGICAL** (`need > Math.Max(74, need)`).
+      It now measures the last line's real ink bottom through the live font against the renderer's
+      own card height.
+- [x] **The DERIVED sweep count was wrong in both modes.** `^echo` missed PAIRTEST's indented
+      invocation: `--full` printed 53 while 54 ran. Anchor is `^ *echo`; proven by adding a hook
+      and re-running both modes (55 `--full`, 54 plain, matching the real line count). Fifth time
+      this counter has been wrong.
+- [x] **The §1.1 priority change is recorded as an amendment** — `docs/DESIGN.md` **§1.2**. The
+      never-simultaneous invariant survives, but the stated priority is inverted for a first-time
+      player's first eleven seconds, which is the window §1.1 exists to protect. Argued on its
+      merits (the rule as written measured 0.00 s of 11 s — an absolute yield to a layer that
+      never ends is a deletion, not a priority), with the limits written down and §1.1's fourth
+      bullet cross-referenced.
+- [x] **`SIGHTLINE_BRIEFTEST` now observes the DRAW side.** It certified "the briefing plays its
+      full 11 s" while reading only `Game.BriefTimer`; a reviewer's one-line `&& false` on the
+      dispatch made the card undrawable and it still PASSed. Every watched frame now paints a real
+      frame through `Hud.Draw` and counts `Hud.BriefCardDraws`. With the mutant:
+      `FAIL (briefCardDrawnOnOnly0framesOf630)` — and every model-side assertion still passing,
+      which is the measurement of how blind the old form was.
+- [x] **The double scrim is gated on `Display.Enabled && Display.PostFX`.** With post-FX off there
+      is no bright pass to attenuate. Board strip under the pause card: base **18.56** → pre-fix
+      **12.08** → fixed **18.55**; post-FX ON deliberately unchanged (10.09 → 10.08).
+- [x] **`Display.RenderFrame` stops building the combining `draw` closure on the post-FX path**,
+      where it was never invoked. Claimed as removed dead work, not as a measured frame-time win.
+- [x] **The DEVLOG's "no camera path" sentence corrected.** `Game.ViewCamera` and the
+      `BeginMode2D` around `Renderer.DrawBoard` are INTACT (`Game.cs:7629/7658`); only the
+      letterbox-blit camera the abandoned first attempt would have needed was never written.
+
 ### PROGRAM RESONANCE — X2 "TRUE NORTH II" (2026-08-29, details in DEVLOG §X2)
 
 - [x] **THE LADDER OF RECORD.** The first ladder ever measured on the COMPOSED tree: n=40

@@ -200,6 +200,12 @@ for `SIGHTLINE_` for the authoritative set.
 arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−, and **held SHIFT** (W4: reveals the
 dash/sprint region in the move overlay — the only key read as a *modifier*; held keys as such are
 not new, `Game.Codex.cs` has scrolled the field manual on held Left/Right/A/D since before it).
+**Free keys** — **DO NOT TRUST THE LIST BELOW; DERIVE IT.** The 2026 audit (wildcard-4)
+found four of the nine letters this line advertised as free were already bound (N/P/U/V),
+and the duplicate registry at `src/Game.cs` ("Free letters remaining…") disagreed with it.
+Run `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u` before binding anything.
+As of wave W5 the genuinely free letters are **`I J O Z`** — W5 bound **Q** (QUIT TO
+DESKTOP, pause card + main menu). Everything else is claimed somewhere.
 
 **Distribution** (publishing a build, the licence position, where saves live, and the
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
@@ -212,6 +218,13 @@ them plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 
 **Don't hand-count them** — the sweep DERIVES its own total and prints a COVERAGE GAP block
 naming any hook in `src/` it fails to run. **W9: the sweep now EXITS NON-ZERO** on a TIMEOUT or a
 missing RESULT line, so autoplay is a real gate instead of a line for a reader to notice.
+**Self-tests & measurement:** every feature that can be checked headlessly ships a
+`SIGHTLINE_*TEST` hook (e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints
+`PASS/FAIL`, plus `SIGHTLINE_*` screenshot hooks. `bash scripts/qa-sweep.sh --full` runs
+them all plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s
+PAIRTEST. **Do not write a count here** — it has been wrong four times (41 / 46 / 49 / 51
+each claimed while a different number ran). W5 made the sweep's own footer DERIVE it, so
+run the sweep and read the last line.
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is
@@ -277,6 +290,7 @@ src/
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
 scripts/qa-sweep.sh    every self-test + autoplay x3 (--full adds PAIRTEST); count is DERIVED
+scripts/qa-sweep.sh    every self-test + autoplay x3 (--full adds PAIRTEST); count DERIVED, not typed
 scripts/publish.sh     hand-run distributable build + persistence re-proof
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image

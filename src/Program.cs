@@ -246,6 +246,70 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BRIEFTEST=1 : W5 THE FIRST HOUR — drives a LIVE (non-NoPersist) first-ever
+        // campaign mission 1 and asserts the briefing card actually plays before the lesson strip
+        // opens. This is the ONE self-test that deliberately runs the persisting path (every other
+        // harness hook sets NoPersist, and NoPersist is exactly what hid this defect), so it
+        // stashes and restores display.json / save.json / meta.json around its body.
+        // SIGHTLINE_BRIEFFIRST=0 restores the pre-W5 ordering and turns this test red.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BRIEFTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "brieftest");   // StartMission -> Unit.SyncPos uses tile math
+            LoadGameFonts();   // W5-FIX: the test now DRAWS the real HUD, so it needs the atlases
+            Console.WriteLine(new Game().BriefingSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_BACKDROPTEST=1 : W5-FIX — the backdrop registry. Drives EVERY Phase through the
+        // chrome pass and through DrawBackdropLayer and asserts (a) no screen builder paints a
+        // full-screen backdrop from the chrome pass (the AUDIO CHECK defect), (b) the registry and
+        // the switch are the same set, (c) the modal scrim doubles only when the composite runs.
+        // Draws the real HUD, so it needs a context + the real font atlases.
+        // SIGHTLINE_AUDBACKDROP=1 restores the defect and turns this red.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BACKDROPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "backdroptest");
+            LoadGameFonts();
+            Console.WriteLine(new Game().BackdropSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_CONTRASTTEST=1 : W5 THE FIRST HOUR — main-menu type contrast through the
+        // shipped post-FX composite. Boots a REAL 1280x800 window with Display + PostFX ON and
+        // reads the framebuffer back; a screen read is the only honest instrument, because the
+        // whole defect lived in the composite. Stashes/restores save.json (it stages a CONTINUE).
+        // SIGHTLINE_QUITTEST=1 : W5 THE FIRST HOUR — the two exits the audit found missing.
+        // Drives the LIVE (persisting) path to prove the quit is persistence-inert, so it stashes
+        // and restores save.json / meta.json. Draws the end cards, so it needs a context + fonts.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_QUITTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "quittest");
+            LoadGameFonts();
+            Console.WriteLine(new Game().QuitSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_CHROMETEST=1 : W5 THE FIRST HOUR — the action bar's fixed slot map, the
+        // CONCEALED pill's pulse envelope, and the doctrine cards fitting their own text.
+        // Needs a real draw context (the bar's layout and its paint are one pass), so it runs
+        // inside a tiny window and draws into it.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CHROMETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "chrometest");
+            // LOAD-BEARING: this test measures TEXT (button widths, wrapped line counts), and
+            // without the real atlases Cfg.Measure falls back to raylib's default font, whose
+            // metrics are narrower — every doctrine description fitted on one line and the
+            // overflow leg silently could not fail.
+            LoadGameFonts();
+            Console.WriteLine(new Game().ChromeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRASTTEST") == "1")
+        {
+            Console.WriteLine(ContrastSelfTest());
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
@@ -921,15 +985,23 @@ public static class Program
             game.Update(dt);
             Audio.UpdateMusic(dt);
 
+            // W5: two-pass frame — the board (and the overlay screens' backdrop) goes through the
+            // post-FX grade, the HUD is drawn on top of the composite so its type stays crisp.
             // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
-            // requested ON TOP of autoplay is asking for a picture of live play — the only way to
-            // photograph a unit MID-MOVE — so draw for real in that combination.
-            // W1: when the draw is a bare ClearBackground, skip the frame entirely and just pump
-            // the event queue (see BatchPump). Same reasoning as the three batch loops: the clear
-            // and the buffer swap were the whole cost of an autoplay smoke run.
+            // requested ON TOP of autoplay is asking for a picture of live play — the only way
+            // to photograph a unit MID-MOVE — so draw for real in that combination.
+            // W1: when nothing is being photographed there is no frame worth drawing at all —
+            // pump the event queue instead (BatchPump). The clear and the buffer swap were the
+            // whole cost of an autoplay smoke run; keeping W5's two-pass call on the draw side
+            // preserves the crisp-HUD split without paying for it in the smoke test.
+            // (lead, at the W5 merge: W1 supplies the fast path, W5 the drawn one.)
             if (autoplay && !shot) BatchPump();
-            else Display.RenderFrame(game.Draw);
+            else Display.RenderFrame(game.DrawBoardLayer, game.DrawHudLayer);
 
+            // W5 THE DOORS: the player asked to leave. Nothing to flush — the quit path writes
+            // nothing (the campaign checkpoint was written at mission start), so break straight
+            // into the normal shutdown below.
+            if (game.QuitRequested) break;
             if (shot || autoplay) frame++;
             // W5: dump the filmed unit's tweened board position every frame, so "positions advance
             // monotonically, no backwards step" is a MEASURED claim rather than an eyeball on PNGs.
@@ -1669,6 +1741,137 @@ public static class Program
     /// window-free-ish self-test hook (SIGHTLINE_VOICETEST measures real glyph widths) can bake
     /// the same atlases the game uses. Idempotent enough for the harness: call it once, after
     /// InitWindow. Behaviour is unchanged for the normal launch path.
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    //  W5 THE FIRST HOUR — SIGHTLINE_CONTRASTTEST=1
+    //
+    //  Pins the repair for audit visual-2. `Display.RenderFrame` used to put the ENTIRE frame
+    //  through the bright-pass, so a saturated UI plate bloomed into its own label: the main
+    //  menu's TRAINING OP — the on-ramp button for a first-time player — measured 2.19:1
+    //  glyph-vs-fill with post-FX on, against 8.67:1 with it off. W5 split the frame in two
+    //  (board + overlay backdrop become the BLOOM SOURCE; the chrome is painted on top of the
+    //  bright pass, into the same target so the colour grade stays uniform), and this test is the
+    //  standing gate that keeps it that way. Shipped reading: 10.76:1.
+    //
+    //  It boots a REAL 1280x800 window with Display and PostFX ON — a screen read is the only
+    //  honest instrument here, because the whole defect lived in the composite — drives the intro
+    //  for 90 frames so the panel-entrance animations settle, then reads the framebuffer back and
+    //  measures each named button.
+    //
+    //  METHOD (mirrored exactly by the offline probe quoted in DEVLOG): inset the button rect by
+    //  8 px so the plate border is excluded; glyph core = 2nd percentile of a 3x3 MIN-filtered
+    //  relative luminance, plate fill = 98th percentile of a 3x3 MAX-filtered one; WCAG ratio
+    //  between them. The min/max filter erases antialiased edge pixels (an edge pixel always has
+    //  both a brighter and a darker neighbour), so the two readings are the glyph INTERIOR and
+    //  the plate INTERIOR — which is what "glyph vs fill" means, and what the authored colours
+    //  were picked against (Pal.Good vs the RGBA(3,18,26) label is 10.90:1 on paper).
+    //
+    //  NOTE ON THE BLOOM LEVEL, because it changes what this number means: SIGHTLINE_POSTFX=1's
+    //  boot-time "demo bloom" injection is OVERWRITTEN on frame 1 by Game.Update's own
+    //  SetPostFxParams(_postFxBloom, ...), which rests at 0. So this measures the SHIPPED resting
+    //  configuration — the fragment shader's always-on `bloomAmt = 1.45` baseline halo — not a
+    //  combat spike. The defect was in what every player sees on the menu, every time.
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    static string ContrastSelfTest()
+    {
+        var fails = new List<string>();
+
+        // Stage a save so the CONTINUE RUN plate exists (the FUL-2 stash/restore pattern — never
+        // clobber a real campaign), then boot the window the game actually ships.
+        string stash = System.IO.File.Exists(SaveGame.SavePathPublic)
+            ? System.IO.File.ReadAllText(SaveGame.SavePathPublic) : null;
+        try
+        {
+            var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r);
+
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "contrasttest");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            LoadGameFonts();
+            Display.Init(true);
+            Display.PostFX = true;
+            Raylib.SetTargetFPS(0);
+
+            var g = new Game { NoPersist = true };
+            for (int i = 0; i < 90; i++)
+            {
+                g.Update(1f / 60f);
+                Display.RenderFrame(g.DrawBoardLayer, g.DrawHudLayer);
+            }
+            if (g.Phase != Phase.Intro) fails.Add("notOnIntro:" + g.Phase);
+
+            var shot = Raylib.LoadImageFromScreen();
+            var boxes = new (string name, Rectangle r)[]
+            {
+                ("CONTINUE_RUN", Hud.OverlayBtn2), ("DEPLOY_SQUAD", Hud.OverlayBtn),
+                ("TRAINING_OP",  Hud.OverlayBtn8), ("LAST_STAND",   Hud.OverlayBtn3),
+                ("WAR_ROOM",     Hud.OverlayBtn4), ("FIELD_MANUAL", Hud.OverlayBtn5),
+                ("SKIRMISH",     Hud.OverlayBtn6), ("DAILY",        Hud.OverlayBtn7),
+                ("AUDIO_CHECK",  Hud.OverlayBtn9),
+            };
+            var report = new List<string>();
+            foreach (var (name, rect) in boxes)
+            {
+                if (rect.Width < 20 || rect.Height < 20) { fails.Add("noRect:" + name); continue; }
+                float ratio = LabelContrast(shot, rect, 8);
+                report.Add($"{name} {ratio:0.00}");
+                if (ratio < 4.5f) fails.Add($"{name}@{ratio:0.00}");
+            }
+            Raylib.UnloadImage(shot);
+            Raylib.CloseWindow();
+
+            return fails.Count == 0
+                ? "CONTRASTTEST: PASS (post-FX ON, glyph-vs-plate >= 4.5:1 on all "
+                  + boxes.Length + " main-menu labels: " + string.Join(" ", report) + ")"
+                : "CONTRASTTEST: FAIL (" + string.Join(",", fails) + ")";
+        }
+        catch (Exception ex) { return "CONTRASTTEST: FAIL (threw:" + ex.GetType().Name + ":" + ex.Message + ")"; }
+        finally
+        {
+            try
+            {
+                if (stash != null) System.IO.File.WriteAllText(SaveGame.SavePathPublic, stash);
+                else if (System.IO.File.Exists(SaveGame.SavePathPublic)) System.IO.File.Delete(SaveGame.SavePathPublic);
+            }
+            catch { }
+        }
+    }
+
+    /// WCAG glyph-core-vs-plate-fill contrast inside `rect` of a screen grab. See ContrastSelfTest.
+    static float LabelContrast(Image img, Rectangle rect, int inset)
+    {
+        int x0 = (int)rect.X + inset, y0 = (int)rect.Y + inset;
+        int w = (int)rect.Width - 2 * inset, h = (int)rect.Height - 2 * inset;
+        var L = new float[h, w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var c = Raylib.GetImageColor(img, x0 + x, y0 + y);
+                L[y, x] = 0.2126f * Srgb(c.R) + 0.7152f * Srgb(c.G) + 0.0722f * Srgb(c.B);
+            }
+        var mins = new List<float>(w * h);
+        var maxs = new List<float>(w * h);
+        for (int y = 1; y < h - 1; y++)
+            for (int x = 1; x < w - 1; x++)
+            {
+                float lo = 2f, hi = -1f;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    { float v = L[y + dy, x + dx]; if (v < lo) lo = v; if (v > hi) hi = v; }
+                mins.Add(lo); maxs.Add(hi);
+            }
+        mins.Sort(); maxs.Sort();
+        float glyph = mins[Math.Clamp((int)(mins.Count * 0.02f), 0, mins.Count - 1)];
+        float plate = maxs[Math.Clamp((int)(maxs.Count * 0.98f), 0, maxs.Count - 1)];
+        float dark = MathF.Min(glyph, plate), light = MathF.Max(glyph, plate);
+        return (light + 0.05f) / (dark + 0.05f);
+    }
+
+    static float Srgb(byte b)
+    {
+        float c = b / 255f;
+        return c <= 0.04045f ? c / 12.92f : MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
+    }
+
     static void LoadGameFonts()
     {
             int[] codepoints = new int[]

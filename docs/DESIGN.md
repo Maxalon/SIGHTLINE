@@ -76,6 +76,9 @@ acknowledgement. Naming a thing is the cheapest way to make an existing system l
 - **Readability wins, always.** §3.E and §3.H govern. Text that fights the signal is a
   regression, and the briefing card yields the shared card slot to wave T1's teaching
   layers *absolutely* — a lesson or a field tip on screen silences the frame outright.
+  **AMENDED by §1.2** for mission 1 of a first-ever campaign only: the never-simultaneous
+  invariant stands, but the ORDER is reversed there (the briefing plays first and the
+  lesson strip opens behind it), because the rule as written measured 0.00 s of 11 s.
 - **Barks are rate-limited by design, not by taste.** One per turn, one per beat kind
   per mission, never the same speaker twice running. The combat log is load-bearing for
   "why did that happen"; flavour may never crowd out a mechanical line.
@@ -96,6 +99,76 @@ would ship an ellipsis fails the build gate instead.
 for the same attention budget as balance and feel work. It earns its place only while it
 stays this small. If a future wave wants dialogue, arcs or a plot, that is a *different*
 amendment and it should be argued on its own terms — this one does not authorise it.
+
+### 1.2 AMENDMENT — the briefing goes FIRST on mission 1 (PROGRAM RESONANCE, wave W5, 2026-08-29)
+
+> **This amends the fourth limit in §1.1 above, and only on mission 1 of a first-ever
+> campaign.** Same contract: on the record, argued, and reversible with one env var.
+
+**What §1.1 said, and what W5 did.** §1.1 lists as a non-negotiable limit that *"the
+briefing card yields the shared card slot to wave T1's teaching layers **absolutely** — a
+lesson or a field tip on screen silences the frame outright."* W5 shipped the opposite
+**priority** for one window: `Game.StartTutorialMaybe` now arms the mission-1 lesson strip
+**pending** (`Game.TutPending`) and `UpdateTutorial` opens it on the frame the briefing card
+retires, so teaching waits up to 11 s behind flavour. The literal *never-simultaneous*
+invariant §1.1 was written to protect is intact — the two still cannot share the slot, and
+`Hud.Draw`'s dispatch chain still puts every teaching layer ahead of the briefing — but the
+ORDER is inverted in exactly the first eleven seconds a new player ever sees. That is the
+window §1.1's limit exists to protect, so this has to be a recorded amendment, not a
+detail of an implementation.
+
+**Why it is nonetheless right.**
+
+- **The rule as written produced ZERO briefings, not a delayed one.** `BriefAllowed`
+  requires `TutorialText == null`; the strip was non-null from the frame `SetupMission`
+  armed it; and `UpdateBriefing` destroys the card outright the instant `Stats.CombatLog`
+  fills, which the strip's own FIRE lesson guarantees. So on a first-ever run the card held
+  without ever burning its clock and was then deleted. Measured on the live persisting path
+  by `SIGHTLINE_BRIEFTEST`: **0.00 s of 11 s.** An absolute yield to a layer that never
+  ends is not a priority, it is a deletion. §1.1's own justification — *"naming a thing is
+  the cheapest way to make an existing system land"* — cannot be served by a card no player
+  has ever seen.
+- **The two layers are not competing for the same moment.** §1.1's limit is about
+  ATTENTION during play: a lesson that says *do this now* must not fight prose. On turn 1
+  of mission 1 nothing is contested — the squad is concealed, no hostile has acted, the
+  combat log is empty, and the MOVE lesson has nothing to teach yet that the next eleven
+  seconds will change. The briefing is a genuine pre-fight beat, and playing it there costs
+  the teaching layer nothing it can use.
+- **The player keeps the override.** Any key or click dismisses the card
+  (`Game.UpdateBriefing`), so a player who wants to move reaches the lesson in **one
+  input**. Teaching is deferred, never withheld; a player cannot get stuck behind flavour.
+  The wait is also bounded twice — `BriefShowSeconds` = 11 s, and `BriefHoldMax` = 45 s
+  gives up entirely rather than ambush anyone mid-fight.
+- **Nothing else moved.** The strip still runs in full and still completes; the action bar's
+  verb staging is live throughout (`OnboardingActive` counts `_tutPending`) so the bar does
+  not flicker whole-then-staged across the card; and `TutStepFire` gained the turn-count
+  patience fallback its three siblings already had, so the FIRE lesson can no longer be the
+  step that outlives the briefing.
+
+**The limit on the amendment — this is the load-bearing half.**
+- **Mission 1 of a first-ever campaign only.** `StartTutorialMaybe` returns immediately for
+  `Mission != 1` and for `Display.TutorialSeen`. On every other mission, and for every
+  returning player, §1.1's absolute yield stands unchanged.
+- **The never-simultaneous invariant is untouched and is still absolute.** `Hud.Draw` draws
+  the tutorial, the training lesson and the field tip ahead of the briefing in one `else if`
+  chain; `BriefAllowed` still requires `TutorialText == null`; `BarksAllowed` still defers to
+  all three. A lesson and a briefing on screen together remains a bug.
+- **This buys ORDER, not CONTENT.** §1.1's cap on the frame — three lines, no plot, nothing
+  a player must read — is not touched. This wave made an existing card reachable; it wrote
+  no new words.
+- **It stays falsifiable.** `SIGHTLINE_BRIEFFIRST=0` restores the pre-W5 ordering, and
+  `SIGHTLINE_BRIEFTEST` goes red without it — with `briefShownOnlyFor0.00sOf11s`, the
+  original defect, named.
+
+**The honest cost, and the correction that produced this section.** A first-time player's
+first eleven seconds are now prose rather than instruction, and nobody has watched a human
+sit through them: the wait is defensible on the argument above, not on evidence. The wave
+that shipped it also did **not** record it as an amendment at the time — it wrote a full
+§5.1 for the much smaller mid-mission-checkpoint decision and left this one as an
+implementation comment in `Game.cs`, which is exactly the drift this document exists to
+prevent. If a recorded human session (audit `wildcard-6`) shows players skipping the card
+or fumbling turn 1, the cheap retreat is to cut `BriefShowSeconds`, not to restore a rule
+that measured zero.
 
 ---
 
@@ -456,6 +529,68 @@ of the spectrum). Revisit it only **after** Option 3 ships and playtests, and on
 **flagged prototype on the larger maps**, judged on one question: *is partial-information
 SIGHTLINE more fun than full-information SIGHTLINE, knowing it costs us threat-preview
 and readability?* Until that bar is cleared, we do not pay its price.
+
+---
+
+### 5.1 AMENDMENT — the mid-mission checkpoint (considered, deferred; PROGRAM RESONANCE wave W5, 2026-08-29)
+
+Same contract as §5: **on the record and reversible with eyes open.**
+
+**The problem.** Until W5 the game had *no way to quit*. The pause card carried 18
+controls, the main menu 9 entries, and neither offered an exit — and because
+`Raylib.SetExitKey(KeyboardKey.Null)` is load-bearing (ESC cancels a targeting mode and
+opens the pause card, and must never close the window), ESC could not do it either. The
+only sanctioned ways out were **ABANDON RUN**, which destroys the run, or **alt-F4**.
+W5 shipped `QUIT TO DESKTOP` on both surfaces. That half is not in question.
+
+The half that *is* a design decision: **the campaign checkpoint is written at mission
+start and nowhere else** (`SaveGame.Save(_run)` in `Game.SetupMission` is the only live
+gameplay call site). So quitting fifteen minutes into mission 5 rewinds to the beginning
+of mission 5. Every turn since is gone.
+
+**The options considered:**
+
+1. **A real mid-mission checkpoint.** The board is fully describable — units, tiles,
+   objective state, pod alert tiers, the anim queue's terminal state — and `SaveGame`'s
+   source-generated JSON contexts make another DTO cheap. Quit exactly where you stand.
+2. **Accept mission-restart-on-quit, and say so out loud.**
+3. **Say nothing** (the status quo before W5, which is what made the missing exit worse
+   than merely missing: a player who force-quit lost work and was never told they would).
+
+**The decision: Option 2, for now.** The confirm text on the pause card reads *"the
+current mission restarts from its start"* — the player is told the price before they pay
+it, and `SIGHTLINE_QUITTEST` asserts the claim is TRUE: the quit path writes nothing,
+deletes nothing, and leaves the mission-start checkpoint byte-identical and `meta.json`
+untouched.
+
+Rationale, and the honest cost:
+
+- **A mission is a coffee break, not an evening.** Measured over five Release autoplays
+  (audit wildcard-8, base `d350416`), a whole six-mission campaign runs 3,581–17,163
+  frames — roughly two minutes of *animation* for the entire campaign. The lost work of
+  a mid-mission quit is bounded by one mission, and one mission is the unit this game is
+  already built around: it is the unit the checkpoint uses, the unit the barracks sits
+  between, and the unit the end card counts.
+- **A mid-mission save is a new persisted format, and this project has been burned by
+  persistence twice** — `PublishTrimmed` destroying save/load while the game still booted
+  (`docs/DISTRIBUTION.md` §3), and a `catch { }` that let a broken publish look healthy.
+  A board DTO is not a small format: it would need a golden fingerprint in the SAVETEST
+  family, and it would need to survive every future change to `Unit`, `Grid` and the
+  objective state machines. That is a wave of its own, not a rider on a UI wave.
+- **It would also be a save-scum surface.** §1's "stakes that bite" is a pillar: a
+  quit-anywhere-resume-anywhere checkpoint inside a mission makes reloading past a bad
+  roll a two-click operation, and the run-to-run loop (pillar 3) is priced on losses
+  being permanent. That is a real design question, not just an engineering one, and it
+  deserves to be answered deliberately rather than acquired as a side effect of adding a
+  QUIT button.
+
+**Deferred, not rejected.** Revisit when either of two things is true: a recorded human
+session (audit wildcard-6's journal proposal) shows real players quitting mid-mission
+often enough to matter, or a mission's median wall-clock length grows past the coffee
+break the argument above rests on. If it ships, it ships with the save-scum question
+answered first — most likely as a **suspend-and-close** (the file is consumed on resume,
+so it restores a session rather than banking a reload point), which keeps the stakes and
+buys the convenience.
 
 ---
 

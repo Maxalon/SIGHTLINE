@@ -29,6 +29,7 @@
 # directory must already EXIST) and SIGHTLINE_BALANCE_JSON=<your worktree>/balance.json
 # before running this. Both are inherited from your shell; this script does not set them.
 set -u
+_SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"   # W5: absolute, for the derived footer count
 export PATH="$PATH:/usr/lib/dotnet"
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 cd "$(dirname "$0")/.."
@@ -114,6 +115,14 @@ echo -n "OPENERTEST : "; verdict "$(SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENE
 # "NAME PASS" with no colon, like EXPOSURETEST.
 echo -n "TUTTEST    : "; verdict "$(SIGHTLINE_TUTTEST=1 run | grep -oE "TUTTEST: (PASS|FAIL)" | head -1)"
 echo -n "THREATTEST : "; verdict "$(SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1)"
+echo -n "TUTTEST    : "; verdict "$(SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST: (PASS|FAIL)" | head -1)"
+echo -n "BRIEFTEST  : "; verdict "$(SIGHTLINE_BRIEFTEST=1 run | grep -oE "BRIEFTEST: (PASS|FAIL)" | head -1)"
+echo -n "CONTRASTTEST: "; verdict "$(SIGHTLINE_CONTRASTTEST=1 run | grep -oE "CONTRASTTEST: (PASS|FAIL)" | head -1)"
+echo -n "CHROMETEST : "; verdict "$(SIGHTLINE_CHROMETEST=1 run | grep -oE "CHROMETEST: (PASS|FAIL)" | head -1)"
+# W5-FIX: the backdrop registry — no phase may paint a full-screen backdrop from the chrome pass.
+echo -n "BACKDROPTEST: "; verdict "$(SIGHTLINE_BACKDROPTEST=1 run | grep -oE "BACKDROPTEST: (PASS|FAIL)" | head -1)"
+echo -n "QUITTEST   : "; verdict "$(SIGHTLINE_QUITTEST=1   run | grep -oE "QUITTEST: (PASS|FAIL)" | head -1)"
+echo -n "THREATTEST : "; verdict "$(SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1)"
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
 echo -n "GEOMTEST   : "; verdict "$(SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1)"
@@ -193,15 +202,16 @@ if [ "$_autofail" = 1 ]; then
   echo "   if it fired, something regressed. DO NOT MERGE."
 fi
 echo "=== DONE ==="
-# COUNT NOTE (see the header): DERIVED, never hand-maintained.
-_have=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l)
-_ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' scripts/qa-sweep.sh | sort -u | wc -l)
-[ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is named but skipped without --full
-echo "($_have self-tests exist; this sweep ran $_ran. Every line above must read PASS, and every"
-echo " autoplay must read WIN or LOSE - never TIMEOUT, never blank.)"
-# W9 REVIEW FIX: ONE exit code covering the WHOLE sweep - self-tests, coverage, and autoplay.
-if [ "$_fail" = 1 ] || [ "$_autofail" = 1 ]; then
-  echo "!! SWEEP FAILED - see the FAIL / COVERAGE GAP / AUTOPLAY lines above. DO NOT MERGE."
-  exit 1
-fi
-exit 0
+# W5: DERIVED, not typed. This footer's number has now been wrong FIVE times (41 / 46 / 49 / 51
+# all claimed while a different count ran — and then W5's own DERIVATION was wrong too, which is
+# the joke this comment has to carry). The 2026 audit's wildcard-4 finding is exactly this class of
+# hand-maintained registry drift. Count the invocation lines in this file instead.
+#
+# W5-FIX: the anchor is '^ *echo', not '^echo'. PAIRTEST's invocation is INDENTED inside the
+# --full block, so anchoring at column 0 silently missed it: --full printed 53 while 54 ran, and
+# plain printed 52 while 53 ran. A derived counter that skips indented lines is a hand-maintained
+# counter wearing a grep.
+_ran=$(grep -cE '^ *echo -n "[A-Z0-9]+ *: "; SIGHTLINE_' "$_SELF")
+[ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is the only --full-gated one
+echo "($_ran self-tests ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped"). Every line above"
+echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"

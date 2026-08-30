@@ -5415,6 +5415,591 @@ builds, which is the size of that jitter.
 
 ---
 
+# PROGRAM RESONANCE — WAVE W5 "THE FIRST HOUR AND THE FRONT DOOR"
+
+**Branch** `wave/first-hour`, base `d350416`. Source: the 67-finding audit dossier —
+`newplayer-1..7`, `visual-2`, `visual-7`, `wildcard-3`. **Balance-inert by construction and by
+measurement** (see §W5-9); this wave takes no balance round and that identity is the proof.
+
+**Thesis.** Ten programs tuned what the bot could measure. This wave fixed six things a person
+would meet in their first hour and a bot never can: a story card that could not draw, a bloom
+that ate the type, a difficulty on-ramp nobody was shown, a bar that moved under the cursor,
+teaching that pointed at a cue the renderer no longer draws, and a game with no way out.
+
+## W5-1 — THE HEADLINE DEFECT: mission 1's briefing could not draw. Measured at 0.00 s of 11 s.
+
+The auditor traced the chain by code-read and said explicitly that they could not reproduce it.
+**It reproduces.** The first job of this wave was to build the instrument, and the instrument is
+`SIGHTLINE_BRIEFTEST=1` — the one self-test in the project that deliberately drives the LIVE,
+persisting path, because `NoPersist` is exactly what hid the defect.
+
+The chain, all four sites verified:
+
+| site | fact |
+|---|---|
+| `Game.BriefAllowed` (Game.cs) | requires `TutorialText == null` |
+| `Game.SetupMission` | arms the mission-1 strip on the same frame `BeginBriefing` composes the card |
+| `Game.UpdateBriefing` | `if (Stats.CombatLog.Count > 0) { BriefLines = null; return; }` |
+| `Stats.Log` / `Anim.cs` | ALWAYS-ON, called from every shot resolution by either side |
+
+So the card **held** — never burning its 11 s clock — for the whole strip, and was then destroyed
+by the first exchange, or by `BriefHoldMax` at 45 s, whichever came first.
+
+One correction to the auditor's account, and it makes the defect *broader*, not narrower.
+They wrote that `TutStepFire`'s only exit is `_tutShot`, so the strip cannot end without a shot.
+`Game.EndPlayerTurn` also advances it — `if (TutStep >= 0 && TutStep < TutStepDone)
+AdvanceTutorial()` — so the strip clears after four END TURNs regardless. The card still never
+draws: four player turns plus four enemy turns is not free, and by then either the log has an
+entry or the 45 s hold has expired. The defect is real; the mechanism is the *duration* of the
+strip, not an infinite one.
+
+**Why ten programs never saw it.** Every harness path sets `NoPersist`, `StartTutorialMaybe`
+returns early under `NoPersist`, so **every mission-1 screenshot ever taken showed the briefing
+precisely because the tutorial was not running.**
+
+**Measured, on the live path:** `briefShownOnlyFor0.00sOf11s`. Not "reduced". Zero.
+
+**The fix is ORDERING, not content** (DESIGN §1.1 caps the narrative frame; this makes an
+existing card reachable, it does not write more of it). The board is not contested on turn 1, so
+the briefing is a genuine pre-fight beat: `StartTutorialMaybe` arms the strip **pending**
+(`Game.TutPending`), `UpdateTutorial` opens it the frame the card retires. `OnboardingActive`
+counts `_tutPending`, so the action bar does not flicker whole-then-staged across the 11 s. Any
+key or click still dismisses the card, so a player who wants to move reaches the lesson in one
+input. `TutStepFire` also gains the turn-count patience fallback its three siblings have had for
+waves (CONCEAL 2 / MOVE 3 / OVERWATCH 6 / now FIRE 9).
+
+`SIGHTLINE_FIRSTRUN=1` is the new screenshot seam: it arms the strip under `NoPersist` so a frame
+can show what a first-ever player actually sees. Screenshots before/after confirm it — before,
+`TRAINING 1/5`; after, `BRIEFING - ELIMINATE` with the bar still staged; at frame 760, the strip.
+
+## W5-2 — THE BLOOM WAS EATING THE TYPE. The HUD comes out of the BLOOM SOURCE.
+
+`Display.RenderFrame` rendered the **entire** frame into the post-FX target, so bloom, vignette
+and chromatic aberration ran over every button, label and panel — and a saturated UI plate
+bloomed into its own label. It was also quietly undoing wave V1's two-atlas font work.
+
+Re-measured with an explicitly stated method (inset the button rect 8 px so the plate border is
+excluded; glyph core = p2 of a 3×3 MIN-filtered relative luminance, plate fill = p98 of a 3×3
+MAX-filtered one; WCAG ratio between them — the min/max filter erases antialiased edge pixels so
+the two readings are the glyph INTERIOR and the plate INTERIOR):
+
+| main-menu label | FX off | **FX on, the shipped defect** |
+|---|---|---|
+| **TRAINING OP** (the on-ramp button) | 8.67 | **2.19** |
+| CONTINUE RUN | 7.07 | 5.77 |
+| DEPLOY SQUAD | 7.07 | 5.66 |
+| LAST STAND | 5.79 | 6.38 |
+
+(The post-fix column is further down, with the two candidate fixes side by side.)
+
+The absolute numbers differ from the auditor's (4.51 → 1.35 on TRAINING OP, 5.34 → 3.42 on
+CONTINUE RUN) because the sampling methods differ; they agree exactly on the headline — TRAINING
+OP collapses ~4× under post-FX and fails 4.5:1 outright — and disagree at the margin, where the
+auditor's method also failed CONTINUE RUN and mine does not. **The method is stated so the number
+is quotable.**
+
+**And this is the SHIPPED resting configuration, not a combat spike.** `SIGHTLINE_POSTFX=1`'s
+boot-time "demo bloom" injection (`BloomIntensity = 0.85`) is overwritten on frame 1 by
+`Game.Update`'s own `SetPostFxParams(_postFxBloom, …)`, which rests at 0. What was measured is the
+fragment shader's always-on `bloomAmt = 1.45` baseline halo. **That comment has been stale for
+waves** — the hook does not do what it says.
+
+**The fix** is a split — but on the **bloom source**, not on the render target, and the
+distinction is load-bearing. `Display.RenderFrame(board, hud)` now runs:
+
+1. `board` — the board, its death-flash, and the overlay screens' animated backdrop
+   (`Hud.DrawBackdropLayer`, split out of the six screen builders) — into `_target`;
+2. `BuildBloom()` on **that**, so the bright-pass sees only atmosphere;
+3. `hud` into the **same** target, on top, contributing nothing to the glow;
+4. one composite, exactly as before.
+
+**The first version of this wave did what the brief literally asked** — HUD drawn after the
+composite, straight onto the backbuffer, through a `Camera2D` carrying the blit's scale+offset for
+the letterboxed path. It measured beautifully (TRAINING OP 8.87:1) and **it broke accessibility.**
+`uBright` and `uGamma` live in the composite shader, so the pause menu's BRIGHTNESS and GAMMA
+applied to the board and not to the chrome. Screenshot at BRIGHTNESS 70%: the board dimmed and the
+HUD did not — a regression aimed squarely at the player those settings exist for. The colour-grade
+seam and the bloom seam are not the same seam, and only the bloom one was ever the defect.
+
+Painting the chrome **into** the target after the bright-pass fixes the defect and keeps
+brightness, gamma, the biome grade and the vignette uniform across the whole frame. It also needs
+no second render texture (so no double-applied source alpha on translucent panels) and **no
+letterbox-blit camera** — the `Camera2D` the abandoned first attempt would have needed to place
+the chrome on the scaled backbuffer was never written, not deleted. *(W5-FIX, correcting this
+paragraph's own wording: the board's shake/zoom camera is UNTOUCHED and still there —
+`Game.ViewCamera` and the `BeginMode2D(ViewCamera(true))` around `Renderer.DrawBoard` at
+`Game.cs:7629/7658`. Do not go hunting for a removed camera; nothing was removed.)* And it
+measures **better** than the version that left the frame entirely — the composite's tonemap
+deepens a dark glyph against a bright plate rather than washing it:
+
+| main-menu label | FX off | FX on, BEFORE | HUD outside FX entirely | **shipped (out of the bloom)** |
+|---|---|---|---|---|
+| **TRAINING OP** (the on-ramp button) | 8.67 | **2.19** | 8.87 | **10.76** |
+| CONTINUE RUN | 7.07 | 5.77 | 7.24 | 8.99 |
+| DEPLOY SQUAD | 7.07 | 5.66 | 7.07 | 8.99 |
+| LAST STAND | 5.79 | 6.38 | 5.79 | 6.51 |
+
+`Hud.BackdropOwnsFrame` skips the in-mission chrome on the screens with an opaque backdrop.
+Those screens used to draw the top/bottom bars and then bury them under the backdrop; with the
+backdrop in the bloom-source pass they painted straight over the main menu until this was added.
+BARRACKS is deliberately absent — it draws no backdrop (it scrims the live board), so its frame
+order is unchanged.
+
+> **CORRECTION (W5-FIX, review blocker 1).** This paragraph originally read "BARRACKS **and AUDIO
+> CHECK** are deliberately absent — neither draws a backdrop". That was false of AUDIO CHECK and
+> the false premise WAS the bug: `Hud.DrawAudition` opened with its own `DrawTacticalBackdrop`
+> call, in the CHROME pass, i.e. after `BuildBloom` — so the composite added the LIVE BOARD's glow
+> straight through an opaque screen that ships post-FX ON and is reachable from the pause card
+> mid-mission. AUDIO CHECK is now in the registry with the rest; see §W5-FIX-1.
+
+**And one more thing the split broke, found by looking at a screenshot rather than by a test.**
+PAUSE, the tag editor and the whole BARRACKS modal family (requisition / perk / spec / boon /
+field event) dim the live board with a full-screen wash drawn from the CHROME pass — which now
+runs *after* `BuildBloom`, while the composite ADDs `glow * 1.45` on top of whatever the chrome
+laid down. So the scrim darkened the board and the board's own glow punched straight back through
+it: the pause card ended up with the squad's cyan halos blooming over its own scrim, which is the
+exact opposite of what a scrim is for. `Hud.BoardScrimAlpha` now lays the same wash in the
+bloom-source pass, so the bright pass never sees the glow. The board consequently takes the wash
+twice and reads darker under a modal than it did pre-W5 — deliberate, and the better of the two
+available errors, because the card is the focus. Three-way crop (pre-split / split-without-this /
+shipped) confirmed it by eye.
+
+**One accepted side effect, recorded rather than hidden.** `PruneAnims` forgets a panel's entrance
+key when it is not drawn in a frame ("re-animate on re-show" — its own comment). The in-mission
+chrome used to be drawn *and buried* under an overlay screen's backdrop, so its keys stayed warm;
+now it is skipped, so returning to the board from the FIELD MANUAL mid-mission re-runs the
+roster/top-bar entrance tween (~0.2 s). That is the same transition every other screen return
+already plays, and it reads as a transition rather than a pop — but it is a behaviour change this
+wave introduced, and it is here so the next person does not have to rediscover why.
+
+**THE BOARD IS UNCHANGED, and the measurement had to be done twice to say so honestly.** Paired
+comparison — *same binary*, only `SIGHTLINE_HUDINFX` toggled, same seed, post-FX on, seven board
+patches. Every patch reads within its own frame-to-frame animation swing, and the two largest
+apparent deltas are that swing, not a render change:
+
+- The gold objective tile first read **−7.0 mean** against the pre-W5 leg, which looked like a
+  result against a same-build run-to-run floor of ±2.9. It is not. That marker *breathes*: over
+  four adjacent frames of the **same build** (86 / 90 / 90-again / 94) its patch mean spans
+  **93.9 → 112.8, a range of 18.9**, and the pre-W5 leg's 103.8 sits inside it. The harness fixes
+  `dt = 1/60` but every animation is driven by wall-clock `GetTime()`, so a build that reaches
+  frame 90 a few milliseconds later samples a different phase. **A screenshot delta is not a
+  result until you have measured the animation's own swing at the same pixels.**
+- The selected soldier's token: +6.6 against a same-build frame swing of 5.9. Same story.
+- Peaks on all four glowing objects — soldier token, gold objective, supply crate, dormant pod —
+  are **identical** (245.8 / 254.0 / 242.1 / 254.0), and bare floor and the cover run move by
+  ±0.03 mean.
+
+## W5-3 — THE DOORS.
+
+**The end cards banked salvage and never mentioned the War Room** (`newplayer-2`). The loss card
+is the highest-leverage retention moment in the product: the player has just lost their first
+squad and is deciding whether there is a second run, and it showed them the number 18 with no
+meaning and no route. Now: a third plate **WAR ROOM [W]**; *"spend it in the WAR ROOM"* centred
+under the SALVAGE slab it explains; and the SURVIVING SQUAD panel headed **"N JOIN THE RESERVE -
+recallable at the next draft"** with each survivor's recall price.
+
+`Game.EndReserve` is the **delta** of `SaveGame.VeteranCount()` across `EnshrineVeterans`, never
+`vets.Count`, so the card structurally cannot over-claim: a name already in the reserve does not
+re-join, and a MERCENARY CLAUSE run (which enshrines nobody) reads 0 with no special case.
+METATEST asserts both legs.
+
+The button gets its own `Hud.EndWarRoomBtn` rect rather than reusing the intro's `OverlayBtn3`
+(LAST STAND). The two screens publish into the same statics, input runs before draw, and a stale
+end-card rect surviving one frame into the intro would turn the door the player just used into an
+accidental LAST STAND.
+
+**There was no way to quit the game** (`wildcard-3`). 18 pause controls, 9 menu entries, no exit —
+and `SetExitKey(KeyboardKey.Null)` is load-bearing (ESC cancels a targeting mode and opens the
+pause card), so ESC could not do it either. The only sanctioned ways out were ABANDON RUN, which
+destroys the run, or alt-F4. Now **QUIT TO DESKTOP [Q]** on the pause card, arm-then-confirm, with
+the honest line *"the current mission restarts from its start"*; and **QUIT [Q]** on the main menu
+with no confirm (nothing is in flight on the title screen). It also completes the intro's utility
+grid into a 3×2 instead of a lone centred AUDIO CHECK. `[Q]` was verified unbound by grep before
+being claimed — note that CLAUDE.md's free-key list and the `Game.cs` keymap comment are both
+stale (`wildcard-4`, not this wave's fix).
+
+The harder half is now **a written decision**: `docs/DESIGN.md` §5.1 records mission-restart-on-
+quit as chosen deliberately, with the argument (a mission is a coffee break; a board DTO is a new
+persisted format in a project burned by persistence twice; and quit-anywhere-resume-anywhere is a
+save-scum surface that prices against the "stakes that bite" pillar) and the conditions under which to
+revisit it.
+
+## W5-4 — THE ON-RAMP. A zero-run profile now opens on RECRUIT.
+
+`newplayer-4`: RECRUIT (rung −1) was always selectable and always **unlabelled** — nothing at level
+0 hinted anything existed below it, and the copy *"standard difficulty - the designed fight"*
+framed 0 as the floor. The archived X2 ladder (n=40/rung, base `a61ef42`,
+`docs/measurements/x2/`) puts RECRUIT at **75.0%** run completion against heat 0's **57.5%** — a
+17.5-point gap, outside the ±6–8 error bar. Roughly two in five first campaigns were ending in a
+loss the on-ramp exists to prevent.
+
+`Game.FirstTimeProfile` (from `SaveGame.LoadRunTotals`) defaults `PendingHeat` to RECRUIT and
+rewrites level 0's hint to *"[<] for a gentler first run"*; **"< RECRUIT"** names the rung below
+zero on every profile. **This moves a DEFAULT, not a rung.** Every heat number in `docs/` is
+untouched, and the measurement harness sets heat explicitly under `NoPersist`, which returns from
+`EnsureMetaLoaded` before the default can be read. ONRAMPTEST asserts both the fresh-profile
+default *and* the control: a profile that has finished a run keeps heat 0.
+
+## W5-5 — THE CHROME.
+
+**The action bar re-flowed between turns** (`visual-7`), so no verb had a stable position — the
+auditor measured OVERWATCH moving from bottom-row slot 8 to **top-row slot 1** purely because a
+squadmate went down and STABILIZE appeared ahead of it in the list. The layout is a greedy wrap
+that fills row 0 and stacks later rows *above* it, so **appending never moves anything already
+placed**. That makes the fixed slot map cheap: everything whose *presence* can change between two
+turns of one mission moves to the tail (BEACON, one-way once planted; STABILIZE, with a downed
+mate; SHOW ALL, with the onboarding); everything ahead of it is per-mission / per-soldier
+constant. No empty ghost cells, no permanently dead buttons. The ability slot also reserves its
+`" (N)"` cooldown suffix — a slot that changes **width** shifts its neighbours just as surely as
+one that appears, and that one moved ten buttons. And the bar gets **one backing plate**: twelve
+chips floating over the battlefield with board texture and gold overlay lines running between them
+was the untidiest composition in the in-mission UI.
+
+**The CONCEALED pill faded to 10% alpha** (5% on the border), so the opening state read as *off*
+for part of every 1.8 s cycle. Concealment is the first rule the onboarding teaches and the one
+that decides where the whole first fight starts; the auditor and a reviewer before them both
+misread a trough-phase frame as "not concealed". Now 0.56–1.00 (a 1.79× swing against 10.0×). The
+renderer and the test read **one** expression, `Hud.ConcealPulse` — a test that re-implements the
+curve it guards proves nothing.
+
+**Doctrine card text overflowed its box** on the first screen a new player touches: the height was
+FIXED at 74 while the body wrapped from y+38 in 19 px steps. Now sized to content and evened
+across the row. **Measured: ten of the sixteen boons in the catalogue overflowed the old fixed
+height**, not just the one the auditor caught. Its second half — the class-glyph disc eating the
+operator blurb's last words on FLINT/NOX/BRIAR — is fixed by dropping the disc into the true
+corner so the blurb row clears it entirely, rather than by clipping the sentence, which is the
+point of the row. One blurb (ASSAULT's) was four characters too wide for its column even then and
+was trimmed.
+
+## W5-6 — THE WORDS.
+
+**The first sentence of instruction in the game pointed at a cue that no longer exists**
+(`newplayer-5`). Both the Training Op's first lesson and the campaign strip's MOVE card said
+*"click a glowing tile"*. Wave V deliberately replaced the flood-fill with a thin cyan contour and
+a corner-tick lattice the code itself calls ~0.6% of a tile's area — a 5/255 modal inner lift.
+Both strings now name the **outline**, the **corner ticks** and the **dashed** outer ring.
+
+**Three verbs were taught only by a 9-second card that burns forever** (`newplayer-7`).
+`UpdateFieldTips` marks a tip seen the instant it shows, per-profile and permanent, with no replay
+surface — and SHOVE appeared **nowhere** in `src/Codex.cs`, nor did any of the four utility items,
+and a grep for `CONTROLS|KEYBIND` over `src/` returned nothing. Now: two FIELD CRAFT rows (SHOVE,
+with `Game.ShoveReach` and both collision damages interpolated from the real constants like every
+other row in that tab; and UTILITY ITEMS, all four kinds by class), and a **VERBS & KEYS** tab —
+16 verbs with hotkeys plus three rows for the bindings that live nowhere else. It is **generated**
+from `Hud.VerbTable` + `Hud.VerbHelp`, i.e. from the same `ActionDesc` switch the bar's hover
+tooltip reads, so a verb's help and its manual entry cannot drift apart. `ActionDesc` is now
+null-safe: its four situational branches fall back to a generic sentence with no live game.
+
+## W5-7 — Four new gates, and each one FAILS on the pre-W5 tree.
+
+A test that cannot fail is not a test. Every one below was falsified by flipping its off-switch:
+
+| hook | falsifier | what it printed |
+|---|---|---|
+| `SIGHTLINE_BRIEFTEST` | `SIGHTLINE_BRIEFFIRST=0` | `stripNotArmedPending, stripOpenedOverTheBriefing, briefShownOnlyFor0.00sOf11s, briefNeverRetired, fireStepHasNoPatienceFallback` |
+| `SIGHTLINE_CONTRASTTEST` | `SIGHTLINE_HUDINFX=1` | `TRAINING_OP@2.21` |
+| `SIGHTLINE_CHROMETEST` | `SIGHTLINE_OLDCHROME=1` | `moved(mateDown):overwatch,focusow,brace,hunker,reload` · `abilitySlotGrewOnCooldown` + 10 more `moved(abilityCd)` · `pillFloor=0.10 pillSwing=10.00x` · `boonOverflow` ×10 |
+| `SIGHTLINE_QUITTEST` | (new surface; no pre-W5 form) | — |
+
+CONTRASTTEST boots a real 1280×800 window with Display and PostFX on and reads the framebuffer
+back; a screen read is the only honest instrument, because the whole defect lived in the
+composite. CHROMETEST **loads the real font atlases before measuring** — a gotcha worth recording:
+without them `Cfg.Measure` falls back to raylib's default face, whose narrower metrics fitted
+every doctrine description on one line, and the overflow leg silently could not fail.
+
+CODEXTEST gained the audit's assertion (every id in the verb table has help text, a hotkey and a
+manual entry; FIELD CRAFT carries SHOVE and UTILITY ITEMS — `shove` and `item` failed it before).
+METATEST gained the reserve-delta anti-over-claim. ONRAMPTEST gained the zero-run default.
+
+## W5-8 — Verification.
+
+`dotnet build -c Release` 0 warn / 0 err. `bash scripts/qa-sweep.sh --full`: **51/51 PASS**,
+COVERAGE GAP block empty, `PAIRTEST: PASS`. *(That 51 was itself the miscounted footer — see
+§W5-FIX-3. The shipped tree runs 55; the sweep prints its own number.)* Autoplay ×3: LOSE m3 / LOSE m5 / LOSE m6 — no TIMEOUT,
+no exception. Screenshots read and judged: first-run mission 1 before/after (+ the strip at frame
+760), intro with FX before/after, board with FX before/after, both end cards, pause card, draft
+(cards + doctrine row), FIELD MANUAL's new tab, WAR ROOM, barracks.
+
+## W5-9 — The inertness proof.
+
+This is a UI/teaching wave and it must not move a gameplay number. Proved two ways:
+
+1. **`SIGHTLINE_PAIRTEST: PASS`** — byte-identical CRN pairing. The render split takes no draws.
+2. **A pinned-slot balance batch is FIELD-FOR-FIELD IDENTICAL to the branch point.**
+   `SIGHTLINE_BALANCE=5` (greedy+sloppy → `runs=10`, asserted in both), `SIGHTLINE_BALANCE_BASE=120`,
+   `SIGHTLINE_BALANCE_HEAT=0`, Release binaries run directly under `xvfb-run` with per-tree
+   `XDG_CONFIG_HOME` and `SIGHTLINE_BALANCE_JSON`. Baseline built from `git archive d350416`.
+   Both JSONs: `runs=10, missions=44, runWinRate=60, avgMissionsCleared=5.1` — and a
+   key-by-key diff over all **670 leaf fields** of the two documents reports **0 differing**,
+   including every nested `byHeat` / `byMission` / `byObjective` / `byArena` / `byDeploy` /
+   `decisionRichness` / `policyGap` / `lossCauses` block. Re-run after the render was
+   re-architected mid-wave (see §W5-2); still 0.
+
+The one behavioural default this wave *does* move is the fresh-profile difficulty rung (W5-4),
+and it cannot reach the instrument: the batch sets heat explicitly, and `EnsureMetaLoaded` returns
+under `NoPersist` before the default is read. That is why the two JSONs are identical rather than
+merely close.
+
+## W5-10 — WHAT I DID NOT DO, and what it costs.
+
+- **CUT: `visual-6` / brief item (g) — unifying the intro's four button families onto one system**
+  (dark plate + coloured left rule, one filled treatment for the single primary verb, hotkey
+  badges in a fixed column, LAST STAND's reserved danger red demoted to a rule). The brief marked
+  it droppable-last and I dropped it. Two reasons, one good and one honest: the half of it that
+  was *measurable* — the labels washing out — is fixed by W5-2 and now reads 6.51–13.65:1 with FX
+  on; and the rest is a substantial aesthetic redesign of the storefront screen whose only
+  reviewer this session is my own screenshot, where the downside (flat saturated primaries are
+  loud, but they are also the clearest call-to-action on the page) is a judgement I would be
+  making alone. **Cost: the intro still stacks three button styles across four widths, and the
+  frame's top-1% chroma is still ~189 against a board at ~100.** The finding stands, unfixed.
+- **The `EndReserve` count and the priced rows can disagree in one narrow case.** The header shows
+  new joiners (the delta); the per-row prices are shown for every Rank ≥ 1 survivor. A run whose
+  survivors were *all* already reserve records reads "0 join" with priced rows above it — correct
+  on both counts, and the header is simply omitted at 0, but it is not the same number. I chose
+  the anti-over-claim delta the gate asked for over the friendlier count.
+- **The board's own bloom was verified INSIDE the measurement noise, not proven identical.** The
+  screenshot harness has never been byte-stable (CLAUDE.md documents why), so "unchanged" here
+  means "smaller than the same build's own frame-to-frame swing at the same pixels", with both
+  numbers stated. A stronger claim would need a deterministic render path this project does not
+  have. I also got this wrong once before getting it right: the first reading looked like a real
+  −14.9 on the gold objective tile, and only measuring that patch across four adjacent frames of
+  one build showed its natural range is 18.9.
+- **The HUD is still inside the colour grade, so the audit's SECONDARY visual-2 finding stands.**
+  Chromatic fringing on HUD text edges (+16-66%) and the ~14% edge-luminance drop are untouched;
+  they come from the composite's CA and vignette, not the bloom. Taking the chrome fully out of
+  the grade is what broke BRIGHTNESS/GAMMA in this wave's first attempt, so doing it properly
+  needs a third pass (grade-only shader over a second target) that costs a full-screen RT and a
+  blit per frame — on a game with no frame-time instrument (`wildcard-7`). Left open in ROADMAP
+  with the shape of the fix written down.
+- **A modal now sits over a DARKER board than it did pre-W5.** PAUSE / the tag editor / the
+  BARRACKS family take their full-screen wash twice — once in the bloom-source pass so the glow
+  cannot punch back through it, once in the chrome pass so the HUD still dims. Reproducing the
+  old brightness exactly would need the two alphas re-solved so their product is the original
+  (0.576 each for 0.82), which would leave the HUD brighter behind the card than before. I took
+  the darker board: the card is the focus, and the alternative error was visible.
+- **`SIGHTLINE_POSTFX=1`'s stale demo-bloom comment is documented above but not fixed.** Removing
+  the dead injection is a one-liner; it belongs with whoever next touches that hook, and changing
+  it now would have made my before/after contrast pair non-comparable.
+- **No human has played any of this.** Every judgement here is a screenshot read by the agent that
+  wrote the code, which is exactly the gap `wildcard-6` names. The gates are real; the *taste*
+  calls (the bar's backing-plate alpha, the pill's new floor, the disc's new corner) are not
+  measured and are not claimed to be.
+
+# W5-FIX — THE REVIEW BLOCKERS (2026-08-29, same branch `wave/first-hour`)
+
+Four independent reviewers plus an adjudicator re-verified the wave above and passed it with
+**five blockers**. The load-bearing safety claims all held and none of them was touched:
+brightness/gamma uniform across board and chrome (swept BRIGHT 0/2/4, GAMMA 0/4), screen shake
+still moving the board and not the HUD (39 frame pairs by SAD registration), colorblind on both
+paths, no new render target, every new self-test stash-and-restoring a real profile
+byte-identically, PAIRTEST PASS, inertness reproduced twice. What follows is the repair of the
+five, plus four cheap evidenced items the review also raised.
+
+**Base for every number below:** `d350416` (the branch point) built fresh from `git archive`, and
+`1444213` (the wave's own HEAD) built the same way as the "pre-fix" leg. Both under
+`xvfb-run -s "-screen 0 1280x800x24"`, Release binaries run directly.
+
+## W5-FIX-1 — THE RENDER SPLIT LEFT AUDIO CHECK BEHIND, and three comments asserted the opposite.
+
+`Hud.DrawAudition` opened with its own `DrawTacticalBackdrop(g.AudClock, Pal.Accent, 0f)`. That
+call sits in the CHROME pass — which W5-2 moved to run **after** `Display.BuildBloom` — so the
+bright pass never saw the audition screen at all. It saw the **live board**, and the composite
+then added `glow * 1.45` from it straight through an opaque screen. This is precisely the
+punch-through that commit `439b386` fixed for PAUSE and the BARRACKS family, applied to none of
+AUDIO CHECK. The screen ships reachable from the intro `[U]` **and** from the pause card
+mid-mission, and `Display.PostFX` defaults true.
+
+**Why nothing caught it: the false premise WAS the bug.** `src/Hud.cs:207-208`, `src/Hud.cs:2551`
+and `docs/DEVLOG.md:5540` all said BARRACKS and AUDIO CHECK "are deliberately absent — neither
+draws a backdrop". One of those two names was wrong, and every reader of that sentence — including
+the wave that wrote it — took it on trust.
+
+**Measured.** The audition screen is deliberately clock-free (it runs off `Game.AudClock`, a dt
+accumulator, not `GetTime`), which makes it the one screen in the game where two builds are
+directly comparable frame-for-frame:
+
+| `SIGHTLINE_AUDITION=1 SIGHTLINE_SHOT=90`, base `d350416` vs the tree | px > +20 luma | px > +40 | peak |
+|---|---|---|---|
+| post-FX **OFF**, pre-fix | 0 (**byte-identical**, mean \|dL\| 0.000) | 0 | — |
+| post-FX **ON**, pre-fix — *the defect* | **17,010** | **8,640** | **+154.1** |
+| post-FX **ON**, fixed | **0** | **0** | **+7.0** |
+| post-FX **OFF**, fixed | 0 (**still byte-identical**) | 0 | — |
+
+Opened from the pause card mid-mission (`SIGHTLINE_MISSION=1`) the defect is the same size —
+17,214 / 8,899 / +166.0 before, 0 / 0 / +7.0 after. The residual +7.0 is the intended W5-2 change
+(the screen's plates and type are legitimately out of the bloom now); the >20 luma column going
+to zero is the fix. By eye it is unmistakable: cyan and amber blobs — soldier tokens, the
+objective marker, a supply crate — floating over the MASTER and MUSIC fader rows.
+
+**The fix, and the gate that makes it structural.** `Phase.AudioCheck` joins the registry and
+`DrawBackdropLayer`'s switch, drawn off `g.AudClock` and **not** `GetTime` (reading the clock here
+would have cost the screen its determinism, and with it the byte-identity that made this
+measurable). The call in `Hud.Audition.cs` is gone. All three false sentences now name BARRACKS
+alone.
+
+That closes the instance. **`SIGHTLINE_BACKDROPTEST` closes the class**, and it is the gate the
+review asked for by construction rather than by inspection. CONTRASTTEST reads nine main-menu
+labels; it could not have caught this and cannot catch the next phase added without a
+`DrawBackdropLayer` entry. BACKDROPTEST does not check a screen, it checks the invariant, over
+every `Phase` that exists:
+
+- **(A)** no phase paints a full-screen backdrop from the CHROME pass — `Hud.BackdropPaints`, a
+  counter incremented inside `DrawTacticalBackdrop` itself, must read 0 after a real `Hud.Draw`;
+- **(B)** `Hud.BackdropPhase` (the registry `BackdropOwnsFrame` now derives from) and
+  `DrawBackdropLayer`'s switch are the **same set** — in-registry-but-paints-nothing loses a
+  screen its top bar, paints-but-not-in-registry paints the in-mission chrome over the main menu;
+- **(C)** the modal scrim doubles up only where the composite runs.
+
+`SIGHTLINE_AUDBACKDROP=1` restores the defect: `BACKDROPTEST: FAIL (backdropFromChromePass:AudioCheck)`.
+
+## W5-FIX-2 — THE CONTENT-SIZED DOCTRINE CARD PUSHED THE DEPLOY ROW OFF THE SCREEN.
+
+W5-5 made the doctrine card size to its text (74 → 105 px for a 3-line boon, which FIELD DRILLS
+is) and every row below it moved down by the difference, because `DraftConfirm` derives from the
+contract row which derives from the boon row. At the **default 100% text size**,
+`SIGHTLINE_DRAFT=1 SIGHTLINE_SEED=808`: BACK / SELECT 4 MORE / RE-ROLL POOL sliced through the
+middle by y=800, `[Esc]` gone. At `SIGHTLINE_UISCALE=3` (120%) the entire row was off-screen while
+`d350416` still rendered it. **One overflow was traded for a worse one** — and RE-ROLL POOL had no
+keyboard route at all, so at 120% a real control was unreachable, not merely awkward.
+
+**The fix reclaims the height instead of paying for it.** `Hud.DraftLayout(boonLines, contractH)`
+computes the whole vertical stack **before anything is drawn**, so the candidate grid participates
+in the reclaim rather than pinning everything below it, and gives up the eight squeezable gaps in
+a fixed order of least harm. The floors are not taste: each is set by the type that gap CARRIES at
+120% — g[0] clears the "N / 4 SELECTED" counter, g[3] "STARTING DOCTRINE", g[5] "RUN CONTRACT",
+g[7] the FIRST OP / HEAT preview line. The first attempt squeezed g[5] to 14 and collided "RUN
+CONTRACT" with the top border of its own cards on the very next screenshot; the shipped floors are
+that screenshot's answer.
+
+The doctrine row also **widened to exactly the RUN CONTRACT row's width** (296 → 395 px cards).
+That is a composition fix in its own right — 932 px against the row directly beneath it at 1230 px
+was the one mismatched width on the screen — and it pays for itself, because a 395 px card wraps
+FIELD DRILLS in three lines where 296 px needed four at 120%, and four lines is what put the row
+off the bottom. The height came out of horizontal slack the screen was already wasting.
+
+**The gate.** CHROMETEST now asserts the DEPLOY row is on screen for **all 16 boons × all 4 text
+sizes**, plus that the doctrine card clears the contract header and the contract row clears the
+info line. It reports its own headroom rather than merely asserting there is some: *tightest
+FDR@90% with 0 px to spare, max gap squeeze 46 px* — and note that "0 px to spare" is against
+`ScreenH − DraftBottomPad`, i.e. there are still 8 real px below it. `Overflow > 0` (the stack
+cannot fit even fully squeezed) is a hard fail, so the failure mode of a future copy edit is a red
+test, not a sliced button; a last-resort clamp keeps the row on screen even then.
+
+`[R]` now re-rolls the pool. The draft phase read only Esc and Enter, so R was free there, and it
+is the same mnemonic RELOAD uses in the fight.
+
+**The review's third item on this leg was right too: CHROMETEST leg (C) was TAUTOLOGICAL.** It
+compared `need = BodyTop + lines*LineH + PadB` against `DraftBoonCardHeight(lines)`, which *is*
+`Math.Max(74, need)` — the assertion could not fail for any string whatsoever, which is why "ten
+of sixteen boons overflowed" was found by a human reading a screenshot and not by the test that
+claimed to cover it. It now measures where the last line's **ink** actually lands, through the
+real font at the live UI scale (`Hud.DraftBoonInkBottom`), against the height the renderer uses.
+
+## W5-FIX-3 — THE DERIVED SWEEP COUNT WAS WRONG IN BOTH MODES.
+
+W5 replaced a hand-typed footer with a derived one and got the derivation wrong: the anchor was
+`^echo`, but PAIRTEST's invocation is **indented** inside the `--full` block, so the grep returned
+53 where 54 invocation lines existed. `--full` printed 53 while 54 ran; plain printed 52 while 53
+ran. A derived counter that skips indented lines is a hand-maintained counter wearing a grep —
+this footer's number has now been wrong **five** times in this project's history.
+
+Anchor is `^ *echo`. Proven by adding a hook (BACKDROPTEST) and re-running both modes: the file
+holds **55** matching invocation lines, `--full` prints **55** and lists 55, plain prints **54**
+and lists 54.
+
+## W5-FIX-4 — THE §1.1 PRIORITY CHANGE IS NOW A RECORDED AMENDMENT (`docs/DESIGN.md` §1.2).
+
+DESIGN §1.1 states as a non-negotiable limit that the briefing card yields the shared card slot to
+the teaching layers **absolutely**. W5-1 arms the mission-1 lesson strip PENDING and makes teaching
+wait up to 11 s behind the flavour card. The literal never-simultaneous invariant survives — the
+`else if` chain in `Hud.Draw`, `BriefAllowed`'s `TutorialText == null`, and `BarksAllowed` are all
+untouched — but the stated PRIORITY is inverted for a first-time player's first eleven seconds,
+which is the exact window that limit exists to protect. W5 wrote a full recorded amendment (§5.1)
+for the much smaller mid-mission-checkpoint decision and left this one as a code comment.
+
+**The change is right and §1.2 argues it on its merits:** the rule as written produced **zero**
+briefings, not a delayed one (`briefShownOnlyFor0.00sOf11s`), so an absolute yield to a layer that
+never ends is a deletion rather than a priority; the two layers are not competing for the same
+moment, because on turn 1 of mission 1 nothing is contested; and any key or click reaches the
+lesson in one input, so teaching is deferred and never withheld. §1.2's limits are the load-bearing
+half — **mission 1 of a first-ever campaign only**, the never-simultaneous invariant still
+absolute, ORDER bought and not CONTENT, and `SIGHTLINE_BRIEFFIRST=0` keeping it falsifiable. §1.1's
+fourth bullet now carries the cross-reference so the rule cannot be read without the amendment.
+
+## W5-FIX-5 — BRIEFTEST DID NOT OBSERVE WHAT IT CERTIFIED.
+
+`Watch()` read `Game.BriefTimer` / `Game.BriefLines` — the model's own `BriefAllowed` predicate,
+read back — and never touched `Hud.DrawBriefCard`. A reviewer put a one-line `&& false` on the
+dispatch at `src/Hud.cs:250` so the card can never be drawn; it built clean, 0 warnings, and the
+test **still PASSed with the full 11 s**. The shipped behaviour was never in dispute; the point is
+that this wave's whole thesis is that a defect hid because nothing observed the draw side, and its
+own headline gate had the same shape.
+
+Every watched frame now paints a **real frame** through `Hud.Draw` inside the test's existing
+64×64 window (which is why `SIGHTLINE_BRIEFTEST` now loads the font atlases) and counts
+`Hud.BriefCardDraws`, a counter incremented inside `DrawBriefCard` itself. Both the first-ever leg
+and the returning-player control assert it. Re-running the reviewer's mutant:
+
+```
+BRIEFTEST: FAIL (briefCardDrawnOnOnly0framesOf630,controlBriefCardDrawnOnOnly0frames)
+```
+
+Note what did **not** fire: every model-side assertion still passed under the mutant. That is the
+measurement of how blind the old form was. Cost: the test went from ~1.5 s to ~2.7 s.
+
+## W5-FIX-6 — the four cheap evidenced items.
+
+- **The double scrim now applies only where its justification does.** `Hud.BloomScrimAlpha` gates
+  the bloom-source wash on `Display.Enabled && Display.PostFX`. With post-FX off there is no
+  bright pass to attenuate and nothing to punch back through, so the second wash was pure loss.
+  Measured on a pure-board strip under the pause card (x 40-300, y 200-620, `SIGHTLINE_PAUSE=1
+  SIGHTLINE_MISSION=1 SIGHTLINE_SEED=4242`): base `d350416` **18.56** → pre-fix **12.08** (−35%)
+  → fixed **18.55**. Post-FX ON is deliberately unchanged: 10.09 → 10.08. W5-2's "the board takes
+  the wash twice" trade still stands where the composite runs, and nowhere else.
+- **`Display.RenderFrame` no longer allocates the combining `draw` closure on the post-FX path**,
+  where it was constructed every frame and never invoked (the split path calls `board()` and
+  `hud()` separately). Two managed allocations per frame for nothing; it is now built after the
+  post-FX early return. Unmeasured as a frame-time win — this game has no frame-time instrument
+  (`wildcard-7`) — and claimed only as the removal of dead work.
+- **The structural gate** is `SIGHTLINE_BACKDROPTEST`, described under W5-FIX-1.
+- **The DEVLOG's camera sentence is corrected.** §W5-2 said the shipped fix "needs no second
+  render texture … and no camera path", which reads as *the Camera2D path was deleted*. It was
+  not. `Game.ViewCamera` and the `BeginMode2D(ViewCamera(true))` around `Renderer.DrawBoard` are
+  intact at `Game.cs:7629/7658` and always were; what never existed is the **letterbox-blit**
+  camera the abandoned first attempt would have needed. Both the DEVLOG paragraph and
+  `Display.RenderFrame`'s header now say so, so a future session does not go hunting for a removed
+  camera.
+
+## W5-FIX-7 — Verification.
+
+`dotnet build -c Release` 0 warn / 0 err. `bash scripts/qa-sweep.sh --full`: **55/55 PASS**,
+COVERAGE GAP block empty, `PAIRTEST: PASS`, footer count **55** matching the 55 invocation lines.
+Plain mode: 54/54, footer **54**. Autoplay ×3 on each run — WIN m6 / LOSE m1 / WIN m6 and
+LOSE m2 / WIN m6 / LOSE m6, no TIMEOUT, no exception. Screenshots read and judged: AUDIO CHECK
+post-FX on/off × three builds (base / pre-fix / fixed), mid-mission AUDIO CHECK the same way,
+draft at 100% and 120% before and after, pause card post-FX off.
+
+## W5-FIX-8 — WHAT I DID NOT DO, and what it costs.
+
+- **`visual-6` is still open**, and so are both W5-2 residuals (the HUD is still inside the colour
+  grade; `SIGHTLINE_POSTFX=1`'s demo-bloom comment is still stale). Nothing in this pass touched
+  them and nothing here changes their argument.
+- **The 120% draft screen still has fixed-pixel chrome under scaled type.** With the row back on
+  the screen, "RE-ROLL POOL (10 SALV)" now *fills* its plate at 120% and the candidate-card blurbs
+  still ellipsize there. That is DEVLOG §5364's known W5-era limitation (`Cfg.Scaled` moves the
+  type, the plates are authored in pixels), not something this fix introduced or repaired — the
+  blocker was reachability, and reachability is what is now asserted.
+- **The draft stack's headroom at 90% text is 0 px against its own limit.** That is the authored
+  layout landing exactly on `ScreenH − 8` with no squeeze at all, not a squeezed near-miss, and
+  the 8 px pad is real screen. It is stated rather than smoothed over because the next person to
+  add a line of doctrine copy needs to know how much slack they have: at 100% it is 0 px too, and
+  the reclaim capacity is 51 px of gaps, of which the worst case already spends 46.
+- **BACKDROPTEST drives `Hud.Draw` per phase with one Game in one state.** It proves no phase
+  paints a backdrop from the chrome pass, which is the defect class; it does not exercise every
+  branch inside every screen builder (a backdrop drawn only in some sub-state of BARRACKS would
+  slip past it). The stronger form would drive each screen's real sub-states, and it is not built.
+- **No human has played any of this either.** Same gap as W5-10's last bullet, unchanged.
+
 ## PROGRAM RESONANCE — Wave W9 "THE REPAIR" (dev; worktree `agent-ae64b077e9a007d39`, branch `wave/the-repair`)
 
 **The thesis, and why it is uncomfortable.** This tree has 51 self-tests, all 51 pass, and one
