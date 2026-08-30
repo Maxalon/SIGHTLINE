@@ -150,6 +150,18 @@ export XDG_CONFIG_HOME="$PWD/.xdg"         # return "" and saves land in a relat
 export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
 ```
 
+> **`SIGHTLINE_SHIPTEST` writes the LIVE player-data directory, and from a SECOND PROCESS** (C6).
+> It is the only hook in the project that does, because "quit the game, start it again, your
+> progress is there" cannot be checked inside one process. It stashes and restores on the way out —
+> verified byte-identical, including any `.tmp` siblings it had to clobber — and the child is
+> bounded. But a sweep **killed mid-SHIPTEST** can leave `4242` salvage and a `C6_SECOND_LAUNCH`
+> achievement in whatever profile `XDG_CONFIG_HOME` points at. Export the isolation above and it is
+> your worktree's throwaway `.xdg`, not your real one.
+>
+> Two file names that mean "a self-test died holding your data", and what to do:
+> `<name>.json.selftest-stash` — **your profile, whole**; rename it back over the original.
+> `<name>.json.tmp` — a write that never landed; the original is untouched, so just delete it.
+
 Run autoplay a few times (RNG varies); confirm **no exceptions and no TIMEOUT**. The
 contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. **W9 THE REPAIR made
 that contract TRUE rather than merely claimed**: it was violated at ~1% per run by two independent
@@ -288,10 +300,13 @@ src/
   Audio.cs      procedural SFX + music (device-free-safe)
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
+  Ship.cs       C6: the DISTRIBUTABLE's contract — version stamp (Ship.Version, off the assembly),
+                the bundled-file manifest (Ship.RequiredFiles) and SIGHTLINE_SHIPTEST
 scripts/dev-setup.sh   sandbox setup
 scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST); counts DERIVED
 scripts/publish.sh     hand-run distributable build + persistence re-proof
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
+LICENSE                the project's own terms (all rights reserved); ALSO copied to build output
 docs/screenshot.png    README image
 ```
 
@@ -367,8 +382,19 @@ docs/screenshot.png    README image
   match or the text wraps at one size and paints at another.
 - **Bundled assets resolve via `Cfg.AssetPath(rel)`** (`AppContext.BaseDirectory`, cwd fallback),
   never a bare relative path — a binary launched from another directory otherwise silently loses
-  the font. Never publish with `-p:PublishTrimmed=true`: it destroys save/load while the game
-  still boots.
+  the font. **That cwd fallback is also a MASK** (C6): from the source tree it resolves a file the
+  `.csproj` forgot to copy off the *repo* instead of off the *build output*, so the build is broken
+  for a player and green for you. Anything bundled must be in `Ship.RequiredFiles` **and** the
+  `.csproj` copy list; `SIGHTLINE_SHIPTEST` resolves the manifest strictly against
+  `AppContext.BaseDirectory` and `scripts/publish.sh` runs it against the published directory,
+  which is the only place that leg is testing the artifact a player receives.
+- **Publish with `bash scripts/publish.sh`, never a bare `dotnet publish`.** The old line here
+  ("never publish with `-p:PublishTrimmed=true`") was **stale and actively harmful** — trimmed is
+  the recommended default and has been since F1 fixed the hazard (source-generated JSON contexts +
+  `TrimmerRootAssembly`; `docs/DISTRIBUTION.md` §3). What is true is that a *bare* publish skips
+  the verification: the script re-runs `SAVETEST`/`METATEST`/`SHIPTEST` **against the binary it
+  just built** and refuses to report success otherwise. C6 also made the two mitigations a build
+  ERROR to remove (`C6GuardTrimmedPersistence` in `Sightline.csproj`).
 - **Headless byte-stability:** the screenshot harness keeps `Display` (post-FX) OFF and
   never touches disk/meta (gated by `NoPersist`), so shots stay byte-identical and the
   balance flywheel is reproducible. Keep new persistent/random/post-FX work behind those
@@ -531,6 +557,21 @@ paired batches, **zero** non-choice fields moved on every one).
 **W4's gates `ch/ARMED >= 2.00` and `meaningful-choices/turn >= 3.00` are now VOID, not met** —
 this tree reads 2.389 / 3.738 at h0, but the thresholds were set on the old instrument, so nobody
 may claim them until they are restated. DEVLOG §TRUE BAND; raw chunks `docs/measurements/tb/`.
+
+CONTOUR **C6 "SHIPS LIKE A PRODUCT"** then took the game from *builds clean* to *a thing you can
+hand someone*, and found six defects no self-test could see — because **every self-test in this
+project runs from the source tree**, where `Cfg.AssetPath`'s cwd fallback resolves a file the
+`.csproj` forgot to copy off the *repo* instead of off the *build output*. Every distributable this
+repo has ever produced shipped **without the root `LICENSE`**; `display.json` was the one
+player-data file **not** written atomically; `SIGHTLINE_SAVETEST` **failed on any machine whose
+profile owned `MetaUnlock` ordinal 1** and so blocked the publish gate; there was no version
+anywhere; and the two screens a new player meets first had never been photographed (every hook
+stages a rich profile — `SIGHTLINE_COLD=1` now selects the zero state). `SIGHTLINE_SHIPTEST`
+(in `qa-sweep.sh` **and** `publish.sh`) is the guard: the bundled manifest resolved strictly
+against `AppContext.BaseDirectory`, the licence obligations, the player-data path, all three
+writers proven atomic by an **open-handle inode probe**, trim-safe serialization, and the version
+stamp. The publish matrix is re-measured in `docs/DISTRIBUTION.md` §2; detail in
+`docs/DEVLOG.md` §C6, open items in `docs/ROADMAP.md`.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

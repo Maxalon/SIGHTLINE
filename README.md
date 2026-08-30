@@ -7,9 +7,10 @@ flank the enemy, set overwatch, and wipe the hostiles before they wipe you.
 Almost everything is generated: the board is geometry, particles, procedural
 textures and shaders, and every sound effect and music bed is **synthesised at
 runtime** — no recorded audio ships. The only committed binaries are two text
-fonts (Noto Mono and Chakra Petch, both SIL Open Font License 1.1, licence text
-in `THIRD-PARTY-NOTICES.txt`). It stays small, fast, and runs natively on Linux,
-macOS and Windows.
+fonts (Noto Mono and Chakra Petch, both SIL Open Font License 1.1, full licence
+text in `assets/`) and the screenshot below. A whole distributable build is
+**29.3 MB across 10 files** (MB = 10^6 bytes), self-contained: no .NET install
+needed on the target machine. It runs natively on Linux, macOS and Windows.
 
 ![SIGHTLINE gameplay](docs/screenshot.png)
 
@@ -65,20 +66,38 @@ and reloads matter.
 
 ## Controls
 
+Every verb is also a button on the action bar, labelled with its key — you never have to
+memorise this table. The game teaches the verbs as they become relevant (there is a
+**TRAINING OP** on the main menu, and a **FIELD MANUAL** you can open at any time with `K`).
+
 | Input | Action |
 |-------|--------|
 | **Left-click** a soldier | Select |
 | **Left-click** a tile | Move there (blue = 1 action, yellow = dash) |
 | **Left-click** a hostile | Fire |
+| **hold Shift** | Reveal the dash/sprint region in the move overlay |
 | **1** / FIRE | Enter targeting mode |
-| **4** / GRENADE | Throw a grenade (AoE, ignores cover, destroys low cover) |
 | **2** / OVERWATCH | Hold a reaction shot |
 | **3** / HUNKER | Defensive crouch |
+| **4** / GRENADE | Throw a grenade (AoE, ignores cover, destroys low cover) |
+| **5** | Class ability (Grapple / …, varies by class) |
+| **6** / FLASH | Flashbang |
+| **7** / DRAG · **8** / SHOVE · **9** / VAULT | Situational verbs; greyed when unavailable |
+| **F** / FOCUS · **B** / BRACE | Aim buff · braced overwatch cone |
 | **R** / RELOAD | Reload weapon |
+| **T** | Rename the selected soldier |
 | **Tab** | Cycle to next soldier |
 | **Enter** | End turn |
-| **Esc / Right-click** | Cancel targeting |
-| **M** | Mute / unmute |
+| **Esc / Right-click** | Cancel targeting; Esc again opens the pause menu |
+| **Wheel** / **Middle-drag** / **C** | Zoom · pan · reset camera |
+| **Arrows / WASD + Space** | Keyboard cursor: move the cursor, Space confirms |
+| **M** / **U** | Mute-unmute · AUDIO CHECK screen |
+| **K** / **Q** | Field manual · quit to desktop |
+| **F11** / **F2** | Fullscreen · animation speed |
+
+The pause menu (`Esc`) carries the rest: window size, brightness, gamma, colourblind palette,
+screen shake, threat preview, animation speed, **text size**, and the four-channel audio mix.
+It also shows the build version, which is what to quote in a bug report.
 
 ## Build & run
 
@@ -89,15 +108,29 @@ Requires the **[.NET 8 SDK](https://dotnet.microsoft.com/download)** (cross-plat
 dotnet run -c Release
 ```
 
-To produce a standalone native binary (no SDK needed to run it):
+To produce a standalone distributable (no SDK needed to run it), use the publish script —
+**not** a bare `dotnet publish`:
 
 ```bash
-# Linux
-dotnet publish -c Release -r linux-x64 --self-contained
-# the executable lands in bin/Release/net8.0/linux-x64/publish/Sightline
+bash scripts/publish.sh                 # -> dist/linux-x64-release/  (29.3 MB, 10 files)
+bash scripts/publish.sh --rid win-x64   # or osx-x64 / osx-arm64
 ```
 
-Use `osx-x64` / `osx-arm64` / `win-x64` for other targets.
+The script exists because the recommended configuration is trimmed, and a trimmed build once
+compiled with 0 errors, booted, played a whole campaign and **saved nothing at all**. So it
+re-runs the persistence and shipping self-tests against the binary it just built and refuses to
+report success if any of them fail. **Ship the whole output directory**, not just the executable:
+`libraylib.so` is `dlopen()`ed at runtime and cannot be linked in, and `assets/`,
+`THIRD-PARTY-NOTICES.txt` and `LICENSE` are licence obligations, not extras. Details, the measured
+size/startup matrix and where player data lives: [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
+
+## Licence
+
+The game's own source is **all rights reserved** — see [`LICENSE`](LICENSE), which explicitly does
+*not* restrict distributing compiled builds. Bundled third-party components (raylib and Raylib-cs
+under Zlib, the .NET runtime under MIT, Noto Mono and Chakra Petch under the SIL Open Font License)
+keep their own terms; the notices are in `THIRD-PARTY-NOTICES.txt` and both fonts ship their full
+OFL text beside them in `assets/`.
 
 ### In Rider (recommended IDE)
 

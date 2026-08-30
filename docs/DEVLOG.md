@@ -8977,3 +8977,396 @@ bodies and resets `bump`; no mid-run Decapitate gets that. **Unspent, and it is 
 - **The first attempt produced ZERO chunks** because a shared-scratchpad copy of the runner had
   been overwritten by another agent. It failed loudly and wrote no data. The runner now lives in
   the repo, and that is the wider lesson: a shared path is not storage.
+
+---
+
+# PROGRAM CONTOUR — wave C6 "SHIPS LIKE A PRODUCT" (2026-08-30, branch `wave/ships`, base `17934ee`)
+
+## THE THESIS
+
+"Builds clean and passes autoplay" is a **development** standard. A **product** standard is a
+fresh machine, an empty profile, a double-clicked binary in a directory nobody chose, and no
+forgiveness. Nine autonomous programs made this game good; none of them walked that path. The one
+time anyone checked a neighbouring case (RESONANCE F1) they found a published build launched from
+the wrong directory **silently lost its font** — a total-failure bug that every self-test in the
+suite passed straight through.
+
+The mechanism behind that, and behind most of what this wave found, is one sentence:
+**every self-test in this project runs from the source tree.** `Cfg.AssetPath` falls back to a
+cwd-relative path when the baked path is missing — deliberate (dev convenience, dropped-in audio)
+and also a **mask**: from the repo root, a file the `.csproj` forgot to copy still resolves, off
+the repo instead of off the build output. The build is broken for a player and green for you.
+
+## WHAT THE WALK FOUND — six defects, none of which any of the 64 existing self-tests could see
+
+**1. Every distributable this repo has ever produced shipped with NO statement of its own terms.**
+PROGRAM CROSSCUT decided the licence (all rights reserved, explicitly not restricting compiled
+builds) and committed a root `LICENSE`. Nothing ever copied it into the output. A recipient of the
+zip could read what raylib and Noto Mono permit and had **nothing at all** telling them what *this*
+permits. One `<None Include="LICENSE" .../>` line; the manifest leg of the new test is what keeps
+it fixed (it reads `FAIL (missing:LICENSE)` without it — that is how the defect was found).
+
+**2. `display.json` was not written atomically**, while `save.json` and `meta.json` were.
+`docs/DISTRIBUTION.md` §5 has claimed ".tmp then rename, so a crash mid-write cannot tear a save"
+for the whole player-data directory since W5. It was true of two files out of three, and false of
+the one written most often — every volume drag, every toggle, every one-shot tip dismissed.
+All three now go through one writer, `SaveGame.WriteAtomic`.
+
+**3. `SIGHTLINE_SAVETEST` fails on any machine whose profile owns `MetaUnlock` ordinal 1**, and
+SAVETEST is on the shipping gate. Its meta block stashed the player's `meta.json` but never
+*cleared* it, then asserted `if (HasUnlock(1)) fails.Add("metaUnlockPhantom")` — a claim about the
+**absence** of an unlock, read off whatever profile happened to be on the machine. Ordinal 1 is
+`StartBoon` (STANDING ORDERS, 70 salvage, the second-cheapest unlock in the game). So a maintainer
+who has bought it runs `scripts/publish.sh`, gets `SAVETEST: FAIL (metaUnlockPhantom)`, and the
+script **refuses to publish a perfectly correct build** because of their own save file. `METATEST`
+already deleted `meta.json` first; SAVETEST now does the same. *Found the way a player would find
+it: with a pre-existing profile sitting in the config directory.*
+
+**4. There was no version anywhere.** A bug report could not name a build. `Hud.cs` even carried
+the comment "a faint version/footer stamp" above a line with no version in it. `<Version>` in the
+`.csproj` is now the single source, read back off the assembly by `Ship.Version` (never a
+hard-coded second copy) and painted on the main-menu footer and the pause card's top-right corner.
+Stamped **v1.0.0**.
+
+**5. The two screens a new player meets first had never been photographed.** Every screenshot hook
+stages a rich profile: `SIGHTLINE_INTRO` **fabricates a mission-3 save** so the CONTINUE button can
+be framed, and `DebugWarRoom` hard-codes a twelve-run career with five legends and two owned
+unlocks. So the cold main menu and the zero-state WAR ROOM had no photograph and no coverage.
+`SIGHTLINE_COLD=1` now selects the genuine first-launch state of both.
+
+**6. `.gitignore` reached `main` as an unresolved merge conflict.** Commit `17934ee` literally
+contains `<<<<<<< HEAD` / `=======` / `>>>>>>> wave/first-hour` as committed lines. Git reads them
+as three harmless patterns so nothing ever failed — but it is the second file a stranger opens, and
+the wave whose job is "what does a stranger receive" is the right one to fix it. Both sides kept.
+
+## THE PublishTrimmed HAZARD — and a stale line that pointed the wrong way
+
+CLAUDE.md said **"Never publish with `-p:PublishTrimmed=true`: it destroys save/load while the game
+still boots."** That was **stale and actively harmful.** F1 fixed the hazard (source-generated JSON
+contexts + `TrimmerRootAssembly` + re-enabled reflection fallback), trimmed has been the
+*recommended default* ever since, and following that line would have cost 57 MB and the fastest
+start in the matrix. Corrected.
+
+What IS true is that a **bare `dotnet publish` skips the verification** — which is exactly how a
+totally broken build once looked green. Three things now stand where a comment used to:
+
+- `scripts/publish.sh` runs `SAVETEST` + `METATEST` + **`SHIPTEST`** against the binary it just
+  built and refuses to report success otherwise.
+- `Sightline.csproj`'s `C6GuardTrimmedPersistence` target makes removing either mitigation a
+  **build error**. Proven non-vacuous: `dotnet publish -p:PublishTrimmed=true
+  -p:JsonSerializerIsReflectionEnabledByDefault=false` now fails with the reason and a §3 pointer.
+- SHIPTEST's TRIMSAFE leg asks each source-generated context whether it can actually see
+  `RunDto` / `MetaDto` / `Display.Dto` — the half of the hazard MSBuild cannot possibly know about,
+  checked in the *untrimmed* build where everyone develops.
+
+**Honest scope:** the guard catches *removal of the mitigation*, not every way persistence can
+break. A DTO reachable from a root but with an unsupported member shape still needs the publish
+script's printed lines. Do not judge a publish by the build log.
+
+## THE NEW SELF-TEST — `SIGHTLINE_SHIPTEST` (wired into `qa-sweep.sh` AND `publish.sh`)
+
+Six legs, all aimed at the seam between the artifact and the machine it lands on:
+
+| leg | what it asserts |
+|---|---|
+| MANIFEST | all 8 entries of `Ship.RequiredFiles` resolve **strictly** against `AppContext.BaseDirectory` — the cwd fallback is explicitly not allowed to carry them — non-empty, and the two `.ttf`s carry a real sfnt magic. (**Six** at first draft, omitting both `CREDITS.txt`; see the review section.) |
+| NOTICES | the shipped `THIRD-PARTY-NOTICES.txt` actually **names** all 5 redistributed components — each keyed on a string unique to its own section — and all 3 of their licences, not merely exists. (First draft called all eight "components" and keyed raylib on the bare substring `"raylib"`, trivially satisfied by `"Raylib-cs"`.) |
+| PROFILE | the player-data dir is an absolute path; a profile written through the real public API reads back off disk **and appears in the file's raw bytes**; and (3b) **a second process of this same binary** banks a sentinel that this one reads back |
+| ATOMIC | `save.json` / `meta.json` / `display.json` are each written by rename, proven **by mechanism** (below) — safe against process death and concurrent readers, **not** power loss (no `fsync`), Unix-only probe — plus a forced-failure probe that a failed write sweeps its own `.tmp` |
+| TRIMSAFE | every persisted DTO is reachable from a source-generated JSON context |
+| VERSION | the assembly carries a `MAJOR.MINOR.PATCH` stamp and the HUD's label contains it |
+
+**How the atomicity leg works, because "I read the code and it looks atomic" is not a test.** Put a
+marker in the target, hold an open read handle across a real save, then read *through that handle*.
+A rename streams into a NEW inode and swaps the directory entry, so the old handle keeps seeing the
+old bytes; a truncate-in-place writer rewrites the SAME inode and the handle sees the new bytes.
+That difference **is** atomicity. Unix-only mechanism, so it self-skips on Windows rather than
+reporting a verdict it cannot reach.
+
+**The second-launch leg is a real fork of the shipped binary.** No hook in this project could ever
+check "quit the game, start it again, your progress is there", because the house rule (never touch
+the player's real profile) makes every hook stash-and-restore *inside one process*. SHIPTEST forks
+`Environment.ProcessPath` with `SIGHTLINE_SHIPCHILD=1`; the child banks a sentinel through the
+ordinary public API and exits; the parent reads it back off disk. Two processes, one player-data
+directory, the shipped code on both sides — and it works from the published **single-file** binary.
+
+> **I fork-bombed the shared container doing this and it is worth writing down.** The first version
+> put the child branch *below* the SHIPTEST branch in `Main`, and the child inherited
+> `SIGHTLINE_SHIPTEST=1`. The child ran SHIPTEST, which forked a grandchild, which ran SHIPTEST…
+> **184 processes** on a box shared with five other agents before it was killed. Two independent
+> guards now stop it and both are commented as load-bearing: the child branch is **first in
+> `Main`**, and the probe **strips every `SIGHTLINE_*` variable** from the child's environment
+> (`XDG_CONFIG_HOME` is not one, so the child stays in the same isolated directory). A self-test
+> that spawns itself needs two guards, not one.
+
+### Proof it FAILS pre-fix — five independent reverts, all run
+
+| revert | SHIPTEST said |
+|---|---|
+| remove `<None Include="LICENSE">` **and** revert `Display.Save` to `File.WriteAllText` | `FAIL (missing:LICENSE,displayNotAtomic:handleSawNewBytes)` |
+| remove the version from `Hud.IntroFooter` | `FAIL (versionNotPainted)` |
+| delete `LICENSE` + `assets/NotoMono-LICENSE.txt` from a **published directory** | `FAIL (missing:assets/NotoMono-LICENSE.txt,missing:LICENSE)` |
+| delete `assets/NotoMono-Regular.ttf` from a **published directory** | `FAIL (missing:assets/NotoMono-Regular.ttf)` — **the exact F1 bug**; the game still boots, prints one `WARNING:` line and silently falls back to the bitmap font |
+| stop the second-launch child writing | `FAIL (secondLaunch:salvageNotCarried)` |
+
+And separately, for fix 3: with a profile owning `StartBoon`, pre-fix
+`SAVETEST: FAIL (metaUnlockPhantom)`; post-fix `SAVETEST: PASS`, and `meta.json` byte-identical
+afterwards.
+
+## THE MEASURED PUBLISH MATRIX (re-measured from scratch, 2026-08-30)
+
+Interleaved — one launch of each mode per round, nine rounds — so all four see the same load on a
+container shared with five other agents. A *sequential* pass twenty minutes apart put `no-trim` at
+117 ms and then 184 ms, which is why the ORDERING is the result and the absolute numbers carry
+"on a loaded four-core box".
+
+> **SIZES SUPERSEDED — see "the corrected matrix" at the end of this section.** The review fixes
+> added ~0.9 MB of code, and this draft never stated whether MB meant 10^6 or 2^20 (it was 10^6 for
+> the directory and MiB in the README, which is the F6 defect). The START column below is still the
+> one of record and is attached to commit `d3feb90`.
+
+| mode | exe | whole directory | files | start (median of 9, min–max) |
+|---|---|---|---|---|
+| **release** (default) | 25.6 MB | 28.4 MB | 10 | **169 ms** (102–323) |
+| small | 15.8 MB | 18.5 MB | 10 | 545 ms (397–696) |
+| no-trim | 82.3 MB | 85.1 MB | 10 | 206 ms (144–288) |
+| plain | 68.3 MB | 71.0 MB | 10 | 317 ms (256–405) |
+| win-x64 release | 24.3 MB (`.exe`) | 26.4 MB | 10 | not runnable here |
+
+On a quiet box the default measured **108–114 ms** median-of-10. File count went **6 → 10** since
+F1 (the Chakra Petch pair and two `CREDITS.txt` ledgers from later waves, `LICENSE` from this one),
+and F1's `size` column was the *executable* where this table carries both that and the directory
+you actually hand someone. `--rid win-x64` cross-publishes cleanly from Linux (10 files,
+`Sightline.exe` + `raylib.dll` + the same asset and licence set); **its self-tests cannot be run
+here, so the Windows build is unverified beyond "it produces the right files."**
+
+## THE PLAYER'S PATH, WALKED
+
+Installed the published directory at `/home/user/player path/SIGHTLINE Game` — outside the source
+tree, **with a space in the path** — against an **empty** player-data directory:
+
+- Both font atlases load **by absolute path from the install directory** (`INFO: FILEIO:
+  [/home/user/player path/SIGHTLINE Game/assets/NotoMono-Regular.ttf] File loaded successfully`).
+- A full campaign runs: `RESULT: WIN mission=6 frame=7654 turns=19`.
+- `SHIPTEST` PASSes from that install, and afterwards the profile directory is **empty** —
+  every file the test wrote was restored away.
+
+### Crash and data safety, measured rather than asserted
+
+**Full disk** (48 KB tmpfs at 100%, a good `meta.json` already in it, live non-`NoPersist` mission 1
+through the published binary): **no exception, the game plays on, and `meta.json` is byte-identical
+afterwards.** A second pass with SHIPTEST on the same filesystem shows every write refused
+(`IOException` / "did not land") with the process still standing. The game degrades to *cannot
+save*, not to *lost your profile*.
+
+That pass also found a real thing: on `ENOSPC` the old code leaves a **0-byte `<name>.json.tmp`
+behind forever**, contradicting the "should never persist" line in DISTRIBUTION §5. Measured side
+by side — old shape leaves `old.json.tmp len=0`, `WriteAtomic`'s sweep leaves nothing.
+
+**Corrupt / truncated / future-version saves and meta** are covered by SAVETEST's three corruption
+legs, which `publish.sh` now runs **against the published binary**; all PASS. **`kill -9` mid-write
+is NOT directly tested** — the write window is sub-millisecond and racing it from a shell is a coin
+flip, not a test. What is tested is the property that makes the outcome safe (the rename), on all
+three files. Stated as a limit, not dressed up as a pass.
+
+## SCREENSHOTS — taken from the PUBLISHED binary, cold profile, and judged
+
+- **Cold main menu** (`SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1`). Correct zero-state: no CONTINUE RUN,
+  DEPLOY SQUAD is the lit primary, caption reads "NEW CAMPAIGN – draft a squad, pick a doctrine,
+  survive 6 operations". `SIGHTLINE v1.0.0` sits in the footer, faint, centred by measurement.
+  Nothing broken or empty. **Judged good.**
+- **Cold WAR ROOM** (`SIGHTLINE_WARROOM=1 SIGHTLINE_COLD=1`). Real zero-states everywhere: HALL OF
+  FAME collapses to "– no legends yet – / Finish a run to enshrine them", achievements show `0/N`,
+  CAREER's WIN RATE is `–` rather than `0%`, BUY chips are unaffordable-red. **But four of the six
+  unlock descriptions are ellipsised mid-word** — see "what I did not fix".
+- **Pause card at TEXT SIZE 120%.** The version sits right-aligned in the card's empty top-right
+  corner, clear of the title and every row. **Judged good.**
+- **Cold main menu at 120%.** Footer stays centred and fits. **But the DIFFICULTY panel's body
+  text overflows its own panel** — see below.
+- **Barracks debrief + campaign map after mission 1** (the genuine first-run state). Roster with
+  HP bars, DEPLOY/BENCH toggles, DEBRIEF lines, a legible DAG with a legend. **Judged good.**
+
+## VERIFICATION
+
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0**, **65/65** self-tests (64 + SHIPTEST), zero
+  `FAIL`, COVERAGE GAP block empty, `PAIRTEST: PASS` (CRN byte-identity intact).
+- Autoplay ×3 in the sweep: no TIMEOUT, no blank RESULT.
+- `bash scripts/publish.sh` green on all four Linux modes plus `--rid win-x64`, with all three
+  self-tests PASSing against each published binary.
+
+## WHAT I DID NOT FIX, AND WHAT IT COSTS
+
+**1. The cold WAR ROOM ellipsises four of six unlock descriptions.** With 0 owned, the six-entry
+catalogue wants 508 px in a 446 px column, so W9's `WarUnlockPlan` shrinks each compact row to ONE
+12 px line and clips with an ellipsis. That is a **deliberate, documented W9 decision** and the
+alternatives it rejected are worse (10 px type breaks the small-text floor; `break`ing off the list
+made an unlock invisible *and unbuyable*). The cost is real and lands on exactly the wrong person:
+**the only player who sees all six unowned is the brand-new one, and they are the one player who
+cannot read what any of them do.** METATEST checks the font size and the hit rect, not
+*readability*. Not fixed here because it is a HUD layout change on a screen other CONTOUR waves may
+be touching, and this wave's lane is the artifact. It is now **photographable**
+(`SIGHTLINE_COLD=1`), which it was not before — that is the durable half.
+
+**2. The intro screen is not fit-tested, and it overflows at TEXT SIZE 120%.** The DIFFICULTY
+panel's body line ("standard difficulty – the designed fight") paints to x≈1266 against a panel
+edge at x≈1239 — **outside its own panel** — and the `[K]` / `[U]` key chips overlap their labels.
+`FITTEST` covers the doctrine / armory / hall-of-fame / draft screens; **the intro is not in its
+list**, so the first screen in the game has never been checked at any scale but 100%. At 100% it is
+clean. Reported precisely rather than fixed, same reason as (1).
+
+**3. A genuine two-process check of `display.json` is impossible headlessly.** `Display.Init` calls
+`Load()` *after* its `if (!enabled) return`, and every shot/autoplay path runs `Init(false)` — by
+design, for headless byte-stability. So settings load-back cannot be verified without a human at a
+keyboard. SHIPTEST's second-launch leg closes the equivalent gap for `meta.json`, which is where
+permanent progress lives; `display.json` is covered only up to "the file is written correctly".
+
+**4. `docs/screenshot.png` was NOT regenerated.** It is current — mission 4/6, HVT GUARDED, a
+board this build still produces — so the brief's condition ("regenerate it if the game no longer
+looks like it") is not met. It is a *worse* hero image than it could be (the 11-second briefing
+card covers the middle of the board), but swapping 700 KB of committed binary for a taste
+preference is not this wave's call to make silently.
+
+**5. The Windows build is unverified beyond its file list.** It cross-publishes cleanly and carries
+the right ten files; nothing here can run it. `Ship.SecondLaunchProbe` and `AtomicityProbe` both
+have Windows-aware paths (the latter self-skips), but neither has been executed on Windows.
+
+**6. Nothing here was balance-measured, and nothing should have been.** No gameplay code changed —
+`PAIRTEST` byte-identity confirms it. The `SIGHTLINE_COLD` hook is shot-only and `NoPersist`-gated;
+the version string is presentation. Quoting a ladder number from this wave would be inventing one.
+
+## WHAT STILL STANDS BETWEEN THIS AND A BUILD YOU WOULD HAND A STRANGER
+
+Ordered by how likely a stranger is to hit it.
+
+1. **No installer, no icon, no window-title art, no `.desktop` file.** A Linux player unzips a
+   directory and runs a file called `Sightline`. Windows will show an unsigned binary and
+   SmartScreen will warn. **Code signing costs money** and is therefore permanently out of scope
+   under this project's rules, but it is the single biggest "is this safe to run?" barrier there.
+2. **The cold WAR ROOM's unreadable unlock list** (above) — the first-run information defect.
+3. **The intro at non-100% text size** (above) — a shipped comfort setting with an unfit screen.
+4. **No crash reporter and no log file.** If the game throws on a player's machine the exception
+   goes to a stdout nobody is reading. The version stamp now lets them *name* a build; there is
+   still nothing to attach to the report.
+5. **Audio has never been heard on real hardware** (RESONANCE's standing item). Every session here
+   runs with `WARNING: AUDIO: Failed to initialize playback device`.
+6. **macOS is entirely untested** — not even a cross-publish was attempted.
+7. **`meta.json` has no export or backup path.** It is the only permanent thing the player owns;
+   the `.bak` beside it is corruption evidence, not a restore.
+
+## C6 — SENT BACK TWICE, AND WHAT THE TWO REVIEWS FOUND
+
+Two independent reviews. **Neither could break the test design** — reviewer 1 reproduced all five
+named reverts plus three more of their own and could not defeat the fork-bomb guards under
+`ulimit -u 250`, from multiple working directories, from an install path with a space, under
+`dotnet run -c Debug`, or nested; reviewer 2 verified trim-safety at the metadata level and upheld
+the `PublishTrimmed` reversal more strongly than the wave had argued it. What failed was
+**precision and bookkeeping**, which is this project's stated worst sin, plus two functional gaps.
+Twelve items, all fixed. The ones worth remembering:
+
+**The manifest did not match the document it guards — found independently by BOTH reviewers.**
+`docs/DISTRIBUTION.md` §1, written by this wave in the same commit, called the output "ten files,
+and you must ship all of them" and listed both `CREDITS.txt` audio ledgers. `Ship.RequiredFiles`
+had **six entries and omitted both**, so a build output with both deleted read `SHIPTEST: PASS` —
+while the array's own doc comment said "the two halves disagreeing is precisely the failure this
+manifest exists to name." **They already disagreed at merge time.** A manifest that does not match
+its document is worse than no manifest, because it gets quoted as evidence. Now eight entries.
+
+**I shipped a leg that could not fail — rule 5, in the wave that quotes rule 5.** The
+`<label>StaleTmp` check ran only after a *successful* `WriteAtomic`, whose `File.Move` has already
+consumed the tmp; it asserted a tautology, a pre-seeded stale `.tmp` still read PASS, and the PASS
+string advertised "no stale `.tmp`" on the strength of it. The sweep is a property of the **failure**
+path and had to be probed there: `SweepProbe` makes the target a **directory**, so the tmp write
+succeeds and the rename cannot, landing control in the catch with a corpse on disk. Remove the
+sweep and it reads `sweep:tmpNotSwept` — verified. The old line survives only as a shape guard,
+renamed `TmpSurvivedSuccessfulWrite`, and the PASS string no longer claims anything for it.
+
+**My probe destroyed a file it did not create.** `Ship.Restore` deleted `<path>.tmp`
+unconditionally, so running `qa-sweep.sh` silently erased a `.tmp` left behind by a real crash —
+the one artefact a maintainer could reason about that crash from. It now stashes the `.tmp`
+siblings alongside the files and puts their bytes back (mtime is necessarily rewritten: the
+production writer uses that exact path, so the test cannot avoid clobbering it and can only restore
+the content). Verified: two pre-seeded crash `.tmp` files come back byte-identical.
+
+**I reintroduced the bug class this wave exists to kill.** `SecondLaunchProbe` used
+`Environment.ProcessPath` unconditionally. Under `dotnet Sightline.dll` that is the **dotnet
+muxer**, so it spawned a bare `dotnet`, which printed usage, exited 0, wrote no sentinel, and gave
+`SHIPTEST: FAIL (secondLaunch:salvageNotCarried)` **on a completely correct build** — the same
+shape as the `metaUnlockPhantom` defect I had just fixed on the same gate, and defended with the
+same excuse ("no current caller trips it"). It now identifies the launcher: apphost/single-file →
+use it; muxer → relaunch as `<muxer> <our .dll>`; neither identifiable → **skip with the reason
+printed in the PASS string**, never fail. Verified PASSing under `dotnet Sightline.dll`,
+`dotnet run`, and the published single-file binary.
+
+**My hermeticity fix made a failure mode worse.** SAVETEST's meta stash lived only in a local
+string while the real file was deleted, so a `kill -9` in that window lost the profile outright.
+Pre-C6 the file was merely *mutated*; post-C6 it was *absent*. Trading "polluted" for "gone", in
+the wave whose thesis is that player data survives a crash. The stash is now a real file moved
+aside by rename (`<name>.json.selftest-stash`, recoverable by hand) and moved back the same way,
+with `WriteAtomic` as the fallback restore instead of a bare `File.WriteAllText` — the exact
+pattern this wave removed everywhere else.
+
+**Two over-claims, both on the sentence next to the thing I did not cover.**
+- §5 said `*.json.tmp` "should never persist, **and now does not**". The sweep is in the `catch`, so
+  a `kill -9` or power cut *between* the tmp write and the rename still leaves one, and there is no
+  startup sweep — deliberately, because that corpse is crash evidence. Corrected to name the limit.
+- The atomicity probe proves the **inode swap**, which covers concurrent readers and process death.
+  It is **not** power-loss durability: that needs an `fsync` of the tmp and of the directory, and
+  this code does neither. Now stated in the PASS string itself, not just the docs.
+
+**My guard's error text was factually false** — and it is the text someone reads at their worst
+moment. It said removing `TrimmerRootAssembly` meant a trimmed build "saves nothing". Reviewer 2
+measured it: with the root removed, `SAVETEST` **passes** and runs round-trip correctly; with
+**both** knobs removed, `SAVETEST`/`METATEST`/`SHIPTEST` all still pass. **Player persistence is
+protected by source generation alone.** What the knobs keep alive is the `SIGHTLINE_BALANCE`
+telemetry export (`NotSupportedException: parameter names have been trimmed by ILLink` /
+`InvalidOperationException: Reflection-based serialization has been disabled`). The guard was right
+to exist and fails safe; its message described the *pre-source-generation* failure and would have
+sent the next maintainer down the wrong road.
+
+**"Bounded wait" was stronger than my code.** `SecondLaunchProbe` called `ReadToEnd()` on two
+redirected pipes *before* `WaitForExit(60_000)`, and `ReadToEnd` has no timeout — a child that
+filled a pipe would have hung the sweep forever. It cannot happen today (the child writes ~15 bytes
+and exits), but the comment claimed more than the code delivered. Both pipes now drain on
+background threads before a deadlined wait.
+
+**A false comment on a line that deletes a save.** The `SIGHTLINE_COLD` block said it was
+"NoPersist-gated … so it can never touch a real profile". The cold path calls `SaveGame.Delete()`,
+which has **no** `NoPersist` guard. What actually protects the player is FUL-2's `introStash`
+capture-and-restore — which already had to exist because the *non*-cold path clobbers the same file
+by writing a staged mission-3 run over it. Net risk unchanged, stated reason wrong.
+
+**Two of my own documents disagreed on a number readers quote.** README said "27 MB" (MiB, from
+`du -sh`); §2 and `publish.sh` said 28.4 MB (decimal) for the same directory. All three now say
+**MB = 10^6 bytes**, explicitly, with exact byte counts.
+
+### The corrected matrix (final C6 binary, MB = 10^6 bytes)
+
+| mode | executable | whole directory | files |
+|---|---|---|---|
+| **release** (default) | 26.5 MB | **29.3 MB** (29,284,496 B) | 10 |
+| small | 16.1 MB | 18.8 MB | 10 |
+| no-trim | 82.3 MB | 85.1 MB | 10 |
+| plain | 68.3 MB | 71.0 MB | 10 |
+| win-x64 release | 24.8 MB (`.exe`) | 26.9 MB | 10 |
+
+**The start-time column from the first draft still stands and is NOT reproduced here as if it were
+fresh.** Those timings were measured on the pre-review binary (`d3feb90`); they were deliberately
+not re-run, because the container was under nine concurrent reviewers at load ~60 and that produces
+a worse number, not a truer one. `docs/DISTRIBUTION.md` §2 carries them with that attribution.
+
+### Also now stated as unverified rather than quietly implied
+
+- The `display.json` mechanism change applies on **all** platforms; `AtomicityProbe` self-skips on
+  Windows, so the Windows behaviour of that change is **unverified**.
+- **`PublishAot` was not tested.** By inspection it sets `PublishTrimmed` and therefore trips the
+  same guard — inspection, not measurement.
+- `SIGHTLINE_SHIPTEST` is the first hook here that writes the live profile **from a second
+  process**. It restores cleanly on success, but a sweep killed mid-SHIPTEST can leave `4242`
+  salvage and a `C6_SECOND_LAUNCH` achievement in whatever profile `XDG_CONFIG_HOME` points at.
+  CLAUDE.md's isolation section now says so, and names the two "a self-test died holding your data"
+  filenames and what to do with each.
+- Dispatch-order quirk, noted not changed: `SIGHTLINE_BALANCE` is handled before `SHIPTEST` in
+  `Main`, so setting both silently runs a balance batch and prints no SHIPTEST line. First-match-
+  wins is the house convention for every hook in that file; `qa-sweep.sh`'s `verdict` already treats
+  a blank capture as a failure.
