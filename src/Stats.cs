@@ -58,6 +58,14 @@ public static class Stats
         // These two fields are what let byObjectiveByBucket hold survivorship still.
         public string NodeKind = "";
         public int SquadHpPct = 100;
+        // C4 "EIGHT BIOMES ARE PAINT": the biome this mission was FOUGHT IN, and how many tiles
+        // of mechanical ground (fern / drift / vent) were stamped on it. Until C4 the biome was
+        // paint, so there was nothing to split by and Stats never recorded it — which is exactly
+        // why C4's first round could see a −3.7 whole-campaign move at heat 0 and not say WHICH
+        // of the three biomes bought it. Read-only telemetry: two pure reads of state that
+        // already exists, no draw, no mutation (CROSSCUT rule 1 — never conclude from a pooled row).
+        public string Biome = "";
+        public int GroundTiles;
         // W8 THE HALF WALL: the DECAPITATE punch-through target. HvtKind is -1 on every other
         // objective, 0 when the HVT was an ELITE (DesignateHvt's exemption — the campaign finale's
         // named boss, or the m3/m5 mid-boss) and 1 when a rank-and-file body took the statline
@@ -325,7 +333,8 @@ public static class Stats
     public static void BeginMission(int mission, string objective, int heat, int squad, int enemies, int layout = -1,
                                     int deploy = Sightline.Mission.DeployFrontal,
                                     string nodeKind = "", int squadHpPct = 100,
-                                    int hvtKind = -1, int hvtMaxHp = 0)
+                                    int hvtKind = -1, int hvtMaxHp = 0,
+                                    string biome = "", int groundTiles = 0)
     {
         if (!Enabled) return;
         if (_run == null) BeginRun(heat);
@@ -334,7 +343,8 @@ public static class Stats
             Mission = mission, Objective = objective, Heat = heat,
             SquadStart = squad, EnemiesStart = enemies, Layout = layout, Deploy = deploy,
             NodeKind = nodeKind ?? "", SquadHpPct = squadHpPct,
-            HvtKind = hvtKind, HvtMaxHp = hvtMaxHp
+            HvtKind = hvtKind, HvtMaxHp = hvtMaxHp,
+            Biome = biome ?? "", GroundTiles = groundTiles
         };
         ResetLeadTracker();   // swings/lead are scoped to one match
     }
@@ -1280,6 +1290,20 @@ public static class Stats
             {
                 nodeKind = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()),
                 avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+            }).ToList(),
+            // C4 "EIGHT BIOMES ARE PAINT": the BIOME a mission was fought in, with the count of
+            // mechanical-ground tiles it carried. Three of the eight now change the fight (VERDANT
+            // undergrowth / TUNDRA slick ice / MAGMA thermal vents) and five are still paint, so a
+            // pooled rung mixes two populations that are no longer the same game. This is the row
+            // that says WHICH. `groundTiles` is 0 on the paint biomes and with SIGHTLINE_BIOMEMECH=0,
+            // which also makes it the cheapest possible check that an A/B arm really was what it
+            // claimed to be.
+            byBiome = missions.GroupBy(m => string.IsNullOrEmpty(m.Biome) ? "?" : m.Biome)
+                .OrderBy(g => g.Key).Select(g => new
+            {
+                biome = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()),
+                avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1),
+                avgGroundTiles = Math.Round(g.Average(m => (double)m.GroundTiles), 1)
             }).ToList(),
             // W8 THE HALF WALL: objective x campaign NODE KIND. byObjective alone pools a capstone
             // with a mid-run node — for Decapitate it always does (one Boss node, always the map's

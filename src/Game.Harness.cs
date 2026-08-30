@@ -3562,6 +3562,279 @@ public partial class Game
             : "ITEMTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// Headless self-test (SIGHTLINE_BIOMETEST) — wave C4 "EIGHT BIOMES ARE PAINT".
+    ///
+    /// Pins the MECHANIC'S ACTUAL EFFECT on a constructed board, never the presence of a field:
+    /// every leg measures a number the game would use (a cover level, a hit%, a Dijkstra cost, a
+    /// line-of-sight verdict, an HP total, an AI destination) with and without the ground under it.
+    ///
+    /// It reads the AMBIENT Terrain.Enabled deliberately, so `SIGHTLINE_BIOMEMECH=0` — the flag that
+    /// restores the pre-C4 board exactly — makes it FAIL. That is the "a test that cannot fail is not
+    /// a test" proof, and it is the same switch the CRN A/B round was measured on.
+    public string BiomeSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        Grid OpenGrid()
+        {
+            var gr = new Grid();
+            for (int x = 0; x < gr.W; x++)
+                for (int y = 0; y < gr.H; y++) { gr.Tiles[x, y] = TileType.Floor; gr.Height[x, y] = 0; }
+            gr.ResetCoverHp();
+            return gr;
+        }
+        Unit Shooter(int x, int y, Team t) {
+            var u = new Unit { Name = "U", Cls = "GRUNT", Team = t, X = x, Y = y, Hp = 10, MaxHp = 10,
+                               Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ═══ 1. THE STAMPER — three mechanical biomes, five that are still paint ═══════════════
+        // (declared, not hidden: STEEL/ARID/ASH/VOID/NEON must stamp NOTHING, so a future wave that
+        // gives one of them a mechanic has to change this line and say so.)
+        int[] mechIdx = { Terrain.BiomeTundra, Terrain.BiomeVerdant, Terrain.BiomeMagma };
+        var mechKind = new Dictionary<int, GroundKind> {
+            { Terrain.BiomeTundra, GroundKind.Ice }, { Terrain.BiomeVerdant, GroundKind.Undergrowth },
+            { Terrain.BiomeMagma, GroundKind.Vent } };
+        for (int bi = 0; bi < Biome.All.Length; bi++)
+        {
+            var gs = OpenGrid();
+            Terrain.Stamp(gs, bi, 4242, 3, null);
+            int n = 0; bool wrongKind = false;
+            for (int x = 0; x < gs.W; x++)
+                for (int y = 0; y < gs.H; y++)
+                    if (gs.Ground[x, y] != GroundKind.None)
+                    { n++; if (mechKind.TryGetValue(bi, out var want) && gs.Ground[x, y] != want) wrongKind = true; }
+            bool mechanical = Array.IndexOf(mechIdx, bi) >= 0;
+            if (mechanical && n == 0) fails.Add($"noGround[{Biome.All[bi].Name}]");
+            if (!mechanical && n != 0) fails.Add($"paintBiomeStamped[{Biome.All[bi].Name}]");
+            if (wrongKind) fails.Add($"wrongKind[{Biome.All[bi].Name}]");
+            if (mechanical && Terrain.Tag(bi) == null) fails.Add($"noTag[{bi}]");
+            if (!mechanical && Terrain.Tag(bi) != null) fails.Add($"paintBiomeTagged[{bi}]");
+        }
+
+        // DENSITY, swept over 24 seeds x 3 missions per mechanical biome. This is a DESIGN
+        // property, not a smoke check: too little and the mechanic is a curiosity nobody meets,
+        // too much and cover/sight/movement stop meaning anything on that board. The bounds are
+        // ~4% and ~26% of the 198-tile grid.
+        foreach (int bi in mechIdx)
+        {
+            int lo = int.MaxValue, hi = 0;
+            for (int sd = 0; sd < 24; sd++)
+                for (int m = 1; m <= 3; m++)
+                {
+                    var gs = OpenGrid();
+                    Terrain.Stamp(gs, bi, sd * 7919 + 13, m, null);
+                    int n = 0;
+                    for (int x = 0; x < gs.W; x++)
+                        for (int y = 0; y < gs.H; y++) if (gs.Ground[x, y] != GroundKind.None) n++;
+                    lo = Math.Min(lo, n); hi = Math.Max(hi, n);
+                }
+            int floor = bi == Terrain.BiomeMagma ? 7 : 12;   // a fissure is a THIN feature by design
+            if (lo < floor) fails.Add($"groundTooSparse[{Biome.All[bi].Name}]={lo}");
+            if (hi > 46) fails.Add($"groundFlood[{Biome.All[bi].Name}]={hi}");
+        }
+
+        // determinism: the SAME (seed, mission) stamps byte-identically, a different mission does not.
+        // This is the CRN contract — the layer must derive from Hash3 and take ZERO Util.Rng draws.
+        {
+            var g1 = OpenGrid(); var g2 = OpenGrid(); var g3 = OpenGrid();
+            Terrain.Stamp(g1, Terrain.BiomeMagma, 777, 2, null);
+            Terrain.Stamp(g2, Terrain.BiomeMagma, 777, 2, null);
+            Terrain.Stamp(g3, Terrain.BiomeMagma, 777, 3, null);
+            bool same = true, differs = false;
+            for (int x = 0; x < g1.W; x++)
+                for (int y = 0; y < g1.H; y++)
+                {
+                    if (g1.Ground[x, y] != g2.Ground[x, y]) same = false;
+                    if (g1.Ground[x, y] != g3.Ground[x, y]) differs = true;
+                }
+            if (!same) fails.Add("stampNotDeterministic");
+            if (!differs) fails.Add("stampIgnoresMission");
+        }
+
+        // reserved tiles are never covered (a soldier must not deploy standing in a fissure)
+        {
+            var gr = OpenGrid();
+            var res = new HashSet<(int x, int y)>();
+            for (int x = 0; x < gr.W; x++) for (int y = 0; y < gr.H; y++) if ((x + y) % 3 == 0) res.Add((x, y));
+            Terrain.Stamp(gr, Terrain.BiomeVerdant, 99, 1, res);
+            foreach (var (x, y) in res) if (gr.Ground[x, y] != GroundKind.None) fails.Add("stampedReserved");
+        }
+
+        // ═══ 2. VERDANT / UNDERGROWTH — the COVER axis ════════════════════════════════════════
+        {
+            var gr = OpenGrid();
+            gr.Ground[9, 5] = GroundKind.Undergrowth; gr.RefreshGroundFlags();
+
+            // at range: LOW cover from EVERY angle, labelled as foliage, and NOT flankable
+            var far = gr.GetCover(9, 5, 14, 5);
+            if (far.Level != 1 || !far.Foliage || far.Partial) fails.Add("foliageNoCoverAtRange");
+            if (far.Defense != 20) fails.Add($"foliageDefense={far.Defense}");
+            var diag = gr.GetCover(9, 5, 14, 10);          // a diagonal angle gets the same protection
+            if (diag.Level != 1 || !diag.Foliage) fails.Add("foliageDiagonal");
+            if (gr.GetCover(9, 5, 5, 5).Level != 1) fails.Add("foliageFromWest");
+
+            // inside FoliageMinDist it is worth NOTHING — that is the counter, and it is the half a
+            // player has to be able to feel: close, and the ferns stop mattering.
+            var close = gr.GetCover(9, 5, 9 + Terrain.FoliageMinDist, 5);
+            if (close.Level != 0 || close.Foliage) fails.Add("foliageStillCoversUpClose");
+
+            // it is a FLOOR, not a bonus: a real high block still reads HIGH, not HIGH+fern
+            gr.Tiles[10, 5] = TileType.HighCover; gr.ResetCoverHp();
+            if (gr.GetCover(9, 5, 14, 5).Level != 2) fails.Add("foliageBrokeHighCover");
+            gr.Tiles[10, 5] = TileType.Floor; gr.ResetCoverHp();
+
+            // high ground SEES OVER it, exactly as it sees over any low block
+            var atk = Shooter(14, 5, Team.Player); var def = Shooter(9, 5, Team.Enemy);
+            var flat = Combat.ComputeOdds(gr, atk, def);
+            if (!flat.Foliage || flat.CoverLevel != 1) fails.Add("oddsMissedFoliage");
+            gr.Height[14, 5] = 1;
+            var high = Combat.ComputeOdds(gr, atk, def);
+            if (!high.SeesOver || high.CoverLevel != 0 || high.Foliage) fails.Add("highGroundBlindToFoliage");
+            gr.Height[14, 5] = 0;
+
+            // and it is worth EXACTLY 20 points of the attacker's hit chance (the number the badge
+            // prints), measured against the same shot with the fern removed
+            gr.Ground[9, 5] = GroundKind.None; gr.RefreshGroundFlags();
+            var bare = Combat.ComputeOdds(gr, atk, def);
+            if (bare.HitChance - flat.HitChance != 20) fails.Add($"foliageAimDelta={bare.HitChance - flat.HitChance}");
+            if (!bare.Flanked && bare.CoverLevel != 0) fails.Add("bareTileNotExposed");
+        }
+
+        // ═══ 3. TUNDRA / SLICK ICE — the MOVEMENT axis ════════════════════════════════════════
+        {
+            var gr = OpenGrid();
+            var bareCost = gr.CostMap(2, 5, (x, y) => false, out _, 12);
+            int bareReach = bareCost[8, 5];               // 6 orthogonal steps = 12 half-tiles
+            for (int x = 3; x <= 16; x++) gr.Ground[x, 5] = GroundKind.Ice;
+            gr.RefreshGroundFlags();
+            var iceCost = gr.CostMap(2, 5, (x, y) => false, out _, 12);
+            if (iceCost[3, 5] != Terrain.IceStepOrth) fails.Add($"iceStep={iceCost[3, 5]}");
+            if (bareReach != 12) fails.Add($"bareReach={bareReach}");
+            if (iceCost[8, 5] != 6) fails.Add($"iceReachCost={iceCost[8, 5]}");
+            // the lane genuinely reaches FURTHER on the same budget: (14,5) is 12 tiles out and
+            // unreachable on foot, reachable on the drift.
+            if (bareCost[14, 5] != -1) fails.Add("bareLaneAlreadyReached");
+            if (iceCost[14, 5] < 0) fails.Add("iceLaneNoExtraReach");
+            // ice is a movement rule ONLY — it is not cover and it does not blind
+            if (gr.GetCover(8, 5, 14, 5).Level != 0) fails.Add("iceGaveCover");
+            if (!gr.HasLineOfSight(2, 5, 16, 5)) fails.Add("iceBlockedSight");
+        }
+
+        // ═══ 4. MAGMA / THERMAL VENTS — the SIGHT axis (plus the toll) ════════════════════════
+        {
+            var gr = OpenGrid();
+            if (!gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("openSightBroken");
+            gr.Ground[9, 5] = GroundKind.Vent; gr.RefreshGroundFlags();
+            if (gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("ventDidNotBlockSight");
+            // steam is not a wall: a COMMANDING (tier-2 height) shooter sees over HIGH COVER but
+            // must not see through a vent — the vent joins smoke, not the terrain.
+            if (gr.HasLineOfSight(4, 5, 14, 5, true)) fails.Add("commandingSawThroughVent");
+            if (!gr.IsVapor(9, 5)) fails.Add("ventNotVapor");
+            // it gives NO cover to whoever is standing on it (it is a screen, not a block)
+            if (gr.GetCover(9, 5, 14, 5).Level != 0) fails.Add("ventGaveCover");
+            // sight around it still works — the fords are the whole reason the fissure has gaps
+            if (!gr.HasLineOfSight(4, 6, 14, 6)) fails.Add("ventBlockedAdjacentLane");
+            // the MOVEMENT half of the toll
+            var vc = gr.CostMap(8, 5, (x, y) => false, out _, 99);
+            if (vc[9, 5] != 2 + Terrain.VentStepExtra) fails.Add($"ventStep={vc[9, 5]}");
+
+            // the HP half of the toll, through the real Game seam both teams move through
+            Grid = gr; Players = new List<Unit>(); Enemies = new List<Unit>();
+            Vip = null; CaptiveLocked = false; SquadConcealed = false; Phase = Phase.PlayerTurn;
+            Objective = Objective.Eliminate; EvacZone.Clear();
+            var walker = Shooter(9, 5, Team.Player); Players.Add(walker);
+            int hp0 = walker.Hp;
+            OnUnitEnteredTile(walker);
+            if (walker.Hp != hp0 - Unit.BurnDamage) fails.Add($"ventNoSear={hp0 - walker.Hp}");
+            if (!walker.HasStatus(StatusKind.Burning)) fails.Add("ventDidNotIgnite");
+            // and PARKING on one keeps you burning — otherwise the safest tile on the board would be
+            // the one nothing can see through (the turtle DESIGN.md 3.A forbids)
+            walker.Statuses.Clear();
+            TickHazards();
+            if (!walker.HasStatus(StatusKind.Burning)) fails.Add("ventParkedNotReignited");
+            // a walker on ordinary floor is untouched by the same tick (the guard is the ground, not the tick)
+            var safe = Shooter(2, 9, Team.Player); Players.Add(safe);
+            int shp = safe.Hp; safe.Statuses.Clear();
+            TickHazards(); OnUnitEnteredTile(safe);
+            if (safe.Hp != shp || safe.HasStatus(StatusKind.Burning)) fails.Add("floorTileBurned");
+        }
+
+        // ═══ 5. THE OPPONENT UNDERSTANDS THE NEW BOARD ════════════════════════════════════════
+        // (a) the enemy planner will not END its move on a thermal vent — proven the only honest
+        //     way: run the SAME scene twice and watch it abandon the exact tile it just chose.
+        {
+            Grid = OpenGrid(); Players = new List<Unit>(); Enemies = new List<Unit>();
+            Vip = null; CaptiveLocked = false; SquadConcealed = false; Phase = Phase.EnemyTurn;
+            Objective = Objective.Eliminate; EvacZone.Clear();
+            var soldier = Shooter(3, 5, Team.Player); Players.Add(soldier);
+            var foe = Shooter(12, 5, Team.Enemy); Enemies.Add(foe);
+            RefreshCombatRoster();
+            var p0 = Ai.Plan(this, foe);
+            (int x, int y) t0 = p0.Path.Count > 0 ? p0.Path[p0.Path.Count - 1] : (foe.X, foe.Y);
+            if (p0.Path.Count == 0) fails.Add("aiDidNotMoveAtAll");
+            else
+            {
+                Grid.Ground[t0.x, t0.y] = GroundKind.Vent; Grid.RefreshGroundFlags();
+                foe.X = 12; foe.Y = 5; foe.SyncPos(); foe.BeginTurn();
+                var p1 = Ai.Plan(this, foe);
+                (int x, int y) t1 = p1.Path.Count > 0 ? p1.Path[p1.Path.Count - 1] : (foe.X, foe.Y);
+                if (t1.x == t0.x && t1.y == t0.y) fails.Add("aiParkedOnVent");
+                if (Grid.IsVent(t1.x, t1.y)) fails.Add("aiEndedOnAVent");
+            }
+        }
+        // (b) the enemy's REACH is the shared cost map, so an ice lane widens the exact set of tiles
+        //     Ai.Plan gets to choose from — no second movement model, nothing for the AI to miss.
+        {
+            Grid = OpenGrid(); Players = new List<Unit>(); Enemies = new List<Unit>();
+            Phase = Phase.EnemyTurn; Objective = Objective.Eliminate; EvacZone.Clear();
+            var foe = Shooter(2, 5, Team.Enemy); Enemies.Add(foe);
+            var bare = Grid.CostMap(foe.X, foe.Y, (x, y) => false, out _, foe.MoveBudget * 2);
+            for (int x = 3; x <= 16; x++) Grid.Ground[x, 5] = GroundKind.Ice;
+            Grid.RefreshGroundFlags();
+            var iced = Grid.CostMap(foe.X, foe.Y, (x, y) => false, out _, foe.MoveBudget * 2);
+            int gained = 0, lost = 0;
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (bare[x, y] < 0 && iced[x, y] >= 0) gained++;
+                    if (bare[x, y] >= 0 && iced[x, y] < 0) lost++;
+                }
+            if (gained <= 0) fails.Add("iceGaveTheAiNothing");
+            if (lost != 0) fails.Add($"iceTookReachAway={lost}");
+        }
+
+        // ═══ 6. THE OFF SWITCH — SIGHTLINE_BIOMEMECH=0 restores the pre-C4 board EXACTLY ══════
+        {
+            bool was = Terrain.Enabled;
+            Terrain.Enabled = false;
+            var gr = OpenGrid();
+            gr.Ground[9, 5] = GroundKind.Undergrowth;
+            gr.Ground[10, 5] = GroundKind.Vent;
+            gr.Ground[11, 5] = GroundKind.Ice;
+            gr.RefreshGroundFlags();
+            if (gr.GetCover(9, 5, 14, 5).Level != 0) fails.Add("offSwitchFoliage");
+            if (!gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("offSwitchVentSight");
+            var c = gr.CostMap(12, 5, (x, y) => false, out _, 99);
+            if (c[11, 5] != 2 || c[10, 5] != 4) fails.Add("offSwitchCosts");
+            if (gr.IsVent(10, 5) || gr.IsIce(11, 5) || gr.IsFoliage(9, 5)) fails.Add("offSwitchPredicates");
+            var gs = OpenGrid(); Terrain.Stamp(gs, Terrain.BiomeMagma, 5, 1, null);
+            for (int x = 0; x < gs.W; x++)
+                for (int y = 0; y < gs.H; y++) if (gs.Ground[x, y] != GroundKind.None) fails.Add("offSwitchStamped");
+            Terrain.Enabled = was;
+        }
+
+        return fails.Count == 0
+            ? "BIOMETEST: PASS (3 biomes mechanical on 3 axes, 5 still paint; undergrowth = omnidirectional low cover past "
+              + Terrain.FoliageMinDist + " tiles and worth exactly 20 aim, gone up close, seen over from height; ice halves the "
+              + "step and widens the shared reach; vents blind even a commanding shooter, give no cover, cost "
+              + Terrain.VentStepExtra + " extra half-tiles and sear on entry AND on parking; the AI abandons a tile that "
+              + "becomes a vent; stamp deterministic per (seed,mission) and off-switch clean)"
+            : "BIOMETEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test (SIGHTLINE_HAZARDTEST): environmental-hazard mechanics — a barrel blocks
     /// movement (IsFloor chokepoint), fire only lights floor + decays, and pathing routes around a
     /// barrel. Window-free (grid + CostMap only).
