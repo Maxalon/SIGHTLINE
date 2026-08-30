@@ -75,3 +75,17 @@ sweep-balance.json
 sightline_boardtest.png
 .w4*.sh
 bal/
+# W9 THE REPAIR — wave-local scratch. Kept SHORT and wave-scoped on purpose: generic names
+# (t.sh / sweep.sh / frames.sh ...) would shadow a real project file later, so the wave's throwaway
+# scripts are deleted from the worktree rather than ignored forever.
+.w9*
+# Every agent is told to point SIGHTLINE_BALANCE_JSON at $PWD/balance.json (see the dev contract),
+# so this one is durable, not wave-local — it belongs beside sweep-balance.json above.
+balance.json
+.w9s/
+.w9exit.sh
+.w9gate.sh
+.w9t.sh
+.w9shot.sh
+.w9sweep.sh
+.w9rev.md

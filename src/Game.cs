@@ -241,6 +241,14 @@ public partial class Game
 
     int _turnCount;
 
+    /// W9 THE REPAIR — player turns taken since this RUN began, across every mission. Distinct from
+    /// _turnCount, which SetupMission resets to 1 at every mission start AND at the mid-mission
+    /// checkpoint redeploy. That reset is why the "never a RESULT: TIMEOUT" guarantee was false:
+    /// AutoStallCheck's cap was PER-MISSION and re-armable, while the harness budget it claims to sit
+    /// under (Program.cs autoCap) is a whole-campaign FRAME count. Reset only at a mode seam
+    /// (ResetModeState), never by SetupMission. Public so the harness can report it.
+    public int RunTurns { get; private set; }
+
     // campaign run
     Run _run = new();
     public Run RunState => _run;
@@ -1562,6 +1570,7 @@ public partial class Game
     /// and needs the RNG stream untouched for byte-stable shots/measurement.
     void ResetModeState()
     {
+        RunTurns = 0;   // W9: the run-scoped autopilot budget resets at the mode seam, and ONLY here
         Mode = GameMode.Campaign;
         DailyMode = false;
         DailyStamp = 0;
@@ -1848,7 +1857,24 @@ public partial class Game
         // W5: the grace ramps HEAT's escalation in — it must not also ramp the RECRUIT rung's
         // RELIEF out. Rung -1's whole point is that mission 1 is survivable, which is exactly the
         // mission the grace would zero. Gated on heat > 0 so heats 1-8 are bit-for-bit unchanged.
-        if (heat > 0)
+        // W9 THE REPAIR — the grace is gated on CAMPAIGN, which makes it the thing it always claimed
+        // to be. It exists to protect "a green 4-rookie squad meeting Heat before it has earned a
+        // single promotion, perk or boon" — a statement about the CAMPAIGN OPENER. But SKIRMISH and
+        // DAILY both enter through SetupMission(1) (Game.Modes.cs), so `n <= 1` was true for EVERY
+        // skirmish and EVERY daily, and the grace zeroed the entire numeric ladder in two of the four
+        // shipped modes. MEASURED: skirmish eliminate, seed 4242, arena 5 reads "4 SQUAD 4 HOSTILES"
+        // at heat 0 and "4 SQUAD 4 HOSTILES  HEAT 8" at heat 8 — the red chip was the only difference
+        // on screen — against a campaign control of 6 vs 10 hostiles on the same seed and arena. Only
+        // the qualitative flags (Ai.Tier at rung 6+, SHORT FUSE, EXPOSED, NO QUARTER's label)
+        // survived; every body, stat and damage point the dial promises was discarded.
+        // This is ROADMAP:1066's own recommendation, which it left as an owner decision. THE CALL,
+        // made: a SKIRMISH or DAILY player explicitly DIALLED the rung — the setup screen renders the
+        // ladder and its per-rung modifier text, the intro sells "pick the objective and the heat",
+        // and FEATURES.md line 13 sells "one fight with a chosen objective+heat". There is no green
+        // squad to protect and no campaign ahead to front-load anxiety into; there is only the fight
+        // they asked for. The grace stays exactly as it was for CAMPAIGN (and for ENDLESS, which
+        // opens at n==1 too and whose escalation is the wave ladder, not heat).
+        if (heat > 0 && Mode != GameMode.Skirmish)
         {
             if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
             else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
@@ -1919,6 +1945,9 @@ public partial class Game
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
+        RunTurns++;   // W9: the mission's OPENING turn is a real turn — SetupMission seats it without
+                      // going through StartPlayerTurn, so the run-scoped counter has to book it here.
+                      // Deliberately an INCREMENT, not a reset: that is the entire point (see the field).
         Pressure = 0; _pressureWaves = 0;   // anti-turtle clock resets each mission (Combat.PressureAim cleared by BeginMission)
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
@@ -2994,7 +3023,20 @@ public partial class Game
     void PurgeAnimsFor(Unit d)
     {
         _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
-                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
+                           || (a is ShotAnim s && s.D == d && a != ActiveAnim)
+                           // W9 THE REPAIR: ...and shots BY the felled unit. The purge only ever
+                           // covered the VICTIM's side, so a soldier downed while its OWN shot sat in
+                           // the queue behind the blow that felled it still fired: full damage, a
+                           // credited kill, Stats bucketed under the downed soldier's class, and the
+                           // takedown stinger — off a body at Hp 0.
+                           // W9 REVIEW FIX to this comment: it used to claim the ActiveAnim exemption
+                           // means "the blow in flight still finishes". TRUE for the target clause
+                           // above; FALSE here — ShotAnim.Update self-cancels for a dead/downed
+                           // ATTACKER, so an exempted active shot by the felled unit is cancelled one
+                           // frame later anyway. The exemption is kept for symmetry and to avoid
+                           // mutating the list under the active anim, but on this clause it is inert.
+                           // A body does not shoot, in flight or not — which is the intended rule.
+                           || (a is ShotAnim s2 && s2.A == d && a != ActiveAnim));
     }
 
     /// FUL-7: does this lethal event open a bleed-out window instead of killing? Soldiers only
@@ -3197,7 +3239,11 @@ public partial class Game
         if (Phase != Phase.PlayerTurn || d.Team != Team.Enemy) return;
         if (ActiveAnim is not ShotAnim sa) return;          // only a direct shot refunds (not a grenade/DoT)
         var killer = sa.A;
-        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip || !killer.Alive) return;
+        // W9: `|| killer.Downed` — a soldier at Hp 0 must not be handed ActionsLeft = 1 (which would
+        // make CanAct true again for a body). QA saw no escalation in 214 campaigns, but the
+        // guard read only !Alive while Downed is exactly the state a felled soldier is IN.
+        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip
+            || !killer.Alive || killer.Downed) return;
         // Require a GENUINE FLANK (not merely any exposed target): the refund rewards
         // *maneuvering to a flank*, not finishing an already-open foe. This de-snowballs the
         // ambush+refund chain a balance audit flagged (an ambush-snap-kill on an exposed-but-
@@ -3911,7 +3957,40 @@ public partial class Game
     // so the match always resolves. Test-only; never runs in normal play.
     int _autoSig = -1, _autoStall;
     int _smartConcealTurns;  // SmartStep: player turns spent concealed (hard anti-TIMEOUT cap)
-    const int AutoMaxTurns = 50;  // hard autopilot match cap: force-end a dragging match as a LOSS
+    const int AutoMaxTurns = 50;  // hard autopilot MISSION cap: force-end a dragging match as a LOSS
+    /// W9 THE REPAIR — the RUN-scoped autopilot cap, and the one that actually makes "never a
+    /// RESULT: TIMEOUT" true. AutoMaxTurns above is per-MISSION and is re-armed by SetupMission's
+    /// `_turnCount = 1`, INCLUDING the mid-mission checkpoint redeploy — so a campaign could spend
+    /// 21 turns on mission 5, wipe on mission 6, take the checkpoint, and be handed a fresh 50-turn
+    /// allowance, while Program.cs's autoCap = 20000 frames buys the WHOLE campaign about 40 turns.
+    /// The backstop was roughly 5x too loose to bound what it claimed to bound. QA measured 2 TIMEOUTs
+    /// in 214 seeded campaigns (~1%); W9 reproduced both (seeds 2001 and 3001) and, on a 20-seed
+    /// census of its own, saw 2 of 20 — a rate qa-sweep only PRINTED and never failed on, and which
+    /// BalanceBatch scores as a LOSS, right-censoring exactly the longest campaigns.
+    /// CALIBRATED FROM A MEASURED CENSUS of this tree's own autoplay, 20 seeded campaigns, RESULT
+    /// lines carrying `turns=`: every run finished, the longest took 75 run-turns / 18,992 frames and
+    /// the next longest 38, and the per-turn frame cost falls as a campaign lengthens (a long campaign
+    /// is long because it is ATTRITED, and a small squad takes cheap turns — the 75-turn outlier ran
+    /// 253 frames/turn against 400-680 on short full-squad runs).
+    /// 150 is 2x the longest campaign measured. That headroom is the point: firing this cap on a
+    /// LEGITIMATE run would score it a LOSS and put the same downward bias into the ladder that the
+    /// old 20,000-frame budget did. It must only ever catch something genuinely stuck.
+    public const int AutoMaxRunTurns = 150;
+    /// The harness's whole-campaign FRAME budget (Program.cs's autoplay loop and BalanceBatch both
+    /// read it). It lives HERE, next to the turn cap it must dominate, because the two numbers are a
+    /// PAIR: if the frame budget can expire before AutoMaxRunTurns is reached, RESULT: TIMEOUT is
+    /// reachable again. STALLTEST pins AutoMaxRunTurns * AutoFramesPerTurn <= AutoFrameCap so a future
+    /// edit to either number fails loudly instead of quietly re-opening the hole.
+    public const int AutoFrameCap = 120000;
+    /// The per-turn frame ceiling for that arithmetic. W9 REVIEW FIX: this was 600, chosen from the
+    /// LONG-CAMPAIGN regime (253 frames/turn at 75 turns) — but the measured SPREAD runs to 681
+    /// (Program.cs), so a campaign that somehow sustained its worst observed rate for 150 turns would
+    /// have hit the frame cap at ~147 turns, three turns before the turn cap. "TIMEOUT is unreachable"
+    /// would then have been EMPIRICAL rather than STRUCTURAL — and that matters more now the sweep
+    /// hard-fails on a TIMEOUT, because a rare false positive becomes a merge block. Set to the
+    /// measured WORST case instead: 150 x 700 = 105,000 <= the 120,000 budget, with no regime
+    /// assumption left in the argument.
+    public const int AutoFramesPerTurn = 700;
 
     // ---------------- activation pods (4.3 awareness tiers) ----------------
     // Baselines; Heat "SHORT FUSE"/"RELENTLESS" shrink first-contact ranges by 1 (read off the
@@ -4188,7 +4267,7 @@ public partial class Game
 
     void UpdatePlayer()
     {
-        if (AutoPlay) { if (SmartPlay) SmartStep(); else AutoStep(); return; }
+        if (AutoPlay) { AutoIdleGuard(); if (SmartPlay) SmartStep(); else AutoStep(); return; }
 
         CheckPodActivation();
         if (_anims.Count > 0) return;   // a pod just activated — let the scatter play
@@ -6033,6 +6112,7 @@ public partial class Game
     void StartPlayerTurn()
     {
         _turnCount++;
+        RunTurns++;      // W9: run-scoped, never reset by SetupMission — see the field
         Phase = Phase.PlayerTurn;
         // W10 INTEL CACHE: the pickup window closes after CacheTurns player turns — the routing
         // detour is a bet against this clock, not free money whenever the fight happens to drift by.
@@ -7244,6 +7324,10 @@ public partial class Game
         if (choiceIdx < 0 || choiceIdx >= _activeEvent.Choices.Length) choiceIdx = AutoEventChoice();
         var ch = _activeEvent.Choices[choiceIdx];
         if (!ChoiceLegal(ch)) return;   // ignore clicks on illegal choices
+        // W9 REVIEW FIX: snapshot the roster BEFORE the outcomes so the reconcile below can tell an
+        // event that actually moved a body from one that did not (see the comment at the call).
+        var rosterBefore = new System.Collections.Generic.HashSet<Unit>(_run.Squad);
+        int deployedBefore = _run.Deployed.Count;
         Stats.RecordEvent(_activeEvent.Id, choiceIdx);   // FUL-1: BY EVENT-CHOICE telemetry (no-op unless Enabled)
         string line = EventCatalog.Apply(_run, ch.Outcome, _eventNode);
         if (ch.HasSecond)
@@ -7253,6 +7337,32 @@ public partial class Game
         }
         if (ch.HasThird) line = line + "; " + EventCatalog.Apply(_run, ch.Outcome3, _eventNode);   // FUL-10
         _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
+        // W9 THE REPAIR — RECONCILE THE DEPLOYMENT. A field event can add or remove a body, and
+        // Run.DebriefSurvivors' AutoDeploy() has ALREADY run by the time this resolves, so the
+        // roster and the deployment disagreed in BOTH directions:
+        //   * a free RECRUIT (DEFECTOR) arrived un-benched, so the barracks header printed
+        //     "DEPLOY 5/4 (squad at capacity)" over five DEPLOYED soldiers and the next mission
+        //     fielded FIVE where Run.DeployCapFor(2) == 4. HandleBenchClick refuses to un-bench past
+        //     the cap, so the event path was the only way over it. A cap is a cap.
+        //   * a RELEASE (THE RESERVE CALLS) freed a DEPLOYED slot and never handed it to the healthy
+        //     benched soldier, so the squad fielded 3/4 with a 6/6-HP body sitting out while the
+        //     header printed its "cap grows over the campaign - field up to it" hint.
+        //
+        // W9 REVIEW FIX — GATED, and NOT AutoDeploy. The first cut called _run.AutoDeploy()
+        // UNCONDITIONALLY here, and the comment claimed it was "a no-op for every event that does not
+        // touch the roster". It is not: AutoDeploy re-derives Benched across the WHOLE roster from a
+        // fixed rule, so it silently discarded the player's own barracks swap on EVERY event —
+        // measured on an Intel-only outcome, MANUAL VEGA[B],KRESS[D],NOX[D],BISHOP[D],LYNX[D] came
+        // back VEGA[D],...,NOX[B],... . Reachable in normal play (HandleBenchClick and ChooseNode sit
+        // in the same barracks branch), and ResolveEvent is the CHECKPOINT site, so the clobbered
+        // deployment is what gets persisted.
+        // So: fire only when the roster ACTUALLY moved, and reconcile by exception —
+        // Run.ReconcileDeployment benches only what the event added, fills only slots the event
+        // freed, trims only over the cap, and leaves every deliberate choice alone. No RNG draw.
+        bool rosterMoved = _run.Squad.Count != rosterBefore.Count
+                           || _run.Squad.Exists(u => !rosterBefore.Contains(u))
+                           || _run.Deployed.Count != deployedBefore;
+        if (rosterMoved) _run.ReconcileDeployment(rosterBefore);
         Audio.Play("turn");
         _activeEvent = null; _eventNode = null;
         // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its

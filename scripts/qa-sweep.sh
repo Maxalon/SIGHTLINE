@@ -38,104 +38,123 @@ FULL=0
 
 run() { xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug 2>/dev/null; }
 
+# W9 REVIEW FIX — THE EXIT CODE IS THE GATE, so it has to mean the whole sweep.
+# W9 made this script exit non-zero on a TIMEOUT, and stopped there: a self-test line reading FAIL,
+# or a non-empty COVERAGE GAP block, still exited 0. "SWEEP-EXIT=0" therefore read as a whole-sweep
+# verdict while it was only an autoplay verdict — and the lead relies on that code at every merge.
+# Every PASS/FAIL capture below is now routed through `verdict`, which prints it exactly as before
+# and records a failure. A BLANK capture (the test threw, or printed nothing) counts as a failure
+# too: that is how a crashed self-test used to read as a quiet blank line.
+_fail=0
+verdict() {   # verdict <captured-text>
+  if [ -z "$1" ]; then echo "<no result line>"; _fail=1; return; fi
+  echo "$1"
+  case "$1" in *FAIL*) _fail=1 ;; esac
+}
+
 echo "=== BUILD (Release) ==="
 dotnet build -c Release 2>&1 | grep -E "error|Error|Warning\(s\)|Build succeeded" | head -20
 
 echo "=== SELF-TESTS ==="
-echo -n "DKTEST     : "; SIGHTLINE_DKTEST=1     run | grep -oE "DKTEST: (PASS|FAIL)" | head -1
-echo -n "RESCUETEST : "; SIGHTLINE_RESCUETEST=1 run | grep -oE "RESCUETEST: (PASS|FAIL)" | head -1
-echo -n "STAGGERTEST: "; SIGHTLINE_STAGGERTEST=1 run | grep -oE "STAGGERTEST: (PASS|FAIL)" | head -1
-echo -n "MORALETEST : "; SIGHTLINE_MORALETEST=1 run | grep -oE "MORALETEST: (PASS|FAIL)" | head -1
-echo -n "BEACONTEST : "; SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACONTEST: (PASS|FAIL)" | head -1
-echo -n "COMBATTEST : "; SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1
-echo -n "SAVETEST   : "; SIGHTLINE_SAVETEST=1  run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1
-echo -n "AITEST     : "; SIGHTLINE_AITEST=1    run | grep -oE "AITEST: (PASS|FAIL)" | head -1
-echo -n "BANDTEST   : "; SIGHTLINE_BANDTEST=1 run | grep -oE "BANDTEST: (PASS|FAIL)" | head -1
-echo -n "ITEMTEST   : "; SIGHTLINE_ITEMTEST=1  run | grep -oE "ITEMTEST: (PASS|FAIL)" | head -1
-echo -n "STATUSTEST : "; SIGHTLINE_STATUSTEST=1 run | grep -oE "STATUSTEST: (PASS|FAIL)" | head -1
-echo -n "COVERTEST  : "; SIGHTLINE_COVERTEST=1 run | grep -oE "COVERTEST: (PASS|FAIL)" | head -1
-echo -n "TRAITTEST  : "; SIGHTLINE_TRAITTEST=1 run | grep -oE "TRAITTEST: (PASS|FAIL)" | head -1
-echo -n "WOUNDTEST  : "; SIGHTLINE_WOUNDTEST=1 run | grep -oE "WOUNDTEST: (PASS|FAIL)" | head -1
-echo -n "CDTEST     : "; SIGHTLINE_CDTEST=1    run | grep -oE "CDTEST: (PASS|FAIL)" | head -1
-echo -n "FIELDTEST  : "; SIGHTLINE_FIELDTEST=1 run | grep -oE "FIELDTEST: (PASS|FAIL)" | head -1
-echo -n "SIEGETEST  : "; SIGHTLINE_SIEGETEST=1 run | grep -oE "SIEGETEST: (PASS|FAIL)" | head -1
-echo -n "EVENTTEST  : "; SIGHTLINE_EVENTTEST=1 run | grep -oE "EVENTTEST: (PASS|FAIL)" | head -1
-echo -n "VETTEST    : "; SIGHTLINE_VETTEST=1   run | grep -oE "VETTEST: (PASS|FAIL)" | head -1
-echo -n "OWTEST     : "; SIGHTLINE_OWTEST=1    run | grep -oE "OWTEST: (PASS|FAIL)" | head -1
-echo -n "SCARTEST   : "; SIGHTLINE_SCARTEST=1  run | grep -oE "SCARTEST: (PASS|FAIL)" | head -1
-echo -n "CONTRACTTEST: "; SIGHTLINE_CONTRACTTEST=1 run | grep -oE "CONTRACTTEST: (PASS|FAIL)" | head -1
-echo -n "SHOVETEST  : "; SIGHTLINE_SHOVETEST=1 run | grep -oE "SHOVETEST: (PASS|FAIL)" | head -1
-echo -n "CONCEALTEST: "; SIGHTLINE_CONCEALTEST=1 run | grep -oE "CONCEALTEST: (PASS|FAIL)" | head -1
-echo -n "HAZARDTEST : "; SIGHTLINE_HAZARDTEST=1 run | grep -oE "HAZARDTEST: (PASS|FAIL)" | head -1
-echo -n "BENCHTEST  : "; SIGHTLINE_BENCHTEST=1 run | grep -oE "BENCHTEST: (PASS|FAIL)" | head -1
-echo -n "DRAFTTEST  : "; SIGHTLINE_DRAFTTEST=1 run | grep -oE "DRAFTTEST: (PASS|FAIL)" | head -1
-echo -n "METATEST   : "; SIGHTLINE_METATEST=1  run | grep -oE "METATEST: (PASS|FAIL)" | head -1
-echo -n "CODEXTEST  : "; SIGHTLINE_CODEXTEST=1 run | grep -oE "CODEXTEST: (PASS|FAIL)" | head -1
-echo -n "VOICETEST  : "; SIGHTLINE_VOICETEST=1 run | grep -oE "VOICETEST: (PASS|FAIL)" | head -1
-echo -n "MODETEST   : "; SIGHTLINE_MODETEST=1  run | grep -oE "MODETEST: (PASS|FAIL)" | head -1
-echo -n "HORDETEST  : "; SIGHTLINE_HORDETEST=1 run | grep -oE "HORDETEST: (PASS|FAIL)" | head -1
-echo -n "DEATHTEST  : "; SIGHTLINE_DEATHTEST=1 run | grep -oE "DEATHTEST: (PASS|FAIL)" | head -1
-echo -n "HEATLADDERTEST: "; SIGHTLINE_HEATLADDERTEST=1 run | grep -oE "HEATLADDERTEST: (PASS|FAIL)" | head -1
-echo -n "SNAPTEST   : "; SIGHTLINE_SNAPTEST=1  run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1
-echo -n "AUDIOTEST  : "; SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1
-echo -n "AUDIOGATE  : "; SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1
+echo -n "DKTEST     : "; verdict "$(SIGHTLINE_DKTEST=1 run | grep -oE "DKTEST: (PASS|FAIL)" | head -1)"
+echo -n "RESCUETEST : "; verdict "$(SIGHTLINE_RESCUETEST=1 run | grep -oE "RESCUETEST: (PASS|FAIL)" | head -1)"
+echo -n "STAGGERTEST: "; verdict "$(SIGHTLINE_STAGGERTEST=1 run | grep -oE "STAGGERTEST: (PASS|FAIL)" | head -1)"
+echo -n "MORALETEST : "; verdict "$(SIGHTLINE_MORALETEST=1 run | grep -oE "MORALETEST: (PASS|FAIL)" | head -1)"
+echo -n "BEACONTEST : "; verdict "$(SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACONTEST: (PASS|FAIL)" | head -1)"
+echo -n "COMBATTEST : "; verdict "$(SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1)"
+echo -n "SAVETEST   : "; verdict "$(SIGHTLINE_SAVETEST=1 run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1)"
+echo -n "AITEST     : "; verdict "$(SIGHTLINE_AITEST=1 run | grep -oE "AITEST: (PASS|FAIL)" | head -1)"
+echo -n "BANDTEST   : "; verdict "$(SIGHTLINE_BANDTEST=1 run | grep -oE "BANDTEST: (PASS|FAIL)" | head -1)"
+echo -n "ITEMTEST   : "; verdict "$(SIGHTLINE_ITEMTEST=1 run | grep -oE "ITEMTEST: (PASS|FAIL)" | head -1)"
+echo -n "STATUSTEST : "; verdict "$(SIGHTLINE_STATUSTEST=1 run | grep -oE "STATUSTEST: (PASS|FAIL)" | head -1)"
+echo -n "COVERTEST  : "; verdict "$(SIGHTLINE_COVERTEST=1 run | grep -oE "COVERTEST: (PASS|FAIL)" | head -1)"
+echo -n "TRAITTEST  : "; verdict "$(SIGHTLINE_TRAITTEST=1 run | grep -oE "TRAITTEST: (PASS|FAIL)" | head -1)"
+echo -n "WOUNDTEST  : "; verdict "$(SIGHTLINE_WOUNDTEST=1 run | grep -oE "WOUNDTEST: (PASS|FAIL)" | head -1)"
+echo -n "CDTEST     : "; verdict "$(SIGHTLINE_CDTEST=1 run | grep -oE "CDTEST: (PASS|FAIL)" | head -1)"
+echo -n "FIELDTEST  : "; verdict "$(SIGHTLINE_FIELDTEST=1 run | grep -oE "FIELDTEST: (PASS|FAIL)" | head -1)"
+echo -n "SIEGETEST  : "; verdict "$(SIGHTLINE_SIEGETEST=1 run | grep -oE "SIEGETEST: (PASS|FAIL)" | head -1)"
+echo -n "EVENTTEST  : "; verdict "$(SIGHTLINE_EVENTTEST=1 run | grep -oE "EVENTTEST: (PASS|FAIL)" | head -1)"
+echo -n "VETTEST    : "; verdict "$(SIGHTLINE_VETTEST=1 run | grep -oE "VETTEST: (PASS|FAIL)" | head -1)"
+echo -n "OWTEST     : "; verdict "$(SIGHTLINE_OWTEST=1 run | grep -oE "OWTEST: (PASS|FAIL)" | head -1)"
+echo -n "SCARTEST   : "; verdict "$(SIGHTLINE_SCARTEST=1 run | grep -oE "SCARTEST: (PASS|FAIL)" | head -1)"
+echo -n "CONTRACTTEST: "; verdict "$(SIGHTLINE_CONTRACTTEST=1 run | grep -oE "CONTRACTTEST: (PASS|FAIL)" | head -1)"
+echo -n "SHOVETEST  : "; verdict "$(SIGHTLINE_SHOVETEST=1 run | grep -oE "SHOVETEST: (PASS|FAIL)" | head -1)"
+echo -n "CONCEALTEST: "; verdict "$(SIGHTLINE_CONCEALTEST=1 run | grep -oE "CONCEALTEST: (PASS|FAIL)" | head -1)"
+echo -n "HAZARDTEST : "; verdict "$(SIGHTLINE_HAZARDTEST=1 run | grep -oE "HAZARDTEST: (PASS|FAIL)" | head -1)"
+echo -n "BENCHTEST  : "; verdict "$(SIGHTLINE_BENCHTEST=1 run | grep -oE "BENCHTEST: (PASS|FAIL)" | head -1)"
+echo -n "DRAFTTEST  : "; verdict "$(SIGHTLINE_DRAFTTEST=1 run | grep -oE "DRAFTTEST: (PASS|FAIL)" | head -1)"
+echo -n "METATEST   : "; verdict "$(SIGHTLINE_METATEST=1 run | grep -oE "METATEST: (PASS|FAIL)" | head -1)"
+echo -n "CODEXTEST  : "; verdict "$(SIGHTLINE_CODEXTEST=1 run | grep -oE "CODEXTEST: (PASS|FAIL)" | head -1)"
+echo -n "VOICETEST  : "; verdict "$(SIGHTLINE_VOICETEST=1 run | grep -oE "VOICETEST: (PASS|FAIL)" | head -1)"
+echo -n "MODETEST   : "; verdict "$(SIGHTLINE_MODETEST=1 run | grep -oE "MODETEST: (PASS|FAIL)" | head -1)"
+echo -n "HORDETEST  : "; verdict "$(SIGHTLINE_HORDETEST=1 run | grep -oE "HORDETEST: (PASS|FAIL)" | head -1)"
+echo -n "DEATHTEST  : "; verdict "$(SIGHTLINE_DEATHTEST=1 run | grep -oE "DEATHTEST: (PASS|FAIL)" | head -1)"
+echo -n "HEATLADDERTEST: "; verdict "$(SIGHTLINE_HEATLADDERTEST=1 run | grep -oE "HEATLADDERTEST: (PASS|FAIL)" | head -1)"
+echo -n "SNAPTEST   : "; verdict "$(SIGHTLINE_SNAPTEST=1 run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1)"
+echo -n "AUDIOTEST  : "; verdict "$(SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1)"
+echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1)"
 # RESONANCE A3: the AUDIO CHECK audition screen's listing/label/measurement contract.
-echo -n "AUDITIONTEST: "; SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1
-echo -n "AMBIENTTEST: "; SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1
+echo -n "AUDITIONTEST: "; verdict "$(SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1)"
+echo -n "AMBIENTTEST: "; verdict "$(SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1)"
 # Q1: the no-two-units-on-one-tile invariant. Drives 16 real missions (~70s), so it goes last.
-echo -n "STACKTEST  : "; SIGHTLINE_STACKTEST=1 run | grep -oE "STACKTEST: (PASS|FAIL)" | head -1
+echo -n "STACKTEST  : "; verdict "$(SIGHTLINE_STACKTEST=1 run | grep -oE "STACKTEST: (PASS|FAIL)" | head -1)"
 # FUL-era hooks the sweep used to omit entirely — the bleed-out state machine, the pikeman,
 # pod sizing/linking, and the content-exposure invariant. (EXPOSURETEST and FUL11PROBE print
 # "NAME PASS" with no colon; the others use "NAME: PASS".)
-echo -n "DOWNTEST   : "; SIGHTLINE_DOWNTEST=1  run | grep -oE "DOWNTEST: (PASS|FAIL)" | head -1
-echo -n "PIKETEST   : "; SIGHTLINE_PIKETEST=1  run | grep -oE "PIKETEST: (PASS|FAIL)" | head -1
-echo -n "PODTEST    : "; SIGHTLINE_PODTEST=1   run | grep -oE "PODTEST: (PASS|FAIL)" | head -1
-echo -n "EXPOSURETEST: "; SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST (PASS|FAIL)" | head -1
-echo -n "FUL11PROBE : "; SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1
+echo -n "DOWNTEST   : "; verdict "$(SIGHTLINE_DOWNTEST=1 run | grep -oE "DOWNTEST: (PASS|FAIL)" | head -1)"
+echo -n "PIKETEST   : "; verdict "$(SIGHTLINE_PIKETEST=1 run | grep -oE "PIKETEST: (PASS|FAIL)" | head -1)"
+echo -n "PODTEST    : "; verdict "$(SIGHTLINE_PODTEST=1 run | grep -oE "PODTEST: (PASS|FAIL)" | head -1)"
+echo -n "EXPOSURETEST: "; verdict "$(SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST (PASS|FAIL)" | head -1)"
+echo -n "FUL11PROBE : "; verdict "$(SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1)"
 # RESONANCE W5: the RECRUIT rung + the comfort settings (anim speed / UI text scale).
-echo -n "ONRAMPTEST : "; SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1
-echo -n "OPENERTEST : "; SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1
+echo -n "ONRAMPTEST : "; verdict "$(SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1)"
+echo -n "OPENERTEST : "; verdict "$(SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1)"
 # RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
 # but were never run by this sweep - the integration review caught it. THREATTEST prints
 # "NAME PASS" with no colon, like EXPOSURETEST.
-echo -n "TUTTEST    : "; SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST: (PASS|FAIL)" | head -1
-echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1
+echo -n "TUTTEST    : "; verdict "$(SIGHTLINE_TUTTEST=1 run | grep -oE "TUTTEST: (PASS|FAIL)" | head -1)"
+echo -n "THREATTEST : "; verdict "$(SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1)"
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
-echo -n "GEOMTEST   : "; SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1
+echo -n "GEOMTEST   : "; verdict "$(SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1)"
+# W9 THE REPAIR: the three hooks this wave shipped. TRUTHTEST ground-truths the DISPLAYED shot
+# numbers against rolled outcomes (no test had ever read a displayed quantity); GRAPPLETEST is the
+# FIRST coverage the GRAPPLE verb has ever had; STALLTEST asserts the autopilot's own
+# "never a RESULT: TIMEOUT" contract instead of leaving it in a comment.
+echo -n "TRUTHTEST  : "; verdict "$(SIGHTLINE_TRUTHTEST=1 run | grep -oE "TRUTHTEST: (PASS|FAIL)" | head -1)"
+echo -n "GRAPPLETEST: "; verdict "$(SIGHTLINE_GRAPPLETEST=1 run | grep -oE "GRAPPLETEST: (PASS|FAIL)" | head -1)"
+echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLTEST: (PASS|FAIL)" | head -1)"
+
 # W1 TRUE INSTRUMENT: the autopilot's ROUTE through the campaign DAG (the sampling frame every
 # published balance number was drawn through) and the frame/RNG independence of gameplay.
-echo -n "ROUTETEST  : "; SIGHTLINE_ROUTETEST=1 run | grep -oE "ROUTETEST: (PASS|FAIL)" | tail -1
+echo -n "ROUTETEST  : "; verdict "$(SIGHTLINE_ROUTETEST=1 run | grep -oE "ROUTETEST: (PASS|FAIL)" | tail -1)"
 # ~20 s: gameplay must be a function of the SEED, not of the frame rate, the animation-speed
 # setting or the screen-shake comfort toggle. 16 campaigns; FAILs under SIGHTLINE_FXRNG=0.
 # Its PHASE 2 (render purity) is the real guard for "presentation never draws from Util.Rng":
 # it asserts that constructing a Unit and drawing 30 real frames both leave the shared stream
 # untouched, and proves the probe sensitive with a deliberate draw.
-echo -n "RNGFRAMETEST: "; SIGHTLINE_RNGFRAMETEST=1 run | grep -oE "RNGFRAMETEST: (PASS|FAIL)" | tail -1
+echo -n "RNGFRAMETEST: "; verdict "$(SIGHTLINE_RNGFRAMETEST=1 run | grep -oE "RNGFRAMETEST: (PASS|FAIL)" | tail -1)"
 
 # W1 STATIC BACKSTOP (free, and it runs even when the binary will not build): Fx.cs is the
 # FX layer and must contain zero draws from the shared gameplay stream. HONEST SCOPE: this
 # grep would NOT have caught the W1 review's Bob defect, which lived in Unit.cs — only
-# RNGFRAMETEST phase 2 catches that class. This is a cheap tripwire on the one file whose
-# entire job is presentation, not a substitute for the runtime assertion.
-# COMMENTS ARE STRIPPED FIRST. The first version of this check grepped the raw file and FAILed on
-# Fx.cs:653, a doc comment reading "deterministic hash (NOT Util.Rng)" — a tripwire that fires on
-# the word rather than the call is worse than no tripwire, and it would have been ignored by the
-# second wave to see it.
+# RNGFRAMETEST phase 2 catches that class. COMMENTS ARE STRIPPED FIRST: the first version
+# grepped the raw file and FAILed on a doc comment reading "deterministic hash (NOT Util.Rng)".
+# LEAD, at the W9 merge: routed into $_fail so the sweep's single exit code covers it too.
 _fxhits=$(sed -E 's,//.*,,' src/Fx.cs | grep -nE 'Util\.(RandF|RandInt|RandRange|Roll|Choice)\(|Util\.Rng')
 echo -n "FXSTREAM   : "; if [ -n "$_fxhits" ]; then
   echo "FXSTREAM: FAIL (src/Fx.cs draws from the shared gameplay Util.Rng — use Util.FxRand*)"
-  echo "$_fxhits" | sed 's/^/     /'
+  echo "$_fxhits" | sed 's/^/     /'; _fail=1
 else echo "FXSTREAM: PASS"; fi
 # W4 THE BOARD BECOMES A PLACE: the only self-test that measures RENDERED PIXELS — the squint
 # value hierarchy (selected soldier > live hostile > dormant pod on mean AND peak luminance),
 # the cover-volume merge, and the move overlay's contour + palette. Needs the full-size window.
-echo -n "BOARDTEST  : "; SIGHTLINE_BOARDTEST=1 run | grep -oE "BOARDTEST: (PASS|FAIL)" | head -1
+echo -n "BOARDTEST  : "; verdict "$(SIGHTLINE_BOARDTEST=1 run | grep -oE "BOARDTEST: (PASS|FAIL)" | head -1)"
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;
   # REQUIRED before a merge (see the header).
-  echo -n "PAIRTEST   : "; SIGHTLINE_PAIRTEST=1 run | grep -oE "PAIRTEST: (PASS|FAIL)" | tail -1
+  echo -n "PAIRTEST   : "; verdict "$(SIGHTLINE_PAIRTEST=1 run | grep -oE "PAIRTEST: (PASS|FAIL)" | tail -1)"
 else
   echo "PAIRTEST   : SKIPPED (re-run with --full; required before merging)"
 fi
@@ -149,26 +168,40 @@ _missing=$(comm -23 \
 if [ -n "$_missing" ]; then
   echo "!! COVERAGE GAP - these self-tests exist in src/ but this sweep never runs them:"
   echo "$_missing" | sed 's/^/     /'
+  _fail=1     # W9 REVIEW FIX: an unrun self-test is a hole in the gate, not a note for the reader
 fi
 
 echo "=== AUTOPLAY x3 ==="
-echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
-echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
-echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
+# W9 THE REPAIR: a TIMEOUT is now a HARD FAILURE of this script, not a line for a reader to notice.
+# CLAUDE.md has always called TIMEOUT a pre-merge failure, but this sweep only PRINTED the RESULT
+# line — and at the ~1% rate two independent stall causes ran at, that is squarely inside the noise
+# an agent writes off as "a weak-autopilot flake". That is exactly how both survived. A BLANK result
+# (the run threw, or printed nothing) fails too.
+_autofail=0
+for _i in 1 2 3; do
+  echo -n "run$_i: "
+  _r=$(SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+ frame=[0-9]+ turns=[0-9]+" | head -1)
+  echo "${_r:-<no RESULT line>}"
+  case "$_r" in
+    *WIN*|*LOSE*) ;;
+    *) _autofail=1 ;;
+  esac
+done
+if [ "$_autofail" = 1 ]; then
+  echo "!! AUTOPLAY FAILED - a TIMEOUT or a missing RESULT line. The autopilot contract"
+  echo "   (Game.AutoMaxRunTurns + the within-turn idle guard) says this is unreachable;"
+  echo "   if it fired, something regressed. DO NOT MERGE."
+fi
 echo "=== DONE ==="
-# W1: this counter is now DERIVED AT RUNTIME, not hand-maintained. It has been wrong four times
-# (41-while-42; the W5/C1 double bump; TRUE BAND finding the "derived" recipe itself miscounted;
-# and W1 hardcoding a fresh number that TRUE BAND's BANDTEST immediately invalidated). Two waves
-# in a row wrote down the right RECIPE and then pasted its answer as a literal, which is how it
-# drifts. So run the recipe instead — it costs one grep and it cannot go stale, whatever the next
-# wave adds.
-# Both sides are counted on the SAME basis — env-var-driven self-tests — so they are comparable.
-# FUL11PROBE has no ...TEST/GATE suffix in src/, hence the +1. FXSTREAM is a shell-side grep with
-# no SIGHTLINE_ env var at all, so it is reported separately rather than inflating either count.
-_exist=$(( $(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l) + 1 ))   # +1: FUL11PROBE
-_ran=$(grep -oE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)=' scripts/qa-sweep.sh | sort -u | wc -l)
-[ "$FULL" = 1 ] || _ran=$((_ran - 1))    # the default skips exactly one (PAIRTEST)
-echo "($_exist self-tests exist in src/; this sweep ran $_ran of them, plus the FXSTREAM shell check."
-echo " Both counts are derived at runtime, not typed. The COVERAGE GUARD block above is the real"
-echo " check — if it is empty, every self-test in src/ was invoked. Every line above must read PASS,"
-echo " and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+# COUNT NOTE (see the header): DERIVED, never hand-maintained.
+_have=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l)
+_ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' scripts/qa-sweep.sh | sort -u | wc -l)
+[ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is named but skipped without --full
+echo "($_have self-tests exist; this sweep ran $_ran. Every line above must read PASS, and every"
+echo " autoplay must read WIN or LOSE - never TIMEOUT, never blank.)"
+# W9 REVIEW FIX: ONE exit code covering the WHOLE sweep - self-tests, coverage, and autoplay.
+if [ "$_fail" = 1 ] || [ "$_autofail" = 1 ]; then
+  echo "!! SWEEP FAILED - see the FAIL / COVERAGE GAP / AUTOPLAY lines above. DO NOT MERGE."
+  exit 1
+fi
+exit 0

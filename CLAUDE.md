@@ -151,7 +151,17 @@ export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
 ```
 
 Run autoplay a few times (RNG varies); confirm **no exceptions and no TIMEOUT**. The
-contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. Measured over
+contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. **W9 THE REPAIR made
+that contract TRUE rather than merely claimed**: it was violated at ~1% per run by two independent
+causes (a per-mission stall cap that the checkpoint redeploy re-armed under a whole-campaign frame
+budget, and a within-turn DEADLOCK the turn-boundary guard structurally could not see). The
+backstop is now run-scoped (`Game.AutoMaxRunTurns`) plus a within-turn idle guard, the harness
+frame budget is `Game.AutoFrameCap` (raised 20000 -> 120000 — the old value right-censored the
+longest campaigns as losses in the BALANCE batch), and `SIGHTLINE_STALLTEST` asserts all of it.
+A `RESULT: TIMEOUT` today is a real regression, not a flake. **Note it cuts BOTH ways for anyone
+re-measuring:** the frame cap loosened, but `AutoMaxRunTurns` is a NEW force-lose arm that is
+STRICTER than the old per-mission `_turnCount > 50` for a long campaign — the change is a
+loosening and a tightening in one. Measured over
 15 Debug autoplays (F1): 3 WIN / 12 LOSE, finale reached on 5, earliest death mission 1,
 zero TIMEOUTs. **A WIN is normal, not suspicious.** `sightline_shot.png` is gitignored;
 `docs/screenshot.png` (README image) is committed.
@@ -195,10 +205,13 @@ not new, `Game.Codex.cs` has scrolled the field manual on held Left/Right/A/D si
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
 `bash scripts/publish.sh`.
 
-**Self-tests & measurement:** 51 features ship a window-free `SIGHTLINE_*TEST` hook
+**Self-tests & measurement:** every feature ships a window-free `SIGHTLINE_*TEST` hook
 (e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
-are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all
-51 plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
+are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all of
+them plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
+**Don't hand-count them** — the sweep DERIVES its own total and prints a COVERAGE GAP block
+naming any hook in `src/` it fails to run. **W9: the sweep now EXITS NON-ZERO** on a TIMEOUT or a
+missing RESULT line, so autoplay is a real gate instead of a line for a reader to notice.
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is
@@ -263,7 +276,7 @@ src/
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
-scripts/qa-sweep.sh    all 51 self-tests + autoplay x3 (--full adds PAIRTEST)
+scripts/qa-sweep.sh    every self-test + autoplay x3 (--full adds PAIRTEST); count is DERIVED
 scripts/publish.sh     hand-run distributable build + persistence re-proof
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image
@@ -352,22 +365,6 @@ docs/screenshot.png    README image
   reseeds explicitly (`Util.Reseed(50000+slot)`), so **paired measurement** is
   reproducible. **Screenshots are NOT byte-identical** and never were: two
   `SIGHTLINE_SHOT=90` runs measurably differ in ~30% of pixels (measured 303,065 of
-<<<<<<< HEAD
-  1,024,000 px), because 58 `Raylib.GetTime()` wall-clock reads drive animation
-  (46 in `Renderer.cs`, 12 in `Hud.cs`) and `Util.Rng` is clock-seeded by default. Never
-  gate anything on a screenshot hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real
-  determinism gate**. Keep new persistent/random/post-FX work behind the `NoPersist`/
-  Display gates so that stays true.
-- **PRESENTATION MUST NEVER DRAW FROM `Util.Rng`** (W1). `Fx.cs` used to roll the screen-shake
-  jitter once per RENDERED FRAME on the shared gameplay stream, so the dice were a function of
-  the frame rate, the animation-speed setting and the `Fx.ShakeOn` comfort toggle — one seed,
-  four different fights. Everything in `Fx.cs` (and `Anim.cs`'s miss-scatter) now draws from
-  **`Util.FxRng`**, a separate stream `Util.Reseed` deliberately does not touch. Use
-  `Util.FxRandF/FxRandInt/FxRandRange` for anything visual; the shared `Util.Rand*` is gameplay
-  only. **`SIGHTLINE_RNGFRAMETEST` is the gate** (four seeds x {1x,8x} x {shake on,off} must all
-  agree); `SIGHTLINE_FXRNG=0` reproduces the old coupling on demand. PAIRTEST alone could never
-  have caught this — it pins dt AND AnimSpeed, so both its legs draw the same number of frames.
-=======
   1,024,000 px), because 56 wall-clock reads drive animation (45 in `Renderer.cs`, 11 in
   `Hud.cs` — counted, the old "58 / 46 / 12" here was off) and `Util.Rng` is clock-seeded by
   default. Never gate anything on a screenshot
@@ -377,7 +374,6 @@ docs/screenshot.png    README image
   through `Renderer.Now()`, which returns the real clock unless the harness-only
   `Renderer.TimePin` is set to a fixed t (`SIGHTLINE_BOARDTEST` does; it is the only reason
   that probe prints one number per run). Restore it to `-1` when you are done.
->>>>>>> wave/board-as-place
 
 ---
 
@@ -442,6 +438,16 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > on the merged tree**, and the composition was 20 points below its own band at heat 0 until
 > X2 measured it and repaired the cause.
 >
+> **W9 THE REPAIR VOIDED THIS TABLE AGAINST THE CURRENT TREE — re-measure before quoting it.**
+> W9 fixed three defects that change RNG DRAW ORDER (the grapple no longer env-damages its own
+> grappler, so it no longer draws its FX; a downed unit's queued shot no longer rolls; the
+> autopilot returns after a GRAPPLE and takes an extra `Util.Roll(45)` next step) and two that
+> change composition without changing draw order (the skirmish/daily heat gate, the post-event
+> `AutoDeploy`). It also raised the batch frame cap 20000 -> 120000, which REMOVES the
+> right-censoring that had been scoring the longest campaigns as losses. W9 deliberately did not
+> price any of it. The table above remains the last MEASURED ladder and its base commit; it is no
+> longer a description of this tree.
+>
 > **The rule this wave exists to enforce: a balance number without a base commit is not a
 > number.** Quote the base, or re-measure. And note the precision — a 40-campaign rung carries
 > **±6-8 points of standard error**, which is the same size as the band's ±8 tolerance and
@@ -474,6 +480,18 @@ lead-swings 0.79 → 0.61 (a 4-body opener is not a contested fight) and Escort 
 8.03t was survivorship bias — only healthy runs used to reach it). `SIGHTLINE_OPENERTRIM=0`
 restores the pre-X2 opener; `SIGHTLINE_AIMTRIM` / `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM` /
 `SIGHTLINE_ENEMYBASE` are default-off dials the wave priced and did not spend.
+
+RESONANCE **W9 "THE REPAIR"** then took 15 defects an adversarial QA pass found and a second agent
+independently reproduced — in a tree where all 51 self-tests passed. Its thesis: the tests are not
+bad, they are aimed at the MODEL and not at the SEAM. `meta.json`, the file holding ALL permanent
+progress, had no analogue of the "parses fine but is unusable" guard `save.json` has had since D2,
+so three hand-edit shapes each killed NEW CAMPAIGN or the WAR ROOM outright. The shot tooltip lied
+three ways (a raw DMG band, a four-waves-stale LOCK-ON badge, and a `ComputeOdds` that was not
+side-effect free). GRAPPLE self-rammed the grappler on every adjacent target — 100% of a
+JUGGERNAUT's. A soldier downed mid-queue still fired. SKIRMISH and DAILY heat added literally
+nothing. And "never a RESULT: TIMEOUT" was false for two independent reasons. Every fix ships a
+test proven to FAIL pre-fix; three new hooks (`TRUTHTEST`, `GRAPPLETEST`, `STALLTEST`) plus new
+legs in seven existing tests. Detail in `docs/DEVLOG.md` §W9.
 
 **Three doc over-claims were found and corrected** — they are the reason this project needs the
 "no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;

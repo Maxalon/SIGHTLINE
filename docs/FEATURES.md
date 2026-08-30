@@ -12,6 +12,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   (endless horde survival, W2 — escalating full-roster waves on one arena, persistent BEST WAVE) / **SKIRMISH**
   (W4 — one fight with a chosen objective+heat) / **DAILY** (W4 — a deterministic date-seeded challenge with a
   local best). Modes share the tactical kernel; endless/skirmish/daily are single-session (no campaign wrapper).
+  **W9 THE REPAIR:** a skirmish's/daily's heat dial is NUMERICALLY REAL — both enter through
+  `SetupMission(1)`, so the mission-1 heat grace (a CAMPAIGN-opener protection) used to zero every extra body,
+  stat and damage point the dial promises, leaving only the qualitative flags. The grace is now gated on
+  `Mode != GameMode.Skirmish`; MODETEST pins that a skirmish's force answers the dial AND that the campaign's
+  mission-1 grace is untouched.
 - **CROSS-RUN META-PROGRESSION — WAR ROOM (HORIZON W3):** the game finally has LEGS beyond one sitting. A persistent
   profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
   legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all
@@ -130,7 +135,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   AttritionFloor`) so a wipe genuinely shrinks strength for a mission or two without death-spiralling.
   `SIGHTLINE_ARMORY`.
 - **VERB abilities — every class has a TOY (AGENCY W2+W4):** **Sharpshooter MARK** (squad focus-fire designator;
-  `Unit.Marked`, `Combat.MarkAim/MarkCrit`), **Assault GRAPPLE** (yank a foe out of cover; reuses `ShoveAnim`),
+  `Unit.Marked`, `Combat.MarkAim/MarkCrit`), **Assault GRAPPLE** (yank a foe out of cover; reuses `ShoveAnim` — an ADJACENT
+  foe has nowhere to be pulled to, so the verb resolves as a SLAM: collision damage plus a broken stance, and
+  W9 THE REPAIR stopped it damaging the GRAPPLER, which was 100% of a JUGGERNAUT's grapples;
+  `SIGHTLINE_GRAPPLETEST` pins it),
   **Ranger SLIPSTREAM** (free, overwatch-immune long move; `Unit.Slipstreaming`), **Gunner SUPPRESSING FIRE**
   (AoE PIN — a foe + its neighbours can't aim/DASH next turn; `Unit.Pinned`/`ClearPins`), and **Corpsman PATCH**
   (heal adjacent ally). Append-only `AbilityKind`, save-safe; AI uses all via direct helpers (no TIMEOUT).

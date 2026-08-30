@@ -5415,6 +5415,452 @@ builds, which is the size of that jitter.
 
 ---
 
+## PROGRAM RESONANCE — Wave W9 "THE REPAIR" (dev; worktree `agent-ae64b077e9a007d39`, branch `wave/the-repair`)
+
+**The thesis, and why it is uncomfortable.** This tree has 51 self-tests, all 51 pass, and one
+adversarial QA pass found 20 reproducible defects. The tests are not bad — they are aimed at the
+MODEL and not at the SEAM. Every entry in the brief names its own structural gap, and the gaps
+rhyme: a rule written twice and tested once; a file the suite only ever reads after writing it
+itself; a contract asserted in a comment; a verb whose two siblings are pinned and which has no
+coverage at all. **A fix that does not close its gap is half a fix**, so every defect below ships
+with a test that FAILS on the pre-fix tree — proven by reintroducing the defect, rebuilding, and
+recording the failure tag.
+
+Base: `d350416` (RESONANCE milestone 2). Fifteen defects assigned; **15 of 15 reproduced, 15 of 15
+fixed**, plus one hard hang found while calibrating a fix that the brief did not have.
+
+### REPRODUCTION RATE: 15/15
+
+Every repro ran verbatim before any fix, from a wave-private data dir (the brief warned that one QA
+script hard-codes a shared `/tmp` path and got cross-contaminated by another agent; this wave's
+driver lives under the worktree). No phantoms.
+
+| # | defect | reproduced |
+|---|---|---|
+| 1 | `{"Veterans":[null]}` kills NEW CAMPAIGN | NRE at `SaveGame.cs:474`, stack-for-stack |
+| 2 | veteran with `Cls:null` kills NEW CAMPAIGN | ArgumentNullException at `Run.cs:1065` |
+| 3 | `{"Legends":[null]}` kills the WAR ROOM | NRE at `Hud.cs:3118`, in the DRAW path |
+| 4 | `MetaDto.SchemaVersion` written, never read | source-confirmed: 8 hits, no read |
+| 5 | DMG row shows the RAW band | source-confirmed + ground-truthed by 40k rolls |
+| 6 | LOCK-ON badge on any uncovered target | source-confirmed: `o.CoverLevel == 0` vs `flanked` |
+| 7 | `ComputeOdds` arms the GUARDED telegraph | source-confirmed via `GrazeFloor` -> `HardenedReduce` |
+| 8 | GRAPPLE self-rams the grappler | seed 3406: `VEGA hp=1->0 SLAM`, verbatim |
+| 9 | a downed soldier fires its queued shot | seed 3406: `BUG: ShotAnim ... downed=True` |
+| 10 | autoplay TIMEOUTs | seeds 2001 + 3001, both at frame 20000 |
+| 11 | event recruit fields cap+1 | BENCHTEST leg pre-fix: `eventRecruitDeployed=5 want=4` |
+| 12 | release strands a benched soldier | BENCHTEST leg pre-fix: `eventReleaseDeployed=3 want=4` |
+| 13 | SKIRMISH/DAILY heat inert | MODETEST leg pre-fix: `skirmishHeatInert h0=4 h8=4` |
+| 14 | WAR ROOM drops STANDING RESERVE | METATEST leg pre-fix: `drew=4/5`; screenshot confirms |
+| 15 | SKIRMISH legend names unbound keys | grep: 2 hits in the codebase, both on the INTRO |
+
+Defects 11-14 were reproduced by writing the missing test first and watching it fail with exactly
+the numbers the brief reported in the wild (5/4, 3/4, 4-vs-4 hostiles, 4 of 5 cards) — which is a
+stronger reproduction than a screenshot, because it is repeatable and it is now permanent.
+
+### THE CRASHES (1-4) — `meta.json` holds ALL permanent progress and had no structural guard
+
+`SaveGame.Load` has applied "parses fine but is unusable is corruption too" to `save.json` since
+D2. `meta.json` — salvage, unlocks, achievements, the veteran reserve, the hall of fame, the heat
+ceiling — had no analogue, so three hand-edit / disk-damage shapes each ended the process with an
+UNHANDLED exception **on a primary entry button**, with no stash and no in-game recovery. The
+asymmetry was the bug. Fixed at the single choke point (`LoadMetaDto` -> `SanitiseMeta`) so every
+consumer is covered by one guard, plus cheap local guards for defence in depth.
+
+**The SchemaVersion policy is now a DECISION, stated and pinned.** meta is deliberately
+FORWARD-TOLERANT — the OPPOSITE of the run save's refuse-and-stash. A run save is one campaign;
+`meta.json` is every campaign, and refusing it would hand a player who merely downgrades a build a
+BLANK CAREER. Every MetaDto field is append-only and defaults inert, so an older build reads its
+own fields correctly. The one real cost is the WRITE-BACK, which cannot round-trip fields this
+build does not know about — so a future-stamped profile is **copied** (not moved) to
+`meta.json.bak` before the first read-modify-write can drop them.
+
+**Gap closed:** no self-test had ever read a `meta.json` it did not itself WRITE. VETTEST /
+METATEST / SAVETEST all delete-or-stash the real file and then write a fixture through
+`EnshrineVeterans`/`AddLegends`, which structurally cannot emit a null element;
+`CorruptionSelfTest` fed exactly one hostile shape, an UNPARSEABLE string. `SaveGame.
+MetaStructureSelfTest` (6 legs, dispatched from SAVETEST) writes RAW BYTES and drives the REAL
+consumers.
+
+### THE DISPLAYED NUMBER LIES, AGAIN (5-7)
+
+Three defects in the panel whose own header comment promises "each badge's condition mirrors
+ComputeOdds EXACTLY so the explanation always matches the math".
+
+* **DMG row.** It printed the RAW weapon band. Against a guarded HVT — the natural state of the
+  target an entire mission type is about — it read `DMG 3-5` for a shot that deals 1-2, with its
+  own `GRAZE 1` row directly beneath it, computed from the same defender, disagreeing by 3x.
+  `ShotOdds` gains `DmgMinEff/DmgMaxEff`; `DmgMin/DmgMax` stay RAW on purpose, because
+  `Combat.ExpectedDamage` and the threat card's tie-break both want the raw band and apply
+  reduction themselves.
+* **LOCK-ON badge.** UNDERTOW W5 de-supersetted the perk (`CoverLevel==0` -> `flanked`) and
+  updated only the math. The badge was a SECOND, INDEPENDENT COPY of the rule, and it went four
+  waves stale — promising +15 aim on the modal targeting situation for a shot whose hit% moved by
+  0. `Combat.LockOnAim(a, flanked)` is now the single source of truth (the `KillRefundsAction`
+  pattern already in that file): ComputeOdds ADDS it, the badge SHOWS it, there is one condition
+  left to drift.
+* **`ComputeOdds` was not side-effect free.** Its GrazeFloor read called `HardenedReduce`, which
+  arms `HvtGuardReducePending`, which `Game.Update` drains into a floating "GUARDED" pop — so
+  merely HOVERING the guarded HVT popped it once per frame (QA's in-game count, not re-measured
+  here: 181 pops over 181 frames of aiming with zero shots fired) against a comment promising "a single float when a hit was actually softened (not
+  spammy)". `HardenedReduce` takes `telegraph = true` by default; the five READ sites pass false.
+
+**Gap closed:** every existing test reads the MATH and none reads the DISPLAYED QUANTITY.
+COMBATTEST pins the graze floor and THREATTEST ground-truths `ExpectedDamage` — both correct —
+and nothing had ever read `ShotOdds.DmgMin/DmgMax` as the number the tooltip prints, because no
+test executes HUD drawing code. PAIRTEST is structurally blind to the third defect: it compares
+two runs of the SAME code, so a deterministic defect matches itself. **`SIGHTLINE_TRUTHTEST`** —
+"what the UI says is what the dice do" — rolls 40,000 real shots per defender and asserts the
+displayed band brackets AND tightly matches observed non-crit damage on a plain foe and a guarded
+HVT, that GRAZE agrees with it, that the raw band was left raw, that armor moves the shown band,
+that ComputeOdds/ExpectedDamage leave the telegraph unarmed while Resolve still arms it, and that
+the badge predicate and the hit% delta are the same number.
+
+### VERBS AND FLOW (8-10)
+
+**GRAPPLE could never pull an adjacent foe — it self-rammed the grappler, every time.** The pull
+vector is `sign(u - target)`, so a Chebyshev-1 target's destination tile IS the grappler's own;
+`ShoveAnim` takes its blocked branch and `rammed` resolves to the GRAPPLER, which eats
+`ShoveRammedDamage` from its own verb. Reproduced here on seed 3406 exactly as filed (`GRAPPLE
+by=VEGA@(13,5) hp=1 target=STALKER@(14,6) cheby=1` -> `ENV VEGA(Player) hp=1->0 SLAM`, i.e. the
+grappler killed itself); the wider rate — 3 of 3 Chebyshev-1 grapples across 11 campaigns — is
+QA's verifier's count, not re-measured here. It is also **100% of a JUGGERNAUT's grapples** (`GrappleReachFor` pins that
+fork at reach 1), so the fork's signature verb could never once do what `Unit.cs:414` advertises.
+
+> **I did not take the brief's first fix option, and this is the disagreement worth recording.**
+> Rejecting the adjacent target (mirroring `DragTargetOk`) would leave JUGGERNAUT with **no legal
+> grapple at all** and force a redesign of the fork inside a bug-fix wave. Instead `ShoveAnim`
+> never rams its own INITIATOR, which makes the adjacent case a clean SLAM — the foe takes the
+> collision damage and loses overwatch/hunker, the grappler takes nothing. The verb stays legal and
+> useful at every reach, the fork keeps a working ability, and the fix is one predicate rather than
+> a redesign. The brief's own EXPECTED sanctions this ("or the adjacent case is a deliberate
+> designed slam that does not damage the grappler"); it is simply the second option, and it is the
+> better one.
+
+**A soldier downed mid-queue still fired its own queued shot.** `PurgeAnimsFor` dropped shots AT a
+felled unit and had no clause for shots BY it, so a body at Hp 0 resolved a shot: full damage, a
+credited kill, `Stats.RecordShot` under the downed soldier's class, the takedown stinger. Three
+guards: the purge gains `s2.A == d` (same ActiveAnim exemption); `ShotAnim.Update` self-cancels for
+a dead/downed attacker; `TryFlankKillRefund` now checks `Downed` as well as `!Alive`. Root cause
+too — the autopilot queued a SECOND action behind a GRAPPLE's not-yet-started ShoveAnim, decided
+from a board that anim was about to change; `AutoStep` and `SmartStep` now return after
+`IssueGrapple`. MARK deliberately still falls through: it resolves immediately and queues nothing.
+
+**"Never a RESULT: TIMEOUT" was false for TWO independent reasons, and only one is in the brief.**
+
+* *(a) THE BUDGET.* `AutoStallCheck`'s cap is per-MISSION (`_turnCount`) and re-armed by
+  `SetupMission` — including the mid-mission checkpoint redeploy — while the harness budget is a
+  whole-CAMPAIGN frame count. 20,000 frames bought a 6-mission campaign ~30-40 turns against a
+  50-turn PER-MISSION cap. Fixed with a run-scoped `RunTurns` that `SetupMission` never resets.
+* *(b) A HARD DEADLOCK, found here while calibrating (a).* Seed 3001 does not run out of budget: it
+  **hangs**. Traced to 38,000 consecutive frames in mission 5 DEFEND with every hostile dead, an
+  empty anim queue and `_turnCount` frozen at 2 — because `AutoStep`'s DEFEND branch does
+  `if (ActionsLeft > 0 && Ammo > 0) { DoOverwatch(); return; }` and **DoOverwatch REFUSES for a
+  DISORIENTED soldier**, spending nothing. Head-of-line blocking makes it total (`AutoStep` always
+  picks `Players.FirstOrDefault(CanAct)`). `AutoStallCheck` can never see it: that guard runs in
+  `StartPlayerTurn`, i.e. at a boundary the game can no longer reach. `SmartStep` already carried
+  the guard at both of its overwatch sites; the smoke-test policy did not. Fixed at source, and
+  backed by a general WITHIN-TURN idle guard so the NEXT one costs a forced turn instead of a
+  phantom pre-merge failure.
+
+| seed | before | after |
+|---|---|---|
+| 2001 | `TIMEOUT mission=6 frame=20000` | `LOSE mission=6 frame=20661 turns=44` |
+| 3001 | `TIMEOUT mission=5 frame=20000` | `WIN mission=6 frame=12813 turns=36` |
+
+**Caps calibrated on a MEASURED 20-seed census of the FINAL tree** (RESULT lines now carry
+`turns=`): all 20 finish, longest campaign **75 run-turns / 18,992 frames**, next longest 38.
+`AutoMaxRunTurns = 150` — 2x the longest measured campaign, because firing this cap on a
+LEGITIMATE run would score it a LOSS and put back the same downward ladder bias the old frame
+budget had. `AutoFrameCap = 100000` against `AutoFramesPerTurn = 600` (measured 253 frames/turn at
+75 turns — a long campaign is long because it is ATTRITED, and a small squad takes cheap turns;
+short full-squad runs cost more per turn but come nowhere near the cap), so 150 x 600 = 90,000
+<= 100,000 and the turn cap always bites first. The frame cap now lives in `Game` beside the turn
+cap it must dominate, and STALLTEST pins the inequality. BalanceBatch and PAIRTEST read the same constant: **at 20,000 the batch
+RIGHT-CENSORED the longest campaigns as losses** (the archived x2 chunks log `frame-cap hits: 1`),
+a small unattributed downward bias in the ladder of record that is now gone.
+
+**Gaps closed:** GRAPPLE had ZERO coverage — `grep -i grapple src/Game.Harness.cs` returned nothing
+— while both siblings were pinned (SHOVETEST's vector points away so its blocked case can never ram
+the shover; FIELDTEST asserts DRAG's Chebyshev-1 exclusion, the very guard GRAPPLE lacked). Every
+purge leg in the suite (DKTEST (2), DOWNTEST (a), OWTEST) builds a queue of shots AT the unit about
+to fall, because in a hand-built scenario the SHOOTER is never harmed. And nothing asserted the
+backstop's contract while qa-sweep only PRINTED the RESULT line. New: **`SIGHTLINE_GRAPPLETEST`**
+(6 legs, the first the verb has ever had) and **`SIGHTLINE_STALLTEST`** (5 legs), plus a
+shooter-side purge leg in DKTEST and a downed-shooter leg in DOWNTEST. **qa-sweep.sh now EXITS
+NON-ZERO on a TIMEOUT or a missing RESULT line** and derives its own footer count.
+
+### MODES AND THE RUN ECONOMY (11-13, 15)
+
+**SKIRMISH and DAILY heat was numerically inert** — the dial added zero bodies, zero stats, zero
+damage in two of the four shipped modes, because both enter through `SetupMission(1)` and the
+mission-1 heat grace swallowed the whole ramp. Measured: skirmish eliminate, seed 4242, arena 5
+reads `4 SQUAD 4 HOSTILES` at heat 0 and the same at heat 8 — the red chip was the only difference
+on screen — against a campaign control of 6 vs 10 on the same seed and arena. ROADMAP:1066
+recommends exactly this fix and calls it an owner decision. **THE CALL, MADE:** the grace is gated
+on `Mode != GameMode.Skirmish` (which covers DAILY). A skirmish player explicitly DIALLED the rung;
+there is no green squad to protect and no campaign ahead to front-load anxiety into, only the fight
+they asked for. CAMPAIGN and ENDLESS keep the grace byte-for-byte.
+
+**A field event broke the deploy cap in BOTH directions** — `DebriefSurvivors`' AutoDeploy has
+already run when `ResolveEvent` fires, so a free recruit fielded cap+1 (`DEPLOY 5/4` over five
+deployed soldiers) and a release stranded a healthy benched soldier at cap−1 (`DEPLOY 3/4` with a
+6/6-HP body sitting out while the header printed its "field up to it" hint). One call to
+`_run.AutoDeploy()` fixes both; it is a no-op for every event that does not touch the roster.
+
+**The SKIRMISH legend named keys it did not bind.** Bound rather than reworded: Kp+/Kp− (matching
+the INTRO's stepper) plus Equal/Minus, which were bound nowhere in the game. Up/Down and W/S keep
+working — and no `Hud.cs` edit was needed.
+
+**Gaps closed:** HEATLADDERTEST and OPENERTEST pin the ramp against CAMPAIGN missions only, and
+MODETEST's skirmish legs assert phase routing; nothing asserted a skirmish's force reads
+`_run.HeatLevel`, and the flywheel covers campaign + endless only. BENCHTEST asserted the cap only
+immediately after `DebriefSurvivors()` — the one moment AutoDeploy has just run — and EVENTTEST
+exercises `EventCatalog.Apply` against a bare test Run with no bench state. New legs: MODETEST (7)
+proves the skirmish force answers the dial **and** that the campaign's mission-1 force is identical
+across rungs, so the grace is proven still intact where it belongs; BENCHTEST (4a/4b) drives the
+REAL `Game.ResolveEvent` (new `DebugResolveEventOutcome` hook, so the CALLER is under test) and
+asserts `Deployed.Count == min(roster, NextDeployCap)` after a recruit and after a release.
+
+### THE WAR ROOM DROPPED AN UNLOCK (14)
+
+STANDING RESERVE was invisible AND unbuyable on a fresh profile. Six entries want 508px in a 446px
+column, so the overflow `break` fired on the fifth compact card — no card, no BUY chip, no scroll
+bar, no "+N more"; the panel border closed flush so nothing signalled a sixth entry. And because
+the break preceded `WarRoomBuyBtns.Add`, no hit-rect was published: **unclickable, not merely
+off-screen**, and there is no keyboard path to an unlock. Third-cheapest unlock in the game, in the
+one state every new player is in.
+
+`Hud.WarUnlockPlan` is now a pure function returning the panel height and the row plan — full 62px
+cards with two description rows while they fit, then one row, then a name+BUY ledger row — read by
+both DrawWarRoom's panel-height call and DrawWarUnlocks' loop. Rows shrink; the catalogue never
+truncates. A shrunk row ellipsizes through `Clip` rather than cutting a word in half. The settled
+column geometry is now named constants that DrawWarRoom itself derives from, so the test asserts
+against THE numbers the screen uses.
+
+**Gap closed:** METATEST covers the unlock MODEL exhaustively and never asked whether the screen
+can DRAW them, and the only WAR ROOM screenshot hook hard-codes a 2-owned demo profile — which is
+exactly the configuration that FITS. *The one state that overflows is the one state the harness
+cannot photograph.* New METATEST leg walks EVERY owned/unowned split and asserts the plan paints
+every unowned entry, so the next appended `MetaUnlock` fails loudly.
+
+**Screenshots, read and judged.** Fresh profile: all six render with BUY chips, even pitch, the
+border closing cleanly under STANDING RESERVE; three of five compact descriptions fit whole, two
+ellipsize — an honest trade against an entry that used to not exist. The shipped 2-owned demo
+profile is unchanged (full two-row cards at the 70px pitch), because the plan is a no-op whenever
+the catalogue fits.
+
+### PROOF EVERY NEW TEST FAILS PRE-FIX
+
+Each defect was reintroduced ALONE, rebuilt, run, and reverted.
+
+| defect reintroduced | result |
+|---|---|
+| all meta guards off | `SAVETEST: FAIL (metaStructureException:NullReferenceException)` |
+| schema stash off | `SAVETEST: FAIL (metaFutureSchemaNotPreserved)` |
+| veteran string guard off | `SAVETEST: FAIL (metaNullClsNotDropped)` |
+| eff band -> raw band | `TRUTHTEST: FAIL (truthDmgRowOverstatesGuarded, truthDmgRowLooseGuarded, truthGrazeDisagreesGuarded, truthGuardNotShownInBand, truthArmorNotShownInBand)` |
+| telegraph on reads | `TRUTHTEST: FAIL (truthComputeOddsArmsTelegraph, truthExpectedDamageArmsTelegraph)` |
+| LOCK-ON superset | `TRUTHTEST: FAIL (truthLockOnBadgeLiesOpen)` + `COMBATTEST: FAIL (lockOnAimExposedZero)` |
+| shove rams the initiator | `GRAPPLETEST: FAIL (SELF-RAM grapplerHp 8->7, SELF-RAM diagonalGrapplerHp=0, SELF-RAM diagonalGrapplerFelled, SELF-RAM juggernautHp 8->7)` |
+| purge without the `A` clause | `DKTEST: FAIL (shotsByCorpse=2)` |
+| + no ShotAnim self-cancel | `DOWNTEST: FAIL (i:downedShotKept, i:downedShotResolved 6->3)` |
+| per-mission cap only | `STALLTEST: FAIL (armDidNotFire phase=PlayerTurn runTurns=91)` |
+| SetupMission resets RunTurns | `STALLTEST: FAIL (runTurnsResetBySetup=1 was=7)` |
+| DEFEND overwatch unguarded | `STALLTEST: FAIL (deadlockNotDrained)` |
+| grace ungated by mode | `MODETEST: FAIL (skirmishHeatInert h0=4 h8=4)` |
+| no post-event re-derive | `BENCHTEST: FAIL (eventRecruitDeployed=5 want=4, eventRecruitOverCap, eventReleaseDeployed=3 want=4, eventReleaseStrandedHealthyBench)` |
+| fixed pitch + old break | `METATEST: FAIL (warUnlockDropped owned=0 unowned=6 drew=4/5)` |
+
+### GAMEPLAY-AFFECTING — THE LADDER MUST BE RE-MEASURED
+
+State it plainly: **this wave moves the numbers and does not price them.** That is a later wave's
+job, and no balance figure is claimed here.
+
+**Changes RNG DRAW ORDER** (so any archived comparison against this tree is void):
+1. the grappler's `EnvDamage` — and its FX draws — no longer happens on an adjacent grapple;
+2. a downed unit's queued shot no longer rolls;
+3. the autopilot takes an extra step after a GRAPPLE (an extra `Util.Roll(45)` on the next step).
+
+**Changes composition without changing draw order:** the skirmish/daily heat gate (arithmetic on
+already-drawn values) and the post-event `AutoDeploy` (a deterministic sort).
+
+**PAIRTEST stays green** and must: it asserts that two identical legs match EACH OTHER, not that
+they match an archived number.
+
+**Not gameplay-affecting at all:** the meta.json guards, the tooltip fixes (no dealt-damage path
+changed — the only behaviour change outside the HUD is that a pure read no longer pops a float),
+the WAR ROOM layout, and the skirmish key bindings.
+
+### WHAT I DID NOT FIX, AND WHY
+
+* **The five pure UI-overflow defects** were explicitly held for after the first-hour/UI wave lands.
+  Untouched here by instruction.
+* **`Mission.OpenerTrim` still applies to SKIRMISH and DAILY** (one body off an n<=1 force). It is
+  UNIFORM across every heat rung, so it does not flatten the dial and is not the defect that was
+  filed — but a skirmish's absolute difficulty is one body lighter than a campaign mission 1 with
+  the same parameters. Flagged, not changed: changing it is a balance lever, not a repair.
+* **The CODEX footer drift** the brief mentions in passing (its legend says "Up/Down select · Wheel
+  scroll" while keyboard scrolling is bound to Left/Right and A/D) is real and out of scope here.
+* **The tooltip's other unbadged modifiers** — Siegebreaker, Bipod, the defender's CoolHeaded,
+  Routed, Vantage/Breaker/Guardian crit, the Marksmen/Fervor/Executioners boons, PressureAim and
+  the faction aim rules. These are OMISSIONS, not false statements, so they are a different (and
+  larger) job than the three lies this wave was sent to fix — but the panel's header comment claims
+  it surfaces EVERY modifier, so either the badges or the comment is still over-claiming.
+* **No balance measurement was run.** With three draw-order changes in the tree a batch would only
+  tell us that the numbers moved, which we already know.
+
+### VERIFICATION
+
+* **Release build:** 0 warn / 0 err.
+* **`bash scripts/qa-sweep.sh --full`:** **52/52 PASS**, PAIRTEST **PASS**, COVERAGE GAP block
+  empty, `SWEEP-EXIT=0`. The footer count is now DERIVED from `src/` rather than hand-maintained
+  (it had been wrong twice before).
+* **Autoplay ×3 inside the sweep** (final tree, after the cap recalibration): `LOSE mission=6
+  frame=12517 turns=32` / `LOSE mission=3 frame=7900 turns=20` / `LOSE mission=5 frame=11652
+  turns=31`. No TIMEOUT, no blank — and the sweep would now have exited 1 if there had been.
+* **PAIRTEST is green and must be** — it asserts that two identical legs match EACH OTHER, not
+  that they match an archived number, so the draw-order changes above do not and cannot break it.
+* **Seeded census, the same 20 campaigns, before and after (base `d350416` vs the final tree).**
+  Before: **2 TIMEOUTs** (seeds 2001 and 3001, both at the 20,000-frame cap), longest FINISHED run
+  14,507 frames. After: **zero TIMEOUTs — all 20 finish**, 11 WIN / 9 LOSE, longest 18,992 frames /
+  **75 run-turns** (seed 2001), next longest 38. The two "TIMEOUTs" turned out to have different
+  causes: 2001 was a campaign that simply needed more budget than it had, 3001 was the deadlock.
+* **The caps are calibrated on THAT census, not on a guess.** `AutoMaxRunTurns = 150` is 2x the
+  longest campaign measured — the headroom is the point, because firing this cap on a LEGITIMATE
+  run would score it a LOSS and put back exactly the downward bias the old frame cap had.
+  `AutoFrameCap = 120000` with `AutoFramesPerTurn = 700` — the measured WORST frames-per-turn (681),
+  not a regime average, after the review pointed out that the first cut's 600 came from the
+  long-campaign regime and left the claim EMPIRICAL: a campaign sustaining its worst observed rate
+  would have hit the frame cap ~3 turns before the turn cap. 150 x 700 = 105,000 <= 120,000 with no
+  regime assumption left in it. STALLTEST pins the inequality — true by construction, which is the
+  point: the three constants live in two files and only mean anything together.
+* **Residual, stated honestly:** the within-turn idle guard covers the PLAYER turn only
+  (`UpdatePlayer`). A deadlock inside `UpdateEnemy` would still be bounded only by the frame cap.
+  Nothing in 40 seeded campaigns showed one, and adding an untested guard to the enemy stager
+  looked riskier than the hole; it is a known gap, not an oversight. **And the raised frame cap makes
+  it 6x slower to surface** (120,000 frames instead of 20,000) — the censoring went down and the
+  detection cost went up, which the first write-up did not say.
+* **Screenshots** read and judged: the WAR ROOM unlocks column on a FRESH profile (all six entries
+  present and buyable) and on the shipped 2-owned demo profile (unchanged). **This judgement missed
+  a real defect** — five of the six descriptions were rendering at 10px, under the project's 12px
+  floor. A reviewer caught it by measuring through the public geometry rather than by looking. See
+  R3 below; "read and judged" is not a measurement, and this is what that costs.
+
+### W9 REVIEW FIXES — what four reviewers found that this wave had got wrong
+
+The review upheld all four of the wave's deviations from the brief and independently reintroduced
+11 of the 15 defects, each producing the recorded failure string. It also found six things wrong
+with the wave itself. Three of them are the same failure mode the wave was written to attack — **a
+claim in a comment that the tree does not honour** — which is worth recording plainly rather than
+quietly patching.
+
+**R1 (BLOCKING) — TRUTHTEST could not fail on EITHER display defect it was written for.**
+The adjudicator reverted only `Hud.cs:1896` back to `(a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)`
+and `Hud.cs:2008` back to `$"{o.DmgMin}-{o.DmgMax}"`, changed nothing else, and got
+**TRUTHTEST: PASS, COMBATTEST: PASS, THREATTEST PASS**. He is right, and the diagnosis is exact:
+the test asserted `ShotOdds.DmgMinEff/DmgMaxEff` and `Combat.LockOnAim(...)` — the values the HUD is
+*supposed* to read — and **nothing bound the HUD to them**. It re-derived the right answer instead
+of observing the panel. That is a pin, not a test, and it is precisely the seam this wave exists to
+close: the flagship "what the UI says is what the dice do" test did not read the UI.
+
+The fix observes the draw call. `Cfg.CaptureText` (null in every normal run) records every string
+the game paints, with the size it was painted at. `Game.TooltipTruthFails` stages a controlled
+board, drives the REAL hover/aim path (`Update` → `UpdateHoverAndAim` → `ComputeOdds`), renders the
+REAL tooltip through `Hud.DebugDrawTooltip`, and asserts on the captured strings — so whatever the
+panel says is what the test reads, *however it was computed*. SIGHTLINE_TRUTHTEST is now two halves
+(`Combat.TruthFails` for the math and purity, `Game.TooltipTruthFails` for the UI) composed into one
+line. Both reverts now fail, with the defect's own signature:
+
+| the adjudicator's revert | result |
+|---|---|
+| `Hud.cs` LOCK-ON badge → `o.CoverLevel == 0` | `TRUTHTEST: FAIL (uiLockOnBadgeLiesOpen painted=True hitDelta=0, uiLockOnValueOpen=+15 aim delta=0)` |
+| `Hud.cs` DMG row → `{o.DmgMin}-{o.DmgMax}` | `TRUTHTEST: FAIL (uiDmgRowLiesGuarded shows=3-5 deals=1-2, uiGrazeDisagreesGuarded dmg=3-5 graze=1 on near miss, uiDmgRowIgnoresDefender both=3-5)` |
+| restored | `TRUTHTEST: PASS` |
+
+`shows=3-5 deals=1-2` is the original dossier entry, now reproduced by the test itself.
+
+**R2 (BLOCKING) — the post-event `_run.AutoDeploy()` discarded the player's manual bench choice on
+EVERY event, and the comment I shipped with it asserted the opposite.** A reviewer proved it on an
+Intel-only outcome: `MANUAL VEGA[B],KRESS[D],NOX[D],BISHOP[D],LYNX[D]` came back
+`VEGA[D],KRESS[D],NOX[B],BISHOP[D],LYNX[D]`. `AutoDeploy` re-derives `Benched` for the WHOLE roster
+from a fixed rule — right at a debrief, wrong afterwards — and `ResolveEvent` is the checkpoint
+site, so the clobbered deployment is what gets persisted. The dossier's own sketch said to gate it
+and I generalised past it. Now gated on a real roster change, and reconciling BY EXCEPTION:
+`Run.ReconcileDeployment` benches only what the event added, fills only slots the event freed, trims
+only over the cap, and leaves every deliberate choice alone. `AutoDeploy` and it share one
+comparator so they cannot diverge.
+
+**And the lesson the reviewer drew is the important part.** BENCHTEST could not catch this because
+it asserts a COUNT invariant — `Deployed.Count == min(Squad.Count, NextDeployCap)` — which **a
+clobbering implementation satisfies exactly as well as a preserving one**. The new leg asserts
+IDENTITY, by name, after an outcome with no roster change at all. It fails on the shipped
+implementation: `BENCHTEST: FAIL (4a2:benchClobbered manual=VEGA[B],KRESS[D],NOX[B],... after=VEGA[D],KRESS[B],NOX[B],...)`.
+
+**R3 (BLOCKING) — the WAR ROOM fix breached the 12px small-text floor on a FRESH PROFILE, and its
+comment claimed it did not.** At 0 owned / 6 unowned the plan lands `cardH = 49 → descRows = 1`, and
+the old code then asked `FitWrap` to squeeze a whole sentence into one row. **FitWrap's floor is
+`CardBodyMinSize = 10`, not 12** — so five of six unlock descriptions rendered at 10px, on the exact
+screen the repair exists for, in the one profile state every new player is in. My DEVLOG recorded
+that screenshot as "read and judged" and did not notice. A compressed row now paints at
+`CardBodySize` (12) and ellipsizes through `Clip` instead of shrinking; when not even one 12px row
+fits, the body is dropped rather than painted sub-floor. `descRows` is derived from the real row
+pitch (`27 + n * TextRow(13)`) instead of hard-coded pixel bands. METATEST asserts
+`bodySize >= 12` at every owned/unowned split, and fails on the old sizing:
+`METATEST: FAIL (warUnlockSubFloorBody owned=0 size=10 rows=1)`. Re-screenshotted: all six entries
+present and buyable, bodies now uniform with the hero card's, four of five ellipsized.
+
+**R4 (BLOCKING) — three shipped numbers stated the opposite of the tree**, in the wave whose own
+commit is titled "attribute every number to whoever measured it". `Program.cs` said
+"AutoMaxRunTurns (90 run-turns)" twice while the constant is 150; commit `2664349` recalibrated it
+and updated DEVLOG and CLAUDE.md but missed both source comments. Fixed.
+
+**R5 — `qa-sweep.sh` exited non-zero only on `_autofail`.** A self-test line reading FAIL, or a
+non-empty COVERAGE GAP block, still exited 0 — so `SWEEP-EXIT=0` read as a whole-sweep verdict while
+it was only an autoplay verdict, and the lead relies on that code at every merge. This is the same
+defect class as the wave's own D10 (a gate that prints instead of failing), shipped by the wave that
+fixed D10. All 38 self-test captures now route through one `verdict` helper that records a FAIL —
+and a BLANK capture, which is how a crashed self-test used to read as a quiet empty line — and the
+COVERAGE GAP block sets the flag too. Verified: `verdict` sets the flag on FAIL and on blank
+(`A: PASS → 0, B: FAIL → 1, C: <no result line> → 1`), and the exit block's truth table is
+`(0,0)→0, (1,0)→1, (0,1)→1, (1,1)→1`. A self-test FAIL alone now blocks the merge; it did not before.
+
+**R6 — STALLTEST's budget leg was resting on a regime assumption.** `AutoFramesPerTurn = 600` came
+from the long-campaign regime (253 frames/turn at 75 turns), but the measured spread runs to 681, so
+a campaign sustaining its worst observed rate would hit the frame cap at ~147 run-turns — three
+turns before the turn cap. "TIMEOUT is unreachable" would have been EMPIRICAL, and that matters more
+now the sweep hard-fails on a TIMEOUT, because a rare false positive becomes a merge block. Set to
+the measured WORST case instead: `AutoFramesPerTurn = 700`, `AutoFrameCap = 120000`, so
+150 × 700 = 105,000 ≤ 120,000 with no regime assumption left in the argument. The leg's own comment
+now says plainly what it is: **true by construction, and that is the point** — the three constants
+live in two files and only mean anything together, so it fails the moment one is edited alone. It is
+a coupling check, not a proof.
+
+**Two comment corrections, no behaviour change.** (a) `PurgeAnimsFor`'s new shooter clause claimed
+its `ActiveAnim` exemption means "the blow in flight still finishes" — true for the target clause,
+FALSE for this one, because `ShotAnim.Update` self-cancels for a dead/downed attacker a frame later
+anyway. The exemption is inert on that clause and is now documented as such; a body does not shoot,
+in flight or not, which is the intended rule. (b) The frame-cap raise makes the wave's own declared
+residual — a deadlock inside `UpdateEnemy`, which the within-turn idle guard does not cover — **6×
+slower to surface** (120,000 frames instead of 20,000). The censoring went down and the detection
+cost went up; both are real and neither was noted before.
+
+### VERIFICATION AFTER THE REVIEW FIXES
+
+* **Release build:** 0 warn / 0 err (full `--no-incremental` rebuild).
+* **`bash scripts/qa-sweep.sh --full`:** **52/52 PASS**, PAIRTEST **PASS**, COVERAGE GAP block
+  empty, `SWEEP-EXIT=0` — and that exit code now covers the WHOLE sweep, not just autoplay.
+* **Autoplay ×3:** `WIN mission=6 frame=7384 turns=20` / `LOSE mission=4 frame=8535 turns=26` /
+  `LOSE mission=5 frame=8938 turns=62`. No TIMEOUT, no blank. The 62-turn run is the longest seen
+  on this tree and sits well inside the 150-turn cap.
+* **The two reverts the adjudicator used to falsify the first TRUTHTEST now FAIL** (table in R1
+  above), and restoring them returns PASS.
+* **Every new assertion was proven against the implementation it rejects:** the bench-identity leg
+  fails on the unconditional `AutoDeploy` (`4a2:benchClobbered`), the floor leg fails on the old
+  sizing (`warUnlockSubFloorBody owned=0 size=10 rows=1`), and the sweep's `verdict` helper plus its
+  exit block were driven through their full truth tables.
+* **Not re-measured, and not claimed:** the balance ladder. W9's declared draw-order changes stand;
+  the review fixes add none.
+
 ## PROGRAM RESONANCE — Wave W4 "THE BOARD BECOMES A PLACE" (dev; branch `wave/board-as-place`)
 
 **Base commit `d350416`.** Rendering only: every line changed is inside `src/Renderer.cs`'s draw

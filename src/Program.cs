@@ -251,6 +251,37 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_TRUTHTEST=1 : W9 — "what the UI says is what the dice do". TWO halves, and the
+        // second is the one the review sent this wave back for:
+        //   MATH  (Combat.TruthFails)        — the effective band, the graze agreement, the shared
+        //                                      LockOn predicate, and ComputeOdds/ExpectedDamage purity.
+        //   UI    (Game.TooltipTruthFails)   — drives the REAL hover/aim path, RENDERS the REAL
+        //                                      tooltip, and asserts on the strings it PAINTS
+        //                                      (captured at the draw call). The math half alone still
+        //                                      passed with Hud.DrawTooltip reverted to the raw DMG
+        //                                      band and the stale LOCK-ON predicate: it re-derived the
+        //                                      right answer instead of observing the panel.
+        // Needs a real window (it draws).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_TRUTHTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "sightline-truthtest");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            string mathFails = Combat.TruthFails();
+            string uiFails = new Game().TooltipTruthFails();
+            Raylib.CloseWindow();
+            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails }, x => !string.IsNullOrEmpty(x)));
+            Console.WriteLine(all.Length == 0
+                ? "TRUTHTEST: PASS (UI-OBSERVED: the tooltip's PAINTED DMG row equals the damage Resolve "
+                  + "deals to that same defender on a plain foe AND a guarded HVT, moves when the defender "
+                  + "does, and agrees with the GRAZE row beneath it; the PAINTED LOCK-ON badge appears iff "
+                  + "the perk moved the hit% and shows that exact delta; no tooltip string is painted below "
+                  + "12px. MATH: the raw band stays raw for ExpectedDamage/threat; armor moves the shown "
+                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs)"
+                : "TRUTHTEST: FAIL (" + all + ")");
+            return;
+        }
         // SIGHTLINE_THREATTEST=1 : RESONANCE T2 — the incoming-fire FORECAST pinned against
         // Combat.ComputeOdds on a synthetic board (gun count, best hit%, expected damage, cover /
         // flank angle, out-of-range / dormant / dry / no-LoS exclusion, overwatch + focused cones,
@@ -577,6 +608,28 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_STALLTEST=1 : W9 THE REPAIR — the autopilot's "never a RESULT: TIMEOUT" contract,
+        // asserted instead of asserted-in-a-comment. Run-scoped turn counter, its force-lose arm, the
+        // turn-cap-vs-frame-cap arithmetic, and the measured DEFEND/disoriented within-turn deadlock.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_STALLTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(64, 64, "stalltest");
+            Console.WriteLine(new Game().StallSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_GRAPPLETEST=1 : W9 THE REPAIR — the assault GRAPPLE verb, which had ZERO coverage
+        // (its two siblings SHOVE and DRAG were both pinned). Reach-2 pull, the adjacent SLAM, and the
+        // invariant that a soldier NEVER takes damage from its own grapple — incl. as a JUGGERNAUT,
+        // whose reach-1 fork makes the adjacent case 100% of its grapples.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_GRAPPLETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "grappletest");   // Unit.SyncPos + ShoveAnim use tile->px math
+            Console.WriteLine(new Game().GrappleSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_CONTRACTTEST=1 : RUN CONTRACTS (IronVeterans no-backfill/fast-rank, HighStakes no-heal, ordinals).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRACTTEST") == "1")
         {
@@ -827,6 +880,10 @@ public static class Program
         bool shotOnBark = shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOTONBARK") == "1";
         if (shotOnBark) shotFrame = int.MaxValue;
         int frame = 0;
+        // W1 derived this cap from measurement rather than guesswork; W9 then RE-derived it
+        // against a run-scoped turn cap and moved the constant into Game so STALLTEST can pin
+        // the relationship. W1's derivation is kept below because it is why the number exists,
+        // and because its naming correction is a recorded lesson (lead, at the W9 merge).
         // W1: the autoplay smoke test's frame budget, DERIVED rather than guessed. It had been a
         // round 20000 since it was written, with nothing in the repo saying where that came from
         // or how close a real campaign gets. Measured over 30 fresh Release autoplays
@@ -840,8 +897,15 @@ public static class Program
         // two largest observations and carries no more information than the max itself. The
         // honest statistic at this n is the OBSERVED MAXIMUM, and that is what this now is.
         // TO RE-DERIVE: bash docs/measurements/w1/framecount.sh 30   (raise n for a real quantile)
-        const int autoMax = 13589;             // observed max over n=30, Release, base commit 5ae9149
-        const int autoCap = 3 * autoMax;       // 40767
+        // W9 THE REPAIR: 20000 frames bought the WHOLE 6-mission campaign only ~30-40 turns (measured
+        // 427-681 frames per run-turn, including the between-mission screens), so the harness budget — not any stall — was ending ~1% of
+        // runs as RESULT: TIMEOUT. Game.AutoMaxRunTurns (150 run-turns) is now the binding backstop and
+        // force-loses well under this; the cap stays purely as a hang guard. The number lives in Game
+        // beside the turn cap it must dominate, and STALLTEST pins that relationship.
+        // The observed max is retained as the SCALE for the TIMEOUT message: a bare frame count
+        // says nothing about whether the cap was tight or the match genuinely stuck (lead, W9 merge).
+        const int autoMax = 13589;             // observed max over n=30 Release autoplays, base 5ae9149
+        const int autoCap = Game.AutoFrameCap; // W9: pinned against AutoMaxRunTurns by STALLTEST
 
         while (!Raylib.WindowShouldClose())
         {
@@ -1030,7 +1094,13 @@ public static class Program
         Display.Init(false);                  // headless render-frame path (no post-FX / no save)
         Raylib.SetTargetFPS(0);               // uncapped — run as fast as the sim allows
 
-        const int frameCap = 20000;           // per-match safety cap; a hit cap counts as a loss
+        // W9 THE REPAIR: raised 20000 -> Game.AutoFrameCap with the autoplay cap. A frame-cap
+        // hit is scored as a LOSS below, so at 20000 the batch RIGHT-CENSORED exactly the longest
+        // campaigns (the archived x2 chunks show it firing: one 20-match chunk logs "frame-cap hits:
+        // 1"), putting a small unattributed downward bias into the ladder of record.
+        // Game.AutoMaxRunTurns (150 run-turns) now force-loses a genuinely dragging campaign long
+        // before this, so the cap is a hang guard only.
+        const int frameCap = Game.AutoFrameCap;   // per-match safety cap; a hit cap counts as a loss
         // APEX W4 — explicit ENDLESS CAP POLICY (so the wave-depth p90 is never silently censored):
         //   * wave cap 30 — mirrors the SIGHTLINE_ENDLESS autoplay cap in Main. A stand that deep is
         //     a deliberate right-censor: it's logged as LossCause "wave-cap" and the report calls out
@@ -1185,7 +1255,7 @@ public static class Program
         Display.Init(false);
         Raylib.SetTargetFPS(0);
 
-        const int frameCap = 20000;
+        const int frameCap = Game.AutoFrameCap;   // W9: matched to BalanceBatch's cap (a censored leg is not a leg)
         // one greedy leg on (heat, slot): the EXACT seeding sequence BalanceBatch.RunOne uses.
         (string result, int cleared, int missions, int turns) Leg(int heat, int slot)
         {

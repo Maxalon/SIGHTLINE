@@ -527,6 +527,42 @@ public partial class Game
             if (SaveGame.LoadMetaHeat() != 0) fails.Add($"saveMetaHeat(-9)={SaveGame.LoadMetaHeat()} want 0");
             SaveGame.SaveMetaHeat(9999);
             if (SaveGame.LoadMetaHeat() != Sightline.Heat.Max) fails.Add("saveMetaHeat(9999) not capped");
+
+            // W9 THE REPAIR — EVERY UNOWNED UNLOCK MUST GET A CARD (and so a WarRoomBuyBtns hit-rect).
+            // THE GAP: this test covers the unlock MODEL exhaustively — round-trip, HasUnlock, the
+            // Quartermaster/StandingReserve effects — and never once asked whether the WAR ROOM can
+            // DRAW them. The only WAR ROOM screenshot hook, DebugWarRoom, hard-codes a demo profile
+            // with TWO already owned, which is exactly the configuration that fits (4 unowned needs
+            // 416px in a 446px column). On a FRESH PROFILE all six want 508px and DrawWarUnlocks' old
+            // overflow `break` fired before WarRoomBuyBtns.Add, so STANDING RESERVE — the third
+            // cheapest unlock in the game — was invisible AND unclickable in the one profile state
+            // every new player is in. There is no keyboard path to an unlock, only the mouse rects.
+            // Pure geometry, so it needs no window: assert the column's row plan paints every unowned
+            // entry at EVERY owned/unowned split, which also fails loudly the day a MetaUnlock is
+            // appended past what the column can hold.
+            {
+                int n = MetaProg.AllUnlocks.Length;
+                int colH = Hud.WarColumnHeight;
+                for (int owned = 0; owned <= n; owned++)
+                {
+                    int unowned = n - owned;
+                    var plan = Hud.WarUnlockPlan(colH, owned, unowned);
+                    int wantCompact = Math.Max(0, unowned - 1);   // the hero card carries the first
+                    if (plan.drawn != wantCompact)
+                        fails.Add($"warUnlockDropped owned={owned} unowned={unowned} drew={plan.drawn}/{wantCompact}");
+                    if (plan.panelH > colH) fails.Add($"warUnlockPanelOverflow owned={owned}");
+                    if (unowned > 1 && plan.cardH < 20) fails.Add($"warUnlockCardCollapsed owned={owned}");
+                    // W9 REVIEW FIX — the 12px SMALL-TEXT FLOOR, asserted where it broke. The first
+                    // cut let a compressed card run FitWrap, whose floor is CardBodyMinSize = 10, so
+                    // a FRESH PROFILE (0 owned / 6 unowned -> cardH 49 -> descRows 1) painted five of
+                    // six unlock descriptions at 10px. A body row is now either >= 12px or absent.
+                    if (plan.descRows > 0 && plan.bodySize < 12)
+                        fails.Add($"warUnlockSubFloorBody owned={owned} size={plan.bodySize} rows={plan.descRows}");
+                    // and a card that claims description rows must have the height to paint them
+                    if (plan.descRows > 0 && plan.cardH < 27 + plan.descRows * Hud.TextRowPublic(13))
+                        fails.Add($"warUnlockBodyOverflows owned={owned} cardH={plan.cardH} rows={plan.descRows}");
+                }
+            }
         }
         catch (Exception e) { return "METATEST: FAIL (exception " + e.Message + ")"; }
         finally
@@ -541,7 +577,7 @@ public partial class Game
             ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist; "
               + "recall charged once in ConfirmDraft + broke-confirm refuses; barracks sinks pend until the checkpoint commit "
               + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved; "
-              + "a corrupt MaxHeat can never lock the difficulty picker)"
+              + "a corrupt MaxHeat can never lock the difficulty picker; the WAR ROOM publishes a buy-rect for every unowned unlock at every owned/unowned split, and never paints an unlock body below the 12px floor)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
