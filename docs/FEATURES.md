@@ -58,6 +58,11 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **GUARDED HVT — Decapitate teeth (PROGRAM VANTAGE W4):** the HVT takes reduced (never zero) damage while a
   designated bodyguard lives within 2 tiles, so the kill is a peel-then-execute positioning puzzle (telegraphed
   shield-dome aura + "HVT GUARDED" readout). `Game.UpdateHvtGuard`, `Combat.HvtGuardReduce`.
+- **HVT statline, pinnable (CROSSCUT W8):** the buff `Game.DesignateHvt` puts on a rank-and-file HVT
+  (`+6 + mission` HP, `+6` aim; an ELITE keeps its own stats) now lives on `Combat.HvtHpBonusBase` /
+  `HvtHpBonusPerMission` / `HvtAimBonus` so a measured round can pin it — `SIGHTLINE_HVTBUFF`,
+  `SIGHTLINE_HVTDEPTH`, `SIGHTLINE_HVTAIM`, all default-identical to the pre-W8 arithmetic.
+  `SIGHTLINE_HVTTEST` pins the selection rule, the ELITE exemption, the magnitudes and the defaults.
 - **AUDIO + LIGHT polish (PROGRAM VANTAGE W3):** transient additive muzzle/impact lights (bloom haloes them),
   tracer/grenade arc trails, damage-number arc+punch, audio pan/pitch, + a sample-asset loader (assets/sfx,
   assets/music tried first; procedural synth fallback) so real CC0 audio can drop in with no call-site changes.

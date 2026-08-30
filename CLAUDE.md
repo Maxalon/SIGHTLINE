@@ -191,15 +191,18 @@ arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
 `bash scripts/publish.sh`.
 
-**Self-tests & measurement:** 51 features ship a window-free `SIGHTLINE_*TEST` hook
+**Self-tests & measurement:** most features ship a window-free `SIGHTLINE_*TEST` hook
 (e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
-are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all
-51 plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
+are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs **every
+one of them** plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s
+PAIRTEST. **Do not write the count down here** — it has gone stale four times; the sweep derives
+it at runtime and prints it, and its COVERAGE GUARD block is the real check.
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
-without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is
-scattered through `docs/DEVLOG.md`; grep `Program.cs` for `SIGHTLINE_` for the
-authoritative set.
+since W1 a display-less batch REFUSES, writes nothing and exits 2 (see the contract below — it
+does NOT report `runs=0` any more, and it leaves any stale JSON untouched). A fuller (but
+non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Program.cs` for
+`SIGHTLINE_` for the authoritative set.
 
 **The `SIGHTLINE_BALANCE` measurement contract (X2 — do not shortcut any of it):**
 1. `SIGHTLINE_BALANCE=<N>` **requires `xvfb-run`.** Since W1 a display-less batch REFUSES —
@@ -259,7 +262,7 @@ src/
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
-scripts/qa-sweep.sh    all 51 self-tests + autoplay x3 (--full adds PAIRTEST)
+scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST)
 scripts/publish.sh     hand-run distributable build + persistence re-proof
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image
