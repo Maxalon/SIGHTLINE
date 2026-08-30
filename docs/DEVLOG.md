@@ -9399,7 +9399,15 @@ trusting it.
   REBUILDS per test, so a source edit landing mid-sweep — even a comment-only one — makes the run
   span two binaries. The sweep of record was started only after the source tree was frozen, and
   nothing but documentation changed after it began. A gate that spanned two builds is not a gate,
-  and noticing that twice cost two sweeps.)
+  and noticing that twice cost two sweeps. A THIRD run was started after the review's ten
+  documentation fixes and then deliberately KILLED at the lead's instruction: those fixes changed
+  **no build input** —
+  `git diff <pre-fix>..HEAD -- src scripts/qa-sweep.sh Sightline.csproj assets` is empty — so the
+  binary under test was byte-identical to the one that produced the result above, and eleven
+  concurrent sweeps were saturating a four-core box. **No post-fix sweep result exists and none is
+  claimed.** Killing it also truncated `qa-sweep-full.txt` in place, which a routine `git add -A`
+  had already committed as a five-line stub; the log was restored from git and the trap is written
+  up in `docs/measurements/c2/README.md`.)
   Notable passes for this diff specifically: `COMBATTEST` and `TRUTHTEST` (the new
   `ShotOdds.CoverDef` field and the tooltip), `SAVETEST` (no persisted-enum or map-generator
   movement), `AIIDLETEST` (the no-idle invariant survives declining), `HEATLADDERTEST` (the

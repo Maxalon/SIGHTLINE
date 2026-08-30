@@ -19,10 +19,33 @@
 | `L-{BASE,DECL}-h*-b*.*` | the ladder chunks. |
 | `POST-*` | one ladder chunk per ARM re-run on the FINAL binary after three behaviour-neutral tidies; both diff empty against their archived `L-*` JSON outside `harness`, which is the proof the ladder binary is the shipped binary. |
 | `paired.py` | McNemar over the identical slot seeds — the honest test for a CRN round, since the two arms play the same worlds. |
-| `qa-sweep-frozen-source.txt` | the pre-merge gate, run on a FROZEN source tree — 65/65 PASS, `SWEEP-EXIT=0`. |
-| `qa-sweep-full.txt` | the same gate re-run after the review's ten documentation fixes (which touched no `src/` file, so the binary is identical). `qa-sweep-full.interim.txt` and `.interim2.txt` are two earlier full sweeps — both green — DISCARDED because a source edit landed mid-run each time and `run()` is `dotnet run -c Debug`, which rebuilds per test: they spanned two binaries, and a gate that spans two builds is not a gate. |
+| **`qa-sweep-full.txt`** | **THE GATE OF RECORD.** Run on a FROZEN source tree: `SWEEP-EXIT=0`, 65/65 self-tests PASS (incl. `DECLINETEST`), COVERAGE GAP block empty, PAIRTEST byte-identical, autoplay x3 WIN/LOSE/LOSE with no TIMEOUT. **This is the file to read.** |
+| `qa-sweep-full.interim.txt`, `.interim2.txt` | two earlier full sweeps — **both green, both DISCARDED**, and not the record. `run()` is `dotnet run -c Debug`, which REBUILDS per test, so a source edit landing mid-sweep makes the run span two binaries. Each of these did. Behaviour-identical builds either way, but a gate that spanned two builds is not a gate. |
 | `shots/` | the two staged frames (`SIGHTLINE_DECLINESHOT`), flag on and off. |
 | `ladder.progress.prelim.txt` | a first 48-chunk pass on an interim binary, kept for provenance. **The round of record is `ladder.progress.txt`**, run on the final binary. |
+
+## WHICH SWEEP LOG IS THE RECORD, AND THE TRAP THAT NEARLY ATE IT
+
+**`qa-sweep-full.txt` is the gate of record.** The two `interim*` files are green but were run
+across a mid-sweep source edit and are kept only to document that hazard.
+
+**The trap, recorded because it nearly made this archive lie.** The gate is re-run with
+`bash scripts/qa-sweep.sh --full > docs/measurements/c2/qa-sweep-full.txt`, which **truncates the
+record in place at second zero**. A re-run was started, a routine `git add -A` fired while it was
+still on its first test, and the commit captured a **five-line stub** in the slot where the
+83-line green log had been. The archive would then have cited a passing gate and contained a
+truncated file. The full log was recovered from an earlier commit and restored.
+
+**If you re-run the gate, write to a NEW filename and rename on success** — never redirect over
+the file the write-up cites. The same applies to any artifact a `git add -A` might scoop up while
+a long job is mid-flight.
+
+*(A post-review re-run of this gate was started and then deliberately KILLED at the lead's
+instruction: the ten review fixes changed no build input —
+`git diff <pre-fix>..HEAD -- src scripts/qa-sweep.sh Sightline.csproj assets` is empty — so the
+binary under test was byte-identical to the one that produced the record, and eleven concurrent
+sweeps were saturating a four-core box. The result above stands for this tree; the lead re-runs
+the full gate on the COMPOSED tree after each merge, which is the run that decides anything.)*
 
 ## THE ARCHIVE NEEDED `git add -f`, AND THE NEXT WAVE WILL TOO
 
