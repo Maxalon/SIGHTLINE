@@ -103,6 +103,45 @@ body and takes `+6 + mission` HP **and** +6 aim, on top of the `+3` every hostil
 hypothesis with a named mechanism — it needs its own paired round — but it is one expression to
 test and it is now the best-evidenced open defect in the project.
 
+## CORRECTION (2026-08-30) — THE MECHANISM NAMED ABOVE IS REFUTED
+
+Wave **W8 THE HALF WALL** was dispatched to test the `DesignateHvt` hypothesis stated in this
+README and in the DEVLOG. **It verified the finding and refuted the mechanism.** Both corrections
+are recorded here rather than edited away, because the wrong mechanism was published under the
+lead's name and a future session would otherwise inherit it.
+
+**What held.** The decomposition is verified from data, not just from `Run.cs`: pooled over these
+48 chunks, `byNodeKind` Boss is **n=479 / 334 wins** and `byMission` m6 is **n=479 / 334 wins** —
+identical *counts*, not merely identical rates. No mission 6 in 960 campaigns is anything but a
+Boss node, so the subtraction is valid and **mid-run Decapitate = 46.0% ±3.9 (n=163)** stands.
+
+**What was wrong.** This README blamed `DesignateHvt`'s `+6 + mission` HP and +6 aim buff. But
+`DesignateHvt` exempts an ELITE, and on missions 3 and 5 the toughest non-special body *is* the
+named mid-boss — so those are exempt too. Split on the exemption:
+
+| mid-run Decapitate | n | win% |
+|---|---|---|
+| HVT **buffed** | 61 | **57.4** |
+| HVT **exempt** | 102 | **39.2** |
+
+**The buffed half is 18.2 points EASIER (±8.0)** — the opposite sign to the hypothesis. Decisive:
+the m3 HVT (23.0 MaxHp) and the m6 HVT (22.4) are the same size of body, and their missions read
+38.3% and 69.7%. **It is not the target.**
+
+**The real asymmetry is the FORCE.** `Mission.Build` de-stacks the finale by 3-4 bodies and resets
+`bump`; no mid-run Decapitate gets that, and an ELITE node adds +2 bodies and +1 stat. The next
+lever belongs there, not on the HVT.
+
+**And the bigger artifact was somewhere else entirely.** W8's cross-tab shows `Eliminate`'s 89.6%
+row is 960 mission-1s; pooled over its MID-RUN cells it is **40.1% ±4.2 (n=137)** — a **49.5-point**
+composition artifact, twice Decapitate's 23.7 and worse than Decapitate's own mid-run cells. The
+general shape: on mid-run node kinds, **KILL objectives 38.3% ±3.1 (n=248)** against the six with a
+non-combat win condition at **83.4% ±1.0 (n=1259)**. At mission 5, Eliminate reads 25.6% and
+Sabotage 96.8%.
+
+So the pooled-row trap this README was written to expose is **worse and more general** than the
+instance it caught. Raw data and the full argument: `docs/measurements/w8/` and DEVLOG §W8.
+
 ## POOLED byObjective — 960 campaigns
 
 | objective | n | win% | ±SE | turns |
