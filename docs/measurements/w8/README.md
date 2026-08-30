@@ -25,13 +25,17 @@ BIN=runbin/W8inst2 bash docs/measurements/w8/run_chunk.sh B-h0-b0 0 0 10
 #            480 campaigns.  OBJ=decapitate
 # round P1 — Decapitate-PINNED lever, ONE dial:                            OBJ=decapitate HVTDEPTH=-1
 # round P2 — Decapitate-PINNED autopilot probe, ONE dial:                  OBJ=decapitate HVTPOLICY=0
-#            (P2 runs on runbin/W8inst3; R0diag proves that binary logic-identical to W8inst2.)
+# round BP — UNPINNED autopilot probe on B's first four slot sets (0/10/20/30) = 24 chunks,
+#            480 campaigns, so it pairs chunk-for-chunk against B's own subset.  HVTPOLICY=0
+#            (P2 and BP run on runbin/W8inst3; R0diag proves that binary logic-identical to W8inst2.)
 OBJ=decapitate HVTDEPTH=-1  BIN=runbin/W8inst2 bash docs/measurements/w8/run_chunk.sh P1-h0-b0 0 0 10
 OBJ=decapitate HVTPOLICY=0  BIN=runbin/W8inst3 bash docs/measurements/w8/run_chunk.sh P2-h0-b0 0 0 10
 ```
 
-`SIGHTLINE_BALANCE_BASE` sets the CRN slot set, so P0/P1/P2 replay **identical worlds** and are
-CRN-paired chunk for chunk. P1 and P2 are compared only against P0 chunks that exist in both.
+`SIGHTLINE_BALANCE_BASE` sets the CRN slot set, so P0/P1/P2 replay **identical worlds**, as do B and
+BP, and they are CRN-paired chunk for chunk. A probe round is pooled only over chunks that exist in
+BOTH rounds — an unfinished round otherwise compares a different rung mix, which briefly produced
+the opposite conclusion mid-wave (see DEVLOG §W8.7).
 
 ## INERTNESS — three proofs, in ascending strength
 
@@ -48,7 +52,7 @@ CRN-paired chunk for chunk. P1 and P2 are compared only against P0 chunks that e
    `byObjective` (8 rows), `byNodeKind` (5), `byMission` (6) and all six ladder rungs, on both `n`
    and win count, not merely on rate. 72.5 / 46.9 / 36.9 / 23.1 / 20.6 / 8.8, exactly as published.
 
-## THE FOUR RESULTS
+## THE RESULTS
 
 **(1) The decomposition verifies from data.** Pooled over L2's 48 chunks, `byNodeKind` Boss is
 n=479 / 334 wins and `byMission` m6 is n=479 / 334 wins — identical counts. Mission 6 ⟺ Boss node in
@@ -68,6 +72,15 @@ across the arms, so their +1.3 / +6.4 is downstream carry-over, not the dial. **
 buffed population is **61 of the 3,547 missions round B played (1.72%, 0.064 per campaign)**, and it
 is the easier half of the very gap the lever was meant to close.
 
+**(3b) The measuring bot is a real tax on Decapitate, and it is NOT the asymmetry.** B vs BP
+(`HVTPOLICY=0`, 480 CRN-paired campaigns per arm) turns off `SmartDecapitate`'s hard focus policy —
+the one that makes every soldier walk at the HVT past an intact firing line. Mid-run Decapitate goes
+**47.7% → 57.0% (+9.3 ±7.6, n=86)** and the finale **68.0% → 77.4% (+9.4 ±4.1, n=234/239)**: the
+**gap between them is 20.3 ±6.2 before and 20.4 ±6.0 after — a change of +0.1 ±8.6, i.e. nothing.**
+The policy costs about nine points on this objective and costs them on both sides. Under the pin
+(P0 vs P2) the same dial is worth +4.8 at mission 1, where every campaign plays and the HVT MaxHp is
+identical at 14.4 — **more than the game lever in (3)**.
+
 **(4) The bigger defect the cross-tab found.** `Eliminate`'s 89.6% flat row is 960 mission-1s; its
 mid-run cells are **42.3% on Combat nodes (n=104)** and **33.3% on Elite nodes (n=33)**. Pooled on
 mid-run node kinds, the two KILL objectives read **38.3% ±3.1 (n=248)** against the six with a
@@ -75,7 +88,8 @@ non-combat win condition at **83.4% ±1.0 (n=1259)** — 45.1 points. Full table
 
 ## FILES
 
-`<tag>.json` (machine record), `<tag>.report.txt` (the printed report) and a force-added `<tag>.log`
-per chunk. `I0-*` is an earlier inertness pair against a mid-wave instrument and `D0-*` a mid-wave
-diagnostic grid on that same instrument; both are kept for provenance. `D0` has identical win rates
-to `B` but no depth cells — do not quote it where `B` exists.
+**153 chunks, 3,060 campaigns archived here; 205 chunks run, zero `BAD`.** Per chunk:
+`<tag>.json` (machine record), `<tag>.report.txt` (the printed report) and a force-added
+`<tag>.log`. A mid-wave diagnostic grid (`D0`, 48 chunks) and its inertness pair (`I0`) were run on
+an earlier build of the same instrument and pruned before commit: `B` reproduces `D0`'s win rates
+exactly and adds the depth cells `D0` lacked, and `I1` supersedes `I0`.
