@@ -1514,11 +1514,15 @@ public partial class Game
     public void DebugBench()
     {
         // C5 THE HARD EDGES — DEFECT: this hook staged NOTHING. It set Wound = 2 and then called
-        // DebriefSurvivors, whose recovery step takes an unhurt soldier's wound DOWN BY TWO
-        // (Run.cs) — so both soldiers were healed by the very call that follows, and
-        // `SIGHTLINE_BENCH=1` photographed the plain barracks. FITTEST's screen audit found it as
-        // a frame byte-identical to SIGHTLINE_CAMPAIGN's. The wound is now applied AFTER the
+        // DebriefSurvivors, whose recovery step decrements the wound (`u.Wound--`, Run.cs) for a
+        // survivor of a cleared mission — so the flag was already spent by the time anything drew,
+        // and `SIGHTLINE_BENCH=1` photographed the plain barracks. FITTEST's screen audit found it
+        // as a frame byte-identical to the CAMPAIGNMAP case's. The wound is now applied AFTER the
         // debrief, which is the order the docstring always claimed.
+        //
+        // The docstring's premise is ALSO stale, and left corrected rather than repeated: the
+        // DEPLOY/BENCH pill is drawn on EVERY roster row (Hud.DrawSquadRow), not only on wounded
+        // ones, so what this hook actually stages now is the WOUNDED(n) rank line beside it.
         _run.JumpTo(2);
         _run.DebriefSurvivors();
         foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
@@ -5600,8 +5604,10 @@ public partial class Game
               + $"; C5 leg F: {screens} screens DRAWN and audited at every scale - every control "
               + $"plate contains its label (tightest {_fitPlateMargin:0.0}px @{_fitPlateTag}), no "
               + $"visible string leaves the canvas (nearest {_fitEdgeMargin:0.0}px @{_fitEdgeTag}), "
-              + $"nothing is ellipsized, smallest type {_fitMinSize:0.#}px authored / "
-              + $"{_fitMinRendered:0.#}px rendered @{_fitMinTag}, {_fitFloors} shrink-to-fit calls "
+              + $"nothing is ellipsized, smallest type {_fitMinSize:0.#}px authored @{_fitMinAuthTag} "
+              + $"and {_fitMinRendered:0.#}px RENDERED @{_fitMinTag} (tracked separately - the "
+              + $"smallest authored size and the smallest ink need not be the same screen), "
+              + $"{_fitFloors} shrink-to-fit calls "
               + $"reach their floor; {totalChecks} assertions over {legChecks.Count} legs, every "
               + $"leg evaluated at all {Display.UiScaleLevels.Length} scales)"
             : $"FITTEST: FAIL ({fails.Distinct().Count()} violations; first 14: "
@@ -5879,6 +5885,13 @@ public partial class Game
                     // DATA LOSS for one that can: the recovery path MOVES save.json aside, so a
                     // shape that should have resumed and did not has just cost a player their run.
                     if (!expectRefusal) fails.Add($"refusedAResumableSave:{what}");
+                    // ...and a refusal MUST take the file with it. `Hud` draws CONTINUE RUN off
+                    // `SaveGame.Exists`, so a save that is refused but left in place is D2's
+                    // "button that did nothing, forever, with no banner and no stash". This is the
+                    // assertion that catches a guard which drops bad data on the WRONG SIDE of its
+                    // own usability check (C5 review B2).
+                    if (System.IO.File.Exists(sp))
+                        fails.Add($"refusedButLeftTheButton:{what}(save.json still offers CONTINUE)");
                     return null;
                 }
                 if (expectRefusal) fails.Add($"acceptedAnUnusableSave:{what}");
@@ -5952,6 +5965,19 @@ public partial class Game
 
             // (8) A save whose squad array holds a null element.
             Resume("nullSquadMember", s => s.Replace("\"Squad\": [", "\"Squad\": [null,"), false);
+
+            // (9) A squad array of NOTHING BUT nulls — the shape that tells a "no soldiers" guard
+            //     apart from a "no elements" guard. It must be refused AND stashed like any other
+            //     unusable file; accepting it leaves a CONTINUE button over an empty roster.
+            Resume("allNullSquad", s =>
+            {
+                int i = s.IndexOf("\"Squad\": [");
+                if (i < 0) return s;
+                int open = s.IndexOf('[', i);
+                int depth = 0, j = open;
+                for (; j < s.Length; j++) { if (s[j] == '[') depth++; else if (s[j] == ']') { depth--; if (depth == 0) break; } }
+                return s.Substring(0, open) + "[null, null]" + s.Substring(j + 1);
+            }, true);
         }
         finally
         {
@@ -5967,10 +5993,11 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "SAVEEDGETEST: PASS (8 hostile save shapes resume into a PLAYABLE run or are refused: "
-              + "mission out of range in both directions, a nameless soldier, an unknown class, an "
-              + "all-benched roster, a double-length roster, a phantom bond, a truncated file and a "
-              + "null squad member — none throws, none fields an empty board"
+            ? "SAVEEDGETEST: PASS (9 hostile save shapes resume into a PLAYABLE run or are refused "
+              + "AND STASHED: mission out of range in both directions, a nameless soldier, an "
+              + "unknown class, an all-benched roster, a double-length roster, a phantom bond, a "
+              + "truncated file, a null squad member and an all-null squad — none throws, none "
+              + "fields an empty board, and no refusal leaves a CONTINUE button behind it"
               + (notes.Count > 0 ? "; " + string.Join(", ", notes) : "") + ")"
             : "SAVEEDGETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
@@ -6352,8 +6379,17 @@ public partial class Game
             //     which makes any further shrink a failure, and the breach itself is recorded as an
             //     open finding rather than quietly normalised.
             bump("scr:" + sc.Name);
-            if (minSize < 99f && minSize <= _fitMinSize)
-            { _fitMinSize = minSize; _fitMinRendered = Cfg.Scaled(minSize); _fitMinTag = $"{tag}:{minWhat}"; }
+            // C5 REVIEW FIX (B3): these are TWO minima and they do not live on the same screen.
+            // The first version tracked one pair under `minSize <= _fitMinSize`, so the LAST screen
+            // to tie the smallest AUTHORED size overwrote the rendered figure — and since the scale
+            // loop runs 0.90 -> 1.20, the PASS line reported the 120% tie (10px authored / 12px
+            // rendered) while the true smallest INK in the game is 9.0px, on AUDIO CHECK at 90%.
+            // The gate was never wrong (it is evaluated per screen per scale, below); the REPORT
+            // was, and the report is what the DEVLOG quoted as the measurement.
+            if (minSize < 99f && minSize < _fitMinSize)
+            { _fitMinSize = minSize; _fitMinAuthTag = $"{tag}:{minWhat}"; }
+            if (minSize < 99f && Cfg.Scaled(minSize) < _fitMinRendered)
+            { _fitMinRendered = Cfg.Scaled(minSize); _fitMinTag = $"{tag}:{minWhat}"; }
             if (minSize < SmallTextAuthoredFloor)
                 fails.Add($"belowSmallTextFloor:{tag}:'{minWhat}'@{minSize:0.#}px");
             if (minSize * 1f < 99f && Cfg.Scaled(minSize) < SmallTextRenderedFloor - 0.01f)
@@ -6394,7 +6430,7 @@ public partial class Game
     // visible string came to the canvas edge, over every screen x every scale.
     static int _fitClips, _fitFloors;
     static float _fitMinSize = 99f, _fitMinRendered = 99f;
-    static string _fitMinTag = "-";
+    static string _fitMinTag = "-", _fitMinAuthTag = "-";
     static string _fitFrameFp = "";
     static float _fitPlateMargin = 9999f, _fitEdgeMargin = 9999f;
     static string _fitPlateTag = "-", _fitEdgeTag = "-", _fitPhase = "-";
@@ -6442,11 +6478,15 @@ public partial class Game
     const float PlateSlack = 1.5f, CanvasSlack = 1.5f;
     /// The measured worst authored/rendered type size in the shipped UI (see the note at the
     /// assertion). Not the 12px rule — the bound that keeps the breach from getting worse.
-    /// 9px is what the tightest shipped fitter declares as its own minimum
-    /// (`FitSize(effect, 12, 9, ...)` on the REQUISITION card); 9px rendered is the smallest the
-    /// four shipped scales can produce from a 10px authored size. Neither is the 12px rule — see
-    /// the note at the assertion, and the open finding in DEVLOG.
-    const float SmallTextAuthoredFloor = 9f, SmallTextRenderedFloor = 9f;
+    /// THE BOUND, and it is set at the MEASURED WORST rather than one slack point below it.
+    /// C5 first set the authored bound to 9 — what the tightest shipped fitter declares as its own
+    /// minimum (`FitSize(effect, 12, 9, ...)` on the REQUISITION card) — while the worst size any
+    /// audited screen actually paints is 10px. That point of slack meant a 10 -> 9 regression on
+    /// the AUDIO CHECK screen would have passed in silence, which is the opposite of what a
+    /// regression bound is for (review B3). It is now 10 authored / 9.0 rendered: exactly what this
+    /// tree paints, so ANY further shrink fails. Neither number is the 12px rule — see the note at
+    /// the assertion and the open finding in DEVLOG.
+    const float SmallTextAuthoredFloor = 10f, SmallTextRenderedFloor = 9f;
     /// The fixed seed every audited screen is staged under.
     const int FitScreenSeed = 20260830;
     static readonly bool FitDump = Environment.GetEnvironmentVariable("SIGHTLINE_FITDUMP") == "1";

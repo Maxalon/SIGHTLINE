@@ -986,8 +986,17 @@ public class Run
     public bool EnsureFieldable()
     {
         if (Squad.Count == 0 || Deployed.Count > 0) return false;
-        AutoDeploy();
-        if (Deployed.Count == 0) Squad[0].Benched = false;   // cap of 0 is not a reason to field nobody
+        // C5 REVIEW FIX: AutoDeploy sizes the field for the NEXT mission (DeployCapFor(Mission+1)),
+        // which is right in the barracks and wrong here — SetupMission has already advanced
+        // Run.Mission, so recovering an all-benched save at mission 2 fielded FIVE where the cap
+        // for the mission about to be played is four. Field to THIS mission's cap, by the same
+        // preference order AutoDeploy uses (healthy + senior first), so the recovery lands on the
+        // squad the game would have fielded anyway.
+        int cap = Math.Min(DeployCapMax, DeployCapFor(Math.Max(1, Mission)) + (HasBoon(Boon.RapidDeploy) ? 1 : 0));
+        var ordered = new List<Unit>(Squad);
+        ordered.Sort(DeployPreference);
+        for (int i = 0; i < ordered.Count; i++) ordered[i].Benched = i >= cap;
+        if (Deployed.Count == 0) Squad[0].Benched = false;   // a cap of 0 is not a reason to field nobody
         return true;
     }
 

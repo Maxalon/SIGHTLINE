@@ -19,8 +19,14 @@ export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
 
 if [ "${1:-}" = "--sweep" ]; then
   shift
+  # C5 REVIEW FIX (B1): `echo "SWEEP-EXIT=$?"` was the LAST command, so this wrapper exited with
+  # the echo's status — 0 — no matter what the sweep returned. That is the same swallow the sweep
+  # itself has (qa-sweep.sh sets _fail/_autofail and never reads them; wave C3 ships the `exit`
+  # for that half). Capture, print, then exit WITH it.
   bash scripts/qa-sweep.sh "$@"
-  echo "SWEEP-EXIT=$?"
+  rc=$?
+  echo "SWEEP-EXIT=$rc"
+  exit "$rc"
 else
   env "$@" xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug 2>&1
 fi

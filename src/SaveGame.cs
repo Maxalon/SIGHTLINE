@@ -135,6 +135,16 @@ public static partial class SaveGame
             // Hud kept drawing CONTINUE off SaveGame.Exists, giving a button that did nothing,
             // forever, with no banner and no stash. Route it through the same recovery path as an
             // unparseable file: the squad is the one field a resumable run cannot do without.
+            // C5 REVIEW FIX (B2): PRUNE NULLS BEFORE THE USABILITY VERDICT, not after.
+            // D2's guard counts DTO ELEMENTS, not soldiers. C5's first pass fixed the crash by
+            // dropping nulls inside FromDto — which moved the drop to the WRONG SIDE of this
+            // check: `"Squad":[null]` passed it (Count == 1), FromDto returned a Run with an EMPTY
+            // squad, Load returned non-null so nothing was stashed, `SaveGame.Exists` stayed true,
+            // and the intro kept drawing a CONTINUE RUN button that ContinueRun then refused —
+            // verbatim the D2 defect this guard exists to prevent ("a button that did nothing,
+            // forever, with no banner and no stash"). Pruning here means the count below is a
+            // count of SOLDIERS, which is what the check always meant.
+            if (dto != null && dto.Squad != null) dto.Squad.RemoveAll(u => u == null);
             if (dto == null || dto.Squad == null || dto.Squad.Count == 0) { StashCorruptSave(); return null; }
             // R2 (LOW-2): SchemaVersion was WRITTEN and self-tested but never READ, so a file
             // stamped 999 loaded silently — the one thing the field exists to prevent. We cannot

@@ -362,6 +362,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     }
 
     // Greedy word-wrap to a pixel width.
+    /// C5 — THE ONE WIDTH PREDICATE. "Does this string fit this column?" was asked three
+    /// different ways in this file: `WrapText` truncated the measurement to an int (letting up to
+    /// a pixel through), `Clip` compared the raw float (letting nothing through), and `WrapLines`
+    /// compared the raw float again. The first two disagreeing cost the WAR ROOM three characters
+    /// and an ellipsis at the 110% text size (see Clip). `WrapLines` is the same trap still armed —
+    /// no call site mixes it with Clip TODAY, which is exactly how the other one stayed hidden.
+    /// All three now ask here, so they cannot drift again.
+    public static bool FitsWidth(string text, int size, int maxW)
+        => (int)Cfg.Measure(text, size, 1f).X <= maxW;
+
     static System.Collections.Generic.List<string> WrapText(string s, int size, int maxW)
     {
         var outl = new System.Collections.Generic.List<string>();
@@ -370,7 +380,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         foreach (var word in words)
         {
             string trial = cur.Length == 0 ? word : cur + " " + word;
-            if ((int)Cfg.Measure(trial, size, 1f).X > maxW && cur.Length > 0) { outl.Add(cur); cur = word; }
+            if (!FitsWidth(trial, size, maxW) && cur.Length > 0) { outl.Add(cur); cur = word; }
             else cur = trial;
         }
         if (cur.Length > 0) outl.Add(cur);
@@ -1247,7 +1257,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // the tail): the WAR ROOM painted "Win a run with no soldier l…" at the 110% text size,
         // and VOICETEST could not see it because its assertion goes through WrapCount — the same
         // int-cast path that called the string fine. Both now ask the width question the same way.
-        if ((int)Cfg.Measure(text, size, 1f).X <= maxW) return text;
+        if (FitsWidth(text, size, maxW)) return text;
         if (ClipProbe != null) ClipProbe(text, size, maxW);
         while (text.Length > 1 && Cfg.Measure(text + "…", size, 1f).X > maxW)
             text = text.Substring(0, text.Length - 1);
@@ -4232,7 +4242,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         foreach (var w in words)
         {
             string test = cur.Length == 0 ? w : cur + " " + w;
-            if (Cfg.Measure(test, size, 1f).X > width && cur.Length > 0)
+            if (!FitsWidth(test, size, width) && cur.Length > 0)     // C5: the shared predicate
             { lines.Add((cur, dy)); dy += lh; cur = w; }
             else cur = test;
         }

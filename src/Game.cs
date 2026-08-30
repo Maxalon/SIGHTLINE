@@ -6713,7 +6713,17 @@ public partial class Game
         // ...and then GET OUT. A wedged animation is dropped, the stalled unit forfeits its turn,
         // and the staging index advances; if that exhausts the list the turn ends here rather than
         // handing control back to the machine that just failed to advance it.
-        if (_anims.Count > 0) _anims.Clear();
+        // The queue is dropped — and this is the codebase's ONLY production `_anims.Clear()`, so it
+        // owes the board a repair that no other caller has ever had to make: `MoveStepAnim` commits
+        // `Unit.X/Y` when it FINISHES, so dropping one in flight leaves the unit's logical tile at
+        // the step's origin with its drawn position frozen between two tiles. Re-sync every unit to
+        // the tile it is actually standing on (C5 review).
+        if (_anims.Count > 0)
+        {
+            _anims.Clear();
+            foreach (var u in Players) u.SyncPos();
+            foreach (var e in Enemies) e.SyncPos();
+        }
         ClearIntent();
         if (stuck != null) stuck.ActionsLeft = 0;
         _aiIdx++;
