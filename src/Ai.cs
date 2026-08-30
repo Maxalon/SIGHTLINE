@@ -66,17 +66,27 @@ public static class Ai
     // cover taken away, which is what an overwatch reaction actually catches (the reaction
     // resolves on every tile ENTERED, and a soldier crossing between cover blocks is uncovered
     // on the way). ratio = E[dmg now] / E[dmg if they were caught in the open], in (0, 1].
-    //   WATCH ratio (the unit can hold a lane from this tile): the higher of the two. Read it
-    //   as "hold if the shot is worth less than 55% of the shot I get when they move" — i.e. a
-    //   standing bet that a soldier crosses the lane more than ~55% of the time, which is the
-    //   one number in this block that is a judgement rather than a measurement.
-    //   DIG ratio (in cover, no lane): lower. Hunkering buys -25 to be hit and no crit; it is
-    //   real, but it is damage DENIED, not damage dealt, so it displaces less.
+    //   WATCH ratio 0.45 (the unit can hold a lane from this tile): the higher of the two, and
+    //   the ONE number in this block that is a judgement rather than a measurement. What the
+    //   flywheel can see says LOWER: a held enemy lane was measured firing 24-27% of the time
+    //   (n=457/461 lanes, the maximal-decline diagnostic in docs/measurements/c2/), which times
+    //   the reaction's -10 aim mod makes a lane worth ~0.20 of the open shot. The excess is the
+    //   part the flywheel is structurally blind to — Game.Autopilot.TileExposure carries +18 for
+    //   an enemy BRACE lane and NOTHING for an ordinary enemy overwatch, so the bot walks into
+    //   enemy kill-zones and the AREA-DENIAL half of a lane cannot be priced. 0.45 is roughly
+    //   twice the visible value and no more; it is declared, not hidden, and the ladder is what
+    //   prices whether it was affordable (it moved five of six rungs by one discordant pair).
+    //   DIG ratio 0.30 (in cover, no lane): lower. Hunkering buys -25 to be hit and no crit; it
+    //   is real, but it is damage DENIED, not damage dealt, so it displaces less.
     // With NEITHER available the shot is always taken — there is nothing to prefer to it.
     //
-    // ABSKEEP is the feel guard the ratio alone does not give: a shot already worth this much
-    // expected damage is taken whatever the ratio says, so a genuinely damaging shot is never
-    // passed up. It is set just under the pre-wave 40-59% band's measured mean (1.97).
+    // ABSKEEP 3.00 is the feel guard the ratio alone does not give: a shot already worth this
+    // much expected damage is taken whatever the ratio says, so a genuinely damaging shot is
+    // never passed up. It sits just above the pre-wave 60-79% band's measured mean (2.51), i.e.
+    // above "a solid shot", and it is inert at the shipped ratios (a 0.45-ratio shot is weak by
+    // construction) — it is there so that raising the ratios later cannot produce an opponent
+    // that passes up real damage.
+    //
     // THE GUNS ON ME. Firing and then standing still is not free: Combat's EXPOSED BY FIRE rule
     // (ExposedFireAim/Crit, +12/+12, symmetric for both teams) hands every soldier that can see
     // this unit a sharper shot at it until it moves again. Holding a lane or digging in does not.

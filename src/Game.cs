@@ -6947,9 +6947,12 @@ public partial class Game
     // ── C2 THE OPPONENT DECLINES ────────────────────────────────────────────────────────────
     /// SIGHTLINE_AIDECLINE — this wave's single dial. `=0` restores the pre-C2 opponent EXACTLY:
     /// Ai.cs's per-tile shot term goes back to the flat `100 + bestHit` constant that dominated
-    /// every terrain term in the scorer, and the decline gate never runs, so a hostile takes any
-    /// shot it can see at any odds. Shipped ON. Mutable so SIGHTLINE_DECLINETEST can run BOTH
-    /// legs in one process, and so an R0diag chunk can prove the wave's telemetry inert.
+    /// every terrain term in the scorer, and the decline gate never runs, so a hostile pays ANY
+    /// positional price for a line of fire and never holds one. (Note what `=0` does NOT restore:
+    /// a wild-odds shooter. Measured over 15407 pre-change shots, only 0.4% were under 20% — the
+    /// constant's damage was positional, not shot quality. See docs/DEVLOG.md §C2.)
+    /// Shipped ON. Mutable so SIGHTLINE_DECLINETEST can run BOTH legs in one process, and so an
+    /// R0diag chunk can prove the wave's telemetry inert.
     public static bool AiDecline = true;
 
     /// SIGHTLINE_AIIDLETEST probe (harness-only; ALWAYS null in normal play). Called once per

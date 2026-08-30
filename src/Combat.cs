@@ -291,7 +291,6 @@ public static class Combat
         }
 
         int hit = a.Aim + a.Weapon.AimBonus + a.Weapon.RangeMod(dist) - coverDef;
-        int coverDefApplied = coverDef;      // C2: stash the exact subtraction for AsIfExposed
         if (d.Hunkered) hit -= 25;
         if (highGround) hit += HighGroundAim;
         if (a.Steady) hit += SteadyAim;          // sharpshooter: braced shot
@@ -460,7 +459,7 @@ public static class Combat
             DmgMin = a.Weapon.DmgMin,
             DmgMax = a.Weapon.DmgMax,
             CoverLevel = coverLevel,
-            CoverDef = coverDefApplied,
+            CoverDef = coverDef,          // C2: the exact subtraction above — see AsIfExposed
             Flanked = flanked,
             Hunkered = d.Hunkered,
             HighGround = highGround,

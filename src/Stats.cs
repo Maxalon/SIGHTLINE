@@ -343,10 +343,8 @@ public static class Stats
     /// Game.OnUnitEnteredTile, so it counts SHOTS FIRED, not lanes that merely existed.
     static int _enemyReactions;
     public static void RecordEnemyReaction() { if (Enabled) _enemyReactions++; }
-    public static int EnemyReactions => _enemyReactions;
 
-    /// C2 self-test read hooks (the report keeps printing from the arrays directly).
-    public static int EnemyDecisionCount(string verb) => _enemyDecisions.GetValueOrDefault(verb, 0);
+    /// Band totals, used by the report and the aggregate JSON.
     public static int EnemyShotsDeclined { get { int n = 0; foreach (int v in _enemyShotDeclined) n += v; return n; } }
     public static int EnemyShotsTaken    { get { int n = 0; foreach (int v in _enemyShotTaken)    n += v; return n; } }
 
