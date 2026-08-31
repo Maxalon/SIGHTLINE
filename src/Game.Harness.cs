@@ -1762,7 +1762,20 @@ public partial class Game
             }
             foe.Alert = AlertLevel.Alert;
             Selected = s; RecomputeMoveCost();
-            if (hover) { AimMode = false; KbCursor = true; CurX = foe.X; CurY = foe.Y; }
+            if (hover)
+            {
+                AimMode = false; KbCursor = true; CurX = foe.X; CurY = foe.Y;
+                // LEAD FIX (C4 merge): TOOLTIP-HOVER used to differ from TOOLTIP-AIM only by the
+                // KEYBOARD cursor, while the screen audit parks Hud.MousePin off-board at
+                // (-4000,-4000) — so the mouse-driven THREAT CARD, the thing this screen exists to
+                // audit, never drew in either, and the two frames collided outright whenever the
+                // foe seat fell through. That is the intermittent
+                // `screenNotStaged:TOOLTIP-HOVER(identical frame to TOOLTIP-AIM)` a reviewer
+                // measured at ~3% of runs and traced to the audited draw path reading the live
+                // pointer. Pinning the pointer ONTO the foe makes the card draw by construction,
+                // so the screen audits what it claims to and the collision cannot recur.
+                Hud.MousePin = Util.TileCenter(foe.X, foe.Y);
+            }
             else { AimMode = true; AimTarget = foe; }
         }
     }
