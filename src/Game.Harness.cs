@@ -7711,6 +7711,8 @@ public partial class Game
               + "not by this count); the +1 damage AND tier 2 reach heat 6, neither reaches heat 5, and the apex "
               + "carries exactly one damage point; dial clamps)"
             : "MIDTOOTHTEST: FAIL " + string.Join(", ", fails);
+    }
+
     /// C3 THE TWO GAMES (SIGHTLINE_CLASSTEST) — the wave's gate, in four legs.
     ///
     /// THE FINDING IT GUARDS. On mid-run campaign nodes, the two objectives that end only when
