@@ -266,6 +266,14 @@ public partial class Game
     public string ConcealSelfTest()
     {
         NoPersist = true;                       // never touch the save file in a test
+        // LEAD FIX (C4 merge): this test was CLOCK-SEEDED while 41 other harness reseed calls
+        // exist, so its pod placement varied run to run and the suppressor legs
+        // (suppressedShotDidNotBreak / suppressedTargetPodAsleep) failed at a low rate — 0/6
+        // standalone in both Debug and Release, but it took down a --full sweep, which is the only
+        // place it matters. C3's exit statement is what turned that into a refusal rather than a
+        // line nobody read. A gate test that depends on the wall clock is a gate that fails
+        // randomly; pinning the stream is the same fix C5 applied per screen in FITTEST.
+        Util.Reseed(90210);
         var fails = new System.Collections.Generic.List<string>();
         StartMission(1);
         if (!SquadConcealed) fails.Add("notConcealedAtStart");
