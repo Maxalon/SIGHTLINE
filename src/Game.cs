@@ -547,6 +547,33 @@ public partial class Game
     public bool PressureActive => Pressure > 0; // for HUD pulse
     int _pressureWaves;                         // count of reinforcement waves the clock has dropped
 
+    // ── C3 THE TWO GAMES: the clock's two arms are not the same thing ────────────────────────
+    // The anti-turtle clock has an AIM arm (a telegraphed, escalating enemy accuracy bonus) and a
+    // REINFORCEMENT arm (a small wave every fresh rung from 2). On HACK and DECAPITATE both arms
+    // do the same job: they make a slow squad's position worse without touching what ENDS the
+    // mission (a full hack bar; one named body). On ELIMINATE the second arm does something else
+    // entirely — the win condition is "no hostile is alive", so every body the clock adds is also
+    // WIN CONDITION. Being slow there does not raise the price of the finish line, it MOVES it.
+    //
+    // Measured on this wave's own tree (D0, 960 campaigns, base 17934ee): on mid-run campaign
+    // nodes 41.0% of Eliminates took at least one wave, averaging 1.69 bodies over ALL of them —
+    // ~4.1 bodies on each mission that took one, on top of a 7.78-body deploy force. Those same
+    // missions read 37.4% ±4.1 against 81.5% ±1.1 for the six objectives that end on a task.
+    //
+    // So the reinforcement arm is suppressed on ELIMINATE and ONLY on Eliminate. The aim ramp,
+    // its banner and its HUD meter are untouched — camping still gets strictly worse, which is
+    // the clock's actual charter (docs/DESIGN.md §3.A). DECAPITATE deliberately keeps both arms:
+    // its win condition is one body, so a wave there raises the price without moving the line —
+    // and that makes it this wave's within-round CONTROL. If Decapitate moves in the paired
+    // measurement, something other than this lever moved it.
+    //
+    // SIGHTLINE_KILLTREADMILL=1 restores the pre-C3 behaviour exactly (both arms everywhere).
+    public static bool ClockWavesOnEliminate = false;
+
+    /// True when the anti-turtle clock's REINFORCEMENT arm may fire this mission. The aim arm is
+    /// never gated by this — see UpdatePressure.
+    bool ClockMayReinforce => ClockWavesOnEliminate || Objective != Objective.Eliminate;
+
     // The clock only runs on objectives where camping is the exploit. Defend is already
     // wave-based; Evac/Escort/Rescue are movement-pressured; Sabotage already makes you move
     // to sites -- none of those need (or want) it.
@@ -6173,6 +6200,10 @@ public partial class Game
         // initial force) — one pod per wave, sized to what ACTUALLY landed under the cap.
         if (podded && added > 0) { _podOrig[_nextWavePod] = added; _nextWavePod++; }
         if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        // C3: every mid-mission body, whatever spawned it, lands on this one counter. EnemiesStart
+        // is the DEPLOY force only, so without this the report cannot tell a mission that beat six
+        // hostiles from one that beat six and then six more.
+        Stats.RecordReinforce(added);
         // APEX W5: headless-harness echo so an autoplay log shows what the waves actually field
         // (AutoPlay is the env-gated smoke/balance path only — never set in normal play).
         if (AutoPlay && added > 0)
@@ -6201,9 +6232,12 @@ public partial class Game
             Audio.Play("turn");
         }
         Pressure = rung;
+        Stats.RecordPressure(rung);   // C3: harness-only high-water mark of the anti-turtle rung
         // Reinforcements kick in from rung 2 onward, once per fresh rung (not every turn) so the
         // board doesn't flood: a small wave that scales with the rung. One per rung-up event.
-        if (rung >= 2 && rung > _pressureWaves)
+        // C3: ...but not on ELIMINATE, where a reinforcement is not pressure — it is the finish
+        // line moving away from the squad. See the ClockWavesOnEliminate contract above.
+        if (rung >= 2 && rung > _pressureWaves && ClockMayReinforce)
         {
             int want = 1 + rung / 2;                       // rung2->2, rung3->2, rung4->3
             SpawnReinforcements(want, 11 + _run.Mission, "REINFORCEMENTS");

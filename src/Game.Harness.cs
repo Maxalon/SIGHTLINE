@@ -1642,9 +1642,13 @@ public partial class Game
     ///   SIGHTLINE_ROSTER=<n>  grows the squad to n soldiers (recruits, name-deduped) so the
     ///                         barracks panel's WORST-CASE height (6 rows) can be screenshot;
     ///   SIGHTLINE_REPORT=<n>  pads the debrief to n report lines (the 5-line display cap).
+    ///   SIGHTLINE_MAPCOL=<n>  jump to mission n instead of 3, so a shot (or CLASSTEST) can stage a
+    ///                         fork whose choices include the BOSS column — always Decapitate, and
+    ///                         therefore the only node kind GUARANTEED to be a PITCHED choice.
     public void DebugCampaignMap()
     {
-        _run.JumpTo(3);                  // visit cols 0-2; current sits at mission 3
+        int col = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAPCOL"), out int mc) && mc > 0 ? mc : 3;
+        _run.JumpTo(col);                // visit cols 0..col-1; current sits at mission `col`
         _run.DebriefSurvivors();
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ROSTER"), out int nRoster))
         {
@@ -7707,6 +7711,214 @@ public partial class Game
               + "not by this count); the +1 damage AND tier 2 reach heat 6, neither reaches heat 5, and the apex "
               + "carries exactly one damage point; dial clamps)"
             : "MIDTOOTHTEST: FAIL " + string.Join(", ", fails);
+    /// C3 THE TWO GAMES (SIGHTLINE_CLASSTEST) — the wave's gate, in four legs.
+    ///
+    /// THE FINDING IT GUARDS. On mid-run campaign nodes, the two objectives that end only when
+    /// bodies fall (ELIMINATE, DECAPITATE) win 38.5% ±3.1 (n=247) against 81.5% ±1.1 (n=1243) for
+    /// the six that end on a task — a 43-point spread between objective CLASSES, larger than the
+    /// gap between two adjacent heat rungs. The wave shipped two things against it: the campaign
+    /// fork now SAYS which class a node is, and the anti-turtle clock stopped moving ELIMINATE's
+    /// finish line.
+    ///
+    /// WHY IT DRAWS. Legs B and C paint the REAL barracks/campaign-map frame and read the strings
+    /// and marks at the DRAW CALL (Cfg.CaptureText, Hud.CaptureClassMarks). This is deliberate and
+    /// it is the lesson W9 was sent back for: its first TRUTHTEST asserted the values the HUD was
+    /// SUPPOSED to read, so reverting the panel left the test green. Asserting Run.IsKillObjective
+    /// here would be the same mistake — leg A pins the predicate, and legs B/C pin that the fork
+    /// actually paints it. Ripping the class row out of the tooltip fails leg C even though the
+    /// predicate is untouched.
+    ///
+    /// LEG D is the balance lever and fails on the pre-C3 tree: with Game.ClockWavesOnEliminate
+    /// restored (SIGHTLINE_KILLTREADMILL=1) the clock spawns bodies into an ELIMINATE, which is
+    /// exactly what leg D forbids — and it checks the OFF path too, so a lever that did nothing
+    /// would fail just as loudly as one that did too much.
+    public string ClassSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        bool shippedClock = Game.ClockWavesOnEliminate;
+        var savedCap = Cfg.CaptureText;
+        var savedMarks = Hud.CaptureClassMarks;
+        try
+        {
+            // ═══ (A) THE MODEL — exactly two of the eight objectives are kill objectives ═══════
+            var all = (Objective[])Enum.GetValues(typeof(Objective));
+            // The count is pinned so that APPENDING a ninth objective (the enums are append-only)
+            // cannot silently inherit "not a kill objective" — someone has to come here and decide.
+            if (all.Length != 8) fails.Add("objectiveCount=" + all.Length);
+            foreach (var o in all)
+            {
+                bool want = o == Objective.Eliminate || o == Objective.Decapitate;
+                if (Run.IsKillObjective(o) != want) fails.Add($"model:{o}");
+                if (Run.IsKillObjective(o.ToString()) != want) fails.Add($"modelStr:{o}");
+            }
+            // an unparseable telemetry name must never be reclassified as a kill objective
+            if (Run.IsKillObjective("Skirmish")) fails.Add("modelBadName");
+
+            // ═══ (B)+(C) THE DRAW — what the FORK actually paints ════════════════════════════
+            // Both classes are staged deterministically rather than waiting for the map to deal
+            // one: the run is built normally, then every reachable node's card objective is
+            // overwritten, so the pass runs twice over the identical geometry with only the class
+            // changed. Anything that differs between the passes came from the class and nothing
+            // else.
+            void DrawPass(Objective forced, string tag)
+            {
+                // FIXED SEED: the map is dealt from the ambient RNG, so an unseeded run gave this
+                // test a different fork every invocation. A gate that samples the world is a gate
+                // that flakes — and this one did, on its second sweep.
+                Util.Reseed(20260830);
+                _run = new Run(); _run.Start();
+                DebugCampaignMap();                       // -> Phase.Barracks with a live fork
+                var choices = _run.NextNodes();
+                if (choices.Count == 0) { fails.Add(tag + ":noFork"); return; }
+                foreach (var n in choices) { n.Kind = NodeKind.Combat; n.Card.Objective = forced; }
+
+                // PARK THE CURSOR OFF THE MAP. The hover tooltip draws a class mark of its own, so
+                // a cursor left on a node by the PREVIOUS pass's tooltip step silently adds one to
+                // the census below. That is the exact flake this leg shipped with: the map layout
+                // is seed-dependent, so whether the stale cursor happened to land on a node varied
+                // run to run and the test failed roughly one sweep in three.
+                Raylib.SetMousePosition(2, 2);
+                var cap = new List<(string text, float size)>();
+                var marks = new List<(Objective obj, float x, float y)>();
+                Cfg.CaptureText = cap; Hud.CaptureClassMarks = marks;
+                Raylib.BeginDrawing(); DrawHudLayer(); Raylib.EndDrawing();
+                Cfg.CaptureText = null; Hud.CaptureClassMarks = null;
+
+                bool kill = Run.IsKillObjective(forced);
+                string mine = kill ? "PITCHED - it ends when the field is clear"
+                                   : "TASKED - it ends when the task is done";
+                string theirs = kill ? "TASKED - it ends when the task is done"
+                                     : "PITCHED - it ends when the field is clear";
+                bool Said(List<(string text, float size)> c, string s) => c.Any(t => t.text == s);
+
+                // (B1) the KEY names both marks. FUL-12's rule: a mark the map draws and the key
+                //      does not name is an unexplained glyph.
+                if (!Said(cap, "PITCHED - clear the field")) fails.Add(tag + ":noKeyPitched");
+                if (!Said(cap, "TASKED - the objective ends it")) fails.Add(tag + ":noKeyTasked");
+                // (B2) a class MARK was painted for every reachable node, and every mark drawn on
+                //      this frame carries an objective of the staged class. The key contributes one
+                //      mark of each class, so the count is choices + 2 and the class census is
+                //      choices+1 of the staged class and exactly 1 of the other.
+                int mine_ = marks.Count(m => Run.IsKillObjective(m.obj) == kill);
+                int other = marks.Count - mine_;
+                if (mine_ != choices.Count + 1) fails.Add($"{tag}:marks={mine_} want{choices.Count + 1}");
+                if (other != 1) fails.Add($"{tag}:otherMarks={other}");
+                // (B3) the objective name is still painted beside the mark (the mark ADDS to the
+                //      label, it does not replace it — a regression that swapped them would read
+                //      as an unlabelled fork).
+                string objName = forced == Objective.Eliminate ? "ELIMINATE" : "EXTRACT";
+                if (!Said(cap, objName)) fails.Add(tag + ":noObjLabel");
+                // (B3b) and with the cursor off the map NO tooltip was painted — which is what
+                //       makes the census above a statement about the LABELS and the key.
+                if (Said(cap, mine) || Said(cap, theirs)) fails.Add(tag + ":tooltipWithoutHover");
+                // (B4) every string THIS WAVE paints clears the 12px floor. Scoped deliberately:
+                //      a whole-frame sweep fails on text this wave did not write — the campaign
+                //      map's region-name strip is FitSize(11, 8) and paints at 8-11px, which is a
+                //      real pre-existing breach of CLAUDE.md's floor but is not this wave's to
+                //      move (see the DEVLOG's "what I did not fix"). An assertion that fails for
+                //      a reason unrelated to the change under test is not a gate, it is noise.
+                foreach (var t in cap)
+                    if ((t.text == mine || t.text == "PITCHED - clear the field"
+                         || t.text == "TASKED - the objective ends it" || t.text == objName)
+                        && t.size < 12f)
+                    { fails.Add($"{tag}:size{t.size}:{t.text}"); break; }
+
+                // (C) THE HOVER TOOLTIP. The map published NodeBtns as it drew; park the real
+                //     cursor on a real node and draw again, so the tooltip is reached through the
+                //     shipped hover predicate and not through a staging flag.
+                if (Hud.NodeBtns.Count == 0) { fails.Add(tag + ":noNodeBtns"); return; }
+                // THE HOVER HAS TO CONVERGE, NOT BE ASSUMED. DrawBarracks gives the card a 0.15 s
+                // slide-down entrance (`PanelAnim("barracks")`), so the whole map — and therefore
+                // every rect NodeBtns publishes — moves by up to 16 px between two consecutive
+                // draws taken inside that window. Parking the cursor on a rect read from the
+                // PREVIOUS draw therefore misses the node about half the time, and it missed 3 of
+                // 4 runs under `dotnet run -c Debug` (where the first draw is slow enough to land
+                // mid-entrance) while passing 8 of 8 on the Release binary. So: re-read the rect,
+                // re-park, re-draw, until the tooltip actually appears. The entrance ends, so this
+                // converges; and it is still the shipped hover predicate doing the deciding.
+                var cap2 = new List<(string text, float size)>();
+                for (int tries = 0; tries < 10; tries++)
+                {
+                    var r = Hud.NodeBtns[0].Rect;
+                    Raylib.SetMousePosition((int)(r.X + r.Width / 2), (int)(r.Y + r.Height / 2));
+                    cap2 = new List<(string text, float size)>();
+                    Cfg.CaptureText = cap2;
+                    Raylib.BeginDrawing(); DrawHudLayer(); Raylib.EndDrawing();
+                    Cfg.CaptureText = null;
+                    // "the tooltip drew at all" is the intel row, which predates this wave — so the
+                    // loop's exit condition can never be satisfied by the thing under test.
+                    if (cap2.Any(t => t.text.Contains("intel"))) break;
+                    if (Hud.NodeBtns.Count == 0) break;
+                }
+                if (!cap2.Any(t => t.text.Contains("intel"))) { fails.Add(tag + ":noTooltip"); return; }
+                if (!Said(cap2, mine)) fails.Add(tag + ":tooltipMissingClass");
+                if (Said(cap2, theirs)) fails.Add(tag + ":tooltipWrongClass");
+            }
+            DrawPass(Objective.Eliminate, "pitched");
+            DrawPass(Objective.Evac, "tasked");
+
+            // ═══ (D) THE LEVER — the clock's aim arm lives, its wave arm stops at ELIMINATE ═══
+            // Runs the REAL UpdatePressure at a turn count past rung 2 (grace 4, one rung per 2
+            // turns => turn 7 is rung 2, the first wave rung) and counts what landed on the board.
+            // Returns the rung TOO. An earlier revision asserted `Pressure` after the last call
+            // in the sequence, so it read whatever the FINAL staging left behind (Evac's 0) rather
+            // than Eliminate's — a correct assertion in the wrong scope, which is worth exactly as
+            // much as no assertion. Each arm now carries its own reading out.
+            (int added, int aim, int rung) ClockAt(Objective obj, bool restore)
+            {
+                Game.ClockWavesOnEliminate = restore;
+                Util.Reseed(20260830);
+                _run = new Run(); _run.Start();
+                _run.CurrentCard = new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None };
+                SetupMission(3);
+                int before = Enemies.Count;
+                _turnCount = 7;                       // rung 2 — the first reinforcement rung
+                UpdatePressure();
+                return (Enemies.Count - before, Combat.PressureAim, Pressure);
+            }
+            var elim = ClockAt(Objective.Eliminate, false);
+            var hack = ClockAt(Objective.Hack, false);
+            var decap = ClockAt(Objective.Decapitate, false);
+            var elimOld = ClockAt(Objective.Eliminate, true);
+            var evac = ClockAt(Objective.Evac, false);
+
+            // the shipped default is the lever ON
+            if (shippedClock) fails.Add("shippedClockWavesOnEliminate");
+            // (D1) ELIMINATE: no bodies, but the pressure ramp is untouched — the clock still bites.
+            if (elim.added != 0) fails.Add("elimAdded=" + elim.added);
+            if (elim.aim <= 0) fails.Add("elimAimArmDead=" + elim.aim);
+            if (elim.rung < 2) fails.Add("elimRung=" + elim.rung);
+            if (hack.rung != elim.rung) fails.Add($"rungDiffers {hack.rung}!={elim.rung}");
+            // (D2) HACK and DECAPITATE carry the SAME clock and are deliberately untouched. If
+            //      either of these ever reads 0 the lever has leaked past its one objective.
+            if (hack.added <= 0) fails.Add("hackAdded=" + hack.added);
+            if (decap.added <= 0) fails.Add("decapAdded=" + decap.added);
+            if (hack.aim != elim.aim) fails.Add($"aimArmDiffers {hack.aim}!={elim.aim}");
+            // (D3) the OFF path restores the pre-C3 clock exactly — a lever with no restore is a
+            //      deletion, and a lever whose two arms behave the same is not a lever at all.
+            if (elimOld.added <= 0) fails.Add("restoreAdded=" + elimOld.added);
+            if (elimOld.aim != elim.aim) fails.Add("restoreAimMoved");
+            // (D4) an objective the clock never ran on is still clock-free (PressureClockObjective
+            //      itself is not collateral damage).
+            if (evac.added != 0 || evac.aim != 0 || evac.rung != 0) fails.Add($"evacClock {evac.added}/{evac.aim}/{evac.rung}");
+        }
+        finally
+        {
+            Cfg.CaptureText = savedCap;
+            Hud.CaptureClassMarks = savedMarks;
+            Game.ClockWavesOnEliminate = shippedClock;
+        }
+
+        return fails.Count == 0
+            ? "CLASSTEST: PASS (model: exactly Eliminate+Decapitate of 8 objectives are PITCHED, both by "
+              + "enum and by telemetry name; DRAW-OBSERVED: the campaign fork paints a class mark per "
+              + "reachable node plus a two-entry key, keeps the objective label, stays >=12px, and its "
+              + "hover tooltip paints THIS node's class line and not the other one — both classes staged; "
+              + "LEVER: the anti-turtle clock adds no bodies to an ELIMINATE while its aim ramp still "
+              + "rises, Hack/Decapitate keep both arms unchanged, Evac has no clock at all, and "
+              + "SIGHTLINE_KILLTREADMILL=1 restores the pre-C3 waves)"
+            : "CLASSTEST: FAIL " + string.Join(", ", fails);
     }
 
     public string OnRampSelfTest()

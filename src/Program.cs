@@ -133,6 +133,12 @@ public static class Program
             Combat.HvtHpBonusPerMission = xhvtd;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HVTAIM"), out int xhvta) && xhvta >= 0)
             Combat.HvtAimBonus = xhvta;
+        // C3 THE TWO GAMES — SIGHTLINE_KILLTREADMILL=1 restores the pre-C3 anti-turtle clock, in
+        // which the REINFORCEMENT arm also fired on ELIMINATE. It is the one objective whose win
+        // condition counts bodies, so there the wave moved the finish line instead of raising the
+        // price of reaching it. Default (unset) = suppressed on Eliminate only; Hack and
+        // Decapitate keep both arms. See Game.ClockWavesOnEliminate.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KILLTREADMILL") == "1") Game.ClockWavesOnEliminate = true;
         //   SIGHTLINE_HVTPOLICY=0 : an INSTRUMENT dial (autopilot only, no player-facing effect).
         //   Demotes the HVT from "every soldier charges it" to an ordinary target, so a Decapitate
         //   win rate can be split into what the MISSION costs and what the BOT's focus policy costs.
@@ -427,6 +433,20 @@ public static class Program
             Display.Shutdown();
             Audio.Shutdown();
             Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_CLASSTEST=1 : C3 THE TWO GAMES — the objective-CLASS gate. Model + DRAW +
+        // lever; see Game.ClassSelfTest. Needs the FULL-SIZE window and the real atlases: it
+        // paints the actual barracks/campaign-map frame and reads the strings and class marks at
+        // the draw call, and the map's layout is derived from Cfg.ScreenW/H.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CLASSTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "sightline-classtest");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            LoadGameFonts();
+            Console.WriteLine(new Game { NoPersist = true }.ClassSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -1183,6 +1203,7 @@ public static class Program
             Display.ChromaIntensity = 0.6f;
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
+        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAPHOVER"), out int mapHover);   // C3: hover map choice k
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
         // RESONANCE C1: SIGHTLINE_SHOTONBARK=1 — do not shoot a fixed frame; wait until a soldier
         // BARK has actually landed in the combat log during live play, then shoot 40 frames later
@@ -1228,6 +1249,16 @@ public static class Program
             // hover-driven, so the harness has to hold the cursor on the tile every frame.
             if (shot && game.DebugMousePark.HasValue)
                 Raylib.SetMousePosition((int)game.DebugMousePark.Value.X, (int)game.DebugMousePark.Value.Y);
+            // C3: SIGHTLINE_MAPHOVER=<k> parks the cursor on the k-th REACHABLE campaign-map node
+            // (1-based), so the node hover tooltip — where the objective CLASS is spelled out —
+            // can be photographed. The rects come from Hud.NodeBtns, which the map publishes as it
+            // DRAWS, so this necessarily lags one frame; a shot at frame 90 has ~89 to settle.
+            // Pair with SIGHTLINE_CAMPAIGN=1 + SIGHTLINE_SHOT. Shot-only, so nothing measured moves.
+            if (shot && mapHover > 0 && Hud.NodeBtns.Count >= mapHover)
+            {
+                var hr = Hud.NodeBtns[mapHover - 1].Rect;
+                Raylib.SetMousePosition((int)(hr.X + hr.Width / 2), (int)(hr.Y + hr.Height / 2));
+            }
             if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
                                                                // delta from the Xvfb pointer clears it otherwise)
             game.Update(dt);

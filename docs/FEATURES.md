@@ -119,10 +119,15 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **PERK BUILD-DEPTH (FRONTIER W3):** the deadest false-choice perks are now distinct verbs — **MOMENTUM** (kill on
   your turn refunds +1 action), **PLATING** (ablative -2 dmg/hit while ≥half HP), **OUTRUNNER** (+1 mob + move
   immune to overwatch). (`Combat.KillRefundsAction/IgnoresOverwatch`; enum stayed append-only.)
-- **Anti-turtle PRESSURE CLOCK (AGENCY W1):** on camp-friendly objectives (Elim/Hack/Decapitate) a graced
-  clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) + reinforcement waves — so turtling is
-  strictly worse than advancing. `PRES` rung-pip meter in the top bar; `Game.PressureRungFor/UpdatePressure/
-  SpawnReinforcements/PressureClockObjective`. `SIGHTLINE_PRESSURE`.
+- **Anti-turtle PRESSURE CLOCK (AGENCY W1; second arm re-scoped by CONTOUR C3):** on camp-friendly objectives
+  (Elim/Hack/Decapitate) a graced clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) +
+  reinforcement waves — so turtling is strictly worse than advancing. **C3: the reinforcement arm no longer
+  fires on ELIMINATE**, the one objective whose win condition counts bodies, where an added body did not raise
+  the price of the finish line but moved it (measured: 41% of mid-run Eliminates took a wave, ~4.1 bodies on a
+  7.8-body force). The aim ramp, banner and meter are untouched, and Hack/Decapitate keep both arms.
+  `Game.ClockMayReinforce`; `SIGHTLINE_KILLTREADMILL=1` restores the pre-C3 clock. `PRES` rung-pip meter in the
+  top bar; `Game.PressureRungFor/UpdatePressure/SpawnReinforcements/PressureClockObjective`.
+  `SIGHTLINE_PRESSURE`.
 - **Visible randomness mitigation (AGENCY W1):** the shot tooltip surfaces the graze floor + streak-breaker
   (`DMG GRAZE n / min-max`, `+N STEADYING`) via `ShotOdds.GrazeFloor/StreakBonus` — missing a high-% shot reads
   as less of a betrayal. `SIGHTLINE_TOOLTIP`. **RESONANCE Q1 (D3):** the STEADYING bonus is now folded into
@@ -309,6 +314,15 @@ seeds (mix of WIN/LOSE, no exceptions):
   **hashed column plan** (FUL-9: every route gets >=1 Eliminate, >=1 Defend-or-
   Rescue, <=1 Escort; boss always Decapitate); the 8-objective rotation remains
   the SKIRMISH/offer fallback. Shown in the HUD.
+- **Objective CLASS, named on the fork (CONTOUR C3):** the eight objectives split into two that end only
+  when hostile bodies fall (**PITCHED** — Eliminate, Decapitate) and six that end on a task (**TASKED** —
+  the rest), and on mid-run campaign nodes that split is worth 36.5 win-rate points. The campaign map now
+  says which: a drawn class mark beside each reachable node's label (crossed blades / an empty tile-square —
+  shapes chosen against the node-kind glyph vocabulary, colour redundant and colourblind-remapped), a
+  two-entry key under the node-kind legend, a class line at the top of the node hover tooltip
+  ("PITCHED - it ends when the field is clear" / "TASKED - it ends when the task is done"), and the tag on
+  the legacy deploy card. Single source of truth `Run.IsKillObjective`; gate `SIGHTLINE_CLASSTEST`; shot
+  hooks `SIGHTLINE_MAPHOVER=<k>` (park the cursor on the k-th choice) and `SIGHTLINE_MAPCOL=<n>`.
 - **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
   ~80% of missions) dealt from a **per-run no-repeat deck** derived purely from
   the run's MapSeed (FUL-9: an arena never repeats within a run; the displayed

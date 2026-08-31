@@ -2073,6 +2073,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// argument, no other panel drawing over the capture, so every string the test reads is
     /// unambiguously the tooltip's own. Test-only; nothing in normal play calls it.
     public static void DebugDrawTooltip(Game g) => DrawTooltip(g);
+    /// C3 (SIGHTLINE_CLASSTEST): paint the REAL campaign map into a caller-chosen region, so the
+    /// test reads what the fork DRAWS — node labels, class marks, the class key and the hover
+    /// tooltip — rather than re-deriving what it ought to say. Publishes NodeBtns as a side effect,
+    /// which is what lets the test park the cursor on a real node and re-draw for the tooltip.
+    public static void DebugDrawCampaignMap(Run run, Rectangle region) => DrawCampaignMap(run, region);
 
     static void DrawTooltip(Game g)
     {
@@ -4792,7 +4797,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         bool hasMap = run.Map.Count > 0 && run.NextNodes().Count > 0;
         int contentH = 100 /*title+sub*/ + 22 /*deploy header*/ + rows * rowPitch
                      + 28 /*debrief header*/ + reportRows * 22 + kiaRow;
-        const int mapChrome = 24 /*section header*/ + 20 /*legend*/ + 14 /*bottom pad*/;
+        // C3: + 16 for the objective-CLASS key row under the node-kind legend. The bottom pad
+        // absorbs 6 of it so the worst case (6-soldier roster + 5 report lines + a KIA line, which
+        // is contentH = 546) still lands at h = 776 inside the 800px window — the map's own clamp
+        // gives the row back out of its 150..250 band, exactly as W12 designed it to.
+        const int mapChrome = 24 /*section header*/ + 20 /*legend*/ + 19 /*class key*/ + 11 /*bottom pad*/;
         int mapH = hasMap ? Math.Clamp(Cfg.ScreenH - 24 - contentH - mapChrome, 150, 250)
                           : 128;   // legacy deploy-card fallback keeps its fixed footprint
         int h = contentH + mapChrome + mapH;
@@ -4885,6 +4894,27 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 lx += legR * 2 + 6;
                 Cfg.Text(it.lbl, new Vector2((int)lx, ly + 1), 12, 1f, Pal.TxtDim);
                 lx += Cfg.Measure(it.lbl, 12, 1f).X + 20;
+            }
+            // C3: the OBJECTIVE-CLASS key, on its own row under the node-kind key. Two taxonomies
+            // that answer different questions ("what node is this" vs "what ends this mission")
+            // must not share a row — mixing them is how a legend stops being read. FUL-12's rule
+            // still binds: a mark the map draws and the key does not name is an unexplained glyph,
+            // so both marks are drawn here with the exact DrawClassMark geometry the nodes use.
+            (Objective o, string lbl)[] classKey =
+            {
+                (Objective.Eliminate, "PITCHED - clear the field"),
+                (Objective.Evac,      "TASKED - the objective ends it"),
+            };
+            float cw2 = 0f;
+            foreach (var it in classKey) cw2 += 12 + 6 + Cfg.Measure(it.lbl, 12, 1f).X + 22;
+            float cx2 = x + w / 2f - (cw2 - 22) / 2f;
+            int cy2 = ly + 19;
+            foreach (var it in classKey)
+            {
+                DrawClassMark(cx2 + 5f, cy2 + 7f, 4.6f, it.o);
+                cx2 += 12 + 6;
+                Cfg.Text(it.lbl, new Vector2((int)cx2, cy2 + 1), 12, 1f, Pal.TxtDim);
+                cx2 += Cfg.Measure(it.lbl, 12, 1f).X + 22;
             }
         }
         else  // fallback: legacy deployment cards (only if the map is unavailable)
@@ -5111,11 +5141,19 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 // W4: an Event node is a "?" choice beat, not a fight — label it EVENT.
                 string lbl = n.Kind == NodeKind.Event ? "EVENT" : ObjName(n.Card.Objective);
                 int lw = (int)Cfg.Measure(lbl, 12, 1f).X;
-                var lr = new Rectangle(p.X - lw / 2f, p.Y + rad + 3, lw, 12);   // default: below the node
+                // C3: an EVENT node is not a fight and carries no class mark; every other choice
+                // does. The mark takes a fixed 12px gutter to the LEFT of the name, so the label
+                // block widens by 12px and the W9 collision nudge still owns the vertical.
+                bool marked = n.Kind != NodeKind.Event;
+                const float markGutter = 12f;
+                float blockW = lw + (marked ? markGutter : 0f);
+                var lr = new Rectangle(p.X - blockW / 2f, p.Y + rad + 3, blockW, 12);   // default: below
                 // collision nudge: if it would overprint the previously drawn label, flip above.
                 if (hasPrevLabel && Raylib.CheckCollisionRecs(lr, prevLabel))
                     lr.Y = p.Y - rad - 15;
-                Cfg.Text(lbl, new Vector2((int)lr.X, (int)lr.Y), 12, 1f, n.Kind == NodeKind.Event ? Pal.Suspect : Pal.Txt);
+                if (marked) DrawClassMark(lr.X + 4.5f, lr.Y + 6f, 4.2f, n.Card.Objective);
+                Cfg.Text(lbl, new Vector2((int)(lr.X + (marked ? markGutter : 0f)), (int)lr.Y), 12, 1f,
+                         n.Kind == NodeKind.Event ? Pal.Suspect : Pal.Txt);
                 prevLabel = lr; hasPrevLabel = true;
             }
         }
@@ -5125,24 +5163,36 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         {
             var c = hovered.Card;
             string l1 = $"{c.ModName}  -  {ObjName(c.Objective)}";
+            // C3: the CLASS is the headline property of a node, so it sits directly under the
+            // name — above force, payout and reward. An EVENT node is not a fight; it gets no
+            // class row (and its Card.Objective is a placeholder that must not be read as one).
+            string lc = hovered.Kind == NodeKind.Event ? null : ObjClassLine(c.Objective);
             string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
             string l2 = $"{force}   +{hovered.Intel} intel";   // routing economy: payout shown alongside risk
             string l3 = c.Reward != RewardKind.None ? "+ " + c.RewardText : null;
             string l4 = Run.EnemyHint(hovered);   // enemy intel hint (S4-A)
             int tw = Math.Max((int)Cfg.Measure(l1, 13, 1f).X,
                      Math.Max((int)Cfg.Measure(l2, 12, 1f).X,
+                     Math.Max(lc != null ? (int)Cfg.Measure(lc, 12, 1f).X + 14 : 0,
                      Math.Max(l3 != null ? (int)Cfg.Measure(l3, 12, 1f).X : 0,
-                              (int)Cfg.Measure(l4, 12, 1f).X))) + 20;
-            int th = (l3 != null ? 76 : 60);   // extra row for the hint
+                              (int)Cfg.Measure(l4, 12, 1f).X)))) + 20;
+            int th = (l3 != null ? 76 : 60) + (lc != null ? 16 : 0);   // extra row for the hint / class
             float tx = Math.Min(mouse.X + 14, region.X + region.Width - tw);
             float ty = Math.Max(mouse.Y - th - 6, field.Y);   // C1: never ride up over the region labels
             var tip = new Rectangle(tx, ty, tw, th);
             Raylib.DrawRectangleRounded(tip, 0.12f, 6, Pal.RGBA(12, 18, 26));
             Raylib.DrawRectangleLinesEx(tip, 1.2f, NodeColor(hovered.Kind));
             Cfg.Text(l1, new Vector2((int)tx + 10, (int)ty + 8), 13, 1f, NodeColor(hovered.Kind));
-            Cfg.Text(l2, new Vector2((int)tx + 10, (int)ty + 26), 12, 1f, Pal.TxtDim);
-            if (l3 != null) Cfg.Text(l3, new Vector2((int)tx + 10, (int)ty + 42), 12, 1f, Pal.Accent);
-            int hintY = l3 != null ? (int)ty + 58 : (int)ty + 42;
+            int row = (int)ty + 26;
+            if (lc != null)
+            {
+                DrawClassMark(tx + 15f, row + 6f, 4.2f, c.Objective);
+                Cfg.Text(lc, new Vector2((int)tx + 24, row), 12, 1f, ObjClassColor(c.Objective));
+                row += 16;
+            }
+            Cfg.Text(l2, new Vector2((int)tx + 10, row), 12, 1f, Pal.TxtDim);
+            if (l3 != null) Cfg.Text(l3, new Vector2((int)tx + 10, row + 16), 12, 1f, Pal.Accent);
+            int hintY = l3 != null ? row + 32 : row + 16;
             Cfg.Text(l4, new Vector2((int)tx + 10, hintY), 12, 1f, Pal.Foe);
         }
     }
@@ -5500,6 +5550,63 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Objective.Decapitate => "DECAPITATE", _ => "ELIMINATE",
     };
 
+    // ── C3 THE TWO GAMES — the objective CLASS, said out loud ────────────────────────────────
+    // Measured on mid-run campaign nodes: an objective that ends only when bodies fall wins 38.5%
+    // (n=247); the six that end on a task win 81.5% (n=1243). That 43-point spread is the single
+    // largest predictor of how hard a node is — larger than the gap between two adjacent heat
+    // rungs — and until this wave NOTHING on the campaign map said which one a node was. The map
+    // named the objective (ELIMINATE / EXTRACT / SABOTAGE ...), which tells a player who has
+    // already learned the difference; to everyone else the fork was two interchangeable circles.
+    // docs/DESIGN.md §3.A: a decision is interesting only if the player can make it INFORMED —
+    // a fork whose dominant term is unreadable is a false choice wearing a decision's costume.
+    //
+    // Two words, used identically everywhere the player picks a node:
+    //   PITCHED — the field must be cleared; the fight IS the objective.
+    //   TASKED  — the objective ends it, and the force can be left standing.
+    // The second half of the TASKED line is deliberate and is the honest part: the flywheel's
+    // optimal policy already declines most of those fights (a won EXTRACT kills 3.3% of the force
+    // it deploys against), so hiding it only taxed players who had not worked it out.
+    static string ObjClassTag(Objective o) => Run.IsKillObjective(o) ? "PITCHED" : "TASKED";
+    static string ObjClassLine(Objective o) => Run.IsKillObjective(o)
+        ? "PITCHED - it ends when the field is clear"
+        : "TASKED - it ends when the task is done";
+    static Color ObjClassColor(Objective o) => Run.IsKillObjective(o) ? Pal.Foe : Pal.Good;
+
+    /// The class MARK: crossed blades for PITCHED, an empty tile-square for TASKED. Shape carries
+    /// it (docs/DESIGN.md §3.H — never hue alone), so the mark survives SIGHTLINE_CB=1 and the
+    /// squint test; the colour is redundant reinforcement.
+    ///
+    /// THE SHAPES ARE CHOSEN AGAINST DrawNodeIcon, NOT IN A VACUUM. The first pass used a filled
+    /// diamond and a hollow ring; a screenshot killed both. BOSS is already "a solid diamond
+    /// inside a ring tick" and the boss node is ALWAYS Decapitate — i.e. always PITCHED — so a
+    /// diamond class mark would have read as a duplicate of the node glyph on the one node where
+    /// the two are guaranteed to co-occur. BATTLE's crosshair already carries a hollow circle, so
+    /// the ring collided too. Diagonal strokes (X) and an orthogonal outline (square) are the two
+    /// silhouettes the node vocabulary — chevron, cross, delta, fork, diamond, crosshair — does
+    /// not use, and they differ from each other at a glance as well as from everything else.
+    /// C3 DRAW-SIDE OBSERVATION of the class mark. `Cfg.CaptureText` sees strings and nothing else,
+    /// so the geometry half of this feature would otherwise be untestable and a revert of
+    /// DrawClassMark's call sites would leave CLASSTEST green. Null in normal play (one null check
+    /// per mark, no allocation); the harness assigns a list and reads back exactly what was
+    /// painted. Same shape as Cfg.CaptureText and the BriefCardDraws counter BRIEFTEST reads.
+    public static System.Collections.Generic.List<(Objective obj, float x, float y)> CaptureClassMarks;
+
+    static void DrawClassMark(float cx, float cy, float r, Objective o, float alpha = 1f)
+    {
+        CaptureClassMarks?.Add((o, cx, cy));
+        Color c = Raylib.Fade(ObjClassColor(o), alpha);
+        float t = MathF.Max(1.6f, r * 0.38f);
+        if (Run.IsKillObjective(o))
+        {   // PITCHED — crossed blades
+            Raylib.DrawLineEx(new Vector2(cx - r, cy - r), new Vector2(cx + r, cy + r), t, c);
+            Raylib.DrawLineEx(new Vector2(cx - r, cy + r), new Vector2(cx + r, cy - r), t, c);
+        }
+        else
+        {   // TASKED — an empty tile: the objective is a PLACE you reach, not a body you drop
+            Raylib.DrawRectangleLinesEx(new Rectangle(cx - r, cy - r, r * 2, r * 2), t * 0.85f, c);
+        }
+    }
+
     static void DrawDeployCard(Rectangle r, MissionCard c)
     {
         bool hover = Raylib.CheckCollisionPointRec(Mouse(), r);
@@ -5510,6 +5617,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         Cfg.Text(c.ModName, new Vector2((int)r.X + 12, (int)r.Y + 10), 17, 1f, tint);
         Cfg.Text(ObjName(c.Objective), new Vector2((int)r.X + 12, (int)r.Y + 34), 13, 1f, Pal.Txt);
+        // C3: the class tag rides on the same row as the objective name, right-aligned, so the
+        // legacy card fork says the same thing the campaign-map fork does. This card only appears
+        // when the map is unavailable, but the two surfaces must never disagree about a node.
+        {
+            string tag = ObjClassTag(c.Objective);
+            float tagW = Cfg.Measure(tag, 12, 1f).X;
+            DrawClassMark(r.X + r.Width - 16 - tagW - 9, r.Y + 40, 4.2f, c.Objective);
+            Cfg.Text(tag, new Vector2((int)(r.X + r.Width - 12 - tagW), (int)r.Y + 34), 12, 1f, ObjClassColor(c.Objective));
+        }
         string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
         Cfg.Text(force, new Vector2((int)r.X + 12, (int)r.Y + 56), 12, 1f, Pal.TxtDim);
         if (c.Reward != RewardKind.None)

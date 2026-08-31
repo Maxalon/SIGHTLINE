@@ -995,6 +995,26 @@ public class Run
         return node.Next[0];
     }
 
+    /// C3 THE TWO GAMES — the single source of truth for the objective CLASS split.
+    ///
+    /// Two of the eight objectives end only when hostile bodies fall: ELIMINATE (all of them) and
+    /// DECAPITATE (one named one). The other six end when the squad reaches a tile, holds a timer
+    /// or sets a charge — outcomes the squad can reach without beating the force. The measured
+    /// consequence on mid-run campaign nodes is a 43-point win-rate gap between the two classes,
+    /// which is larger than the gap between any two adjacent heat rungs.
+    ///
+    /// The campaign map, the briefing and the objective card all named the objective and none of
+    /// them named the class, so the single biggest predictor of how hard a node is was the one
+    /// property the player could not read. Everything that surfaces the class — the map node
+    /// tooltip, the mission-card tag, the balance report's ENCOUNTER COMPLETION block — asks THIS
+    /// predicate, so the game can never tell the player one thing and score another.
+    public static bool IsKillObjective(Objective o) => o == Objective.Eliminate || o == Objective.Decapitate;
+
+    /// String overload for the telemetry side (Stats stores the objective by name). An unparseable
+    /// name is NOT a kill objective — the balance report must never silently reclassify a row.
+    public static bool IsKillObjective(string name) =>
+        Enum.TryParse(name, out Objective o) && IsKillObjective(o);
+
     /// Objective rotation baseline: an 8-objective cycle (Eliminate / Hack / Evac / Escort /
     /// Sabotage / Rescue / Defend / Decapitate), repeating.
     public static Objective ObjectiveFor(int n) => ((n - 1) % 8) switch

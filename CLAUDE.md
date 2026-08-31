@@ -237,8 +237,13 @@ The sweep derives both halves at runtime *from env-var NAMES rather than line sh
 break was a counter keyed on a line shape that a routing change invalidated), prints them in its
 footer, and its **COVERAGE GUARD** block — which names any hook in `src/` the sweep never invokes
 — is the real check. Run it and read the last lines.
-**Since W9 the sweep EXITS NON-ZERO** on any FAIL line, a non-empty COVERAGE GAP, a TIMEOUT or a
-missing RESULT line, so it is a gate rather than a report for a reader to notice.
+**Since W9 the sweep was SUPPOSED to EXIT NON-ZERO** on any FAIL line, a non-empty COVERAGE GAP, a
+TIMEOUT or a missing RESULT line — **and until CONTOUR C3 it did not: the script accumulated
+`_fail`/`_autofail` and then ended on an `echo`, so its status was always 0.** C3 found it when its
+own new self-test FAILED inside a `--full` sweep that still reported `SWEEP-EXIT=0`, and wired the
+`exit`. Every green-sweep claim in this repo dated before C3 was quoting the exit code of an echo;
+the PASS/FAIL lines were real, the machine-checkable gate was not. **It is a gate now — check the
+code, and if you add a self-test line route it through `verdict` or it is invisible to it.**
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 since W1 a display-less batch REFUSES, writes nothing and exits 2 (see the contract below — it
@@ -546,6 +551,29 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > campaigns reaching heat ≥ 6. Campaign-level inertness claims survive it; "this rung is unaffected"
 > claims have always had this hole.
 >
+> **MOVED BY PROGRAM CONTOUR WAVE C3** (branch `wave/two-games`, base `17934ee` — L3's own tree;
+> C3's baseline arm reproduces the L3 archive on **960/960 campaigns**, so the two rows below are
+> directly comparable). One lever, CRN-paired, 960 campaigns per arm on identical worlds:
+>
+> | | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
+> |---|---|---|---|---|---|---|
+> | L3 (= C3's baseline arm, reproduced campaign-for-campaign) | 71.2 | 47.5 | 31.2 | 23.8 | 20.0 | 6.9 |
+> | **C3** | **73.1** | **55.0** | **34.4** | **25.6** | **20.0** | **7.5** |
+>
+> All six rungs are in band. **Read the row with three caveats C3 recorded against itself:**
+> **(1)** roughly HALF the gain is the MISSION-1 change — mission 1 is always an `Eliminate` and
+> the lever removed the mechanic that was losing it. Stratified on whether the baseline survived
+> m1 (a legitimate CRN conditional), the honest pooled figure is **+1.39, p=0.0024**, not the
+> +2.50 headline; **heat 2's move is 58% opener and heat 4's is 100% opener.**
+> **(2)** the opener is now unlosable up to heat 4 (0 losses in 640 campaigns) — an overshoot, and
+> ROADMAP's top item is to back it out via `Mission.OpenerTrim` **and re-measure**, which will move
+> h2 and h4 down again.
+> **(3)** ±SE per rung is BINOMIAL and too small: a rung is 8 clusters of 20, the clusters
+> disagree (h2 reads 45/25/20/10/50/40/45/40), and the **cluster SE exceeds the binomial at five of
+> six rungs** (11–40%). h2 clears its floor by 0.47 cluster-SE — in band, not robust. Monotonicity
+> is a pre-existing property of the tree, not something the lever bought.
+> Data `docs/measurements/c3/`; DEVLOG §C3.
+>
 > **A pooled objective row can hide a 49.5-point artifact** — W8 proved it on `Eliminate`, whose
 > 89.1% row is largely 960 mission-1s and reads ~40% over its mid-run cells. Use the
 > `byObjectiveByNodeKind` / `byObjectiveByMission` cross-tab before concluding anything from a
@@ -662,6 +690,26 @@ b0-b30**, which is also how C2 found that L3's own slot space is heterogeneous a
 rung. Its two open findings (an enemy overwatch has NO lane selection and only FIRES on 24-27% of
 lanes held; the autopilot has no term for enemy overwatch at all, so the flywheel cannot price
 area denial) are in `docs/ROADMAP.md`. DEVLOG §C2; rationale `docs/DESIGN.md` §5.2.
+**PROGRAM CONTOUR** is the eleventh, and wave **C3 "THE TWO GAMES"** is the one a fresh session
+most needs to know about, because it changes what an objective *is* in this game. SIGHTLINE's eight
+objectives are **two classes**: two end only when hostile bodies fall (ELIMINATE, DECAPITATE) and
+six end on a task. On mid-run campaign nodes that split was worth **43.0 points** of win rate —
+more than any step on the heat ladder — and nothing in the game said which class a node was.
+C3 refuted force size, mission length and reinforcement volume as causes by measurement and located
+it in the win condition: **a WON non-kill mission kills 25.1% of the force it deployed against, and
+a won EXTRACT kills 3.3%.** FIVE of the eight objectives are routinely won by declining the
+encounter (`Defend` is the sixth and is not one of them — it kills 4.28 bodies a mission, more than
+any other non-kill objective; its low clear% is a denominator artifact of replenishment).
+It shipped one lever (the anti-turtle clock's reinforcement arm no longer fires on ELIMINATE — the
+one objective where an added body is also win condition, so the clock moved the finish line instead
+of raising its price; `SIGHTLINE_KILLTREADMILL=1` restores it) and one information change (the
+campaign fork names the class — **PITCHED** / **TASKED** — on the node label, a legend key, the
+hover tooltip and the deploy card). Gap 43.0 → **36.5**; the ladder above. `Run.IsKillObjective` is
+the single source of truth; `SIGHTLINE_CLASSTEST` is the gate. **Three things it left open, in
+ROADMAP order: the opener overshot and must be backed out with a re-measured ladder; the flywheel
+has no camping policy, so turtling is UNMEASURABLE rather than unmeasured; and the reward is still
+not priced (`MissionNode.Intel` is blind to the class, so a PITCHED node pays a TASKED node's
+rate).** Rationale and its cost: `docs/DESIGN.md` §5.2; detail `docs/DEVLOG.md` §C3.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:
