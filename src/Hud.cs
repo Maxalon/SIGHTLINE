@@ -177,7 +177,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// between two machines running the same commit. A flaky gate is not a gate.
     /// `NaN` (the default) means "read the real pointer"; nothing but the harness writes it.
     public static Vector2 MousePin = new Vector2(float.NaN, float.NaN);
-    static Vector2 Mouse() => float.IsNaN(MousePin.X) ? Mouse() : MousePin;
+    // C5 THE HARD EDGES — harness-only POINTER PIN, so a pixel-reading self-test audits a frame
+    // whose hover state is fixed instead of wherever the pointer happens to sit. NaN in normal
+    // play, where this must read the real pointer.
+    // LEAD FIX at the C3 merge: this line shipped as `... ? Mouse() : MousePin`, i.e. it called
+    // ITSELF on the unpinned path — infinite recursion, stack overflow, and BOARDTEST aborted with
+    // no verdict line at all. A mass-replace of `Raylib.GetMousePosition()` had rewritten the one
+    // call site that WAS the replacement. It survived its own wave's merge because `<no result
+    // line>` contains no "FAIL" and the sweep's exit code was still hollow; C3's exit statement,
+    // landing in the same merge, is what turned it into a refusal.
+    static Vector2 Mouse() => float.IsNaN(MousePin.X) ? Raylib.GetMousePosition() : MousePin;
 
     /// C5 THE HARD EDGES — harness-only entrance-animation PIN. `>= 0` makes every panel
     /// entrance report that progress instead of reading the wall clock, so a self-test can audit
