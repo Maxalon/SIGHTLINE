@@ -2438,6 +2438,78 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
 ---
 
+## PROGRAM CONTOUR — OPENED 2026-08-30 on base `17934ee`. THE SHAPE OF THE FIGHT.
+
+CROSSCUT measured the ladder and found its LEVEL was fine — five of six rungs in band. This
+program is about everything that measurement could not price: the ladder's *shape*, the
+opponent's *decisions*, the 45-point gap between objective *classes*, eight biomes that are
+*paint*, and a build nobody has ever launched the way a player would.
+
+Six waves, all from `17934ee`, each independently reviewed before merge:
+
+- [ ] **C1 THE FLAT MIDDLE** (`wave/flat-middle`) — `h4→h6` is the smallest step on all three
+      measured ladders and `h2→h4` joins it on the composed tree, while the ends buy 3-6× as much.
+      `Heat.Mods` explains it: rung 8 is the only entry carrying `DmgDelta` or `AiTier`, so the
+      middle rungs add bodies and stat points and only the apex changes KIND.
+- [ ] **C2 THE OPPONENT DECLINES** (`wave/opponent-declines`) — `Ai.cs:537` scores any available
+      shot at `100 + bestHit` against terrain terms bounded under ~64. The opponent always acts
+      and never *declines*, which is also why the enemy overwatch branch fired 3 times in 1589
+      turns. The handoff calls this the single biggest remaining gap in the fight.
+- [ ] **C3 THE TWO GAMES** (`wave/two-games`) — kill objectives 38.3% ±3.1 (n=248) vs 83.4% ±1.0
+      (n=1259) for the six with a non-combat win condition. A gap between objective *classes*.
+- [ ] **C4 BIOME MECHANICAL** (`wave/biome-mechanical`) — `grep -ci biome` is 0 in `Combat.cs`,
+      `Ai.cs`, `Grid.cs` and `Unit.cs`. W4 gave the biomes a visual identity; this is the half
+      that makes the place change the fight.
+- [ ] **C5 THE HARD EDGES** (`wave/hard-edges`) — `FITTEST` covers five surfaces, not the game;
+      the `UpdateEnemy` deadlock is bounded only by the frame cap; a dead branch should be a loud
+      coverage failure, not a discovery three programs later; plus a defect hunt on the composed
+      tree, which no wave has swept.
+- [ ] **C6 SHIPS LIKE A PRODUCT** (`wave/ships`) — "builds clean and passes autoplay" is a
+      development standard, not a product one. Nobody has launched this game from outside the
+      source tree with an empty profile. The one time anyone checked a neighbouring case, a
+      published build silently lost its font.
+
+**The rules carried in from CROSSCUT** (each learned by shipping the mistake): a pooled row can
+hide a 49.5-point artifact, so cross-tab; a rung is four slot sets or it is not a rung; a CRN
+round prices consequences and is blind to feel; count NAMES not line shapes; a test that cannot
+fail is not a test; and a correct assertion in the wrong scope is indistinguishable from no
+assertion.
+
+### CONTOUR interim finding — THE GATE WAS A REPORT, NOT A GATE (found by C3, verified by the lead)
+
+`scripts/qa-sweep.sh` accumulated `_fail` and `_autofail` and then **ended on an `echo`. There was
+no `exit`.** `_autofail` even printed "DO NOT MERGE" — and the script still exited 0. Verified
+directly on base `17934ee`.
+
+**So CLAUDE.md's claim was false:** *"Since W9 the sweep EXITS NON-ZERO on any FAIL line, a
+non-empty COVERAGE GAP, a TIMEOUT or a missing RESULT line, so it is a gate rather than a report."*
+It was a report the whole time, and **every green-sweep claim quoting `SWEEP-EXIT=0` — including
+all eight PROGRAM CROSSCUT merges — was quoting the exit code of an echo.**
+
+**What this does NOT invalidate, stated precisely.** A hardened re-run on `main` @ `17934ee` reads
+build 0 warn / 0 err, **FAIL lines 0**, autoplay **3/3** WIN|LOSE, `PAIRTEST: PASS`. `main` is
+genuinely green. The CROSSCUT merges were gated by *reading the printed output*, not by the exit
+code — which is exactly why the W9 merge defect was caught: every autoplay leg printed
+`<no RESULT line>` and the merge was refused on that text. The earlier write-up said "the sweep
+correctly refused"; it did not. The automation was hollow, the inspection was real. Both halves of
+that sentence matter.
+
+C3 ships the fix (`[ "$_fail" = 1 ] && _rc=1; [ "$_autofail" = 1 ] && _rc=1; exit $_rc`) plus
+`AIIDLETEST`, which was the one sweep line not routed through `verdict`.
+
+**Consequence for anyone reading an archived measurement:** a wave's "SWEEP-EXIT=0" line is
+evidence of nothing on any tree before C3. The FAIL-line count, the three RESULT lines and the
+`PAIRTEST: PASS` line in the same log ARE evidence. Read those.
+
+### CONTOUR interim finding — a bare `.gitignore` rule silently ate three waves' runners
+
+`.gitignore:57` carries a bare `run_chunk.sh` pattern from an earlier wave's scratch cleanup.
+**C1, C2 and C4 each cited a `run_chunk.sh` in their archive README and each silently failed to
+commit it**, leaving their archived runners inoperable; C2 also lost `qa*.txt` and `shots/*.png`.
+Those rules are indiscriminate because `.gitignore` reached `main` carrying unresolved merge
+conflict markers (lines 74/93/104) — a lead merge defect, fixed by C6. Narrow the rule and re-check
+every wave archive after that merge.
+
 ## PROGRAM CONTOUR — wave C6 "SHIPS LIKE A PRODUCT" (CLOSED 2026-08-30, branch `wave/ships`)
 
 The "ships-like-a-product" item declared never-started above is **done**. Full write-up in
