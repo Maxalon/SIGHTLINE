@@ -6212,6 +6212,13 @@ public partial class Game
     static readonly string[] AiCovKnownRare = { "relock", "shove" };
     /// Once per 1000 enemy acts. Below this a verb exists in the code and not in the game.
     const double AiCovRareRate = 0.001;
+    /// The rate verdict needs a sample in which the threshold is a COUNT, not a coin flip.
+    /// At the sweep's old N the batch was ~2470 acts, so `AiCovRareRate` came to ~2.5 expected
+    /// events and a branch sitting near the line flipped PASS/FAIL between runs: `sap` read
+    /// 10/8083 (0.12%, PASS) and 2/2473 (0.08%, FAIL) on the same tree. A flaky gate is not a
+    /// gate. Below this floor the rate verdict is SKIPPED and said to be skipped — the
+    /// unregistered-label and never-fired assertions still run, because those are not rate-based.
+    const int AiCovMinActs = 6000;
     public static string AiCoverageSelfTest(int campaigns)
     {
         var fails = new List<string>();
@@ -6258,7 +6265,8 @@ public partial class Game
             census.Add($"{b}={c}({100.0 * rate:0.00}%)");
             if (Array.IndexOf(AiCovBackstops, b) >= 0) continue;      // structural, not a verb
             bool declared = Array.IndexOf(AiCovKnownRare, b) >= 0;
-            if (rate < AiCovRareRate)
+            if (acts < AiCovMinActs) { }        // sample too small to resolve the rate — see AiCovMinActs
+            else if (rate < AiCovRareRate)
             {
                 if (!declared)
                     fails.Add($"branchEffectivelyDead:{b}={c}/{acts}({100.0 * rate:0.00}% < {100.0 * AiCovRareRate:0.00}%)");
@@ -6281,6 +6289,9 @@ public partial class Game
         return fails.Count == 0
             ? $"AICOVTEST: PASS ({played} campaigns / {missions} missions / {acts} enemy acts "
               + $"({contested} contested); every enemy verb fires at least once per "
+              + (acts < AiCovMinActs
+                   ? $"[RATE VERDICT SKIPPED: {acts} acts < {AiCovMinActs} floor] "
+                   : "")
               + $"{(int)(1 / AiCovRareRate)} acts except the {AiCovKnownRare.Length} declared "
               + $"effectively-dead ones. census: " + string.Join(" ", census)
               + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "") + ")"

@@ -154,10 +154,10 @@ echo -n "GRAPPLETEST: "; verdict "$(SIGHTLINE_GRAPPLETEST=1 run | grep -oE "GRAP
 echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLTEST: (PASS|FAIL)" | head -1)"
 # C5 THE HARD EDGES: the ENEMY-turn half of the no-deadlock contract (STALLTEST covers the player
 # turn), and the enemy DECISION CENSUS — every branch of the enemy exec chain must be REACHED, at
-# a rate a player could actually meet. AICOVTEST=2 walks 48 campaigns (~10 s); the effectively-dead
+# a rate a player could actually meet. AICOVTEST=6 walks 144 campaigns (~25 s; N=2 gave ~2470 acts, below the AiCovMinActs floor that keeps the rate verdict from being a Poisson draw); the effectively-dead
 # branches it tolerates are named in Game.Harness.cs's AiCovKnownRare and printed on every run.
 echo -n "ENEMYSTALLTEST: "; verdict "$(SIGHTLINE_ENEMYSTALLTEST=1 run | grep -oE "ENEMYSTALLTEST: (PASS|FAIL)" | head -1)"
-echo -n "AICOVTEST  : "; verdict "$(SIGHTLINE_AICOVTEST=2 run | grep -oE "AICOVTEST: (PASS|FAIL)" | head -1)"
+echo -n "AICOVTEST  : "; verdict "$(SIGHTLINE_AICOVTEST=6 run | grep -oE "AICOVTEST: (PASS|FAIL)" | head -1)"
 # C5: the HOSTILE SAVE — eight edited/truncated/older-build save.json shapes through the real
 # resume path. W9 asked this of meta.json; save.json had never been asked.
 echo -n "SAVEEDGETEST: "; verdict "$(SIGHTLINE_SAVEEDGETEST=1 run | grep -oE "SAVEEDGETEST: (PASS|FAIL)" | head -1)"
