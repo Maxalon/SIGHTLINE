@@ -231,3 +231,20 @@ _ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' "$_SELF" | sort -u | wc -l)
 echo "($_have self-tests exist in src/; this sweep ran $_ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped")."
 echo " Both counts are derived from env-var NAMES, not line shapes. Every line above must read"
 echo " PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+
+# ── THE GATE ACTUALLY GATES NOW (found by C4's review pass, 2026-08-30) ──────────────────────
+# W9 built `_fail` and `_autofail`, routed every self-test through `verdict`, routed the COVERAGE
+# GAP and the FX-stream check into `_fail`, wrote three long comment blocks about the sweep being
+# "a gate rather than a report"... and never wrote the `exit`. The script fell off the end and
+# returned the status of its last `echo`, i.e. **0, unconditionally, forever**. CLAUDE.md has been
+# telling every session "Since W9 the sweep EXITS NON-ZERO on any FAIL line, a non-empty COVERAGE
+# GAP, a TIMEOUT or a missing RESULT line" — of a script that could not exit non-zero at all.
+# C4 caught it the only way it could be caught: a real FAIL line appeared in a sweep that reported
+# SWEEP-EXIT=0. This is rule 6 in the dev contract — a correct assertion in the wrong scope is
+# indistinguishable from no assertion — applied to the gate itself.
+if [ "$_fail" = 1 ] || [ "$_autofail" = 1 ]; then
+  echo "SWEEP: FAILED (a self-test FAILed, a coverage gap is open, or autoplay did not finish)"
+  exit 1
+fi
+echo "SWEEP: OK"
+exit 0

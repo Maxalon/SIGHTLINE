@@ -2147,20 +2147,52 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       sets you alight — `Grid.HasLineOfSight` + `CostMap` + `OnUnitEnteredTile`). Symmetry is
       structural: every rule lives in a function both sides already ask for the truth, so `Ai.cs`
       cannot play the old game. `SIGHTLINE_BIOMETEST`; `SIGHTLINE_BIOMEMECH=0` restores the pre-C4
-      board exactly. Measured CRN-paired at n=160/rung/arm on h0/h2/h4 — **declared: heat 0 moves
-      47.5 → 43.8 and lands 3.2 under its band floor** (−3.7 ± 5.6, inside its own SE), and the
-      per-biome cross-tab reads **mechanical −3.2 ± 2.1 against a flat paint control +0.3 ± 1.7**.
-      DEVLOG §C4; raw round `docs/measurements/c4/`.
+      board exactly. Measured CRN-paired at n=160/rung/arm on h0/h2/h4: heat 0 reads 43.8 vs 47.5,
+      a −3.7 point estimate that crosses the band floor but is **not a measured breach**
+      (chunk-paired t = −1.07). DEVLOG §C4; raw round `docs/measurements/c4/`.
 - [ ] **The other FIVE biomes are still paint.** STEEL / ARID / ASH / VOID / NEON change nothing;
       BIOMETEST asserts they stamp nothing, so giving one a mechanic means changing that assertion
       deliberately. The obvious candidates follow the art: ASH = short sight lines in the ashfall,
       ARID = dune ridges as soft high ground, NEON/VOID = the lattice as a conductive/teleport
       grid. None designed, none measured.
-- [ ] **C4 left the heat-0 rung 3.2 points under its floor and did not chase it.** Unpriced levers,
-      all in `src/Terrain.cs`: the per-biome tile budgets (44 / 34 / 24), `FoliageMinDist`,
-      `VentStepExtra`. And the standing question it opened: **a symmetric rule is not a neutral
-      rule** — all three mechanics cost the player 2-4 points of mission win rate, and the
-      hypothesis (a longer exchange favours the side with more bodies) is untested.
+- [ ] **THE GROUND LAYER'S COST IS CONCENTRATED ON MISSION 1 — the only cell C4's round could
+      individually resolve, and a DESIGN.md §3.D violation.** Splitting the archived round by
+      campaign node kind (`aggregate_nodekind.py`): **`Start` A 91.7% vs B 96.0%, chunk-paired
+      −4.37, SE 0.97, t = −4.53** over 24 chunks (n=480/arm), against Combat +1.13 (t=+0.60),
+      Elite −3.98 (t=−1.16), Supply −0.27, Boss +4.10. `Start` is mission 1, exactly one per
+      campaign, so it carries no within-campaign clustering — which is why it resolves while the
+      pooled rung does not. `byObjective` agrees: **Eliminate −3.55 ± 1.12, t = −3.16** (m1's
+      objective in the baseline rotation). This is the front-loaded anxiety §3.D forbids and that
+      X2's `Mission.OpenerTrim` exists to prevent, and it points at a **cheaper, more targeted
+      lever than any of the three C4 named**: suppress or thin the ground layer on mission 1.
+      Unpriced.
+- [ ] **The C4 ladder is now STALE by construction.** Its review pass moved the layer off plateaus
+      (M1) and re-tuned density (VERDANT 12.1% → 17.7%, MAGMA mean 9.7 → 13.0), so the shipped
+      layer is not the measured one. Re-measure before quoting `docs/measurements/c4/` as the
+      price of what ships. Other unpriced levers: the tile budgets (44 / 34 / 24),
+      `FoliageMinDist`, `VentStepExtra`.
+- [ ] **"A symmetric rule is not a neutral rule" is a DIRECTION, not a result.** The three
+      mechanical boards moved −3.2 ± 2.1 in mission win rate against a flat +0.3 ± 1.7 paint
+      control, but chunk-clustered the difference-in-differences is **−3.19 ± 1.98, t = −1.61,
+      sign test 17/24** — not resolved at n=160. Per rung only MAGMA is consistently negative;
+      TUNDRA flips at h2 (+1.9) and VERDANT at h4 (+5.7). C4's hypothesised mechanism ("a longer
+      exchange favours the side with more bodies") is **refuted in C4's own archive**: per-biome
+      `avgTurns` reads MAGMA 6.36 / TUNDRA 6.18 / VERDANT 5.58 against paint biomes 5.36-6.47, so
+      the longest-fight biome in the batch has no mechanic at all.
+- [ ] **A quarter of MAGMA boards have no vent-free route.** Treating vents as walls, 47/200
+      (23.5%) of MAGMA boards leave an objective fixture or hostile unreachable without a crossing,
+      so "the gaps are the fords" is true on most boards and not on all. And a vent step costs 8
+      half-tiles — a full-mobility soldier's ENTIRE walk — so a WOUNDED soldier (budget 6) cannot
+      enter one at all; 15 tiles across 200 boards have every walkable neighbour a vent, where a
+      wounded soldier can never move again (it can still shoot, so no stall). Recorded, unrepaired.
+- [ ] **The Escort VIP leash treats vents as a score penalty, not as walls.** Fire gets a two-pass
+      leash (an `avoidFire` pass first); vents get penalties only, and a penalty is not a veto, so
+      the asset can be routed through a vent and seared. C4's archive shows no measurable harm
+      (Escort −0.74 ± 1.99) but the two hazards are not handled symmetrically.
+- [ ] **`Hud.DrawThreatCard` (`Hud.cs` ~2333-2347) draws with raw `Raylib.DrawTextEx` at fixed
+      12/14px**, bypassing `Cfg.Text` and therefore the TEXT SIZE setting — which CLAUDE.md
+      forbids explicitly. Pre-existing (W10's FITTEST does not cover this card), but C4 put its
+      longest, most rule-dense strings on it. A C5 surface.
 - [ ] **W7 (ships-like-a-product) was never started.**
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
       guard covers the player turn only.

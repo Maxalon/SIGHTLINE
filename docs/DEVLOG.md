@@ -9019,9 +9019,11 @@ Every rule lives in one of the three functions **both sides already ask for the 
 | slick ice | `Grid.CostMap` | the one movement model: `Ai.Plan`'s reachable set, the player's move overlay, the path preview and the VIP leash all widen together |
 | thermal vents | `Grid.HasLineOfSight` (via a new `IsVapor`, joining smoke rather than high cover) + `CostMap` + `OnUnitEnteredTile` | every sight read on both sides routes around it; the crossing toll is in half-tiles and the burn is the existing 3.6 fire sear |
 
-Nothing in `src/Terrain.cs` reads `a.Team`. The layer is stamped once per mission from
-`(MapSeed, mission)` through `Util.Hash3` — **zero `Util.Rng` draws, no `System.Random`** — so
-CRN pairing is untouched. It is **not persisted** (`SaveGame` never serialises a `Grid`; verified
+Nothing in `src/Terrain.cs` reads `a.Team`. The layer is stamped once per mission through
+`Util.Hash3` — **zero `Util.Rng` draws, no `System.Random`** — so CRN pairing is untouched.
+(The stronger claim this paragraph originally made, "from `(MapSeed, mission)`", is **false** and
+is corrected in the addendum: `Terrain.Stamp` is pure, but the BOARD also keys on the reserved set,
+which `Mission.Build` drew from `Util.Rng`.) It is **not persisted** (`SaveGame` never serialises a `Grid`; verified
 `Tiles`/`Height`/`Smoke`/`Fire`/`Barrel` appear nowhere in it), so `GroundKind` is **not** a
 fourteenth persisted-by-ordinal enum and SAVETEST's hashes are unchanged.
 
@@ -9089,8 +9091,9 @@ Two more capture-driven repairs, both caught by looking rather than by a test:
 Judged captures: VERDANT (three dark fern regions with bright rims, cover keeps the top of the
 value hierarchy), TUNDRA (narrow outlined lanes after the drift budget was cut 42 -> 34 — the
 first capture was a *lake*, not a lane), MAGMA (a broken vertical crack down the right third),
-and MAGMA under `SIGHTLINE_CB=1`, where the fissure works purely in value and is **more** legible
-than in colour.
+and MAGMA under `SIGHTLINE_CB=1` — where "**more** legible than in colour" was **wrong** and is
+corrected in the addendum: value legibility is identical (+145.5/−28.9 vs +141.0/−28.9); what CB
+actually buys the vent is HUE SEPARATION from MAGMA's own warm palette.
 
 ## THE MEASUREMENT — declared, including the part that is bad
 
@@ -9101,9 +9104,9 @@ instrumented). All 96 chunks printed `OK ... runs=20`; zero `BAD`.**
 
 | rung | A (mechanic ON) | B (pre-C4 board) | delta | ±SE(delta) | L3 of record | floor | verdict |
 |---|---|---|---|---|---|---|---|
-| heat 0 | **43.8%** | 47.5% | −3.7 | 5.6 | 47.5 | 47 | **3.2 BELOW the floor** |
-| heat 2 | **30.0%** | 31.2% | −1.3 | 5.2 | 31.2 | 32 | below by 2.0 (B was below by 0.8) |
-| heat 4 | **25.6%** | 23.8% | +1.9 | 4.8 | 23.8 | 22 | in band |
+| heat 0 | **43.8%** | 47.5% | −3.7 | 5.6 | 47.5 | 47 | ~~3.2 BELOW the floor~~ **⚠ see addendum: chunk-paired t = −1.07, NOT a measured breach** |
+| heat 2 | **30.0%** | 31.2% | −1.3 | 5.2 | 31.2 | 32 | t = −0.19 |
+| heat 4 | **25.6%** | 23.8% | +1.9 | 4.8 | 23.8 | 22 | t = +0.51 |
 
 **Arm B reproduces the L3 ladder to the decimal on all three rungs.** With the flag off this
 branch is the same game as `17934ee`, so every point of difference in column A is the ground layer
@@ -9127,14 +9130,19 @@ Pooled across all three rungs, **mission** win rate:
 | **MECHANICAL (3)** | 649 | **81.7%** | 669 | **84.9%** | **−3.2** | **2.1** |
 | **PAINT (5, control)** | 1070 | 81.1% | 1124 | 80.9% | **+0.3** | 1.7 |
 
-> **A SYMMETRIC RULE IS NOT A NEUTRAL RULE.** All three mechanics point the same way and cost the
-> player 2-4 points of mission win rate on the boards that carry them, while the five paint biomes
-> read **+0.3 ± 1.7** — flat. The effect is confined to exactly the boards with the mechanic,
-> which is what makes the pooled campaign move credible even though it sits under its own SE.
+> ~~**A SYMMETRIC RULE IS NOT A NEUTRAL RULE.** All three mechanics point the same way and cost
+> the player 2-4 points of mission win rate on the boards that carry them, while the five paint
+> biomes read **+0.3 ± 1.7** — flat.~~
+> **⚠ SUPERSEDED — see the C4 ADDENDUM below.** Chunk-clustered the DiD is −3.19 ± 1.98,
+> **t = −1.61** (sign test 17/24): a DIRECTION, not a result. "All three point the same way" is a
+> pooling artifact — per rung only MAGMA is consistently negative; TUNDRA flips at h2 and VERDANT
+> at h4. The correct sentence is: *the three mechanical boards moved −3.2 ± 2.1, direction
+> consistent, MAGMA the only biome consistent across rungs, not resolved at n=160.*
 
-*Hypothesised mechanism, NOT measured:* each rule makes the exchange harder to resolve, and a
-longer exchange favours the side with more bodies — the enemy, at every rung. Nothing in this
-round tests that. *Caveat on the control:* the paint rows are not clean, because a run mauled on a
+*Hypothesised mechanism — **REFUTED in this same archive**, see the addendum:* each rule makes the
+exchange harder to resolve, and a longer exchange favours the side with more bodies. Per-biome
+`avgTurns` says otherwise (MAGMA 6.36 / TUNDRA 6.18 / VERDANT 5.58 against paint 5.36-6.47 — the
+longest-fight biome in the batch has no mechanic). *Caveat on the control:* the paint rows are not clean, because a run mauled on a
 MAGMA mission arrives at the next (paint) mission weaker. They read flat anyway.
 
 **Decision density did not move** at heat 0 (`meaningful-choices/turn` 3.581 -> 3.502,
@@ -9191,10 +9199,11 @@ ventDidNotIgnite,ventParkedNotReignited,aiParkedOnVent,iceGaveTheAiNothing)
 
 1. **Five of the eight biomes are still paint.** STEEL, ARID, ASH, VOID and NEON change nothing.
    Declared, asserted by BIOMETEST, and deliberate.
-2. **The heat-0 rung is 3.2 points below its band floor** and this wave did not repair it. The
-   obvious levers exist and are **unpriced**: the per-biome tile budgets (44 / 34 / 24),
-   `Terrain.FoliageMinDist`, `Terrain.VentStepExtra`. Repairing a noise-level delta with a second
-   unmeasured lever is exactly the mistake this project's rules forbid.
+2. ~~**The heat-0 rung is 3.2 points below its band floor**~~ — **⚠ corrected in the addendum**:
+   that is a point estimate crossing a threshold (chunk-paired **t = −1.07**), not a measured
+   breach. What IS resolved is that the cost sits on **mission 1** (`Start` t = −4.53). The wave
+   did not repair either. Levers, all **unpriced**: thinning the layer on m1 (the targeted one the
+   wave never found), the per-biome tile budgets, `Terrain.FoliageMinDist`, `Terrain.VentStepExtra`.
 3. **The mechanism behind the −3.2 mission-level cost is a hypothesis, not a measurement.** "A
    longer exchange favours the side with more bodies" was not tested.
 4. **The autopilot's vent weight (12) is below fire's (20) even though a vent is PERMANENT and
@@ -9208,11 +9217,221 @@ ventDidNotIgnite,ventParkedNotReignited,aiParkedOnVent,iceGaveTheAiNothing)
    player meets a mechanic for the first time on a live mission with only the briefing card, the
    banner and the codex. W5's onboarding work is the right home for that and this wave did not
    touch it.
-8. **The ambient particle layer was not re-cut.** TUNDRA still snows and MAGMA still throws embers
-   across the *whole* board, including over tiles with no drift or vent. Only the per-tile
-   *signature* and the board-scale *features* were retired on the mechanical biomes.
+8. ~~**The ambient particle layer was not re-cut.**~~ — **⚠ the wrong layer.** The reviewer
+   measured it: the ambient particles are round motes and are harmless. The real collision was
+   TUNDRA's per-tile Snow SIGNATURE — paired pale diagonal hairlines, the drift's own fracture
+   motif at ~half the alpha, on ~55% of floor tiles — which this wave's skip only suppressed *on*
+   mechanical tiles. Fixed in the addendum (M3), board-wide, like the MAGMA vein.
 9. **One new wall-clock read in `Renderer.cs`** (shared by `DrawGround` and `DrawVentSteam`), so
    CLAUDE.md's count of 45 is now 46. Screenshots were never byte-stable; `PAIRTEST` is the
    determinism gate and it is green.
 10. **`GroundKind` is not persisted and that is load-bearing.** If a future wave ever serialises a
     Grid mid-mission, this enum joins the append-only set and needs a SAVETEST fingerprint.
+
+## C4 ADDENDUM — TWO INDEPENDENT REVIEWS, EIGHT + FOUR FIXES (2026-08-30)
+
+Both reviewers passed the engineering (0/0, SWEEP-EXIT=0, PAIRTEST byte-identical, no save-format
+break, no unwinnable board in 800 stamped missions, no stall in 17 forced-biome autoplays, no
+hot-path cost) and both sent the wave back on **claims and coverage**. Everything below is either a
+correction to something C4 asserted, or a defect its own tests could not see.
+
+### THE BIG ONE — the cost is on MISSION 1, and C4 never asked where
+
+`byNodeKind` has been in every chunk of this archive since W1 and C4 never published it. `Start` is
+mission 1 — exactly ONE per campaign, so it carries no within-campaign clustering, which is why it
+resolves when the pooled rung cannot. Chunk-paired over all 24 chunks (reproduced from C4's own
+archive with the committed `aggregate_nodekind.py`):
+
+| node kind | A | B | paired Δ | SE | **t** | n/arm |
+|---|---|---|---|---|---|---|
+| **Start** (m1) | **91.7%** | **96.0%** | **−4.37** | **0.97** | **−4.53** | 480 |
+| Combat | 78.2% | 77.5% | +1.13 | 1.89 | +0.60 | ~490 |
+| Elite | 72.3% | 77.0% | −3.98 | 3.43 | −1.16 | ~240 |
+| Supply | 89.2% | 89.0% | −0.27 | 1.55 | −0.17 | ~280 |
+| Boss | 66.5% | 64.3% | +4.10 | 4.31 | +0.95 | ~245 |
+
+h0 alone: `Start` −4.37, SE 1.75, **t = −2.50**. `byObjective` agrees — **Eliminate −3.55 ± 1.12,
+t = −3.16**, and Eliminate is m1's objective in the baseline rotation.
+
+> **The ground layer's cost is concentrated on the opening mission.** That is the front-loaded
+> anxiety `DESIGN.md` §3.D forbids and the exact failure X2's `Mission.OpenerTrim` exists to
+> prevent. C4 declared "h0 is under the floor" and never asked WHERE. It also points at a cheaper,
+> more targeted lever than any of the three the wave named: **suppress or thin the layer on
+> mission 1.** Unpriced; ROADMAP.
+
+### THE CLAIMS C4 GOT WRONG, corrected at every site
+
+1. **"A SYMMETRIC RULE IS NOT A NEUTRAL RULE" was bold in DEVLOG, ROADMAP *and* CLAUDE.md, and it
+   is a direction, not a result.** Chunk-clustered DiD **−3.19 ± 1.98, t = −1.61**, sign test
+   17/24. And "all three point the same way" is a POOLING ARTIFACT: per rung only MAGMA is
+   consistently negative; TUNDRA flips at h2 (+1.9), VERDANT at h4 (+5.7), and individually both
+   are indistinguishable from zero. Restated everywhere as: *the three mechanical boards moved
+   −3.2 ± 2.1, direction consistent, MAGMA the only biome consistent across rungs, not resolved at
+   n=160.*
+2. **"3.2 BELOW the floor" was a bolded verdict on a point estimate.** Chunk-paired h0 is
+   **t = −1.07**. The README's own "the round could not resolve it at n=160" was right; the verdict
+   column was not. The table now prints the paired SE and t instead of a verdict.
+3. **The hypothesised mechanism is REFUTED in C4's own archive.** It proposed "a longer exchange
+   favours the side with more bodies". Per-biome `avgTurns`, instrumented A arm: MAGMA 6.36,
+   TUNDRA 6.18, VERDANT 5.58 — against paint biomes 5.36 (STEEL) to **6.47 (VOID)**. The
+   longest-fight biome in the batch has no mechanic. Whatever is happening, it is not that.
+4. **"Every tile is derived from (MapSeed, mission)" is false.** `StampBiomeGround` also passes a
+   `reserved` set built from unit and fixture positions, which come out of `Util.Rng` in
+   `Mission.Build`; holding (MapSeed=424242, mission=3) fixed and varying only the ambient stream
+   gives 10-11 distinct boards. **Nothing depends on the stronger claim** — zero draws is what CRN
+   needs and that is independently proven — but the sentence was wrong in `Terrain.cs`, `Grid.cs`,
+   `Game.cs`, `CLAUDE.md` and `FEATURES.md`. All five now say the true half: `Terrain.Stamp` is
+   pure and takes zero draws; the BOARD keys on the reserved set too.
+5. **The colourblind claim was refuted by measurement.** Seam-vs-floor luminance on the same vent
+   tile and seed: colour **+145.5 / −28.9**, `SIGHTLINE_CB=1` **+141.0 / −28.9** — value legibility
+   is identical and marginally *lower* in CB, so "more legible in CB" was wrong. What is true is
+   **hue separation**: in colour the seam sits inside MAGMA's own warm palette near the barrel and
+   cache amber, while the CB cream is a hue the room does not otherwise contain. VERDANT is the
+   biome that genuinely improves under CB. The code comment also cited a CB advantage that no
+   longer exists (the per-tile vein giving up orange) — the vein is now suppressed outright.
+6. **`docs/measurements/c4/run_chunk.sh` did not exist.** The README promised the round was
+   re-runnable and a bare `run_chunk.sh` pattern at `.gitignore:57` had silently swallowed it —
+   **the third consecutive wave hit by the same line.** Committed, and `.gitignore` now carries
+   `!docs/measurements/**/run_chunk.sh` (plus the four sibling patterns) so an archive's runner can
+   never be dropped again.
+
+### THE TESTS THAT DID NOT TEST WHAT THEY SAID
+
+**The AI leg was a COMPOSITE, and C4 singled it out as the opposite.** The reviewer mutated
+`Ai.cs`'s vent weight one value at a time: `−34 → 0` **PASS**, `−34 → −1` **PASS**, `−34 → +200`
+(inverted incentive!) **PASS**. It only failed when `VentStepExtra` was zeroed too — so
+`Grid.CostMap`'s toll was carrying the whole result, with `Ai.Plan`'s `Util.RandRange(0,3)`
+tie-break jitter as a further confound. There are now **two** legs with two different claims:
+
+* **(a) composite** — the behavioural claim, which is real: with everything the game ships, nothing
+  lets a hostile end its move on hot ground. Jitter now pinned with `Util.Reseed` on both plans, so
+  a "different tile" cannot be noise.
+* **(a2) isolated** — `Terrain.VentStepExtra` temporarily zeroed so CostMap gives no signal, jitter
+  pinned, and the tile asserted still REACHABLE at the same cost (otherwise "declined" is
+  indistinguishable from "could not get there"). A single vent changes no sightline that starts or
+  ends on it — `HasLineOfSight` tests neither endpoint — so the only thing left that can move the
+  planner is the term in `Ai.cs`.
+
+Mutation results after the fix — all four now fail, and this is the proof that matters:
+
+| mutation | before | after |
+|---|---|---|
+| `Ai.cs` vent weight `−34 → 0` | PASS | **FAIL** (`aiTermDoesNothing`) |
+| `Ai.cs` vent weight `−34 → +200` | PASS | **FAIL** (`aiTermDoesNothing`) |
+| `Terrain.VentStepExtra 6 → 7` | PASS | **FAIL** (`ventStep=9,ventUncrossable=9`) |
+| `Terrain.VentBurnTurns 2 → 1` | PASS | **FAIL** (`ventBurnTurns=1,ventBurnConst=1`) |
+
+Two of those were **self-referential assertions** — `vc[9,5] != 2 + Terrain.VentStepExtra` and
+`ventBurn != Terrain.VentBurnTurns` pass for *any* value of the constant. Both now pin the LITERAL
+as well as the constant: the literal catches a changed constant, the constant catches a code path
+that ignores it and hardcodes a number. `VentStepExtra = 7` mattered particularly: it makes a vent
+**uncrossable by every unit in the game**, silently turning the fissure into a wall, and the test
+waved it through. A new invariant leg asserts `2 + VentStepExtra <= 8` and says why.
+`aiEndedOnAVent` was redundant with `aiParkedOnVent` (one vent tile in the scene) and is dropped.
+**`Terrain.VentBurnTurns` was dead code** — `TickHazards` hardcoded `2` — so the vent now re-ignites
+for its own constant. Both tuning numbers became `static` rather than `const`: a `const` folds at
+compile time, which made the literal pin *unreachable code* and (caught by the 0-warning build) it
+could never have failed.
+
+**The density guard measured a board that never occurs in play.** The sweep ran on `OpenGrid()` —
+every tile floor, `reserved = null`. On real `SetupMission` boards the layer fell below C4's own
+floor on **43/200 MAGMA, 25/200 TUNDRA, 21/200 VERDANT**, MAGMA's minimum was **1 vent tile**, and
+13/200 boards had ≤4 — i.e. C4's own stated failure ("a mechanic that silently vanishes on some
+seeds is worse than one that is merely small") was still happening on ~1 MAGMA mission in 5, while
+the budgets 44/34/24 barely bound anything. The sweep now builds **real missions** through the real
+`SetupMission` with the biome pinned by `SIGHTLINE_FORCEBIOME`, and pins mean, min, flood and a
+thin-board share. The open-grid bound is kept as a separate, weaker, clearly-scoped claim about the
+stamper's own ceiling. **BIOMETEST prints the measured densities in its PASS line every sweep**, so
+a comment can never drift from the shipped value again — which is exactly how this defect survived.
+
+### THE FOUR DESIGN/LEGIBILITY MUST-FIXES
+
+**M1 — MECHANICAL GROUND ON A PLATEAU RENDERED AS ZERO PIXELS.** `Terrain.Free` gated on
+`grid.IsFloor`, which is `Tiles==Floor && !Barrel` and has never looked at `Height`. `DrawGround`
+runs before `DrawElevation`, which paints the plateau top with a **fully opaque** rect offset by
+`-lift`. So fern and ice on raised ground were invisible: a soldier could stand on raised
+undergrowth and take omnidirectional low cover **with no mark on the board at all**, and a raised
+vent kept only its steam, drawn at the un-lifted tile centre. Two of ~nine vents on the
+photographed board. Fixed at the SOURCE — the layer never stamps on `Height > 0` — because a
+plateau already carries its own rule (high ground sees over low cover) and stacking a second one on
+it is muddier than keeping them apart. **BIOMETEST structurally could not see this**: `OpenGrid()`
+sets `Height = 0` everywhere. There is now a direct leg that builds a plateau and asserts nothing
+lands on it, plus a `groundOnPlateau` assertion on the real-board sweep.
+
+**M2 — THE SHIPPED DENSITY WAS NOT THE STATED DENSITY.** `Terrain.cs` claimed VERDANT targeted
+"~18-22% of the 198-tile board"; C4's own `byBiome.avgGroundTiles` over 24 instrumented chunks said
+**12.1%** (23.99 tiles). MAGMA's 9.66 tiles across *two* walkers is ~4.8 per crack — on some seeds a
+scatter of singles rather than a line, which makes the fords story true on some boards and
+meaningless on others; and a captured VERDANT "patch" was five separate single tiles, contradicting
+this file's own rationale that a patch "has to be several tiles wide or it is just a decorated
+tile". Re-tuned against real boards (more patches, more lobes, larger lobes; the fissure's
+*deliberate* ford rate cut 18% → 8% because the involuntary gaps from cover already supply them,
+and the walk lengthened). Measured after, on real boards: **VERDANT 35.0 (19-44) = 17.7%, TUNDRA
+18.3 (10-34) = 9.2%, MAGMA 13.0 (7-20) = 6.6%** — MAGMA's real minimum goes 1 → 7. The comment now
+states the measured shipped numbers and BIOMETEST prints them.
+
+**M3 — C4 BROKE ITS OWN NEW RULE, ON ITS OWN BIOME.** The wave's headline rule was "when a biome's
+mechanic is live, the biome's decorative version of that motif is retired" — and TUNDRA's Snow
+signature draws **paired pale diagonal hairlines** (210,232,248 @0.18) on ~55% of floor tiles while
+the drift's mechanical fracture is **a pale diagonal hairline** (226,244,255 @0.34). Identical
+motif, ~2× alpha apart. C4's skip only stopped the double-draw *on* a mechanical tile and left the
+decoy everywhere else. Now suppressed board-wide when `AnyIce`, exactly as the MAGMA vein is
+suppressed when `AnyVent`. Two lesser collisions fixed with it: an **isolated ice tile** drew all
+four rim edges — a complete bright box on the tile grid, which is the game's cursor/selection
+language — and now gives up its outline (a rim traces a LANE; one tile has no lane); and the fern
+rim wore **(142,210,130)**, sitting on `Pal.Good` (74,222,128), the hue this palette reserves for
+"bonus / available action" against §3.H's one-accent-one-job — pulled to a desaturated olive
+(178,198,108) with the value contrast unchanged. *And the layer C4 apologised for in its own "what
+I did not do" — the ambient particles — was the wrong one: those are round motes and are harmless.*
+
+**M4 — TWO MODES NEVER ANNOUNCED THE RULE.** `BeginBriefing` returns early for anything but
+CAMPAIGN, so SKIRMISH, DAILY, LAST STAND and TRAINING stamp the ground layer and never compose the
+card that states it. The LAST STAND banner had no `BiomeMechTag()` at all — endless stamps the
+ground and announced it nowhere — and the campaign **FINALE** banner dropped the tag too. Both
+banners patched; the non-campaign modes now get the one-sentence rule on the banner's SUB-line,
+the surface they already have, and only when nothing else has claimed it.
+
+### Smaller items, all declared
+
+* **Double sear.** `OnUnitEnteredTile` ran the fire block and the vent block as two unconditional
+  `if`s, so a tile that was both on fire and a vent charged `BurnDamage` **twice** in one step (a
+  grenade or barrel can light a vent tile: `LightFire` only requires Floor, and a vent is floor).
+  One sear per step now, fire named first. The round was measured WITH the double charge, so its
+  published cost is an upper bound; the fix only ever reduces damage. Pinned by a `doubleSear` leg.
+* **The intel cache is reserved at radius 0** while the doc comment said "all with their rings".
+  Comment corrected rather than the code: the cache is an optional pickup, not a win condition, and
+  a soldier detouring for it may reasonably pay for the ground around it.
+* **No `avoidVent` leash pass.** Fire gets a two-pass VIP leash (an `avoidFire` pass first); vents
+  get score penalties only, and a penalty is not a veto, so the Escort asset can be routed through
+  a vent and seared. C4's archive shows no measurable harm (Escort −0.74 ± 1.99) but "mirroring the
+  existing fire-route term" understated the asymmetry. Recorded, unrepaired.
+* **"The gaps are the fords" is overstated, and there is a mobility cliff under it.** Treating
+  vents as walls, **47/200 (23.5%) of MAGMA boards** have an objective fixture or hostile with no
+  vent-free route — on a quarter of MAGMA missions crossing is *mandatory*. And a vent step costs
+  **8 half-tiles**, exactly a full-mobility soldier's entire single-action walk, so a **wounded**
+  soldier (budget 6) cannot enter one at all; 15 tiles across 200 boards have every walkable
+  neighbour a vent, where a wounded soldier can never move again (it can still shoot, so no stall).
+  The codex now states the real number instead of "costs extra movement".
+* **The CODEX documented three mechanics that did not exist** when `SIGHTLINE_BIOMEMECH=0` — the
+  entries were added unconditionally. Gated. A fourth entry now names the five rooms that have NO
+  ground rule, because a player could not otherwise tell "no rule" from "undocumented".
+* **The briefing card's rule line looked exactly like the three flavour lines** and sat last. It
+  gets a `GROUND — ` prefix and the em dash its neighbours use.
+* **No screenshot hook.** Every comparable visual feature ships one; judging C4 meant hunting
+  seeds. `SIGHTLINE_BIOMESHOT` added (pair with `SIGHTLINE_FORCEBIOME` + `SIGHTLINE_SHOT=760`).
+* **CLAUDE.md's clock-read count was fixed in one place and stale in another** (line 393 still said
+  45). Both now say 46.
+* **Flagged for C5, not mine:** `Hud.DrawThreatCard` draws with raw `Raylib.DrawTextEx` at fixed
+  12/14px, bypassing `Cfg.Text` and the TEXT SIZE setting, which CLAUDE.md forbids explicitly.
+  Pre-existing — W10's FITTEST does not cover this card — but C4 put its longest, most rule-dense
+  strings on it.
+
+### What this addendum does NOT do
+
+1. **It does not re-measure the round.** Instructed not to, and the numbers all reproduced exactly.
+   The consequence is stated plainly and in three places: **the shipped layer is no longer the
+   measured layer** (M1 moved it off plateaus, M2 raised density), so `docs/measurements/c4/` is a
+   pre-fix price and C5 owes it a re-measure before anyone quotes it as the cost of what ships.
+2. **It does not repair the mission-1 concentration**, the mobility cliff, the mandatory-crossing
+   share, or the leash asymmetry. All four are in ROADMAP with their numbers.
+3. **It does not give the five paint biomes a mechanic.** Still declared, still asserted.

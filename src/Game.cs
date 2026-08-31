@@ -1100,7 +1100,12 @@ public partial class Game
         {
             var withRule = new string[BriefLines.Length + 1];
             System.Array.Copy(BriefLines, withRule, BriefLines.Length);
-            withRule[BriefLines.Length] = groundRule;
+            // C4 REVIEW: the rule line was typographically identical to the three FLAVOUR lines
+            // above it and sat last — the one sentence on the card that changes how the fight works
+            // looked exactly like "No colours flying". The card draws every row in one colour, so
+            // the separation has to be lexical: a GROUND — prefix, in the em dash the adjacent
+            // Voice lines use (this line shipped with a hyphen while its neighbours used —).
+            withRule[BriefLines.Length] = "GROUND — " + groundRule;
             BriefLines = withRule;
         }
         BriefTimer = BriefShowSeconds;
@@ -1897,9 +1902,12 @@ public partial class Game
     }
 
     /// Stamp the ground layer for mission `n`. Every tile the layer must not touch is reserved
-    /// first: a unit's own tile and its ring (nobody deploys standing in a fissure), the evac
-    /// zone, the hack terminal, each sabotage charge, the RESCUE cage and the intel cache — all
-    /// with their rings, because those are approach tiles the objective depends on.
+    /// first: a unit's own tile and its ring (nobody deploys standing in a fissure), the evac zone,
+    /// the hack terminal and each sabotage charge, all WITH their rings, because those are approach
+    /// tiles the objective depends on. The INTEL CACHE is the one exception and takes its own tile
+    /// only (`Ring(...,0)`): it is an optional pickup, not a win condition, and a soldier detouring
+    /// for it may reasonably have to pay for the ground around it. The doc comment used to claim
+    /// "all with their rings", which was wrong (C4 review).
     void StampBiomeGround(int n)
     {
         var reserved = new HashSet<(int x, int y)>();
@@ -2194,8 +2202,12 @@ public partial class Game
         // C4 "EIGHT BIOMES ARE PAINT" — stamp this mission's GROUND layer (VERDANT undergrowth /
         // TUNDRA ice / MAGMA vents). Deliberately LAST: the arena, the force, every objective
         // fixture and the intel cache are all final by here, so `reserved` can name every tile the
-        // layer must not cover. Pure derivation from (MapSeed, mission) via Util.Hash3 — ZERO
-        // Util.Rng draws, so the shared stream and the flywheel's CRN pairing are untouched.
+        // layer must not cover. Stamped through Util.Hash3 with ZERO Util.Rng draws, so the shared
+        // stream and the flywheel's CRN pairing are untouched. NOTE (C4 review): `reserved` is
+        // itself derived from unit/fixture positions that Mission.Build drew from Util.Rng, so the
+        // resulting BOARD is a function of (MapSeed, mission, arena, reserved) — not of
+        // (MapSeed, mission) alone. Terrain.Stamp is pure; this call site is not, and that is fine:
+        // zero draws is the invariant, not board-identity across ambient streams.
         StampBiomeGround(n);
         if (Mode == GameMode.Campaign)
         {
@@ -2207,7 +2219,7 @@ public partial class Game
             if (n >= Run.MaxMissions && Objective == Objective.Decapitate)
             {
                 var kf = Combat.MissionFaction;
-                ShowBanner($"FINALE - KILL THE {Run.FinaleBossName(kf).ToUpperInvariant()}", true);
+                ShowBanner($"FINALE - KILL THE {Run.FinaleBossName(kf).ToUpperInvariant()}{BiomeMechTag()}", true);
                 BannerSub = Run.FinaleKitClause(kf);
             }
             else ShowBanner($"MISSION {n} - {Biome.Name}{BiomeMechTag()}{facTag}", false);
@@ -2225,11 +2237,22 @@ public partial class Game
             RevealedVerbs.Clear();
             ApplyReveal(TrainLessons[0].Reveal);
         }
-        else ShowBanner($"LAST STAND - {Biome.Name}", false);   // SpawnEndlessWave already banner'd WAVE 1
+        else ShowBanner($"LAST STAND - {Biome.Name}{BiomeMechTag()}", false);   // SpawnEndlessWave already banner'd WAVE 1
 
         // RESONANCE C1 (VOICE): re-seed the DEDICATED bark stream and clear the per-mission bark
         // budget, then compose the briefing. Voice never touches Util.Rng — see src/Voice.cs.
         Voice.BeginMission(_run?.MapSeed ?? 0, n);
+        // C4 REVIEW (M4) — THE RULE HAS TO REACH EVERY MODE. `BeginBriefing` returns early for
+        // anything but CAMPAIGN, so SKIRMISH, DAILY, LAST STAND and TRAINING stamp the ground layer
+        // and never compose the card that states its rule. The banner tag alone names the mechanic
+        // ("SLICK ICE") without saying what it does. Those modes get the sentence on the banner's
+        // SUB-line instead — the surface they already have — and only when nothing else has claimed
+        // it (TRAINING's "nothing here is saved" and the finale's kit clause both outrank it).
+        if (Mode != GameMode.Campaign && BannerSub == null)
+        {
+            string modeRule = BiomeMechRule();
+            if (modeRule != null) BannerSub = modeRule;
+        }
         _firstBloodSeen = false;
         BeginBriefing(n);
 
@@ -2891,21 +2914,24 @@ public partial class Game
             EnvDamage(mover, Unit.BleedDamage, "BLEED", Pal.RGBA(205, 45, 45));
             if (!mover.Alive) return;
         }
-        if (Grid.IsFire(mover.X, mover.Y))       // stepping into a burning tile sears + ignites
+        // Stepping onto hot ground sears + ignites. C4 REVIEW FIX — the vent branch used to be a
+        // second unconditional `if`, so a tile that was BOTH on fire and a vent (a grenade or a
+        // barrel can light a vent tile: LightFire only requires Floor, and a vent IS floor) charged
+        // Unit.BurnDamage TWICE in one tile entry. One sear per step, fire named first because it
+        // is the transient one. The C4 balance round was measured WITH the double charge, so its
+        // published cost is an upper bound on the layer's; the incidence is tiny (it needs fire and
+        // a vent on the same tile) and the fix only ever reduces damage.
+        bool onFire = Grid.IsFire(mover.X, mover.Y);
+        bool onVent = Grid.IsVent(mover.X, mover.Y);
+        if (onFire || onVent)
         {
-            mover.AddStatus(StatusKind.Burning, 2);
-            EnvDamage(mover, Unit.BurnDamage, "BURN", Pal.RGBA(255, 140, 40));
-            if (!mover.Alive) return;
-        }
-        // C4 / MAGMA — the second half of the fissure's toll. CostMap already charged the
-        // MOVEMENT half (Terrain.VentStepExtra), which is why both the AI and the player's own
-        // path route around a vent unless the crossing is genuinely worth it; this is the HP half.
-        // Symmetric by construction (no Team read), and it uses the same sear+ignite the fire
-        // hazard has used since 3.6 rather than inventing a second burn.
-        if (Grid.IsVent(mover.X, mover.Y))
-        {
-            mover.AddStatus(StatusKind.Burning, Terrain.VentBurnTurns);
-            EnvDamage(mover, Unit.BurnDamage, "VENT", Pal.RGBA(255, 140, 40));
+            // C4 / MAGMA — the second half of the fissure's toll. CostMap already charged the
+            // MOVEMENT half (Terrain.VentStepExtra), which is why both the AI and the player's own
+            // path route around a vent unless the crossing is genuinely worth it; this is the HP
+            // half. Symmetric by construction (no Team read), and it reuses the sear+ignite the
+            // fire hazard has used since 3.6 rather than inventing a second burn.
+            mover.AddStatus(StatusKind.Burning, onFire ? 2 : Terrain.VentBurnTurns);
+            EnvDamage(mover, Unit.BurnDamage, onFire ? "BURN" : "VENT", Pal.RGBA(255, 140, 40));
             if (!mover.Alive) return;
         }
         if (mover.Team == Team.Player)
@@ -3767,9 +3793,15 @@ public partial class Game
         // the fissure would become the safest tile on the board (it also breaks line of sight),
         // which is the dominant-defensive-strategy failure DESIGN.md 3.A forbids. Same caged-VIP
         // exemption for the same reason.
+        // C4 REVIEW FIX: this branch hardcoded `2`, which made Terrain.VentBurnTurns DEAD CODE —
+        // mutating it 2 -> 1 changed nothing and no test could see it. The vent now re-ignites for
+        // its own constant, and BIOMETEST pins the constant's effect rather than its value.
         foreach (var u in Players.Concat(Enemies))
-            if (u.Alive && (Grid.IsFire(u.X, u.Y) || Grid.IsVent(u.X, u.Y)) && !(u == Vip && CaptiveLocked))
-                u.AddStatus(StatusKind.Burning, 2);
+        {
+            if (!u.Alive || (u == Vip && CaptiveLocked)) continue;
+            if (Grid.IsFire(u.X, u.Y)) u.AddStatus(StatusKind.Burning, 2);
+            else if (Grid.IsVent(u.X, u.Y)) u.AddStatus(StatusKind.Burning, Terrain.VentBurnTurns);
+        }
 
         Grid.TickFire();
     }

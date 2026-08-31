@@ -18,7 +18,8 @@ public class Grid
     public int[,] Fire;         // environmental fire: turns remaining a tile burns (hazards)
     public bool[,] Barrel;      // explosive barrel present on a tile (hazards)
     // C4 "EIGHT BIOMES ARE PAINT": what a floor tile is MADE OF (see src/Terrain.cs). Stamped
-    // once per mission from (MapSeed, mission) via Util.Hash3 — zero Util.Rng draws — and read
+    // once per mission via Util.Hash3 — ZERO Util.Rng draws (the property CRN needs), though the
+    // board is keyed on the reserved set too, not on (MapSeed, mission) alone — and read
     // by the three functions BOTH teams already ask for the truth: GetCover, CostMap and
     // HasLineOfSight. NOT persisted (SaveGame never serialises a Grid).
     public GroundKind[,] Ground;

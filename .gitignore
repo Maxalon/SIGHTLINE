@@ -59,6 +59,17 @@ run_chunk0.sh
 battery.sh
 agg.py
 
+# ...BUT a measurement ARCHIVE's runner is the opposite of scratch: it is the evidence that the
+# round is re-runnable, and every archive README in docs/measurements/ promises it is committed.
+# The bare `run_chunk.sh` pattern above silently swallowed it for THREE consecutive waves (C4's
+# review caught the third), each time refuting that promise after the fact. Un-ignore it where it
+# is an artifact, keep ignoring it where it is scratch.
+!docs/measurements/**/run_chunk.sh
+!docs/measurements/**/run_chunk0.sh
+!docs/measurements/**/table.py
+!docs/measurements/**/agg.py
+!docs/measurements/**/battery.sh
+
 # RESONANCE C1 (VOICE) verification artifacts — screenshots + measurement dumps, never committed
 c1_*.png
 *_balance.txt

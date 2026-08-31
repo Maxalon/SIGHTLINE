@@ -25,22 +25,61 @@ python3 docs/measurements/c4/inert_diff.py A.json B.json   # the R0diag
 
 ## 1. THE LADDER — what the mechanic costs, declared
 
-| rung | A: mechanic ON | B: pre-C4 board | Δ | ±SE(Δ) | L3 ladder of record | band floor | verdict |
+| rung | A: mechanic ON | B: pre-C4 board | Δ | chunk-paired SE | chunk-paired t | L3 of record | floor |
 |---|---|---|---|---|---|---|---|
-| heat 0 | **43.8%** | 47.5% | **−3.7** | 5.6 | 47.5 | 47 | **A is 3.2 BELOW the floor** |
-| heat 2 | **30.0%** | 31.2% | **−1.3** | 5.2 | 31.2 | 32 | below by 2.0 (B was below by 0.8) |
-| heat 4 | **25.6%** | 23.8% | **+1.9** | 4.8 | 23.8 | 22 | in band |
+| heat 0 | **43.8%** | 47.5% | **−3.7** | 3.50 | **−1.07** | 47.5 | 47 |
+| heat 2 | **30.0%** | 31.2% | **−1.3** | 6.66 | −0.19 | 31.2 | 32 |
+| heat 4 | **25.6%** | 23.8% | **+1.9** | 3.65 | +0.51 | 23.8 | 22 |
+| pooled | — | — | −1.04 | 2.71 | −0.38 | — | — |
+
+**Read the t column, not a verdict column.** The first version of this table carried
+"A is 3.2 BELOW the floor" in bold. That is a POINT ESTIMATE crossing a threshold, not a measured
+breach: chunk-paired (the two arms of a chunk ran the same slot set, so the chunk difference is the
+paired observation, and 8 chunks per rung is the honest n) heat 0 reads **t = −1.07**. The README's
+own "the round could not resolve it at n=160" was the correct reading all along; the bolded verdict
+was not. Reproduce with `paired_t.py`.
 
 **Arm B reproduces the L3 ladder of record to the decimal on all three rungs** (47.5 / 31.2 /
 23.8). That is the control this wave gets for free and it is worth stating plainly: with the
 flag off, this branch is the same game as `17934ee`, so every point of difference in column A is
 the ground layer and nothing else.
 
-**None of the three deltas reaches its own standard error.** The ladder stays monotone
-(43.8 > 30.0 > 25.6). But heat 0 was sitting *exactly* on its band floor before this wave
-(47.5 vs a floor of 47), so a −3.7 point estimate puts it **3.2 under**. That is declared, not
-buried: the wave did not stay in band at heat 0, and it cannot claim the move is noise either —
-it can only say the round could not resolve it at n=160.
+**Not one rung is resolved.** The ladder stays monotone (43.8 > 30.0 > 25.6). Heat 0 was sitting
+*exactly* on its band floor before this wave (47.5 vs a floor of 47), so the −3.7 point estimate
+puts it under — but at t = −1.07 the round cannot tell that move from zero. What it CAN tell is
+where the cost sits: see §1b.
+
+> ### ⚠ THIS ROUND NO LONGER DESCRIBES WHAT SHIPS.
+> The C4 review pass changed the layer after this round was taken: mechanical ground is no longer
+> stamped on RAISED terrain (it rendered as zero pixels under the opaque plateau top), and density
+> was re-tuned against real boards (VERDANT 12.1% → 17.7%, MAGMA mean 9.7 → 13.0 tiles, TUNDRA
+> 17.2 → 18.3). Every number here is a PRE-FIX number. It remains valid as the price of the layer
+> as measured, and as the proof that arm B is `17934ee`; it is **not** the price of the shipped
+> tree. Re-measure before quoting it as such.
+
+## 1b. WHERE THE COST IS — the opening mission (`aggregate_nodekind.py`)
+
+`byNodeKind` was in every chunk of this archive from the start (W1 put it there) and the wave
+never published it. `Start` is mission 1 — exactly ONE per campaign, so it carries no
+within-campaign clustering, which is why it resolves when the pooled rung does not. Chunk-paired
+over all 24 chunks, MISSION win rate:
+
+| node kind | A | B | paired Δ | SE | **t** | n/arm |
+|---|---|---|---|---|---|---|
+| **Start** (mission 1) | **91.7%** | **96.0%** | **−4.37** | **0.97** | **−4.53** | 480 |
+| Combat | 78.2% | 77.5% | +1.13 | 1.89 | +0.60 | ~490 |
+| Elite | 72.3% | 77.0% | −3.98 | 3.43 | −1.16 | ~240 |
+| Supply | 89.2% | 89.0% | −0.27 | 1.55 | −0.17 | ~280 |
+| Boss | 66.5% | 64.3% | +4.10 | 4.31 | +0.95 | ~245 |
+
+At heat 0 alone: `Start` −4.37, SE 1.75, **t = −2.50** (8 chunks). `byObjective` agrees —
+**Eliminate −3.55, SE 1.12, t = −3.16**, and Eliminate is mission 1's objective in the baseline
+rotation.
+
+> **THE GROUND LAYER'S COST IS CONCENTRATED ON THE OPENING MISSION.** That is the front-loaded
+> anxiety `docs/DESIGN.md` §3.D forbids, and it is the exact failure X2's `Mission.OpenerTrim`
+> exists to prevent. It also points at a cheaper, more targeted lever than any of the three the
+> wave named: **suppress or thin the ground layer on mission 1.** Unpriced.
 
 ## 2. THE CROSS-TAB — which room bought it (CROSSCUT rule 1)
 
@@ -61,16 +100,20 @@ exactly this. Pooled across all three rungs, **mission** win rate:
 | **MECHANICAL (3)** | ★ | 649 | **81.7%** | 669 | **84.9%** | **−3.2** | **2.1** |
 | **PAINT (5, control)** | | 1070 | 81.1% | 1124 | 80.9% | **+0.3** | 1.7 |
 
-**The finding: a SYMMETRIC rule is not a NEUTRAL rule.** All three mechanics point the same way
-and cost the player ~2-4 points of mission win rate on the boards that carry them, while the
-five paint biomes — the built-in control — read **+0.3 ± 1.7**, i.e. flat. The effect is
-confined to exactly the boards with the mechanic, which is what makes the pooled campaign move
-credible even though it is under its own SE.
+**The direction: the mechanical boards moved down, the paint control did not.** Mechanical −3.2
+± 2.1 against paint +0.3 ± 1.7. **This is a direction, not a result.** Chunk-clustered, the
+difference-in-differences is **−3.19 ± 1.98, t = −1.61**, sign test **17/24 chunks negative** —
+not resolved at n=160. And "all three point the same way" is a POOLING ARTIFACT: per rung, only
+**MAGMA** is consistently negative (−2.7 / −4.8 / −5.2); TUNDRA flips positive at h2 (+1.9) and
+VERDANT at h4 (+5.7), and individually TUNDRA (−3.6 ± 3.6) and VERDANT (−1.9 ± 3.5) are
+indistinguishable from zero. The honest sentence is: *the three mechanical boards moved −3.2 ±
+2.1, direction consistent, MAGMA the only biome consistent across rungs, not resolved at n=160.*
 
-*The mechanism, hypothesised and NOT measured:* every one of the three rules makes the exchange
-harder to resolve — undergrowth lowers hit chance, ice widens both sides' reach, a vent both
-blinds and costs to cross — and a longer exchange favours the side with more bodies, which at
-every rung is the enemy. Nothing in this round tests that; it is the next wave's question.
+*The mechanism the wave hypothesised is REFUTED in this same archive.* It proposed that each rule
+makes the exchange harder to resolve and that a longer exchange favours the side with more bodies.
+Per-biome `avgTurns` from the instrumented A arm: MAGMA 6.36, TUNDRA 6.18, VERDANT 5.58 — against
+paint biomes ranging 5.36 (STEEL) to **6.47 (VOID)**. The longest-fight biome in the batch has no
+mechanic at all. Whatever is happening, it is not that.
 
 *Caveat on the control:* the paint rows are not a clean control, because a run mauled on a MAGMA
 mission arrives at the next (paint) mission weaker. They read flat anyway.
@@ -119,6 +162,10 @@ claim is made about either.
   for the per-biome table.
 * `C4diag-{A,B}-h0-b0.json` — the R0diag pair.
 * `run_chunk.sh` / `run_round.sh` / `run_round_i.sh` / `aggregate.py` / `aggregate_biome.py` /
-  `inert_diff.py` — the exact command lines, committed so the round is re-runnable.
+  `aggregate_nodekind.py` / `paired_t.py` / `inert_diff.py` — the exact command lines, committed
+  so the round is re-runnable. **`run_chunk.sh` was NOT committed on the first pass**: a bare
+  `run_chunk.sh` pattern in `.gitignore` swallowed it, refuting this line, for the third
+  consecutive wave. `.gitignore` now carries `!docs/measurements/**/run_chunk.sh` so an archive's
+  runner can never be silently dropped again.
 * Raw `.log` / `.report.txt` are NOT archived (they are a slice of the JSON and `*.log` is
   gitignored); every number above is derivable from the committed JSONs by the committed scripts.

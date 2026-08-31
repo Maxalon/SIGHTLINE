@@ -271,9 +271,11 @@ src/
   Game.Harness.cs    every Debug*/*SelfTest env-gated hook (headless-only)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
   Terrain.cs    C4: the per-tile biome GROUND layer (VERDANT undergrowth / TUNDRA ice /
-                MAGMA vents). Stamped from (MapSeed,mission) via Hash3 — zero Util.Rng
-                draws, NOT persisted. Read by Grid.GetCover/CostMap/HasLineOfSight, so
-                both teams get it from the same truth. SIGHTLINE_BIOMEMECH=0 = pre-C4.
+                MAGMA vents). Stamped through Hash3 with ZERO Util.Rng draws (Stamp is
+                pure; the BOARD also keys on the reserved set, so it is NOT a function of
+                (MapSeed,mission) alone). NOT persisted. Read by Grid.GetCover / CostMap /
+                HasLineOfSight, so both teams get it from one truth.
+                SIGHTLINE_BIOMEMECH=0 = the pre-C4 board, exactly.
   Unit.cs       Unit + Weapon + enums (Team/WeaponKind); per-weapon range curves
   Combat.cs     ComputeOdds (hit/crit/dmg) + Resolve (rolls a shot)
   Ai.cs         enemy planner: score reachable tiles for cover+LoF, flank, finish
@@ -388,7 +390,7 @@ docs/screenshot.png    README image
   default. Never gate anything on a screenshot
   hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real determinism gate**. Keep new
   persistent/random/post-FX work behind the `NoPersist`/Display gates so that stays true.
-  **If you write a test that reads PIXELS, pin the clock**: `Renderer.cs`'s 45 reads all go
+  **If you write a test that reads PIXELS, pin the clock**: `Renderer.cs`'s 46 reads all go
   through `Renderer.Now()`, which returns the real clock unless the harness-only
   `Renderer.TimePin` is set to a fixed t (`SIGHTLINE_BOARDTEST` does; it is the only reason
   that probe prints one number per run). Restore it to `-1` when you are done.
@@ -545,12 +547,17 @@ cross), MAGMA THERMAL VENTS (opaque like smoke, dear to cross, and it burns). Sy
 structural — every rule lives in `Grid.GetCover` / `Grid.CostMap` / `Grid.HasLineOfSight`, the
 functions both sides already ask for the truth, so `Ai.cs` cannot play the old game.
 **The other five are still paint and BIOMETEST asserts it.** Priced CRN-paired (base `17934ee`,
-n=160/rung/arm, `docs/measurements/c4/`): the flag-off arm reproduces the L3 ladder to the decimal,
-and **heat 0 moves 47.5 → 43.8, landing 3.2 under its band floor** (−3.7 ± 5.6 — inside its own SE,
-so unresolved, not "noise"). Its per-biome cross-tab is the finding to carry forward: **a symmetric
-rule is not a neutral rule** — the three mechanical biomes read −3.2 ± 2.1 in mission win rate
-against a flat +0.3 ± 1.7 paint control. `SIGHTLINE_BIOMEMECH=0` restores the pre-C4 board exactly.
-DEVLOG §C4.
+n=160/rung/arm, `docs/measurements/c4/`): the flag-off arm reproduces the L3 ladder to the decimal.
+**heat 0 reads 43.8 against 47.5, a −3.7 point estimate that crosses the band floor of 47 but is
+NOT a measured breach** (chunk-paired t = −1.07). The one cell the round CAN resolve is the opening
+mission: `byNodeKind` **Start −4.37, chunk-paired SE 0.97, t = −4.53 (n=480/arm)** — the layer's
+cost is concentrated on mission 1, which is the front-loaded anxiety DESIGN.md §3.D forbids and
+X2's `Mission.OpenerTrim` exists to prevent. Direction across the three mechanical biomes is
+consistent (−3.2 ± 2.1 mission win rate against a flat +0.3 ± 1.7 paint control) but is **not
+resolved at n=160** (DiD t = −1.61); only MAGMA is negative at every rung.
+**The shipped layer is NOT the measured layer** — the review pass moved it off plateaus and
+re-tuned density, so the ladder above is a pre-fix number and C5 owes it a re-measure.
+`SIGHTLINE_BIOMEMECH=0` restores the pre-C4 board exactly. DEVLOG §C4.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

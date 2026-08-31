@@ -27,8 +27,12 @@ seeds (mix of WIN/LOSE, no exceptions):
   **MAGMA — THERMAL VENTS:** a steaming fissure BLOCKS LINE OF SIGHT like smoke (it joins `Grid.IsVapor`, not
   the terrain — it gives no cover at all), forcing a crossing costs extra movement, and touching one sears +
   ignites you; the gaps in the crack are the FORDS, and parking on a vent keeps you burning. The layer is
-  stamped once per mission from `(MapSeed, mission)` through `Util.Hash3` — zero `Util.Rng` draws, not
-  persisted — with a hard per-biome tile budget. Legible on five surfaces: the board material (value-carried +
+  stamped once per mission through `Util.Hash3` with **zero `Util.Rng` draws** and is not persisted;
+  `Terrain.Stamp` is pure, though the resulting BOARD also keys on the reserved set (unit and
+  fixture positions), so it is not a function of `(MapSeed, mission)` alone. Never stamped on RAISED
+  terrain — a plateau top is painted opaque over the ground layer, so ground there would be a rule
+  with no pixels. Hard per-biome tile budget; real-board density is pinned by BIOMETEST and printed
+  in every sweep (VERDANT ~35 tiles / TUNDRA ~18 / MAGMA ~13 of 198). Legible on five surfaces: the board material (value-carried +
   rimmed, colorblind-safe), the mission banner tag, the briefing card's one-sentence rule, the shot tooltip /
   hover threat card, and the CODEX FIELD CRAFT tab. `SIGHTLINE_BIOMETEST`; `SIGHTLINE_BIOMEMECH=0` restores the
   pre-C4 board exactly. Priced CRN-paired at n=160/rung/arm — see DEVLOG §C4 for the declared heat-0 move.

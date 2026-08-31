@@ -37,9 +37,15 @@ public enum GroundKind
 /// so `Ai.cs` and `Combat.cs` cannot play the old game on the new board. Nothing here reads
 /// `a.Team`.
 ///
-/// DETERMINISM: every tile is derived from (MapSeed, mission) through `Util.Hash3`. ZERO draws
-/// from `Util.Rng` and no `System.Random`, so `SIGHTLINE_PAIRTEST` stays byte-identical and the
-/// balance flywheel's CRN pairing is untouched.
+/// DETERMINISM — the accurate statement, after the C4 review REFUTED the first one.
+/// `Terrain.Stamp` itself is a pure function of (grid, biome, seed, mission, reserved) through
+/// `Util.Hash3`: it takes ZERO draws from `Util.Rng` and uses no `System.Random`, which is the
+/// property CRN pairing and `SIGHTLINE_PAIRTEST` actually need, and it is independently proven.
+/// But the BOARD is NOT a function of (MapSeed, mission) alone: `Game.StampBiomeGround` passes a
+/// `reserved` set built from unit and fixture positions, and those come out of `Util.Rng` inside
+/// `Mission.Build`. Holding (MapSeed=424242, mission=3) fixed and varying only the ambient stream
+/// produced 10-11 DISTINCT stamped boards. Nothing depends on the stronger claim — say the true
+/// one: zero draws, regenerated per mission, exactly like the arena itself.
 public static class Terrain
 {
     /// Master gate (SIGHTLINE_BIOMEMECH=0 turns the whole layer off, for the A/B measurement and
@@ -69,8 +75,19 @@ public static class Terrain
     // ---- MAGMA: THERMAL VENTS ----------------------------------------------------------
     // A vent is opaque (steam — it blocks sight exactly like smoke, for BOTH teams and for the
     // commanding see-over-high shooter), dear to force a crossing through, and hot.
-    public const int VentStepExtra = 6;    // extra half-tiles added to the step onto a vent
-    public const int VentBurnTurns = 2;    // Burning applied to whoever touches one
+    // NOT const: SIGHTLINE_BIOMETEST zeroes it to ISOLATE Ai.cs's own vent term from this toll
+    // (the reviewer showed the composite leg passed with the Ai term at 0, at -1 and even INVERTED
+    // to +200, because CostMap alone was carrying it). Gameplay never writes it.
+    // BOUND, and it is load-bearing: an orthogonal vent step costs 2 + this = 8 half-tiles, which is
+    // EXACTLY a full-mobility (4) soldier's single-action budget. At 7 a vent is uncrossable by
+    // anyone; BIOMETEST asserts the literal 8, so raising it fails loudly instead of silently
+    // turning the fissure into a wall. A WOUNDED soldier (budget 6) already cannot enter one --
+    // that is a declared consequence, not an accident (DEVLOG C4 addendum).
+    public static int VentStepExtra = 6;   // extra half-tiles added to the step onto a vent
+    // static, not const, for the same reason VentStepExtra is: a const folds at compile time, so
+    // BIOMETEST's literal pin on it became UNREACHABLE CODE (a 0-warning build caught that) and
+    // could never have failed. A tuning number a test asserts must be readable at runtime.
+    public static int VentBurnTurns = 2;   // Burning turns applied to whoever touches a vent
 
     /// The board-space tag shown beside the biome name in the mission banner ("VERDANT ·
     /// UNDERGROWTH"), or null for the five biomes that are still paint.
@@ -121,6 +138,17 @@ public static class Terrain
         {
             if (budget <= 0) return false;
             if (!grid.IsFloor(x, y)) return false;                  // floor only; barrels excluded
+            // C4 REVIEW (M1) — NEVER stamp onto RAISED terrain. `IsFloor` is `Tiles==Floor &&
+            // !Barrel` and has never looked at `Height`, so the layer used to land on plateaus —
+            // where `Renderer.DrawElevation` paints the plateau top with a FULLY OPAQUE rect,
+            // offset by -lift, AFTER `DrawGround`. Fern and ice on a plateau therefore rendered as
+            // literally ZERO pixels: a soldier could stand on raised undergrowth and take
+            // omnidirectional low cover with NO mark on the board. That is the invisible
+            // unfairness this whole wave exists to avoid, and it is worse than no mechanic.
+            // Excluded at the SOURCE rather than repaired in the renderer, because a plateau is
+            // already a distinct tactical surface with its own rule (high ground sees over low
+            // cover) and stacking a second ground rule on it is muddier than keeping them apart.
+            if (grid.HeightAt(x, y) > 0) return false;
             if (grid.Ground[x, y] != GroundKind.None) return false;
             if (reserved != null && reserved.Contains((x, y))) return false;
             return true;
@@ -141,20 +169,30 @@ public static class Terrain
     /// wide or it is just a decorated tile.
     static void StampPatches(Grid grid, int s, GroundKind kind, Action<int, int, GroundKind> put)
     {
-        // Tuned to land ~18-22% of the 198-tile board under fern: enough that "stand in the
-        // undergrowth" is a live option on most turns, far short of a board where cover stops
-        // meaning anything. BIOMETEST's groundFlood guard pins the ceiling.
-        int n = 3 + HI(s, 0, 11, 2);                       // 3..4 patches
+        // C4 REVIEW (M2) — TUNED AGAINST REAL BOARDS, NOT AN OPEN GRID. The first cut was tuned on
+        // `OpenGrid()` (all floor, nothing reserved) and this comment claimed "~18-22% of the
+        // 198-tile board". On real `SetupMission` boards — where cover, barrels, plateaus, units
+        // and objective rings eat a large share of every patch — it SHIPPED at 12.1% (mean 23.99
+        // tiles, measured over the wave's own 24 instrumented chunks), and a mission-6 capture
+        // showed a "patch" that was five separate single tiles. That contradicted this file's own
+        // rationale two lines down. Patch count and lobe count are both raised so a patch survives
+        // the board it is actually stamped on.
+        // MEASURED ON REAL BOARDS AFTER THE RE-TUNE (BIOMETEST prints these every sweep, so the
+        // number in this comment can never drift from the shipped one again):
+        //   VERDANT mean 35.0 tiles (19-44) = 17.7% of 198  |  TUNDRA 18.3 (10-34) = 9.2%
+        //   MAGMA   mean 13.0 tiles (7-20)  =  6.6%
+        int n = 4 + HI(s, 0, 11, 2);                       // 4..5 patches
         for (int i = 0; i < n; i++)
         {
             float px = 2f + H(s, i, 21) * (grid.W - 4f);
             float py = 1f + H(s, i, 22) * (grid.H - 2f);
             float ang = H(s, i, 23) * MathF.Tau;
-            int lobes = 2 + HI(s, i, 24, 2);               // 2..3 lobes
+            int lobes = 3 + HI(s, i, 24, 2);               // 3..4 lobes
             for (int k = 0; k < lobes; k++)
             {
                 int cx = (int)MathF.Round(px), cy = (int)MathF.Round(py);
-                int r = 1 + (H(s, i, 40 + k) < 0.20f ? 1 : 0);   // radius 1, sometimes 2
+                int r = 1 + (H(s, i, 40 + k) < 0.34f ? 1 : 0);   // radius 1, often 2 (a patch has to
+                                                                 // survive the cover on a real board)
                 for (int dx = -r; dx <= r; dx++)
                     for (int dy = -r; dy <= r; dy++)
                         if (Math.Abs(dx) + Math.Abs(dy) <= r) put(cx + dx, cy + dy, kind);
@@ -225,11 +263,17 @@ public static class Terrain
             // the squad's left-to-right axis rather than lying along it
             float ang = (H(s, i, 43) < 0.5f ? MathF.PI * 0.5f : -MathF.PI * 0.5f)
                         + (H(s, i, 44) - 0.5f) * 1.5f;
-            int len = 10 + HI(s, i, 45, 5);                // 10..14 steps each
+            int len = 13 + HI(s, i, 45, 5);                // 13..17 steps each (real boards eat ~a third)
             for (int k = 0; k < len; k++)
             {
                 int cx = (int)MathF.Round(px), cy = (int)MathF.Round(py);
-                if (H(s, i, 200 + k) >= 0.18f) put(cx, cy, GroundKind.Vent);   // ~18% of steps are FORDS
+                // C4 REVIEW (M2): DELIBERATE fords cut to ~8%. On an open grid 18% read as a line
+                // with gaps; on a REAL board cover, barrels and reserved rings already eat a large
+                // share of the walk, and the two gap sources COMPOUNDED — measured mean 9.66 vents
+                // over two walkers, i.e. ~4.8 per crack, which on some seeds is eight isolated
+                // singles rather than a fissure. The involuntary gaps ARE the fords now; the
+                // deliberate ones only stop the crack becoming a perfect wall.
+                if (H(s, i, 200 + k) >= 0.08f) put(cx, cy, GroundKind.Vent);
                 // Wander kept LOW (0.55, vs 0.85 for a drift). The first MAGMA capture walked at
                 // 0.9 and — after cover tiles ate a third of the steps — produced ten scattered
                 // singles rather than a crack. A fissure has to read as a LINE or the sight-block

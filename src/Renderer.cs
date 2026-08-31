@@ -666,6 +666,16 @@ public static class Renderer
                     }
                     case AmbientKind.Snow:    // TUNDRA — pale frost sheen (cool diagonal light streaks)
                     {
+                        // C4 REVIEW (M3): ONE MOTIF, ONE MEANING — applied properly this time. The
+                        // frost sheen is a PAIRED PALE DIAGONAL HAIRLINE (210,232,248 @0.18) and the
+                        // drift's mechanical fracture is a PALE DIAGONAL HAIRLINE (226,244,255
+                        // @0.34): the same motif, two thirds of a stop apart, on ~55% of floor
+                        // tiles. C4's first cut only skipped the signature ON a mechanical tile,
+                        // which stopped the double-draw and left the decoy everywhere else. Killed
+                        // board-wide when the board carries ice, exactly as the MAGMA vein is killed
+                        // when it carries vents. A pale diagonal on a TUNDRA board now means one
+                        // thing: you are looking at the fast lane.
+                        if (Terrain.Enabled && g.Grid.AnyIce) break;
                         if (SHash(gx, gy, 21) > 0.55f) break;
                         var frost = Pal.RGBA(210, 232, 248);
                         float off = SHash(gx, gy, 23) * r.Width * 0.5f;
@@ -2726,7 +2736,11 @@ public static class Renderer
                     // scattered decoration — the first capture had blades and no edge, and at a
                     // squint that photographs as texture, not as a place you can decide to stand in.
                     Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(8, 24, 12), 0.60f));
-                    Color edgeC = cb ? Pal.RGBA(206, 216, 188) : Pal.RGBA(142, 210, 130);
+                    // C4 REVIEW (M3): (142,210,130) sat on Pal.Good (74,222,128) — the hue this
+                    // palette reserves for "a bonus / an available action", against DESIGN.md 3.H's
+                    // one-accent-one-job. Pulled to a desaturated OLIVE: still unmistakably plant,
+                    // no longer the pip green. Value contrast (what carries the read) is unchanged.
+                    Color edgeC = cb ? Pal.RGBA(206, 216, 188) : Pal.RGBA(178, 198, 108);
                     if (!gr.IsFoliage(x - 1, y)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height), 2.0f, Raylib.Fade(edgeC, 0.40f));
                     if (!gr.IsFoliage(x + 1, y)) Raylib.DrawLineEx(new Vector2(r.X + r.Width, r.Y), new Vector2(r.X + r.Width, r.Y + r.Height), 2.0f, Raylib.Fade(edgeC, 0.40f));
                     if (!gr.IsFoliage(x, y - 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y), 2.0f, Raylib.Fade(edgeC, 0.40f));
@@ -2751,10 +2765,20 @@ public static class Renderer
                     // you can trace with your eye and the move overlay visibly bulges along it.
                     Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(196, 224, 240), 0.14f));   // C4 review: the first capture put the drift at the same value as TUNDRA cover; the plate is now OUTLINE-led (rim 0.42 -> 0.58) so cover keeps the top of the value hierarchy
                     Color rim = Pal.RGBA(226, 244, 255);
+                    // C4 REVIEW (M3): an ISOLATED ice tile has no ice neighbour, so it drew all
+                    // FOUR edges — a complete bright box on the tile grid, which is the game's
+                    // cursor/selection language and reads as "this tile is selected". A lone tile
+                    // keeps its fill + fracture and gives up the outline; the rim exists to trace
+                    // the boundary of a LANE, and a single tile has no lane to trace.
+                    bool loneIce = !gr.IsIce(x - 1, y) && !gr.IsIce(x + 1, y)
+                                   && !gr.IsIce(x, y - 1) && !gr.IsIce(x, y + 1);
+                    if (!loneIce)
+                    {
                     if (!gr.IsIce(x - 1, y)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height), 1.6f, Raylib.Fade(rim, 0.58f));
                     if (!gr.IsIce(x + 1, y)) Raylib.DrawLineEx(new Vector2(r.X + r.Width, r.Y), new Vector2(r.X + r.Width, r.Y + r.Height), 1.6f, Raylib.Fade(rim, 0.58f));
                     if (!gr.IsIce(x, y - 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y), 1.6f, Raylib.Fade(rim, 0.58f));
                     if (!gr.IsIce(x, y + 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y + r.Height), new Vector2(r.X + r.Width, r.Y + r.Height), 1.6f, Raylib.Fade(rim, 0.58f));
+                    }
                     for (int i = 0; i < 2; i++)
                     {
                         float ax = r.X + 6f + GH(x, y, 600 + i) * (Cfg.Tile - 12f);
@@ -2775,6 +2799,13 @@ public static class Renderer
                     // a crevasse: the tile drops into shadow, a jagged hot seam runs through it, and
                     // (in DrawVentSteam, above the figures) a steam column says "you cannot see
                     // across this". Value carries all three reads.
+                    // C4 REVIEW — the CB claim, corrected. Measured seam-vs-floor luminance on the
+                    // same tile and seed: colour +145.5/-28.9, SIGHTLINE_CB=1 +141.0/-28.9. Value
+                    // legibility is IDENTICAL and marginally lower in CB, so "more legible in CB"
+                    // was wrong. What is true is HUE SEPARATION: in colour the seam sits inside
+                    // MAGMA's own warm palette, near the barrel and cache amber; the CB cream is a
+                    // hue the room does not otherwise contain. Both pass; VERDANT is the biome that
+                    // genuinely improves under CB.
                     Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(6, 4, 4), 0.62f));
                     // rim, same device as the fern mat and the drift: the tile has a BOUNDARY, so
                     // "which tiles are hot" is a question the board answers rather than the tooltip.
