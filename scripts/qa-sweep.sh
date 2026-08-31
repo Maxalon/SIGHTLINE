@@ -83,6 +83,7 @@ echo -n "CONTRACTTEST: "; verdict "$(SIGHTLINE_CONTRACTTEST=1 run | grep -oE "CO
 echo -n "SHOVETEST  : "; verdict "$(SIGHTLINE_SHOVETEST=1 run | grep -oE "SHOVETEST: (PASS|FAIL)" | head -1)"
 echo -n "CONCEALTEST: "; verdict "$(SIGHTLINE_CONCEALTEST=1 run | grep -oE "CONCEALTEST: (PASS|FAIL)" | head -1)"
 echo -n "HAZARDTEST : "; verdict "$(SIGHTLINE_HAZARDTEST=1 run | grep -oE "HAZARDTEST: (PASS|FAIL)" | head -1)"
+echo -n "BIOMETEST  : "; verdict "$(SIGHTLINE_BIOMETEST=1 run | grep -oE "BIOMETEST: (PASS|FAIL)" | head -1)"
 echo -n "BENCHTEST  : "; verdict "$(SIGHTLINE_BENCHTEST=1 run | grep -oE "BENCHTEST: (PASS|FAIL)" | head -1)"
 echo -n "DRAFTTEST  : "; verdict "$(SIGHTLINE_DRAFTTEST=1 run | grep -oE "DRAFTTEST: (PASS|FAIL)" | head -1)"
 echo -n "METATEST   : "; verdict "$(SIGHTLINE_METATEST=1 run | grep -oE "METATEST: (PASS|FAIL)" | head -1)"

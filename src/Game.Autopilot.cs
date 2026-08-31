@@ -1611,6 +1611,11 @@ public partial class Game
     {
         float threat = 0f;
         if (Grid.IsFire(x, y)) threat += 20f;   // never voluntarily end a move standing in fire (hazards)
+        // C4 / MAGMA: the same price the enemy planner pays for ending on a thermal vent, on the
+        // same scale as this function's other hazard terms — so the balance bot does not walk the
+        // squad into the fissure and hand the wave a win-rate drop that is a BOT defect, not a
+        // design consequence. Smaller than fire's 20 because a vent is a toll, not a trap.
+        if (Grid.IsVent(x, y)) threat += 12f;
         if (InSiegeZone(x, y)) threat += 30f;   // a charged SIEGE strike WILL land here -> vacate (cover-ignoring)
         // FUL-8 PIKEMAN: a live enemy BRACE lane costs a TURN (stagger), not a life — weighted between
         // an exposed gun (~6-10) and the siege zone's 30, so the bot paths around it, not through it.

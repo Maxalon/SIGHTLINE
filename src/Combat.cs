@@ -32,6 +32,9 @@ public struct ShotOdds
     public bool HighGround;  // attacker fires from raised terrain onto a lower foe
     public bool SeesOver;    // high ground negates the target's LOW cover
     public bool Partial;     // diagonal-at-range: target only partly obscured (half cover)
+    public bool Foliage;     // C4/VERDANT: the target's cover is UNDERGROWTH — omnidirectional, and
+                             // gone the moment you close inside Terrain.FoliageMinDist. The HUD says
+                             // so, because "LOW COVER" on a tile with no block beside it is a lie.
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
     public bool Ambush;      // attacker fired from concealment (one-shot bonus)
     public bool ExposedFire; // target fired last turn and stayed put — exposed by fire (HORIZON W1)
@@ -460,6 +463,9 @@ public static class Combat
             DmgMax = a.Weapon.DmgMax,
             CoverLevel = coverLevel,
             CoverDef = coverDef,          // C2: the exact subtraction above — see AsIfExposed
+            // C4: only true when the cover the defender is ACTUALLY getting is the fern mat — a
+            // shield arc or a see-over both clear it below/above, so it can never mislabel a block.
+            Foliage = cover.Foliage && !seesOver && coverLevel == 1,
             Flanked = flanked,
             Hunkered = d.Hunkered,
             HighGround = highGround,

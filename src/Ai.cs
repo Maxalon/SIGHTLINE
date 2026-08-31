@@ -670,6 +670,14 @@ public static class Ai
             if (cover.Flanked) score -= 25;
             score -= actionsToReach * 6;                         // prefer cheaper moves slightly
             if (g.Grid.IsFire(tx, ty)) score -= 60;              // never voluntarily stand in fire (hazards)
+            // C4 / MAGMA — the enemy must not park on a thermal vent. The penalty is deliberately
+            // SMALLER than fire's 60 and smaller than the 100+bestHit a shot is worth: a vent is a
+            // price, not a wall, so a hostile that can only reach a killing angle by standing on
+            // the crack will still take it and eat the burn. That is the same bet the player is
+            // offered. (The MOVEMENT half of the toll is already in Grid.CostMap, so `reach` here
+            // has priced the crossing before this loop ever sees the tile; this term is only about
+            // ENDING the move there.)
+            if (g.Grid.IsVent(tx, ty)) score -= 34;
             // wariness of an explosive barrel the squad could shoot to catch it in the blast
             for (int bdx = -1; bdx <= 1; bdx++)
                 for (int bdy = -1; bdy <= 1; bdy++)

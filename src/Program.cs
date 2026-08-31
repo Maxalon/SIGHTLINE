@@ -155,6 +155,12 @@ public static class Program
         // pre-C2 opponent exactly (constant term, no decline gate). See docs/measurements/c2/.
         string aiDeclineEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIDECLINE");
         if (aiDeclineEnv == "1") Game.AiDecline = true; else if (aiDeclineEnv == "0") Game.AiDecline = false;
+        // C4 "EIGHT BIOMES ARE PAINT" — SIGHTLINE_BIOMEMECH=0/1: the biome GROUND layer (VERDANT
+        // undergrowth / TUNDRA slick ice / MAGMA thermal vents). =0 restores the pre-C4 board
+        // EXACTLY (Terrain.Enabled gates the stamper AND every Grid predicate), which is both the
+        // A/B lever for the CRN round and the "watch your own test fail" proof for BIOMETEST.
+        string biomeMechEnv = Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEMECH");
+        if (biomeMechEnv == "1") Terrain.Enabled = true; else if (biomeMechEnv == "0") Terrain.Enabled = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -804,6 +810,17 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BIOMETEST=1 : C4 "EIGHT BIOMES ARE PAINT" — the biome GROUND layer. Pins the
+        // MECHANIC'S EFFECT (cover level, hit%, Dijkstra cost, line-of-sight verdict, HP, the AI's
+        // chosen destination) on constructed boards, not the presence of a field. Reads the ambient
+        // Terrain.Enabled on purpose, so SIGHTLINE_BIOMEMECH=0 makes it FAIL.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BIOMETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "biometest");   // Unit.SyncPos + Ai.Plan use tile->px math
+            Console.WriteLine(new Game().BiomeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_COVERTEST=1 : destructible-cover degrade chain (item 3.6). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COVERTEST") == "1")
         {
@@ -1127,6 +1144,9 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_MARKERS") == "1") game.DebugMarkers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
+        // C4: the biome GROUND layer. Pair with SIGHTLINE_FORCEBIOME=2|3|7 (TUNDRA/VERDANT/MAGMA)
+        // and SIGHTLINE_SHOT=760; add SIGHTLINE_CB=1 for the colorblind pass.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BIOMESHOT") == "1") game.DebugBiomeShot();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_THREATSHOT") == "1") game.DebugThreatShot();      // RESONANCE T2: incoming-fire pips + tinted path + card (pair with SIGHTLINE_CB=1)

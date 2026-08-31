@@ -290,6 +290,12 @@ src/
   Game.Autopilot.cs  SmartStep/AutoStep balance + smoke-test AI (headless-only)
   Game.Harness.cs    every Debug*/*SelfTest env-gated hook (headless-only)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
+  Terrain.cs    C4: the per-tile biome GROUND layer (VERDANT undergrowth / TUNDRA ice /
+                MAGMA vents). Stamped through Hash3 with ZERO Util.Rng draws (Stamp is
+                pure; the BOARD also keys on the reserved set, so it is NOT a function of
+                (MapSeed,mission) alone). NOT persisted. Read by Grid.GetCover / CostMap /
+                HasLineOfSight, so both teams get it from one truth.
+                SIGHTLINE_BIOMEMECH=0 = the pre-C4 board, exactly.
   Unit.cs       Unit + Weapon + enums (Team/WeaponKind); per-weapon range curves
   Combat.cs     ComputeOdds (hit/crit/dmg) + Resolve (rolls a shot)
   Ai.cs         enemy planner: score reachable tiles for cover+LoF, flank, finish
@@ -416,12 +422,13 @@ docs/screenshot.png    README image
   reseeds explicitly (`Util.Reseed(50000+slot)`), so **paired measurement** is
   reproducible. **Screenshots are NOT byte-identical** and never were: two
   `SIGHTLINE_SHOT=90` runs measurably differ in ~30% of pixels (measured 303,065 of
-  1,024,000 px), because 56 wall-clock reads drive animation (45 in `Renderer.cs`, 11 in
-  `Hud.cs` — counted, the old "58 / 46 / 12" here was off) and `Util.Rng` is clock-seeded by
+  1,024,000 px), because 57 wall-clock reads drive animation (46 in `Renderer.cs` — C4 added
+  one, shared by `DrawGround`/`DrawVentSteam` — and 11 in
+  `Hud.cs`; counted, the old "58 / 46 / 12" here was off) and `Util.Rng` is clock-seeded by
   default. Never gate anything on a screenshot
   hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real determinism gate**. Keep new
   persistent/random/post-FX work behind the `NoPersist`/Display gates so that stays true.
-  **If you write a test that reads PIXELS, pin the clock**: `Renderer.cs`'s 45 reads all go
+  **If you write a test that reads PIXELS, pin the clock**: `Renderer.cs`'s 46 reads all go
   through `Renderer.Now()`, which returns the real clock unless the harness-only
   `Renderer.TimePin` is set to a fixed t (`SIGHTLINE_BOARDTEST` does; it is the only reason
   that probe prints one number per run). Restore it to `-1` when you are done. **The CHROME has
@@ -710,6 +717,26 @@ ROADMAP order: the opener overshot and must be backed out with a re-measured lad
 has no camping policy, so turtling is UNMEASURABLE rather than unmeasured; and the reward is still
 not priced (`MissionNode.Intel` is blind to the class, so a PITCHED node pays a TASKED node's
 rate).** Rationale and its cost: `docs/DESIGN.md` §5.2; detail `docs/DEVLOG.md` §C3.
+
+**PROGRAM CONTOUR — wave C4 "EIGHT BIOMES ARE PAINT" (2026-08-30)** ended the standing gap that
+`grep -ci biome` returned **0** in `Combat.cs`/`Ai.cs`/`Grid.cs`/`Unit.cs`. `src/Terrain.cs` adds a
+per-tile GROUND layer and **three of eight biomes now change the fight, on three axes**: VERDANT
+UNDERGROWTH (low cover from every angle, but only past 2 tiles), TUNDRA SLICK ICE (half a step to
+cross), MAGMA THERMAL VENTS (opaque like smoke, dear to cross, and it burns). Symmetry is
+structural — every rule lives in `Grid.GetCover` / `Grid.CostMap` / `Grid.HasLineOfSight`, the
+functions both sides already ask for the truth, so `Ai.cs` cannot play the old game.
+**The other five are still paint and BIOMETEST asserts it.** Priced CRN-paired (base `17934ee`,
+n=160/rung/arm, `docs/measurements/c4/`): the flag-off arm reproduces the L3 ladder to the decimal.
+**heat 0 reads 43.8 against 47.5, a −3.7 point estimate that crosses the band floor of 47 but is
+NOT a measured breach** (chunk-paired t = −1.07). The one cell the round CAN resolve is the opening
+mission: `byNodeKind` **Start −4.37, chunk-paired SE 0.97, t = −4.53 (n=480/arm)** — the layer's
+cost is concentrated on mission 1, which is the front-loaded anxiety DESIGN.md §3.D forbids and
+X2's `Mission.OpenerTrim` exists to prevent. Direction across the three mechanical biomes is
+consistent (−3.2 ± 2.1 mission win rate against a flat +0.3 ± 1.7 paint control) but is **not
+resolved at n=160** (DiD t = −1.61); only MAGMA is negative at every rung.
+**The shipped layer is NOT the measured layer** — the review pass moved it off plateaus and
+re-tuned density, so the ladder above is a pre-fix number and C5 owes it a re-measure.
+`SIGHTLINE_BIOMEMECH=0` restores the pre-C4 board exactly. DEVLOG §C4.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

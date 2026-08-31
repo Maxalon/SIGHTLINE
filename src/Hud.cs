@@ -2114,6 +2114,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         if (o.Hunkered)  flags.Add(("HUNKERED", "-25 aim, no crit", Pal.Foe)); // target dug in
         if (o.CoverLevel == 2 && !o.Partial) flags.Add(("HIGH COVER", "-40 aim", Pal.Foe));
         else if (o.CoverLevel == 2 && o.Partial) flags.Add(("PARTIAL HIGH COVER", "-20 aim", Pal.Foe));
+        // C4/VERDANT: name the fern for what it is. "LOW COVER" on a tile with no block beside it
+        // reads as a bug; UNDERGROWTH plus the distance clause is the whole rule in one badge, and
+        // it tells the player the counter (close inside 2 tiles and it is worth nothing).
+        else if (o.CoverLevel == 1 && !o.Partial && o.Foliage)
+            flags.Add(("UNDERGROWTH", $"-20 aim past {Terrain.FoliageMinDist}", Pal.Foe));
         else if (o.CoverLevel == 1 && !o.Partial) flags.Add(("LOW COVER", "-20 aim", Pal.Foe));
         else if (o.CoverLevel == 1 && o.Partial)  flags.Add(("PARTIAL LOW COVER", "-10 aim", Pal.Foe));
         if (o.CoverLevel == 0 && !o.Hunkered) flags.Add(("EXPOSED", "+18 crit", Pal.Good));
@@ -2414,6 +2419,18 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         if (c.Watched)
             lines.Add((here ? "OVERWATCH LANE — you are standing in a reaction lane"
                             : "OVERWATCH LANE — entering draws a reaction", Pal.Suspect));
+        // C4 — what the GROUND under this tile does. Same rule as the cover line above: only the
+        // EXCEPTIONAL state earns a row, so a plain floor tile still says nothing.
+        switch (g.Grid.GroundAt(tx, ty))
+        {
+            case GroundKind.Undergrowth:
+                lines.Add(($"UNDERGROWTH — low cover from every angle past {Terrain.FoliageMinDist} tiles", Pal.Good)); break;
+            case GroundKind.Ice:
+                lines.Add(("SLICK ICE — crossing the drift costs half a step", Pal.Good)); break;
+            case GroundKind.Vent:
+                lines.Add((here ? "THERMAL VENT — you are burning; nothing sees across this tile"
+                                : "THERMAL VENT — blocks sight; standing here sets you alight", Pal.Foe)); break;
+        }
 
         const int pad = 11, lh = 16;
         // C5 REVIEW FIX: the THREAT CARD measured and painted through raylib directly — the card
