@@ -410,9 +410,23 @@ public static class Program
         // reason CHROMETEST does — raylib's default face is narrower and every overflow vanishes.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FITTEST") == "1")
         {
-            Raylib.InitWindow(64, 64, "fittest");
+            // C5 THE HARD EDGES: leg (F) DRAWS every screen the game can put up, so this needs the
+            // FULL-SIZE window (the layouts are authored against Cfg.ScreenW/H) plus Display and
+            // Audio, exactly like BOARDTEST — the other self-test that runs the shipped draw path.
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fittest");
+            // C5: leg (F) DRAWS. Without a display that is a crash deep in raylib rather than an
+            // answer, so refuse the same way every other drawing self-test does (exit 2).
+            RequireWindow("FITTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
             LoadGameFonts();
+            Display.Init(false);          // post-FX OFF: this leg measures geometry, not bloom
+            Raylib.SetTargetFPS(0);
+            Audio.Init();                 // staging a screen can pop a cue; the device may be absent
             Console.WriteLine(Game.FitSelfTest());
+            Display.Shutdown();
+            Audio.Shutdown();
+            Renderer.UnloadNoise();
             Raylib.CloseWindow();
             return;
         }
@@ -443,17 +457,25 @@ public static class Program
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "sightline-truthtest");
             Raylib.SetExitKey(KeyboardKey.Null);
             Cfg.Font = Raylib.GetFontDefault();
+            LoadGameFonts();      // C5: the perk-card leg reads PAINTED strings; the default face
+                                  // measures narrower and its own draw path must be the real one.
             string mathFails = Combat.TruthFails();
             string uiFails = new Game().TooltipTruthFails();
+            // C5: the PERK CHOOSER's fourteen "before > after" lines, measured against the shipped
+            // code path for each perk rather than re-derived from the constants they print.
+            string perkFails = new Game().PerkCardTruthFails();
             Raylib.CloseWindow();
-            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails }, x => !string.IsNullOrEmpty(x)));
+            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails, perkFails }, x => !string.IsNullOrEmpty(x)));
             Console.WriteLine(all.Length == 0
                 ? "TRUTHTEST: PASS (UI-OBSERVED: the tooltip's PAINTED DMG row equals the damage Resolve "
                   + "deals to that same defender on a plain foe AND a guarded HVT, moves when the defender "
                   + "does, and agrees with the GRAZE row beneath it; the PAINTED LOCK-ON badge appears iff "
                   + "the perk moved the hit% and shows that exact delta; no tooltip string is painted below "
                   + "12px. MATH: the raw band stays raw for ExpectedDamage/threat; armor moves the shown "
-                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs)"
+                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs. "
+                  + "PERK CARD (C5): every painted before>after line agrees with the shipped path that "
+                  + "grants it — ApplyPerk for the stat bumps, a real mission refill for BANDOLIER, "
+                  + "ComputeOdds for the aim/crit perks, HardenedReduce for the damage cuts)"
                 : "TRUTHTEST: FAIL (" + all + ")");
             return;
         }
@@ -819,6 +841,64 @@ public static class Program
         // SIGHTLINE_STALLTEST=1 : W9 THE REPAIR — the autopilot's "never a RESULT: TIMEOUT" contract,
         // asserted instead of asserted-in-a-comment. Run-scoped turn counter, its force-lose arm, the
         // turn-cap-vs-frame-cap arithmetic, and the measured DEFEND/disoriented within-turn deadlock.
+        // SIGHTLINE_SAVEEDGETEST=1 : C5 THE HARD EDGES — the HOSTILE SAVE. W9 asked this of
+        // meta.json and found three killers; save.json had never been asked. Drives eight edited /
+        // truncated / older-build save shapes through the real resume path and then plays and
+        // draws them. Needs a window: it draws a frame per shape.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVEEDGETEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "saveedgetest");
+            RequireWindow("SAVEEDGETEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            LoadGameFonts();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.SaveEdgeSelfTest());
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_AICOVTEST=<N> : C5 THE HARD EDGES — the ENEMY DECISION CENSUS. Walks N
+        // campaigns per (heat x objective) cell and asserts every branch of the enemy exec chain
+        // is REACHED at least once; the known-dead OVERWATCH branch is waived by name and its
+        // count is printed on every run. SIGHTLINE_AICOVSTRICT=1 drops the waiver (and fails on
+        // this tree, which is the proof the gate can fail). Needs a window: it drives real play.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AICOVTEST"), out int covN) && covN > 0)
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "aicovtest");
+            RequireWindow("AICOVTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.AiCoverageSelfTest(covN));
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_ENEMYSTALLTEST=1 : C5 THE HARD EDGES — the ENEMY-turn deadlock guard. W9's
+        // idle guard covers the player turn; this one wedges a real enemy turn and asserts the
+        // guard names the stalled unit, ends the turn, stays silent in clean play, and that the
+        // SAME wedge with the guard off still hangs. Needs a window: it drives real missions.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ENEMYSTALLTEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "enemystalltest");
+            RequireWindow("ENEMYSTALLTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.EnemyStallSelfTest());
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_STALLTEST") == "1")
         {
             Raylib.SetTraceLogLevel(TraceLogLevel.Error);

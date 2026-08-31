@@ -2249,6 +2249,23 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       asserted at 100% only. `FITTEST` is written so a sixth leg is an addition, not a rewrite.
 - [ ] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post.
       W3's premise (overwatch as a real enemy choice) is therefore unexercised.
+
+- [x] **CLOSED by C5 "THE HARD EDGES" — W10's text-scale gate now covers the game.** `FITTEST`
+      leg (F) stages **40 screens**, DRAWS each at all four shipped text sizes, and reads the
+      geometry back from the draw calls (`Cfg.InkProbe` / `Hud.PlateProbe` / `Hud.ClipProbe` /
+      `Hud.FloorProbe`) rather than re-deriving layouts in the test. Asserts plate containment, no
+      ink off canvas, **no ellipsis**, the type floor, and that each screen drew its own frame.
+      FITTEST also gained **THE SCOPE GUARD** (rule 6, made mechanical): it counts assertions per
+      leg per scale and fails by name on any leg that did not run at every scale — 13,898
+      assertions over 45 legs today.
+- [ ] **The enemy OVERWATCH branch is effectively dead — and C5 corrected the number while
+      building the test for it.** Measured on the composed tree over **8083 enemy acts**: overwatch
+      fires **8 times, 0.10%** — not zero, but once per thousand acts, which is a verb no player
+      will see. The CAUSE is still open and belongs to C2/W3. What C5 added is
+      `SIGHTLINE_AICOVTEST`, the enemy DECISION CENSUS: every branch of the enemy exec chain tags
+      itself, the gate is a RATE (once per 1000 acts, because a zero gate would not have caught
+      this), and the effectively-dead branches are a declared registry that fails by name when an
+      UNDECLARED branch goes quiet.
 - [ ] **W3 THE OPPONENT CHOOSES was never started.** `Ai.cs` still scores any shot at
       `100 + bestHit` against terrain terms bounded under ~64, so the opponent now always ACTS but
       still never DECLINES. That is the single biggest remaining gap in the fight.
@@ -2269,8 +2286,14 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       the defect was entirely positional, and that is what moved.
 - [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
       still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
-- [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
-      guard covers the player turn only.
+- [x] **CLOSED by C5 — the enemy turn has a deadlock guard.** `Game.EnemyStallGuard` runs from
+      `Update` BEFORE the animation pump (a guard inside `UpdateEnemy` is structurally blind to an
+      animation that never completes, because `Update` returns before the phase switch while the
+      queue is non-empty). After 480 updates with nothing moving it prints the unit, class, stage,
+      planner branch, queue head, turn and mission, then forfeits the stalled unit so the turn
+      ends. It runs in REAL PLAY, not only in autoplay. `SIGHTLINE_ENEMYSTALLTEST` wedges a real
+      enemy turn to prove all of it, including the leg that makes the rest mean something: the same
+      wedge with the guard off still hangs.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.
 
 ---
@@ -2336,3 +2359,47 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
       file list (nothing here can run either).
 - [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns
       and the `.bak` beside it is corruption evidence, not a restore.
+
+### Left open by C5 "THE HARD EDGES" (found, reproduced, deliberately not fixed)
+
+- [ ] **The 12px small-text floor is not met at the DEFAULT text size.** Measured at 100%: 10px on
+      the AUDIO CHECK screen and 11px on seventeen others (in-mission HUD, end cards, WAR ROOM,
+      EVENT card). Repro: `SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small` lists every string with its
+      authored and rendered size. Meeting the rule is a re-layout of half the chrome, so C5 shipped
+      a regression BOUND at the measured worst (9px, which is what the tightest shipped fitter
+      declares as its own minimum) and the survey. The next wave that wants the rule starts here.
+- [ ] **Six shrink-to-fit calls reach their floor at 120%** (three WAR ROOM achievement
+      descriptions, one shop body, one prep body). Nothing is lost yet; they are one authored
+      character from losing a word. Counted in FITTEST's PASS line on every run.
+- [ ] **ACCESSIBILITY: TEXT SIZE AND COLOURBLIND MODE CANNOT BE REACHED UNTIL YOU ARE IN A FIGHT.**
+      `Update`'s Escape handler is gated on `PlayerTurn || EnemyTurn`, and the pause card is the
+      SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN SHAKE, THREAT
+      PREVIEW, AUTO-CAM and FULLSCREEN. The INTRO — the first screen a player sees — carries ten
+      doors (CONTINUE / DEPLOY / TRAINING / LAST STAND / WAR ROOM / FIELD MANUAL / SKIRMISH / DAILY
+      / AUDIO CHECK / QUIT) and a difficulty dial, and **no settings entry at all**. It compounds
+      the 12px finding above exactly: the 120% text size that would lift every sub-12px string to
+      >=12px is behind the door that cannot be opened.
+      **BARRACKS is worse** — `case Phase.Barracks` has no Escape handler whatsoever: no pause card,
+      no route back to the intro, no field manual (`K` is `Phase.Intro`-gated). On the screen where
+      a player deliberates over perks, the shop and the node pick, the only exits are forward or the
+      window's close button. Not a soft-lock (forward always exists), and every overlay phase
+      (Draft, SkirmishSetup, WarRoom, Codex, AudioCheck, the end cards) does take Escape — walked
+      and confirmed. **VOLUME is the exception and an earlier draft of this item had it wrong:** the
+      four faders live on AUDIO CHECK, which the intro opens with `U`.
+      `QUITTEST` asserts the arm/confirm/checkpoint contract and **asserts nothing about
+      reachability from any phase** — that is the half that is broken.
+- [ ] **`terminal-reload` fired 0 times in 8083 enemy acts.** That is a BACKSTOP working as
+      designed (the planner's own reload branch gets there first), not a hole — recorded so the
+      next reader does not re-discover it as a defect.
+- [ ] **The sweep's AICOVTEST is a COARSE version of the gate.** It runs `=2` (48 campaigns,
+      ~2740 acts), where the one-per-1000 rate is a threshold of **2.74 events** — "does every
+      undeclared branch fire at least 3 times?" — and `item` (10), `sap` (13) and `brace` (13) sit
+      at 3.6-4.7x the bar. The headline "overwatch fires 8 times in 8083 acts" is the `=6` run;
+      **at the sweep's n, overwatch is 0**. A wave that suspects a verb has gone quiet should run
+      `SIGHTLINE_AICOVTEST=6` by hand rather than trust the sweep line.
+- [ ] **An OCCLUSION signal would let the text audit assert string-vs-string overprint.**
+      `Cfg.InkProbe` already fires in draw order, so z-order is available; what is missing is
+      whether an opaque fill landed between two strings. Acquiring it means funnelling **230** raw
+      `Raylib.DrawRectangle*` calls in `Hud.cs` and **87** in `Renderer.cs` through a `Cfg.Rect`
+      seam. Two overprint assertions exist today, both hand-scoped to one row each (FITTEST legs B
+      and C). Priced, declined by C5, and worth doing for whoever next owns the chrome.

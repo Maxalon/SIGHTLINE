@@ -208,6 +208,16 @@ public static partial class SaveGame
             // Hud kept drawing CONTINUE off SaveGame.Exists, giving a button that did nothing,
             // forever, with no banner and no stash. Route it through the same recovery path as an
             // unparseable file: the squad is the one field a resumable run cannot do without.
+            // C5 REVIEW FIX (B2): PRUNE NULLS BEFORE THE USABILITY VERDICT, not after.
+            // D2's guard counts DTO ELEMENTS, not soldiers. C5's first pass fixed the crash by
+            // dropping nulls inside FromDto — which moved the drop to the WRONG SIDE of this
+            // check: `"Squad":[null]` passed it (Count == 1), FromDto returned a Run with an EMPTY
+            // squad, Load returned non-null so nothing was stashed, `SaveGame.Exists` stayed true,
+            // and the intro kept drawing a CONTINUE RUN button that ContinueRun then refused —
+            // verbatim the D2 defect this guard exists to prevent ("a button that did nothing,
+            // forever, with no banner and no stash"). Pruning here means the count below is a
+            // count of SOLDIERS, which is what the check always meant.
+            if (dto != null && dto.Squad != null) dto.Squad.RemoveAll(u => u == null);
             if (dto == null || dto.Squad == null || dto.Squad.Count == 0) { StashCorruptSave(); return null; }
             // R2 (LOW-2): SchemaVersion was WRITTEN and self-tested but never READ, so a file
             // stamped 999 loaded silently — the one thing the field exists to prevent. We cannot
@@ -766,8 +776,17 @@ public static partial class SaveGame
         }
         // installed weapon mods are re-baked BEFORE ammo seeding inside FromUnitDto so an EXTENDED MAG
         // is reflected in the starting clip; all append-only fields default inert for old saves.
+        // C5 THE HARD EDGES — DEFECT: `FromUnitDto` returns null for a null element and its own
+        // comment says "callers skip nulls" — and this caller, the one that builds the RUN's
+        // roster, did not. A save.json whose Squad array holds a `null` (a truncated writer, a
+        // hand edit, a merge of two files) therefore resumed with a null IN the roster and threw a
+        // NullReferenceException as soon as anything walked it. The veteran-reserve caller does
+        // skip; this one now does too.
         foreach (var d in dto.Squad)
-            r.Squad.Add(FromUnitDto(d));
+        {
+            var u = FromUnitDto(d);
+            if (u != null) r.Squad.Add(u);
+        }
         var cd = dto.Card;
         r.CurrentCard = cd == null
             ? Run.StandardCard(Math.Max(1, dto.Mission))

@@ -1617,10 +1617,19 @@ public partial class Game
     /// so the BENCH toggle buttons are visible (S3-A).
     public void DebugBench()
     {
-        // wound two soldiers so the BENCH button appears in their rows
-        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
+        // C5 THE HARD EDGES — DEFECT: this hook staged NOTHING. It set Wound = 2 and then called
+        // DebriefSurvivors, whose recovery step decrements the wound (`u.Wound--`, Run.cs) for a
+        // survivor of a cleared mission — so the flag was already spent by the time anything drew,
+        // and `SIGHTLINE_BENCH=1` photographed the plain barracks. FITTEST's screen audit found it
+        // as a frame byte-identical to the CAMPAIGNMAP case's. The wound is now applied AFTER the
+        // debrief, which is the order the docstring always claimed.
+        //
+        // The docstring's premise is ALSO stale, and left corrected rather than repeated: the
+        // DEPLOY/BENCH pill is drawn on EVERY roster row (Hud.DrawSquadRow), not only on wounded
+        // ones, so what this hook actually stages now is the WOUNDED(n) rank line beside it.
         _run.JumpTo(2);
         _run.DebriefSurvivors();
+        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
         _run.PendingPerks.Clear();
         _run.PendingSpecs.Clear();
         _shopDone = true;
@@ -5506,11 +5515,45 @@ public partial class Game
         void Tight(ref float best, ref string tag, float v, string what)
         { if (v < best) { best = v; tag = what; } }
 
+        // -- C5 THE HARD EDGES - THE SCOPE GUARD -------------------------------------------
+        // CROSSCUT rule 6: "a correct assertion in the wrong scope is indistinguishable from no
+        // assertion" - W5 wrote the right guard for the longest string on the squad screen and
+        // put it OUTSIDE the scale loop, and CHROMETEST's own blurb leg sat outside its loop for
+        // a wave. Prose cannot enforce that, so this test now COUNTS the assertions it evaluates,
+        // per leg, per scale: an assertion that has drifted out of the loop records checks at one
+        // scale index only, and the tally below FAILS on it by name. Every leg (A-E, and one row
+        // per audited screen) must record at least one check at EVERY shipped scale.
+        int scaleIdx = 0;
+        var legChecks = new Dictionary<string, int[]>();
+        void Bump(string leg)
+        {
+            if (!legChecks.TryGetValue(leg, out var row)) legChecks[leg] = row = new int[Display.UiScaleLevels.Length];
+            row[scaleIdx]++;
+        }
+        // C5 REVIEW FIX (E1) — THE COUNTER AND THE ASSERTION ARE ONE STATEMENT.
+        // The first version bumped and asserted separately, so the number counted BUMPS. The review
+        // defeated it in two edits: introduce a real 120%-only defect (PlateSlack 1.5 -> 1.0, which
+        // FAILS with 18 violations, all @120%), then condition only the ASSERTION on
+        // `S == "@100%"` while leaving its bump — PASS, with a byte-identical headline count, while
+        // 18 real violations went unreported. `Check` cannot be separated from what it asserts, so
+        // the number now means "assertions EVALUATED".
+        // AND THE LIMIT, STATED RATHER THAN IMPLIED: this proves each assertion RAN at each scale.
+        // It cannot prove the CONDITION was not itself narrowed — nothing short of mutation testing
+        // can. What it buys is that the natural way to lose coverage (moving, gating or deleting an
+        // assertion) now moves the number with it.
+        void Check(string leg, bool ok, string fail)
+        {
+            Bump(leg);
+            if (!ok) fails.Add(fail);
+        }
+        int screens = 0;
+
         try
         {
             foreach (float ui in Display.UiScaleLevels)
             {
                 Cfg.UiScale = ui;
+                scaleIdx = Array.IndexOf(Display.UiScaleLevels, ui);
                 string S = $"@{(int)(ui * 100)}%";
 
                 // ---- (A) the MID-RUN FIELD DOCTRINE card ------------------------------------
@@ -5524,20 +5567,22 @@ public partial class Game
                         float ink = Hud.BoonOfferInkBottom(b);
                         float chooseTop = ch - Hud.BoonOfferChooseUp;
                         Tight(ref mA, ref tA, chooseTop - ink, $"{BoonDef.Code(b)}{S}");
-                        if (ink + pad > chooseTop)
-                            fails.Add($"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
+                        Check("A", !(ink + pad > chooseTop),
+                              $"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
                         // ...and no wrapped line may exceed the column it was wrapped to
                         foreach (var (line, _) in Hud.WrapLinesForTest(BoonDef.Desc(b), Hud.BoonOfferBodyW, Hud.BoonOfferFs))
-                            if (Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1)
-                                fails.Add($"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                        {
+                            Check("A", !(Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1),
+                                  $"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                        }
                     }
                     // [ CHOOSE ] itself must land inside the card
                     float cbot = ch - Hud.BoonOfferChooseUp + Cfg.Measure("[ CHOOSE ]", Hud.BoonOfferFs, 1f).Y;
-                    if (cbot + pad > ch) fails.Add($"chooseBelowCard{S}({cbot:0}>{ch})");
+                    Check("A", !(cbot + pad > ch), $"chooseBelowCard{S}({cbot:0}>{ch})");
                     // and the whole block (title 92px above, ACTIVE strip 40px below) fits the canvas
                     int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
-                    if (y0 - 92 < 8) fails.Add($"boonTitleOffTop{S}({y0 - 92})");
-                    if (y0 + ch + 40 > Cfg.ScreenH) fails.Add($"boonBlockOffBottom{S}({y0 + ch + 40})");
+                    Check("A", !(y0 - 92 < 8), $"boonTitleOffTop{S}({y0 - 92})");
+                    Check("A", !(y0 + ch + 40 > Cfg.ScreenH), $"boonBlockOffBottom{S}({y0 + ch + 40})");
                 }
 
                 // ---- (B) the ARMORY weapon row ---------------------------------------------
@@ -5555,8 +5600,8 @@ public partial class Game
                         float bw = Cfg.Measure(blurb, Hud.ArmoryBlurbFs, 1f).X;
                         float budget = Hud.ArmoryBlurbWidth();
                         Tight(ref mB, ref tB, budget - bw, $"{k}blurb{S}");
-                        if (bw > budget) fails.Add($"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
-                        if (blurbBot + pad > Hud.ArmoryRowH) fails.Add($"armoryBlurbBelowRow{S}");
+                        Check("B", !(bw > budget), $"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
+                        Check("B", !(blurbBot + pad > Hud.ArmoryRowH), $"armoryBlurbBelowRow{S}");
                         float nameRight = Hud.ArmoryTextX + Cfg.Measure(name, Hud.ArmoryNameFs, 1f).X;
                         foreach (var (tag, fs) in new[] { ("EQUIPPED", Hud.ArmoryTagFs),
                                                           ($"[ {Game.ArmoryCost} INTEL ]", Hud.ArmoryTagFs),
@@ -5568,12 +5613,12 @@ public partial class Game
                             // two independent strings may share a BAND or a COLUMN, never both
                             bool xOverlapBlurb = tagLeft < Hud.ArmoryTextX + bw + pad;
                             bool yOverlapBlurb = tagBot + pad > blurbTop && tagTop < blurbBot + pad;
-                            if (xOverlapBlurb && yOverlapBlurb)
-                                fails.Add($"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
-                            if (tagLeft < nameRight + 12)
-                                fails.Add($"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
-                            if (tagBot + pad > Hud.ArmoryRowH) fails.Add($"armoryTagBelowRow:{k}{S}");
-                            if (tagTop < 2) fails.Add($"armoryTagAboveRow:{k}{S}");
+                            Check("B", !(xOverlapBlurb && yOverlapBlurb),
+                                  $"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
+                            Check("B", !(tagLeft < nameRight + 12),
+                                  $"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
+                            Check("B", !(tagBot + pad > Hud.ArmoryRowH), $"armoryTagBelowRow:{k}{S}");
+                            Check("B", !(tagTop < 2), $"armoryTagAboveRow:{k}{S}");
                         }
                     }
                 }
@@ -5593,17 +5638,17 @@ public partial class Game
                             { Name = worstName, Cls = cls, Rank = rank, Kills = 999, Heat = 8, Won = true };
                             float subW = Cfg.Measure(Hud.WarLegendSub(l), Hud.WarLegendSubFs, 1f).X;
                             Tight(ref mC, ref tC, textW - subW, $"{rank[0]}{cls[0]}sub{S}");
-                            if (subW > textW)
-                                fails.Add($"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
+                            Check("C", !(subW > textW),
+                                  $"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
                             string score = Hud.WarLegendScore(l);
                             float scw = Cfg.Measure(score, Hud.WarLegendScoreFs, 1f).X;
                             float nameW = Cfg.Measure(l.Name, Hud.WarLegendNameFs, 1f).X;
                             float scoreLeft = colW - Hud.WarLegendPadR - scw;
                             float nameRight = Hud.WarLegendTextX + nameW;
                             Tight(ref mC, ref tC, scoreLeft - nameRight, $"{rank[0]}{cls[0]}name{S}");
-                            if (score.Length > 0 && scoreLeft < nameRight + 12)
-                                fails.Add($"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
-                            if (scw > textW) fails.Add($"legendScoreOverruns{S}");
+                            Check("C", !(score.Length > 0 && scoreLeft < nameRight + 12),
+                                  $"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
+                            Check("C", !(scw > textW), $"legendScoreOverruns{S}");
                         }
                 }
 
@@ -5614,17 +5659,17 @@ public partial class Game
                     {
                         float lw = Cfg.Measure(dl, Hud.DraftDeployFs, 1f).X;
                         Tight(ref mD, ref tD, dbw - lw, $"DEPLOY{S}");
-                        if (lw + 8 > dbw) fails.Add($"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
+                        Check("D", !(lw + 8 > dbw), $"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
                     }
                     float rw = Cfg.Measure(Hud.DraftRerollLabel, Hud.DraftRerollFs, 1f).X;
                     Tight(ref mD, ref tD, rrw - rw, $"REROLL{S}");
-                    if (rw + 8 > rrw) fails.Add($"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
+                    Check("D", !(rw + 8 > rrw), $"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
                     float bw2 = Cfg.Measure("BACK", Hud.DraftBackFs, 1f).X
                               + Cfg.Measure("[Esc]", Hud.DraftBackHintFs, 1f).X;
                     Tight(ref mD, ref tD, bkw - bw2, $"BACK{S}");
-                    if (bw2 + 12 > bkw) fails.Add($"backLabelOverruns{S}({bw2:0}>{bkw})");
-                    if (Hud.DraftBtnRowW() > Cfg.ScreenW - 24)
-                        fails.Add($"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
+                    Check("D", !(bw2 + 12 > bkw), $"backLabelOverruns{S}({bw2:0}>{bkw})");
+                    Check("D", !(Hud.DraftBtnRowW() > Cfg.ScreenW - 24),
+                          $"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
                 }
 
                 // ---- (E) the DRAFT operator card's text columns -----------------------------
@@ -5634,21 +5679,71 @@ public partial class Game
                     {
                         float w2 = Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X;
                         Tight(ref mE, ref tE, bw - w2, $"blurb{S}");
-                        if (w2 > bw) fails.Add($"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
+                        Check("E", !(w2 > bw), $"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
                     }
                     foreach (var ab in new[] { "RUN&GUN", "BLITZ", "STEADY", "SUPPRESS", "PATCH",
                                                "MARK", "GRAPPLE", "SLIPSTREAM", "SUPPR. FIRE" })
                     {
                         float w2 = Cfg.Measure("ABILITY: " + ab, Hud.DraftAbilityFs, 1f).X;
                         Tight(ref mE, ref tE, aw - w2, $"ability{S}");
-                        if (w2 > aw) fails.Add($"draftAbilityClips{S}:{ab}");
+                        Check("E", !(w2 > aw), $"draftAbilityClips{S}:{ab}");
                     }
                     int gridW = 3 * Hud.DraftCardW() + 2 * Hud.DraftGridGap;
-                    if (gridW > Cfg.ScreenW - 24) fails.Add($"draftGridOffCanvas{S}({gridW})");
+                    Check("E", !(gridW > Cfg.ScreenW - 24), $"draftGridOffCanvas{S}({gridW})");
                 }
+
+                // ---- (F) THE SCREEN AUDIT - every screen the game can draw, on a LIVE FRAME ---
+                // W10's gate covered five surfaces; the rest of the product was asserted at 100%
+                // or not at all. This leg stages each screen, DRAWS it, and reads the ink and the
+                // control plates back from the draw calls themselves (Cfg.InkProbe /
+                // Hud.PlateProbe) - so it observes what the game paints rather than a
+                // transcription of the layout arithmetic, and a screen that throws while drawing
+                // is a failure too. Inside the loop by construction: it takes the scale.
+                screens = ScreenAudit(S, fails, Check);
             }
         }
-        finally { Cfg.UiScale = savedScale; }
+        finally { Cfg.UiScale = savedScale; Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+
+        // ── C5 REVIEW FIX (E1) — THE SENSITIVITY CONTROL, run on every invocation ────────────
+        // Binding the counter to the assertion (Check, above) makes the number mean "assertions
+        // evaluated" — but the review's step 2 shows what that still cannot see: narrow the
+        // CONDITION to one scale and the count does not move. Nothing structural can catch that,
+        // so this catches it EMPIRICALLY, the way AIIDLETEST proves its own probe: re-run the whole
+        // screen audit at a deliberately UNSHIPPED 200% text scale, where the fixed-pixel chrome
+        // must break, and require the assertions to FIRE. If a leg has been gated to one scale, or
+        // its tolerance loosened into uselessness, this control goes quiet and the test fails —
+        // which is exactly what happens to the review's step-2 mutation.
+        // The 200% pass is DIAGNOSTIC ONLY: its violations are counted, never added to `fails`.
+        var control = new List<string>();
+        try
+        {
+            Cfg.UiScale = 2.0f;
+            scaleIdx = 0;                       // the control's checks are not part of the coverage tally
+            ScreenAudit("@200%CONTROL", control, (leg, ok, msg) => { if (!ok) control.Add(msg); });
+        }
+        catch (Exception ex) { fails.Add("sensitivityControlThrew:" + ex.GetType().Name); }
+        finally { Cfg.UiScale = savedScale; Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+
+        int ctlPlate = 0, ctlInk = 0, ctlClip = 0;
+        foreach (var c in control)
+        {
+            if (c.StartsWith("labelLeavesPlate")) ctlPlate++;
+            else if (c.StartsWith("inkOffCanvas")) ctlInk++;
+            else if (c.StartsWith("textEllipsized")) ctlClip++;
+        }
+        if (ctlPlate == 0)
+            fails.Add("sensitivityDead:labelLeavesPlate never fired at the 200% control");
+        if (ctlInk + ctlClip == 0)
+            fails.Add("sensitivityDead:neither inkOffCanvas nor textEllipsized fired at the 200% control");
+
+        // THE SCOPE GUARD's verdict (see the note above the counter).
+        foreach (var kv in legChecks)
+            for (int i = 0; i < kv.Value.Length; i++)
+                if (kv.Value[i] == 0)
+                    fails.Add($"legOutsideScaleLoop:{kv.Key}@{(int)(Display.UiScaleLevels[i] * 100)}%(0 checks)");
+        int totalChecks = 0;
+        foreach (var kv in legChecks) foreach (int n in kv.Value) totalChecks += n;
+        if (legChecks.Count < 6) fails.Add($"scopeGuardVacuous(legs={legChecks.Count})");
 
         notes.Add($"doctrine {mA:0}px@{tA}");
         notes.Add($"armory {mB:0}px@{tB}");
@@ -5659,11 +5754,1047 @@ public partial class Game
             ? $"FITTEST: PASS ({BoonDef.All.Length} doctrine cards, 5 weapon rows x 3 tags, "
               + $"{Run.Ranks.Length}x5 legend rows, 5 deploy labels and the operator card fit their "
               + $"chrome at all {Display.UiScaleLevels.Length} shipped text sizes - tightest margins: "
-              + string.Join(", ", notes) + ")"
+              + string.Join(", ", notes)
+              + $"; C5 leg F: {screens} screens DRAWN and audited at every scale - every control "
+              + $"plate contains its label (tightest {_fitPlateMargin:0.0}px @{_fitPlateTag}), no "
+              + $"visible string leaves the canvas (nearest {_fitEdgeMargin:0.0}px @{_fitEdgeTag}), "
+              + $"nothing is ellipsized, smallest type {_fitMinSize:0.#}px authored @{_fitMinAuthTag} "
+              + $"and {_fitMinRendered:0.#}px RENDERED @{_fitMinTag} (tracked separately - the "
+              + $"smallest authored size and the smallest ink need not be the same screen), "
+              + $"{_fitFloors} shrink-to-fit calls "
+              + $"reach their floor; {totalChecks} assertions over {legChecks.Count} legs, every "
+              + $"leg evaluated at all {Display.UiScaleLevels.Length} scales, and a 200% CONTROL "
+              + $"pass fires them ({ctlPlate} plate / {ctlInk} off-canvas / {ctlClip} ellipsis "
+              + $"violations at a scale the game does not ship) so the gate is proven live on this "
+              + $"run rather than merely counted)"
             : $"FITTEST: FAIL ({fails.Distinct().Count()} violations; first 14: "
               + string.Join(",", fails.Distinct().Take(14)) + ")";
     }
 
+
+
+
+
+
+
+    // ─── C5 THE HARD EDGES — THE PERK CARD'S NUMBERS, MEASURED (a TRUTHTEST leg) ───────────────
+    /// W9's finding was that the shot tooltip's numbers were a transcription of what the resolver
+    /// was SUPPOSED to do. The PERK CHOOSER is the same shape one screen over: fourteen
+    /// "before > after" lines the player picks a permanent upgrade from, every number typed by
+    /// hand beside the resolver's constant. They agreed. Nothing bound them, and nothing would
+    /// have said so — the card is the only place in the game those numbers appear, so a retune of
+    /// `Unit.PerkAim` would have left fourteen cards quietly lying.
+    ///
+    /// This leg DRAWS the real chooser, captures the line it PAINTS (`Cfg.CaptureText`, the same
+    /// seam TooltipTruthFails uses), and compares the numbers in it against a MEASUREMENT taken
+    /// through the shipped code path for that perk:
+    ///   * TANK / SPRINTER  — `Run.ApplyPerk` on a real soldier: the stat afterwards IS the claim.
+    ///   * BANDOLIER        — a real mission setup, which is where grenades are refilled.
+    ///   * the aim perks    — `Combat.ComputeOdds` in the stated condition, minus the same shot
+    ///                        without the perk.
+    ///   * the crit perks   — the same, on `CritChance`.
+    ///   * HARDENED/BULWARK — `Combat.HardenedReduce`, the one source of truth for damage taken.
+    ///   * COOLHEADED       — the attacker's hit% against a defender who has it.
+    /// A perk with no painted line and no measurable claim is fine; a perk with a line whose
+    /// numbers do not match the measurement is a lie on the card.
+    public string PerkCardTruthFails()
+    {
+        var fails = new List<string>();
+        var grid = new Grid();   // a fresh Grid is all floor at height 0 (see Grid())
+
+        Unit Soldier(int aim = 60, int x = 3, int y = 5)
+            => new Unit { Name = "PROBE", Cls = "ASSAULT", Team = Team.Player, Aim = aim, Mobility = 7,
+                          Hp = 10, MaxHp = 10, Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true, X = x, Y = y };
+        Unit Foe(int x, int y, int hp = 10, int maxHp = 10)
+            => new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, Aim = 60, Mobility = 6,
+                          Hp = hp, MaxHp = maxHp, Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true, X = x, Y = y };
+
+        /// hit% delta a perk buys the ATTACKER on this exact shot.
+        int AimDelta(Perk p, Unit a, Unit d)
+        {
+            int plain = Combat.ComputeOdds(grid, a, d).HitChance;
+            a.Perks.Add(p);
+            int perked = Combat.ComputeOdds(grid, a, d).HitChance;
+            a.Perks.Remove(p);
+            return perked - plain;
+        }
+        int CritDelta(Perk p, Unit a, Unit d, bool highGround = false)
+        {
+            if (highGround) { grid.Height[a.X, a.Y] = 2; }
+            int plain = Combat.ComputeOdds(grid, a, d).CritChance;
+            a.Perks.Add(p);
+            int perked = Combat.ComputeOdds(grid, a, d).CritChance;
+            a.Perks.Remove(p);
+            if (highGround) grid.Height[a.X, a.Y] = 0;
+            return perked - plain;
+        }
+
+        // THE MEASUREMENTS. Each entry answers "what does the shipped code actually do?" as a
+        // function of the soldier the card is offered to — never as a literal.
+        //   stat  : the value the perk changes, before -> after, through Run.ApplyPerk
+        //   delta : the aim/crit/damage swing ComputeOdds or HardenedReduce actually produces
+        //   gate  : the RANGE at which a range-gated perk stops applying, found by scanning
+        var deltas = new Dictionary<Perk, List<int>>();
+
+        // -- aim perks: measure the swing AND, for the range-gated pair, the gate itself ---------
+        {
+            var a = Soldier(); var d = Foe(a.X + 2, a.Y);
+            int cq = AimDelta(Perk.CloseQuarters, a, d);
+            // the gate: the largest distance at which CLOSE QUARTERS still fires
+            int cqGate = 0;
+            for (int dist = 1; dist <= 10; dist++)
+            {
+                var dd = Foe(a.X + dist, a.Y);
+                if (AimDelta(Perk.CloseQuarters, a, dd) > 0) cqGate = dist;
+            }
+            deltas[Perk.CloseQuarters] = new List<int> { cq, cqGate };
+
+            var a2 = Soldier(); int mk = 0, mkGate = 99;
+            for (int dist = 1; dist <= 12; dist++)
+            {
+                var dd = Foe(a2.X + dist, a2.Y);
+                int sw = AimDelta(Perk.Marksman, a2, dd);
+                if (sw > 0 && dist < mkGate) { mkGate = dist; mk = sw; }
+            }
+            deltas[Perk.Marksman] = new List<int> { mk, mkGate };
+
+            var a3 = Soldier(); var d3 = Foe(a3.X + 3, a3.Y); d3.Hunkered = true;
+            deltas[Perk.Siegebreaker] = new List<int> { AimDelta(Perk.Siegebreaker, a3, d3) };
+
+            // LOCK-ON fires on FLANKED, and the shared predicate is the same one W9 bound the
+            // tooltip badge to.
+            var a4 = Soldier(); a4.Perks.Add(Perk.LockOn);
+            deltas[Perk.LockOn] = new List<int> { Combat.LockOnAim(a4, flanked: true) };
+        }
+        // -- crit perks --------------------------------------------------------------------------
+        {
+            var a = Soldier();
+            deltas[Perk.Executioner] = new List<int> { CritDelta(Perk.Executioner, a, Foe(a.X + 3, a.Y, hp: 3)) };
+            deltas[Perk.GiantSlayer] = new List<int> { CritDelta(Perk.GiantSlayer, a, Foe(a.X + 3, a.Y)) };
+            deltas[Perk.Vantage] = new List<int> { CritDelta(Perk.Vantage, a, Foe(a.X + 3, a.Y), highGround: true) };
+            var ds = Foe(a.X + 3, a.Y); ds.Suppress = 1;
+            deltas[Perk.Breaker] = new List<int> { CritDelta(Perk.Breaker, a, ds) };
+        }
+        // -- damage-taken perks, through the ONE reduction path ----------------------------------
+        {
+            var d = Soldier();
+            int plain = Combat.HardenedReduce(d, 9, crit: false, telegraph: false);
+            d.Perks.Add(Perk.Hardened);
+            int flat = plain - Combat.HardenedReduce(d, 9, crit: false, telegraph: false);
+            int onCrit = plain - Combat.HardenedReduce(d, 9, crit: true, telegraph: false);
+            d.Perks.Remove(Perk.Hardened);
+            deltas[Perk.Hardened] = new List<int> { flat, onCrit };
+
+            var b = Soldier();                                    // full HP => Bulwark active
+            int bPlain = Combat.HardenedReduce(b, 9, crit: false, telegraph: false);
+            b.Perks.Add(Perk.Bulwark);
+            deltas[Perk.Bulwark] = new List<int> { bPlain - Combat.HardenedReduce(b, 9, crit: false, telegraph: false) };
+        }
+        {
+            var atk = Foe(3, 5); var def = Soldier(60, 6, 5);
+            int plain = Combat.ComputeOdds(grid, atk, def).HitChance;
+            def.Perks.Add(Perk.CoolHeaded);
+            deltas[Perk.CoolHeaded] = new List<int> { plain - Combat.ComputeOdds(grid, atk, def).HitChance };
+        }
+        // -- the two STAT BUMPS, through the real applier ----------------------------------------
+        {
+            var u = Soldier(); int hp0 = u.MaxHp; Run.ApplyPerk(u, Perk.Tank);
+            deltas[Perk.Tank] = new List<int> { u.MaxHp - hp0 };
+            var v = Soldier(); int mob0 = v.Mobility; Run.ApplyPerk(v, Perk.Sprinter);
+            deltas[Perk.Sprinter] = new List<int> { v.Mobility - mob0 };
+        }
+        // -- BANDOLIER through the path that actually hands out grenades: a real mission ---------
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            var s = g.Players.FirstOrDefault(u => u != null && !u.IsVip);
+            if (s == null) fails.Add("noSoldierForBandolier");
+            else
+            {
+                int before = s.Grenades;
+                s.Perks.Add(Perk.Bandolier);
+                g.DebugResetupMission();
+                var s2 = g.Players.FirstOrDefault(u => u != null && u.Name == s.Name);
+                if (s2 == null) fails.Add("bandolierSoldierVanished");
+                else deltas[Perk.Bandolier] = new List<int> { s2.Grenades - before };
+            }
+        }
+
+        // ---- now READ THE CARD, for real -------------------------------------------------------
+        // TWO assertions per perk, and they are different assertions:
+        //   (i)  the chooser PAINTS the string its own formatter returns — the observation binding
+        //        W9's review demanded (a test that only checks the formatter proves nothing about
+        //        the panel);
+        //   (ii) the numbers IN that string are the ones the measurement above produced.
+        foreach (var kv in deltas)
+        {
+            var perk = kv.Key;
+            var swing = kv.Value;
+            var cap = new List<(string text, float size)>();
+            Unit who;
+            var g2 = new Game { NoPersist = true };
+            who = g2.DebugStagePerkOffer(perk);
+            if (who == null) { fails.Add("noOfferedSoldier:" + perk); continue; }
+            string formatted = Hud.PerkDeltaLineForTest(who, perk);
+            if (string.IsNullOrEmpty(formatted)) { fails.Add("noDeltaLineForOfferedPerk:" + perk); continue; }
+            try
+            {
+                Cfg.CaptureText = cap;
+                Raylib.BeginDrawing();
+                g2.DrawHudLayer();
+                Raylib.EndDrawing();
+            }
+            finally { Cfg.CaptureText = null; }
+
+            if (!cap.Any(c => c.text == formatted))
+                fails.Add($"perkCardDidNotPaintItsOwnLine:{perk}:'{formatted}'");
+
+            var got = System.Text.RegularExpressions.Regex.Matches(formatted, @"\d+")
+                .Select(m => int.Parse(m.Value)).ToList();
+            // The claim the line makes, rebuilt from the OFFERED soldier and the MEASURED swing.
+            var want = new List<int>();
+            switch (perk)
+            {
+                case Perk.Tank: want.Add(who.MaxHp); want.Add(who.MaxHp + swing[0]); break;
+                case Perk.Sprinter: want.Add(who.Mobility); want.Add(who.Mobility + swing[0]); break;
+                case Perk.LockOn:
+                case Perk.Siegebreaker: want.Add(who.Aim); want.Add(who.Aim + swing[0]); break;
+                case Perk.CloseQuarters:
+                case Perk.Marksman: want.Add(who.Aim); want.Add(who.Aim + swing[0]); want.Add(swing[1]); break;
+                case Perk.Bandolier: want.Add(1 + who.BonusGrenades); want.Add(1 + who.BonusGrenades + swing[0]); break;
+                case Perk.Hardened: want.Add(swing[0]); want.Add(swing[1]); break;
+                default: want.Add(swing[0]); break;
+            }
+            foreach (int n in want)
+                if (!got.Contains(n))
+                    fails.Add($"perkCardLies:{perk}:'{formatted}' has no {n} (measured {string.Join("/", want)})");
+        }
+
+        return fails.Count == 0 ? "" : string.Join(",", fails.Distinct());
+    }
+
+    /// Harness: stage the barracks PERK CHOOSER on a real run with `p` as the left offer and a
+    /// no-delta perk on the right, so exactly one delta line is painted.
+    public Unit DebugStagePerkOffer(Perk p)
+    {
+        if (_run == null || _run.Squad == null || _run.Squad.Count == 0) { _run = new Run(); _run.Start(); }
+        _shopDone = true;
+        _run.PendingSpecs.Clear();
+        _run.BoonOffer.Clear();
+        _run.PendingPerks.Clear();
+        var who = _run.Squad.FirstOrDefault(u => u != null && !u.IsVip) ?? _run.Squad[0];
+        who.Perks.Remove(p);
+        _run.PendingPerks.Add(new PerkOffer { Unit = who, A = p, B = Perk.Reflexes });
+        Phase = Phase.Barracks;
+        return who;
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_SAVEEDGETEST: THE HOSTILE SAVE ─────────────────────────
+    /// W9 asked "what does a hand-edited meta.json do to the game?" and found three shapes that
+    /// each killed a screen outright. It never asked the same question of `save.json`, whose guard
+    /// (D2, R2) stops at three shapes: unparseable, no squad, and a schema from the future. Every
+    /// other field is read as written.
+    ///
+    /// This drives the shapes a real corrupted / edited / truncated / older-build save produces,
+    /// through the REAL resume path (`ContinueRun`) and then through 300 updates and a drawn frame
+    /// — because "loads without throwing" is not the contract; "you can play it" is. A shape that
+    /// crashes, that resumes with nobody on the board, or that puts a number on the HUD the run
+    /// cannot mean, is a defect.
+    public static string SaveEdgeSelfTest()
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadSave = false, hadMeta = false; string saveStash = null, metaStash = null;
+        try
+        {
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+
+        // A real save, written by the game, as the base every shape is edited FROM. Hand-writing
+        // the JSON would test a fiction; this is the file the game actually produces.
+        string good = null;
+        try
+        {
+            Util.Reseed(9001);
+            var seed = new Game();                 // live path: StartMission writes the checkpoint
+            seed.StartMission(1);
+            good = System.IO.File.ReadAllText(sp);
+        }
+        catch (Exception ex) { fails.Add("couldNotWriteABaseSave:" + ex.GetType().Name); }
+
+        /// Apply one edit to the base save, resume it, and play it. Returns the resumed Game
+        /// (null if the resume was refused, which is a legitimate outcome — refusing a broken
+        /// save is a repair; crashing on it is not).
+        Game Resume(string what, Func<string, string> edit, bool expectRefusal)
+        {
+            if (good == null) return null;
+            try
+            {
+                System.IO.File.WriteAllText(sp, edit(good));
+                var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                bool ok = g.ContinueRun();
+                if (!ok)
+                {
+                    // A refusal is the right answer for a file that cannot be read at all, and
+                    // DATA LOSS for one that can: the recovery path MOVES save.json aside, so a
+                    // shape that should have resumed and did not has just cost a player their run.
+                    if (!expectRefusal) fails.Add($"refusedAResumableSave:{what}");
+                    // ...and a refusal MUST take the file with it. `Hud` draws CONTINUE RUN off
+                    // `SaveGame.Exists`, so a save that is refused but left in place is D2's
+                    // "button that did nothing, forever, with no banner and no stash". This is the
+                    // assertion that catches a guard which drops bad data on the WRONG SIDE of its
+                    // own usability check (C5 review B2).
+                    if (System.IO.File.Exists(sp))
+                        fails.Add($"refusedButLeftTheButton:{what}(save.json still offers CONTINUE)");
+                    return null;
+                }
+                if (expectRefusal) fails.Add($"acceptedAnUnusableSave:{what}");
+                // it has to be PLAYABLE, not merely loaded
+                if (g.Players.Count == 0) fails.Add($"resumedWithNoSquad:{what}");
+                if (g.AlivePlayers().Count == 0) fails.Add($"resumedWithNobodyAlive:{what}");
+                for (int i = 0; i < 300 && g.Phase != Phase.Win && g.Phase != Phase.Lose; i++)
+                    g.Update(1f / 60f);
+                Raylib.BeginDrawing();
+                g.Draw();                              // the HUD reads the run's numbers
+                Raylib.EndDrawing();
+                return g;
+            }
+            catch (Exception ex)
+            {
+                fails.Add($"threw:{what}:{ex.GetType().Name}:{Short(ex.Message)}");
+                return null;
+            }
+        }
+
+        try
+        {
+            // (1) MISSION out of range, in both directions. ContinueRun clamps the number it SETS
+            //     UP with and leaves `Run.Mission` as written — so the board is mission 6 while
+            //     every readout, reward and cap still reads 999.
+            var far = Resume("mission=999", s => s.Replace("\"Mission\": 1,", "\"Mission\": 999,"), false);
+            if (far != null && far.RunState != null && far.RunState.Mission > Run.MaxMissions)
+                fails.Add($"missionNotClamped:{far.RunState.Mission}(>{Run.MaxMissions})");
+            var zero = Resume("mission=0", s => s.Replace("\"Mission\": 1,", "\"Mission\": 0,"), false);
+            if (zero != null && zero.RunState != null && zero.RunState.Mission < 1)
+                fails.Add($"missionNotClamped:{zero.RunState.Mission}(<1)");
+            var neg = Resume("mission=-7", s => s.Replace("\"Mission\": 1,", "\"Mission\": -7,"), false);
+            if (neg != null && neg.RunState != null && neg.RunState.Mission < 1)
+                fails.Add($"missionNotClamped:{neg.RunState.Mission}(<1)");
+
+            // (2) A soldier with NO NAME. `Name` is the one string the DTO reads raw, and it is a
+            //     dictionary key (BondTally), a save key and a HUD string.
+            Resume("name=null", s => s.Replace("\"Name\":", "\"Name\": null, \"NameWas\":"), false);
+
+            // (3) A soldier of an UNKNOWN CLASS — what an older/newer build's roster looks like.
+            Resume("cls=WIZARD", s => s.Replace("\"Cls\": \"", "\"Cls\": \"WIZARD"), false);
+
+            // (4) EVERYBODY BENCHED. Nothing in the DTO stops it, and a run you cannot field is a
+            //     run you cannot lose or leave.
+            var benched = Resume("allBenched", s => s.Replace("\"Benched\": false", "\"Benched\": true"), false);
+            if (benched != null && benched.Players.Count == 0)
+                fails.Add("allBenchedFieldsNobody");
+
+            // (5) A roster twice RosterMax — the barracks lays out six rows.
+            Resume("doubleRoster", s =>
+            {
+                int i = s.IndexOf("\"Squad\": [");
+                if (i < 0) return s;
+                int open = s.IndexOf('{', i);
+                int depth = 0, j = open;
+                for (; j < s.Length; j++) { if (s[j] == '{') depth++; else if (s[j] == '}') { depth--; if (depth == 0) break; } }
+                string one = s.Substring(open, j - open + 1);
+                var sb = new System.Text.StringBuilder(s.Substring(0, open));
+                for (int k = 0; k < 12; k++) { sb.Append(one.Replace("\"Name\": \"", $"\"Name\": \"X{k}")); sb.Append(','); }
+                sb.Append(s.Substring(open));
+                return sb.ToString();
+            }, false);
+
+            // (6) A BOND naming somebody who is not on the roster.
+            Resume("phantomBond", s => s.Contains("\"BondTally\": {}")
+                ? s.Replace("\"BondTally\": {}", "\"BondTally\": {\"NOBODY\": 3}")
+                : s.Replace("\"BondTally\": {", "\"BondTally\": {\"NOBODY\": 3,"), false);
+
+            // (7) TRUNCATION — the classic half-written file. Must be refused, not read.
+            Resume("truncated", s => s.Substring(0, s.Length / 2), true);
+
+            // (8) A save whose squad array holds a null element.
+            Resume("nullSquadMember", s => s.Replace("\"Squad\": [", "\"Squad\": [null,"), false);
+
+            // (9) A squad array of NOTHING BUT nulls — the shape that tells a "no soldiers" guard
+            //     apart from a "no elements" guard. It must be refused AND stashed like any other
+            //     unusable file; accepting it leaves a CONTINUE button over an empty roster.
+            Resume("allNullSquad", s =>
+            {
+                int i = s.IndexOf("\"Squad\": [");
+                if (i < 0) return s;
+                int open = s.IndexOf('[', i);
+                int depth = 0, j = open;
+                for (; j < s.Length; j++) { if (s[j] == '[') depth++; else if (s[j] == ']') { depth--; if (depth == 0) break; } }
+                return s.Substring(0, open) + "[null, null]" + s.Substring(j + 1);
+            }, true);
+        }
+        finally
+        {
+            try
+            {
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (System.IO.File.Exists(sp + ".bak")) System.IO.File.Delete(sp + ".bak");
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "SAVEEDGETEST: PASS (9 hostile save shapes resume into a PLAYABLE run or are refused "
+              + "AND STASHED: mission out of range in both directions, a nameless soldier, an "
+              + "unknown class, an all-benched roster, a double-length roster, a phantom bond, a "
+              + "truncated file, a null squad member and an all-null squad — none throws, none "
+              + "fields an empty board, and no refusal leaves a CONTINUE button behind it"
+              + (notes.Count > 0 ? "; " + string.Join(", ", notes) : "") + ")"
+            : "SAVEEDGETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_AICOVTEST: THE ENEMY DECISION CENSUS ────────────────────
+    /// The test that would have caught a branch firing ZERO times in 1595 enemy turns.
+    ///
+    /// THE STANDING FINDING (CROSSCUT, docs/ROADMAP.md): the enemy OVERWATCH branch was measured
+    /// taken 0 times in 1595 pre-W2 enemy act-opportunities and 3 times in 1589 post-W2 — a whole
+    /// verb of the opponent's vocabulary that does not exist in play. Nothing in the project could
+    /// see it: every AI test asserts that a DECISION IS CORRECT GIVEN A BOARD, and a branch that
+    /// is never reached is correct on every board it never reaches. The gap is not a missing
+    /// assertion about overwatch; it is the absence of any assertion about REACHABILITY.
+    ///
+    /// So this walks real campaigns and counts which of `Game.ActBranches` the opponent actually
+    /// takes. A branch that never fires over the whole sample is a coverage FAILURE by name.
+    ///
+    /// A ZERO GATE WOULD NOT HAVE CAUGHT IT, AND SAYING SO IS THE POINT. Measured on this tree
+    /// (144 campaigns, 8083 enemy acts): `overwatch` fires **8 times, 0.10%**. So "the branch is
+    /// never taken" is not literally true here — it is taken about once per thousand acts, which
+    /// is a verb no player will ever see, and a test that only asked "> 0?" would have passed the
+    /// pre-W2 tree on a large enough sample too. The gate is therefore a RATE, and the set of
+    /// effectively-dead branches is a DECLARED REGISTRY:
+    ///
+    ///   * any branch firing below `AiCovRareRate` (once per 1000 enemy acts) must be NAMED in
+    ///     `AiCovKnownRare`. An undeclared branch that falls that low FAILS, by name — which is
+    ///     precisely what would have happened to `overwatch` the day it went quiet, instead of a
+    ///     human noticing three programs later;
+    ///   * a DECLARED branch that climbs back above the rate is reported as a stale declaration
+    ///     (a note, not a failure — the wave that revives a verb should not be blocked by the
+    ///     registry that recorded it as dead, it should be told to delete the entry);
+    ///   * `SIGHTLINE_AICOVSTRICT=1` treats every declared entry as a failure. That is the mode
+    ///     that fails on today's tree, and it is this test's proof that it can fail at all.
+    ///
+    /// THE BACKSTOPS ARE NOT VERBS. `terminal-reload` / `terminal-hunker` exist so W2's
+    /// no-idle-act invariant holds STRUCTURALLY when a plan goes stale, and `none` is the tag for
+    /// "no branch fired" (the bleed-out window). They are censused and reported, never gated:
+    /// `terminal-reload` measured 0 in 8083 acts, which is the design working, not a hole.
+    // "move" and "idle" join the backstops rather than the gated verb list (C5's call): they are
+    // resolutions of the sentinel, not verbs the planner chose. `idle` in particular is expected to
+    // read ZERO on a contested batch — C2 measured exactly 0 across ~53k contested acts — so a
+    // non-zero idle means a branch LOST ITS LABEL, which is the acceptance oracle for this merge.
+    static readonly string[] AiCovBackstops = { "terminal-reload", "terminal-hunker", "none", "move", "idle" };
+    /// The declared effectively-dead branches, with the rate measured at the base of this wave
+    /// (8083 acts): overwatch 0.10%, relock 0.06%, shove 0.05%. Delete an entry when its verb
+    /// climbs back above the rate — the PASS line will tell you which.
+    // COMPOSITION FINDING (lead, at the C2+C5 merge — neither wave could see this alone).
+    // "overwatch" was declared effectively-dead by C5 against the PRE-C2 opponent, where it fired
+    // 8 times in 8083 acts. C2's decline gate revived it: on the composed tree the same batch reads
+    // 86/8083 (1.06%), an order of magnitude above the rate, and AICOVTEST's own STALE DECLARATION
+    // note demanded its removal. That note firing is the test working exactly as designed.
+    // "sap" is MARGINAL at the sweep's N: 10/8083 (0.12%) here, but 2/2473 (0.08%) at N=2, which
+    // FAILS. The rate gate is 0.10%, so at N=2 the threshold is ~2.7 events and a Poisson draw
+    // decides it. Recorded, not papered over — the fix is a floor on acts, not a declaration.
+    static readonly string[] AiCovKnownRare = { "relock", "shove" };
+    /// Once per 1000 enemy acts. Below this a verb exists in the code and not in the game.
+    const double AiCovRareRate = 0.001;
+    public static string AiCoverageSelfTest(int campaigns)
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        var count = new Dictionary<string, long>();
+        foreach (var b in ActBranches) count[b] = 0;
+        long acts = 0, contested = 0, unknown = 0;
+        bool strict = Environment.GetEnvironmentVariable("SIGHTLINE_AICOVSTRICT") == "1";
+
+        BranchProbe = (branch, plan, standing) =>
+        {
+            acts++;
+            if (standing > 0) contested++;
+            if (count.ContainsKey(branch)) count[branch]++;
+            else { unknown++; count[branch] = 1; }        // a new branch nobody registered
+        };
+
+        var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
+                           Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
+        int slot = 0, played = 0, missions = 0;
+        foreach (int heat in new[] { 0, 4, 8 })
+            foreach (var o in objs)
+                for (int rep = 0; rep < campaigns; rep++)
+                {
+                    Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+                    Util.Reseed(310000 + slot++);
+                    var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true, ForcedObjective = o };
+                    g.StartMission(1);
+                    int frame = 0;
+                    while (frame++ < 40000 && g.Phase != Phase.Win && g.Phase != Phase.Lose)
+                        g.Update(1f / 60f);
+                    played++;
+                    missions += g.RunState != null ? Math.Max(1, g.RunState.Mission) : 1;
+                }
+        BranchProbe = null;
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", null);
+
+        // ---- the verdict ----------------------------------------------------------------------
+        var census = new List<string>();
+        foreach (var b in ActBranches)
+        {
+            long c = count[b];
+            double rate = acts > 0 ? c / (double)acts : 0;
+            census.Add($"{b}={c}({100.0 * rate:0.00}%)");
+            if (Array.IndexOf(AiCovBackstops, b) >= 0) continue;      // structural, not a verb
+            bool declared = Array.IndexOf(AiCovKnownRare, b) >= 0;
+            if (rate < AiCovRareRate)
+            {
+                if (!declared)
+                    fails.Add($"branchEffectivelyDead:{b}={c}/{acts}({100.0 * rate:0.00}% < {100.0 * AiCovRareRate:0.00}%)");
+                else if (strict)
+                    fails.Add($"declaredDeadBranch:{b}={c}/{acts}");
+                else
+                    notes.Add($"DEAD-BY-DECLARATION:{b}={c}/{acts}");
+            }
+            else if (declared && rate >= 2 * AiCovRareRate)   // 2x, so a branch sitting ON the line does not flip the note run to run
+                notes.Add($"STALE DECLARATION:{b}={c}/{acts}({100.0 * rate:0.00}%) is above the rate — delete it from AiCovKnownRare");
+        }
+        // vacuity: a census of nothing proves nothing, and the rate gate needs enough acts for
+        // "once per thousand" to be a measurable statement at all.
+        if (acts < 1500) fails.Add($"vacuousCensus(acts={acts})");
+        if (contested < acts / 2) notes.Add($"contested={contested}/{acts}");
+        if (unknown > 0) fails.Add($"unregisteredBranch(count={unknown}) — add it to Game.ActBranches");
+        // and the probe has to be wired to the chain it claims to census
+        if (count["shoot"] == 0) fails.Add("probeNotWired(no shots seen at all)");
+
+        return fails.Count == 0
+            ? $"AICOVTEST: PASS ({played} campaigns / {missions} missions / {acts} enemy acts "
+              + $"({contested} contested); every enemy verb fires at least once per "
+              + $"{(int)(1 / AiCovRareRate)} acts except the {AiCovKnownRare.Length} declared "
+              + $"effectively-dead ones. census: " + string.Join(" ", census)
+              + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "") + ")"
+            : $"AICOVTEST: FAIL ({string.Join(",", fails.Distinct())}) census: "
+              + string.Join(" ", census) + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "");
+    }
+
+    /// C5 (review E3): an animation that never completes — the OTHER deadlock. Harness-only; the
+    /// enemy turn enqueues one when `Game.DebugEnemyAnimWedge` is set, and `Game.Update` then
+    /// returns at the animation pump every frame without ever reaching the phase switch.
+    class StuckAnim : Anim
+    {
+        public override bool Update(Game g, float dt) => false;   // never done, by construction
+        public override void Draw(Game g) { }
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_ENEMYSTALLTEST ──────────────────────────────────────────
+    /// The ENEMY-TURN half of the no-deadlock contract, asserted the only way a deadlock guard
+    /// honestly can be: by DEADLOCKING THE ENEMY TURN and watching what happens.
+    ///
+    ///  (A) THE ARM — with the turn wedged, the guard fires within its own bound and the line it
+    ///      prints NAMES the unit, the stage and the planner branch. A guard that fires silently
+    ///      is the W9 TIMEOUT again: an agent gets a frame count and no diagnosis.
+    ///  (B) THE ESCAPE — the wedged turn ENDS. Not "eventually, at the harness frame cap": the
+    ///      guard forfeits the stalled unit and, when that exhausts the staging list, hands the
+    ///      turn back. Real play is where this matters; a batch loses a run, a player loses the
+    ///      session.
+    ///  (C) NON-VACUITY, and this is the leg that makes the whole test mean something — the SAME
+    ///      wedge with `EnemyStallGuardOn = false` (the pre-guard tree) must NOT recover. If it
+    ///      did, the wedge would be proving nothing and (A)/(B) would pass on a tree with no
+    ///      guard in it at all.
+    ///  (D) NO FALSE POSITIVES — real missions, no wedge, hundreds of real enemy turns: the guard
+    ///      must never fire. A stall guard that trips in a healthy fight would silently forfeit
+    ///      hostile turns and quietly move every balance number in the project.
+    ///  (E) THE BUDGET — the guard has to bite before the harness frame budget, or a TIMEOUT is
+    ///      reachable again through this door. Pinned against Game.AutoFrameCap, exactly as
+    ///      STALLTEST pins AutoMaxRunTurns.
+    public static string EnemyStallSelfTest()
+    {
+        var fails = new List<string>();
+        int armFrames = -1, escapeFrames = -1, noGuardFrames = -1;
+        string armLine = "";
+        long enemyTurnsSeen = 0;
+
+        // ---- (A) + (B): wedge a real enemy turn -----------------------------------------------
+        {
+            Util.Reseed(4242);
+            EnemyStallFires = 0; LastEnemyStall = ""; EnemyStallGuardOn = true;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            // play forward until the enemy turn is actually running
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase != Phase.EnemyTurn) fails.Add("neverReachedAnEnemyTurn");
+            else
+            {
+                DebugEnemyWedge = true;
+                int before = EnemyStallFires;
+                int spun = 0;
+                while (EnemyStallFires == before && spun++ < EnemyStallFrames + 240) g.Update(1f / 60f);
+                armFrames = spun;
+                armLine = LastEnemyStall;
+                if (EnemyStallFires == before) fails.Add($"guardNeverFired(after {spun} wedged updates)");
+                if (armFrames > EnemyStallFrames + 120) fails.Add($"guardFiredLate({armFrames})");
+                // the diagnosis has to be a diagnosis
+                foreach (var must in new[] { "stage=", "unit=", "plan=", "anims=", "mission=" })
+                    if (!armLine.Contains(must)) fails.Add("stallLineMissing:" + must);
+                if (armLine.Contains("unit=<none")) fails.Add("stallLineNamesNoUnit");
+
+                // (B) the turn gets OUT — bounded by one fire per staged hostile.
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int e2 = 0;
+                while (g.Phase == Phase.EnemyTurn && e2++ < budget) g.Update(1f / 60f);
+                escapeFrames = e2;
+                if (g.Phase == Phase.EnemyTurn)
+                    fails.Add($"wedgedTurnNeverEnded(after {e2} updates, fires={EnemyStallFires})");
+                DebugEnemyWedge = false;
+            }
+        }
+
+        // ---- (B2) THE ANIMATION HALF — the deadlock a guard inside UpdateEnemy cannot see ------
+        // `Update` returns at the animation pump while the queue is non-empty, so it never reaches
+        // the phase switch: a guard called from `UpdateEnemy` is not merely late here, it is NEVER
+        // CALLED. The first version of this test only wedged the stage machine (its own stall line
+        // said `anims=0`), so it passed on the placement it argues against — review E3.
+        int animArm = -1, animEscape = -1; string animLine = "";
+        {
+            Util.Reseed(4242);
+            EnemyStallGuardOn = true;
+            int before = EnemyStallFires;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase != Phase.EnemyTurn) fails.Add("neverReachedAnEnemyTurn(animWedge)");
+            else
+            {
+                DebugEnemyAnimWedge = true;
+                int spun = 0;
+                while (EnemyStallFires == before && spun++ < EnemyStallFrames + 240) g.Update(1f / 60f);
+                animArm = spun;
+                animLine = LastEnemyStall;
+                if (EnemyStallFires == before)
+                    fails.Add($"guardNeverFiredOnAStUCKANIM(after {spun} updates)");
+                // the diagnosis must NAME the queue, or it is not a diagnosis of THIS half
+                if (!animLine.Contains("head=StuckAnim"))
+                    fails.Add("animStallLineDoesNotNameTheQueueHead:" + Short(animLine));
+                // and it must recover: the queue is dropped and the turn ends
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int e2 = 0;
+                DebugEnemyAnimWedge = false;      // one wedge is enough; the recovery must finish the turn
+                while (g.Phase == Phase.EnemyTurn && e2++ < budget) g.Update(1f / 60f);
+                animEscape = e2;
+                if (g.Phase == Phase.EnemyTurn) fails.Add($"animWedgedTurnNeverEnded(after {e2})");
+                // ...and nobody is left standing between two tiles (the recovery drops the queue,
+                // and MoveStepAnim commits X/Y only on completion).
+                foreach (var u in g.Players)
+                    if (u.Alive && Vector2.Distance(u.Pos, Util.TileCenter(u.X, u.Y)) > 1.5f)
+                        fails.Add($"unitLeftMidTile:{u.Name}");
+                foreach (var e in g.Enemies)
+                    if (e.Alive && Vector2.Distance(e.Pos, Util.TileCenter(e.X, e.Y)) > 1.5f)
+                        fails.Add($"enemyLeftMidTile:{e.Name}");
+            }
+            DebugEnemyAnimWedge = false;
+        }
+
+        // ---- (C) the same wedge on the PRE-GUARD tree hangs ------------------------------------
+        {
+            Util.Reseed(4242);
+            EnemyStallGuardOn = false;
+            int firesBefore = EnemyStallFires;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase == Phase.EnemyTurn)
+            {
+                DebugEnemyWedge = true;
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int spun = 0;
+                while (g.Phase == Phase.EnemyTurn && spun++ < budget) g.Update(1f / 60f);
+                noGuardFrames = spun;
+                if (g.Phase != Phase.EnemyTurn)
+                    fails.Add("wedgeIsNotAWedge(the turn ended with the guard OFF, so (A)/(B) prove nothing)");
+                if (EnemyStallFires != firesBefore)
+                    fails.Add("guardFiredWhileDisabled");
+                DebugEnemyWedge = false;
+            }
+            else fails.Add("neverReachedAnEnemyTurn(legC)");
+            EnemyStallGuardOn = true;
+        }
+
+        // ---- (D) real missions, no wedge: the guard must stay silent ---------------------------
+        {
+            EnemyStallFires = 0;
+            Game.ActProbe = (u, plan, a, am, st) => { };
+            for (int rep = 0; rep < 4; rep++)
+            {
+                Util.Reseed(70000 + rep);
+                var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                g.StartMission(1);
+                Phase last = g.Phase;
+                int f = 0;
+                while (f++ < 30000 && g.Phase != Phase.Win && g.Phase != Phase.Lose)
+                {
+                    g.Update(1f / 60f);
+                    if (g.Phase == Phase.EnemyTurn && last != Phase.EnemyTurn) enemyTurnsSeen++;
+                    last = g.Phase;
+                }
+            }
+            Game.ActProbe = null;
+            if (EnemyStallFires > 0) fails.Add($"falsePositives={EnemyStallFires} in clean play");
+            if (enemyTurnsSeen < 40) fails.Add($"vacuous(onlySaw {enemyTurnsSeen} enemy turns)");
+        }
+
+        // ---- (E) the budget relationship --------------------------------------------------------
+        // (read through locals so the compiler evaluates the RELATIONSHIP rather than folding two
+        // consts into a constant-false branch it then warns is unreachable — which is exactly the
+        // shape of a check that cannot fail.)
+        long stallBound = EnemyStallFrames, frameCap = AutoFrameCap;
+        if (stallBound * 24 >= frameCap)
+            fails.Add($"stallBudgetExceedsFrameCap({stallBound}x24 >= {frameCap})");
+        if (stallBound <= 0) fails.Add("stallFramesNotPositive");
+
+        return fails.Count == 0
+            ? $"ENEMYSTALLTEST: PASS (BOTH halves of the deadlock: a wedged ANIMATION is detected in "
+              + $"{animArm} updates, named at the queue head, and drained in {animEscape} more with "
+              + $"no unit left between tiles - that is the half a guard inside UpdateEnemy is never "
+              + $"even called for; and a wedged STAGE MACHINE is detected in {armFrames} updates "
+              + $"(bound {EnemyStallFrames}) and named — \"{armLine.Substring(0, Math.Min(armLine.Length, 130))}\" — "
+              + $"the turn then ends in {escapeFrames} more; the SAME wedge with the guard off still "
+              + $"hangs after {noGuardFrames} updates; {enemyTurnsSeen} clean enemy turns fired it zero "
+              + $"times; {EnemyStallFrames} x 24 units < the {AutoFrameCap}-frame harness budget)"
+            : "ENEMYSTALLTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── C5 THE HARD EDGES — THE SCREEN AUDIT (FITTEST leg F) ──────────────────────────────────
+    /// Every screen the game can draw, drawn for real at every shipped text size, with the ink and
+    /// the control plates read back FROM THE DRAW CALLS (`Cfg.InkProbe` / `Hud.PlateProbe`).
+    ///
+    /// WHY A LIVE FRAME. W10's five legs measure layout arithmetic the test re-derives from the
+    /// same constants the renderer uses. That is fine for the five surfaces someone thought to
+    /// transcribe, and it is exactly the shape CROSSCUT's rule 5 warns about everywhere else: the
+    /// screen the test describes and the screen the game paints can differ, and nothing notices.
+    /// This leg cannot drift, because it IS the draw: it stages a screen, calls `Hud.Draw`, and
+    /// audits what came out.
+    ///
+    /// WHAT IT ASSERTS, per screen per scale:
+    ///   1. CONTROL PLATES CONTAIN THEIR LABELS. Every button/plate in the game reports (label,
+    ///      plate, painted box); the box must lie inside the plate. A label that has outgrown its
+    ///      chrome is unreadable — and a control the player cannot read is a control they will
+    ///      not press.
+    ///   2. NOTHING IS PAINTED OFF THE CANVAS. Any visible string whose box leaves 1280x800 has
+    ///      lost information the player was meant to have. Screens with a real scroll region
+    ///      (the CODEX) are exempt BY NAME, not by silence.
+    ///   3. THE SCREEN ACTUALLY DREW. A stager that throws, or paints fewer than three strings,
+    ///      is a failed audit rather than a quiet pass — the vacuity trap that lets a screen
+    ///      "pass" because it was never on screen.
+    /// Returns the number of screens audited so the PASS line can state its own coverage.
+    static int ScreenAudit(string S, List<string> fails, Action<string, bool, string> check)
+    {
+        var ink = new List<(string text, Rectangle box, float alpha)>();
+        var plates = new List<(string label, Rectangle plate, Rectangle box)>();
+        var seen = new Dictionary<string, string>();     // frame fingerprint -> the screen that drew it
+        var clips = new List<string>();                  // strings the renderer ellipsized away
+        var floors = new List<string>();                 // shrink-to-fit calls that hit their floor
+
+        int n = 0;
+        foreach (var sc in ScreenCases)
+        {
+            ink.Clear(); plates.Clear();
+            string tag = sc.Name + S;
+            float minSize = 99f; string minWhat = "-";
+            try
+            {
+                // DETERMINISM: several stagers roll (the shop slate, the event, the draft pool),
+                // and Util.Rng is clock-seeded by default — the first version of this leg reported
+                // a different worst-case string on consecutive runs, which is a flaky gate rather
+                // than a gate. One fixed seed per screen, so a FAIL reproduces verbatim.
+                Util.Reseed(FitScreenSeed);
+                var g = new Game { NoPersist = true };
+                sc.Stage(g);
+                // Let the game settle exactly as it does before a screenshot: several stagers
+                // (the hover tooltip's odds, the briefing card's timer) only produce their state
+                // inside Update, and a draw-only audit photographs the frame before them.
+                for (int f = 0; f < 3; f++) g.Update(1f / 60f);
+                Hud.AnimPin = 1f;              // audit the SETTLED frame, deterministically
+                Hud.TimePin = 1000.0; Renderer.TimePin = 1000.0;   // ...and at a FIXED clock
+                // ...and a FIXED POINTER. Thirty draw sites read the live cursor (hover fills,
+                // hover cards, and the threat card, which anchors itself at it), so without this
+                // the audited frame depended on where the mouse happened to be: a ~3% flake and a
+                // 16-check disagreement between machines on the same commit (review E2). Parked
+                // off-canvas so no control is hovered and every cursor-anchored panel clamps to the
+                // same place on every run and every machine.
+                Hud.MousePin = new System.Numerics.Vector2(-4000f, -4000f);
+                var fp = new System.Text.StringBuilder();
+                Cfg.InkProbe = (t, pos, box, size, alpha) =>
+                    {
+                        if (string.IsNullOrEmpty(t)) return;
+                        fp.Append(t).Append('|').Append((int)pos.X).Append(',').Append((int)pos.Y).Append(';');
+                    };
+                Raylib.BeginDrawing();
+                Raylib.ClearBackground(Pal.Bg);
+                // The BOARD pass counts toward the frame FINGERPRINT (so two screens that differ
+                // only on the board are not "the same screen") but not toward the geometry audit:
+                // it paints inside a Camera2D, so its ink is in world space, not screen space.
+                g.DrawBoardLayer();
+                Cfg.InkProbe = (t, pos, box, size, alpha) =>
+                    {
+                        if (string.IsNullOrEmpty(t)) return;
+                        fp.Append(t).Append('|').Append((int)pos.X).Append(',').Append((int)pos.Y).Append(';');
+                        ink.Add((t, new Rectangle(pos.X, pos.Y, box.X, box.Y), alpha));
+                        // CLAUDE.md's own rule: 12px is the small-text floor. The size recorded here
+                        // is the AUTHORED one, which is what that rule is written against.
+                        if (alpha >= 0.06f && size < minSize) { minSize = size; minWhat = Short(t); }
+                        if (FitDumpSmall && alpha >= 0.06f && size < 12f)
+                            Console.WriteLine($"FITSMALL {tag} {size:0.#}px rendered={Cfg.Scaled(size):0.#}px '{Short(t)}'");
+                    };
+                Hud.PlateProbe = (l, p, b) =>
+                    { plates.Add((l, p, b)); fp.Append('[').Append(l).Append((int)p.X).Append(',').Append((int)p.Y).Append(']'); };
+                Hud.ClipProbe = (t, sz, w) => clips.Add($"{tag}:'{Short(t)}'@{sz}px/{w}px");
+                Hud.FloorProbe = (t, sz, w) => floors.Add($"{tag}:'{Short(t)}'@{sz}px/{w}px");
+                g.DrawHudLayer();
+                Raylib.EndDrawing();
+                _fitPhase = g.Phase.ToString() + (g.Paused ? "+paused" : "");
+                _fitFrameFp = fp.Length.ToString() + ":" + fp.ToString().GetHashCode().ToString("x8");
+            }
+            catch (Exception ex) { fails.Add($"screenThrew:{tag}:{ex.GetType().Name}"); continue; }
+            finally
+            {
+                Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.ClipProbe = null; Hud.FloorProbe = null;
+                Hud.AnimPin = -1f; Hud.TimePin = -1.0; Renderer.TimePin = -1.0;
+                Hud.MousePin = new System.Numerics.Vector2(float.NaN, float.NaN);
+            }
+            n++;
+
+            // (1) every control plate contains its own label
+            foreach (var (label, plate, box) in plates)
+            {
+                if (plate.Width < 2 || plate.Height < 2) continue;          // a collapsed/hidden control
+                float overL = plate.X - box.X, overR = (box.X + box.Width) - (plate.X + plate.Width);
+                float overT = plate.Y - box.Y, overB = (box.Y + box.Height) - (plate.Y + plate.Height);
+                float worst = MathF.Max(MathF.Max(overL, overR), MathF.Max(overT, overB));
+                if (-worst < _fitPlateMargin) { _fitPlateMargin = -worst; _fitPlateTag = $"{tag}:{Short(label)}"; }
+                check("scr:" + sc.Name, worst <= PlateSlack,
+                      $"labelLeavesPlate:{tag}:'{Short(label)}'by{worst:0}px");
+            }
+
+            // (2) nothing visible is painted off the canvas
+            if (!sc.Scrolls)
+                foreach (var (text, box, alpha) in ink)
+                {
+                    if (alpha < 0.06f) continue;                            // an entrance fade paints nothing
+                    float edge = MathF.Min(MathF.Min(box.X, box.Y),
+                                           MathF.Min(Cfg.ScreenW - (box.X + box.Width), Cfg.ScreenH - (box.Y + box.Height)));
+                    if (edge < _fitEdgeMargin) { _fitEdgeMargin = edge; _fitEdgeTag = $"{tag}:{Short(text)}"; }
+                    check("scr:" + sc.Name,
+                          box.X >= -CanvasSlack && box.Y >= -CanvasSlack
+                          && box.X + box.Width <= Cfg.ScreenW + CanvasSlack
+                          && box.Y + box.Height <= Cfg.ScreenH + CanvasSlack,
+                          $"inkOffCanvas:{tag}:'{Short(text)}'@({box.X:0},{box.Y:0},{box.Width:0}x{box.Height:0})");
+                }
+
+            // (3) THE SMALL-TEXT FLOOR, as a REGRESSION BOUND rather than as the rule.
+            //     CLAUDE.md declares 12px the floor. The shipped UI does not meet it: this leg
+            //     measured 10px authored on the AUDIO CHECK screen and 11px on seventeen others at
+            //     100% (`SIGHTLINE_FITDUMP=small` lists every one). Asserting 12 here would fail a
+            //     tree nobody in this wave is authorised to re-lay-out, and asserting nothing would
+            //     let the next fitter step take it lower still. So the gate is the MEASURED worst,
+            //     which makes any further shrink a failure, and the breach itself is recorded as an
+            //     open finding rather than quietly normalised.
+            // C5 REVIEW FIX (B3): these are TWO minima and they do not live on the same screen.
+            // The first version tracked one pair under `minSize <= _fitMinSize`, so the LAST screen
+            // to tie the smallest AUTHORED size overwrote the rendered figure — and since the scale
+            // loop runs 0.90 -> 1.20, the PASS line reported the 120% tie (10px authored / 12px
+            // rendered) while the true smallest INK in the game is 9.0px, on AUDIO CHECK at 90%.
+            // The gate was never wrong (it is evaluated per screen per scale, below); the REPORT
+            // was, and the report is what the DEVLOG quoted as the measurement.
+            if (minSize < 99f && minSize < _fitMinSize)
+            { _fitMinSize = minSize; _fitMinAuthTag = $"{tag}:{minWhat}"; }
+            if (minSize < 99f && Cfg.Scaled(minSize) < _fitMinRendered)
+            { _fitMinRendered = Cfg.Scaled(minSize); _fitMinTag = $"{tag}:{minWhat}"; }
+            check("scr:" + sc.Name, minSize >= SmallTextAuthoredFloor,
+                  $"belowSmallTextFloor:{tag}:'{minWhat}'@{minSize:0.#}px");
+            check("scr:" + sc.Name, minSize >= 99f || Cfg.Scaled(minSize) >= SmallTextRenderedFloor - 0.01f,
+                  $"rendersBelowFloor:{tag}:'{minWhat}'@{Cfg.Scaled(minSize):0.#}px");
+
+            // (4) NOTHING WAS ELLIPSIZED. A geometry audit cannot see this: the box a clipped
+            //     string paints FITS — losing the tail is what made it fit. Clip is the renderer's
+            //     last-resort backstop, so a live screen reaching it means a column and its content
+            //     have drifted apart. This found the WAR ROOM ellipsizing an achievement
+            //     description at the 110% text size over a sub-pixel disagreement between the
+            //     wrapper and the clipper (fixed in Hud.Clip; this assertion is what caught it).
+            check("scr:" + sc.Name, clips.Count == 0,
+                  "textEllipsized:" + (clips.Count > 0 ? clips[0] : ""));
+            for (int ci = 1; ci < clips.Count; ci++)
+                check("scr:" + sc.Name, false, "textEllipsized:" + clips[ci]);
+
+            // (5) the screen actually drew, and drew ITS OWN screen. Two cases that paint an
+            //     identical frame mean one of them never staged — the vacuity trap that would
+            //     otherwise let this leg "cover" a screen it has never seen. (Found three:
+            //     WOUND / TRAITS / ENDLESSOFFER all photographed the main menu.)
+            check("scr:" + sc.Name, ink.Count >= 3, $"screenDrewNothing:{tag}(strings={ink.Count})");
+            bool twinned = seen.TryGetValue(_fitFrameFp, out string twin);
+            check("scr:" + sc.Name, !twinned, $"screenNotStaged:{tag}(identical frame to {twin})");
+            if (!twinned) seen[_fitFrameFp] = sc.Name;
+            if (FitDump && (clips.Count > 0 || floors.Count > 0))
+                Console.WriteLine($"FITDUMP {tag}: clipped={clips.Count} atFloor={floors.Count} "
+                    + string.Join(" ", clips.Concat(floors)));
+            if (FitDump)
+                Console.WriteLine($"FITDUMP {tag}: phase={_fitPhase} strings={ink.Count} plates={plates.Count} "
+                    + $"minSize={minSize:0.#}px('{minWhat}') "
+                    + $"tightestPlate={_fitPlateMargin:0.0}px@{_fitPlateTag} nearestEdge={_fitEdgeMargin:0.0}px@{_fitEdgeTag}");
+            _fitClips += clips.Count; _fitFloors += floors.Count;
+            clips.Clear(); floors.Clear();
+        }
+        return n;
+    }
+
+    // Diagnostics for the PASS line: the tightest label-in-plate margin and the closest any
+    // visible string came to the canvas edge, over every screen x every scale.
+    static int _fitClips, _fitFloors;
+    static float _fitMinSize = 99f, _fitMinRendered = 99f;
+    static string _fitMinTag = "-", _fitMinAuthTag = "-";
+    static string _fitFrameFp = "";
+    static float _fitPlateMargin = 9999f, _fitEdgeMargin = 9999f;
+    static string _fitPlateTag = "-", _fitEdgeTag = "-", _fitPhase = "-";
+    public static void FitAuditReset() { _fitPlateMargin = 9999f; _fitEdgeMargin = 9999f; _fitPlateTag = "-"; _fitEdgeTag = "-"; }
+
+    static string Short(string s) => s == null ? "" : (s.Length <= 22 ? s : s.Substring(0, 22) + "~");
+
+    /// Push a staged screen's squad to the longest strings the GAME can hand it: the widest
+    /// callsign+nickname shape the generator makes, the tag editor's own 14-character cap on every
+    /// soldier, and a rank/kill count at the top of their ranges. Nothing here is hypothetical —
+    /// each field is bounded by the code that produces it (Game.UpdateTagEditor caps the tag at 14;
+    /// Run.Ranks bounds the rank; the kill counter is a 3-digit field on the hall-of-fame row).
+    /// The longest identity the GENERATOR can actually deal, derived from its own pools rather
+    /// than invented: `Mission.Callsigns`' longest entry and `Nicknames`' longest entry. A stress
+    /// case built from unreachable content reports defects the player can never see — the first
+    /// version of this helper assigned "KESTREL \"MAVERICK\"" into `Unit.Name`, which no code path
+    /// produces, and duly "found" a 9px shop line that cannot occur.
+    internal static string FitWorstCallsign => Mission.LongestCallsign;
+    internal static string FitWorstNickname => Nicknames.Longest;
+
+    static void FitStressSquad(Game g)
+    {
+        var squad = g.RunState != null ? g.RunState.Squad : null;
+        if (squad != null)
+            foreach (var u in squad)
+            {
+                if (u == null || u.IsVip) continue;
+                u.Name = FitWorstCallsign; u.Nickname = FitWorstNickname;
+                u.CustomTag = "WMWMWMWMWMWMWM";      // 14 chars, the widest glyphs in the face
+                u.Rank = Run.Ranks.Length - 1;
+                u.Kills = 999;
+            }
+        foreach (var u in g.Players)
+        {
+            if (u == null || u.IsVip) continue;
+            u.Name = FitWorstCallsign; u.Nickname = FitWorstNickname;
+            u.CustomTag = "WMWMWMWMWMWMWM";
+            u.Rank = Run.Ranks.Length - 1;
+            u.Kills = 999;
+        }
+    }
+
+    /// Slack in px. A plate's label may kiss its border (rounded corners hide a pixel); ink may
+    /// touch the canvas edge. Anything past this is ink the player cannot read.
+    const float PlateSlack = 1.5f, CanvasSlack = 1.5f;
+    /// The measured worst authored/rendered type size in the shipped UI (see the note at the
+    /// assertion). Not the 12px rule — the bound that keeps the breach from getting worse.
+    /// THE BOUND, and it is set at the MEASURED WORST rather than one slack point below it.
+    /// C5 first set the authored bound to 9 — what the tightest shipped fitter declares as its own
+    /// minimum (`FitSize(effect, 12, 9, ...)` on the REQUISITION card) — while the worst size any
+    /// audited screen actually paints is 10px. That point of slack meant a 10 -> 9 regression on
+    /// the AUDIO CHECK screen would have passed in silence, which is the opposite of what a
+    /// regression bound is for (review B3). It is now 10 authored / 9.0 rendered: exactly what this
+    /// tree paints, so ANY further shrink fails. Neither number is the 12px rule — see the note at
+    /// the assertion and the open finding in DEVLOG.
+    const float SmallTextAuthoredFloor = 10f, SmallTextRenderedFloor = 9f;
+    /// The fixed seed every audited screen is staged under.
+    const int FitScreenSeed = 20260830;
+    static readonly bool FitDump = Environment.GetEnvironmentVariable("SIGHTLINE_FITDUMP") == "1";
+    /// SIGHTLINE_FITDUMP=small lists every string the game paints below the 12px small-text floor
+    /// CLAUDE.md declares, with its RENDERED size — the survey behind this wave's open finding.
+    static readonly bool FitDumpSmall = Environment.GetEnvironmentVariable("SIGHTLINE_FITDUMP") == "small";
+
+    /// The screens. Each entry stages a real `Game` and names itself; `Scrolls` marks a surface
+    /// with a genuine scroll region, where ink outside the canvas is the SCROLLBAR's job to
+    /// resolve rather than a defect. Adding a screen here is the whole cost of covering it.
+    struct ScreenCase
+    {
+        public string Name; public Action<Game> Stage; public bool Scrolls;
+        public ScreenCase(string name, Action<Game> stage, bool scrolls = false)
+        { Name = name; Stage = stage; Scrolls = scrolls; }
+    }
+
+    static readonly ScreenCase[] ScreenCases =
+    {
+        new ScreenCase("INTRO",        g => { }),
+        new ScreenCase("MISSION",      g => { g.StartMission(1); g.BriefLines = null; }),
+        new ScreenCase("PAUSE",        g => { g.StartMission(1); g.Paused = true; }),
+        new ScreenCase("TOOLTIP-AIM",  g => { g.StartMission(1); g.DebugTooltip(false); }),
+        new ScreenCase("TOOLTIP-HOVER",g => { g.StartMission(1); g.DebugTooltip(true); }),
+        new ScreenCase("THREATCARD",   g => { g.StartMission(1); g.DebugThreatShot(); }),
+        new ScreenCase("TUTORIAL",     g => { g.StartMission(1); g.ShowTutorialStep(0); }),
+        new ScreenCase("TRAINING",     g => g.BeginTraining()),
+        new ScreenCase("VERBS",        g => { g.StartMission(1); g.DebugVerbs(); }),
+        new ScreenCase("STATUS",       g => { g.StartMission(1); g.DebugStatus(); }),
+        new ScreenCase("TAGEDIT",      g => { g.StartMission(1); g.DebugTagEditor(); }),
+        new ScreenCase("INTENT",       g => { g.StartMission(1); g.DebugIntent(); }),
+        new ScreenCase("SHOP",         g => g.DebugShop()),
+        new ScreenCase("SHOP-PREP",    g => g.DebugPrep()),
+        new ScreenCase("ARMORY",       g => g.DebugArmory()),
+        new ScreenCase("CAMPAIGNMAP",  g => g.DebugCampaignMap()),
+        new ScreenCase("BENCH",        g => g.DebugBench()),
+        new ScreenCase("PERKCHOOSER",  g => g.DebugBarracksPerk()),
+        new ScreenCase("DEPLOYCARDS",  g => g.DebugDeployCards()),
+        new ScreenCase("BOONOFFER",    g => g.DebugBoon()),
+        new ScreenCase("EVENT",        g => g.DebugEvent()),
+        new ScreenCase("DRAFT",        g => g.BeginDraft()),
+        new ScreenCase("VETDRAFT",     g => g.DebugVetDraft()),
+        new ScreenCase("WIN",          g => g.DebugSummary(false)),
+        new ScreenCase("LOSE",         g => g.DebugSummary(true)),
+        new ScreenCase("KIA",          g => { g.StartMission(1); g.DebugKia(); }),
+        new ScreenCase("WARROOM",      g => g.DebugWarRoom()),
+        new ScreenCase("CODEX",        g => g.DebugCodex(), true),
+        new ScreenCase("AUDIOCHECK",   g => g.DebugAudition()),
+        new ScreenCase("SKIRMISHSETUP",g => g.DebugSkirmishSetup()),
+        new ScreenCase("ENDLESSOFFER", g => { g.BeginEndless(); g.DebugEndlessOffer(); }),
+        new ScreenCase("WOUND",        g => { g.StartMission(1); g.DebugWound(); }),
+        new ScreenCase("TRAITS",       g => { g.StartMission(1); g.DebugTraits(); }),
+        new ScreenCase("ROSTERFULL",   g => { Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", "6");
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", "8");
+                                              g.DebugCampaignMap();
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", null);
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", null); }),
+        new ScreenCase("ENDLESSHUD",   g => { g.BeginEndless(); }),
+        new ScreenCase("BRIEF",        g => g.StartMission(1)),   // the briefing card is up for 11 s
+        // THE WORST-CASE CONTENT, which is where the last two waves' text defects actually lived:
+        // W10's ARMORY hook photographed the SECOND-SHORTEST blurb in the game for four waves.
+        // Default staging paints default-length strings; these three paint the longest strings a
+        // player can actually produce (a 14-char custom tag - the editor's own cap - on a
+        // full-length callsign+nickname, a full roster, and a padded debrief).
+        new ScreenCase("MISSION-WORST", g => { g.StartMission(1); FitStressSquad(g); }),
+        new ScreenCase("ROSTER-WORST",  g => { Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", "6");
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", "8");
+                                               g.DebugCampaignMap();
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", null);
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", null);
+                                               FitStressSquad(g); }),
+        new ScreenCase("WIN-WORST",     g => { g.DebugSummary(false); FitStressSquad(g); }),
+        new ScreenCase("SHOP-WORST",    g => { g.DebugShop(); FitStressSquad(g); }),
+    };
 
     // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
     /// The two ways OUT of a screen that the audit found missing, pinned together because they are

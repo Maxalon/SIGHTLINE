@@ -1873,6 +1873,10 @@ public partial class Game
         // recovery in DebriefSurvivors and the flag is cleared THERE (EnterBarracks, after the
         // debrief consumes it) - so it must survive the whole mission. Do NOT clear it here,
         // or the recovery path is dead code (review Blocker 2).
+        // C5: a run that has soldiers must field one. See Run.EnsureFieldable — the UI guards the
+        // click, nothing guarded the persisted flag, and an all-benched roster set up a mission
+        // with an empty board.
+        _run.EnsureFieldable();
         Players = new List<Unit>(_run.Squad.Where(u => !u.Benched));
 
         // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
@@ -3840,6 +3844,11 @@ public partial class Game
         // W11 NEW CONTACT: with the banner lane free, ID the next unseen alert archetype (one per
         // banner window). Live phases only; internally !NoPersist-gated like the tutorial.
         else if (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn) CheckNewContact();
+
+        // C5 THE HARD EDGES: the enemy-turn deadlock guard runs BEFORE the animation pump — an
+        // animation that never completes returns below, so a guard placed after it (or inside
+        // UpdateEnemy) could never see that half of the deadlock. See EnemyStallGuard.
+        if (Phase == Phase.EnemyTurn) EnemyStallGuard();
 
         // advance animation queue — but NEVER while the codex is open (FUL-2: BeginCodex clears
         // Paused for the overlay, which let queued enemy ShotAnims resolve while the player read
@@ -6608,9 +6617,138 @@ public partial class Game
         }
     }
 
+
+    // ── C5 THE HARD EDGES — THE ENEMY-TURN DEADLOCK GUARD ─────────────────────────────────────
+    /// W9 shipped a within-turn idle guard and it covers the PLAYER turn only (`AutoIdleGuard`
+    /// runs from `UpdatePlayer`, autoplay-only). The enemy turn had nothing: a stage machine that
+    /// stops advancing, or an animation that never reports done, freezes the game until something
+    /// outside it gives up — the harness frame cap after ~13.5k frames in a batch (reported as
+    /// `RESULT: TIMEOUT` with no diagnosis), and NOTHING AT ALL in front of a player, who simply
+    /// watches a hostile that never acts. This is the missing half.
+    ///
+    /// It runs in REAL PLAY, not only in autoplay, because that is where the failure is worse: a
+    /// batch loses a run, a player loses the session. It costs one integer hash per frame of the
+    /// enemy turn.
+    ///
+    /// WHERE IT SITS, and why that is the whole design: in `Update`, BEFORE the animation pump —
+    /// not inside `UpdateEnemy`. While `_anims` is non-empty `Update` returns before the phase
+    /// switch, so a guard inside `UpdateEnemy` is structurally blind to the "an animation never
+    /// completes" half of the deadlock — the same shape of blindness W9 found in the turn-boundary
+    /// guard. From `Update` it sees both halves.
+    ///
+    /// WHAT COUNTS AS PROGRESS: the staging index, the stage, the queue depth and the head
+    /// animation's type, plus every unit's position/HP/actions/ammo/state. Any real activity moves
+    /// one of them. A banner beat (`BannerTimer > 0.55`, which `UpdateEnemy` deliberately waits
+    /// out) resets the counter, so a telegraph is never mistaken for a stall.
+    public const int EnemyStallFrames = 480;   // 8 s at 60 fps of an enemy turn with NOTHING moving
+
+    /// Diagnostics. `EnemyStallFires` is the count for this process; `LastEnemyStall` is the line
+    /// the guard printed, which names the unit and the planner branch that stalled.
+    public static int EnemyStallFires;
+    public static string LastEnemyStall = "";
+    /// Falsifiability lever + the escape hatch's own off switch (ENEMYSTALLTEST leg C runs the
+    /// wedged turn with this false and asserts the game hangs, which is what the pre-guard tree
+    /// does). Never false in play.
+    public static bool EnemyStallGuardOn = true;
+    /// Harness-only fault injectors. There is no way to write an honest test for a deadlock guard
+    /// without a deadlock, and the two halves of the deadlock need DIFFERENT wedges:
+    ///   `DebugEnemyWedge`     — `UpdateEnemy` returns without doing anything: the STAGE MACHINE
+    ///                           stops advancing with an EMPTY queue.
+    ///   `DebugEnemyAnimWedge` — an animation is enqueued that never reports done: `Update` then
+    ///                           returns at the animation pump and never reaches the phase switch
+    ///                           at all. THIS is the half a guard inside `UpdateEnemy` cannot see,
+    ///                           and it is the reason this guard runs from `Update` instead
+    ///                           (C5 review E3: the first version of ENEMYSTALLTEST only wedged the
+    ///                           stage machine, so it PASSED on the placement it argues against).
+    public static bool DebugEnemyWedge;
+    public static bool DebugEnemyAnimWedge;
+
+    int _enemyStallSig, _enemyStallFrames;
+
+    /// The branch a plan intends, named. Deliberately lives HERE and not on `EnemyPlan`: `Ai.cs`
+    /// is another wave's lane this wave must not touch.
+    public static string PlanBranch(EnemyPlan p)
+    {
+        if (p == null) return "none";
+        if (p.SiegeCharge != null) return "siege";
+        if (p.SapTile != null) return "sap";
+        if (p.RelockTile != null) return "relock";
+        if (p.HealTarget != null) return "heal";
+        if (p.Grenade) return "grenade";
+        if (p.UseItem) return "item";
+        if (p.ShoveTarget != null) return "shove";
+        if (p.Brace) return "brace";
+        if (p.ShootTarget != null) return "shoot";
+        if (p.Overwatch) return "overwatch";
+        if (p.Reload) return "reload";
+        if (p.Hunker) return p.IdleRepair ? "hunker(terminal-else)" : "hunker";
+        if (p.Path.Count > 0) return "move-only";
+        return "empty";
+    }
+
+    void EnemyStallGuard()
+    {
+        if (!EnemyStallGuardOn) return;
+        if (BannerTimer > 0.55f) { _enemyStallFrames = 0; return; }   // the telegraph beat, not a stall
+
+        int sig = 17;
+        sig = sig * 31 + _aiIdx;
+        sig = sig * 31 + (int)_aiStage;
+        sig = sig * 31 + _anims.Count;
+        if (_anims.Count > 0) sig = sig * 31 + _anims[0].GetType().Name.Length * 7919;
+        foreach (var e in Enemies)
+            sig = sig * 31 + (e.Hp * 7 + e.X * 31 + e.Y + e.ActionsLeft * 8191 + e.Ammo * 127
+                              + (e.Alive ? 1 : 0) + (e.OnOverwatch ? 2 : 0) + (e.Hunkered ? 4 : 0));
+        foreach (var p in Players)
+            sig = sig * 31 + (p.Hp * 7 + p.X * 31 + p.Y + p.ActionsLeft * 3
+                              + (p.Alive ? 1 : 0) + (p.Downed ? 2 : 0));
+        if (sig != _enemyStallSig) { _enemyStallSig = sig; _enemyStallFrames = 0; return; }
+        if (++_enemyStallFrames < EnemyStallFrames) return;
+        _enemyStallFrames = 0;
+
+        // FAIL LOUD. The point of this guard is not that the game keeps running — it is that the
+        // next agent gets a NAME instead of a frame count. Every field here answers a question the
+        // W9 TIMEOUT could not: which unit, at which stage of its turn, intending which branch,
+        // with what still in the animation queue.
+        var stuck = (_aiUnits != null && _aiIdx >= 0 && _aiIdx < _aiUnits.Count) ? _aiUnits[_aiIdx] : null;
+        string who = stuck == null
+            ? $"<none: index {_aiIdx} of {(_aiUnits == null ? 0 : _aiUnits.Count)}>"
+            : $"{stuck.Name}/{stuck.Cls} #{_aiIdx} at ({stuck.X},{stuck.Y}) hp={stuck.Hp} "
+              + $"act={stuck.ActionsLeft} ammo={stuck.Ammo}{(stuck.Alive ? "" : " DEAD")}";
+        string head = _anims.Count > 0 ? _anims[0].GetType().Name : "-";
+        LastEnemyStall = $"ENEMY-STALL: enemy turn made no progress for {EnemyStallFrames} updates. "
+            + $"stage={_aiStage} unit={who} plan={PlanBranch(_aiPlan)} anims={_anims.Count} head={head} "
+            + $"turn={_turnCount} mission={(_run != null ? _run.Mission : 0)} mode={Mode}";
+        EnemyStallFires++;
+        Console.Error.WriteLine(LastEnemyStall);
+
+        // ...and then GET OUT. A wedged animation is dropped, the stalled unit forfeits its turn,
+        // and the staging index advances; if that exhausts the list the turn ends here rather than
+        // handing control back to the machine that just failed to advance it.
+        // The queue is dropped — and this is the codebase's ONLY production `_anims.Clear()`, so it
+        // owes the board a repair that no other caller has ever had to make: `MoveStepAnim` commits
+        // `Unit.X/Y` when it FINISHES, so dropping one in flight leaves the unit's logical tile at
+        // the step's origin with its drawn position frozen between two tiles. Re-sync every unit to
+        // the tile it is actually standing on (C5 review).
+        if (_anims.Count > 0)
+        {
+            _anims.Clear();
+            foreach (var u in Players) u.SyncPos();
+            foreach (var e in Enemies) e.SyncPos();
+        }
+        ClearIntent();
+        if (stuck != null) stuck.ActionsLeft = 0;
+        _aiIdx++;
+        _aiStage = AiStage.PickNext;
+        if (_aiUnits == null || _aiIdx >= _aiUnits.Count) StartPlayerTurn();
+    }
+
     // ---------------- enemy turn ----------------
     void UpdateEnemy()
     {
+        if (DebugEnemyWedge) return;    // C5 harness-only fault injector (see EnemyStallGuard)
+        if (DebugEnemyAnimWedge && _anims.Count == 0)
+            Enqueue(new StuckAnim(), Team.Enemy);   // C5: the animation half of the deadlock
         if (BannerTimer > 0.55f) return; // let banner breathe before acting
 
         if (_aiStage == AiStage.PickNext)
@@ -6690,10 +6828,18 @@ public partial class Game
             // the auditor's definition of an idle act — without a `fired` flag threaded through all
             // twelve branch bodies.
             int actionsBefore = e.ActionsLeft, ammoBefore = e.Ammo;
-            // C2: the branch that actually FIRES below, named at the branch rather than
-            // re-derived from state afterwards (a shot that then repositions into cover would
-            // misclassify under any after-the-fact reading). Feeds Stats' enemy decision mix.
-            string dec = null;
+            // THE DECISION CENSUS — ONE instrument, TWO consumers. C2 and C5 independently
+            // instrumented these same branches (C5 as a coverage census, C2 as the enemy decision
+            // mix) and disagreed on the terminal else. Merging both verbatim would have put two
+            // parallel censuses over one code path, free to diverge silently, with BOTH waves'
+            // tests green — the exact defect class this project keeps rediscovering. So: every
+            // branch writes ONE variable, the sentinel is resolved ONCE at the publish site below,
+            // and both consumers are handed the resolved label. Named at the branch rather than
+            // re-derived from state afterwards, because a shot that then repositions into cover
+            // would misclassify under any after-the-fact reading.
+            // It exists because the OVERWATCH branch was measured firing 8 times in 8083 acts and
+            // no test in the project could have noticed.
+            _actBranch = "none";
             // W2 REVIEW FIX — the BLEED-OUT WINDOW, and it is the whole shape of this wave's number.
             // When every surviving soldier is on the floor, Ai.Plan takes its `players.Count == 0`
             // early return (Ai.cs:78, after the FUL-7 LAST LIGHT downed filter): there is nothing to
@@ -6712,10 +6858,11 @@ public partial class Game
             {
                 if (_aiPlan.SiegeCharge != null && e.HasSiege && e.ChargeTurns == 0 && e.ActionsLeft > 0)
                 {
-                    dec = "siege";
+                    _actBranch = "siege";
                     // SIEGE charges a telegraphed strike: NO damage now — the 3x3 danger zone IS the
                     // telegraph (drawn for the whole next player turn); it lands at the top of the
                     // following enemy turn (TickSiegeStrikes). Spends the action -> no dead turn.
+                    _actBranch = "siege";
                     e.ActionsLeft = 0;
                     var (cx, cy) = _aiPlan.SiegeCharge.Value;
                     e.ChargeX = cx; e.ChargeY = cy;
@@ -6729,7 +6876,7 @@ public partial class Game
                     Grid.IsCover(_aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) &&
                     Util.ChebyDist(e.X, e.Y, _aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) <= 1)
                 {
-                    dec = "sap";
+                    _actBranch = "sap";
                     e.ActionsLeft = 0;
                     var (sx, sy) = _aiPlan.SapTile.Value;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "BREACH", Pal.Foe, 16f);
@@ -6741,10 +6888,11 @@ public partial class Game
                 else if (_aiPlan.RelockTile != null && e.ActionsLeft > 0 &&
                     CanRelock(e, _aiPlan.RelockTile.Value))
                 {
-                    dec = "relock";
+                    _actBranch = "relock";
                     // SIGNAL W8 — CUSTODIAN: standing at the objective, spend the action undoing
                     // one step of the player's progress (validated NOW, post-move — a re-blown
                     // charge or a dead keeper mid-path falls through to the generic branches).
+                    _actBranch = "relock";
                     e.ActionsLeft = 0;
                     DoRelock(e, _aiPlan.RelockTile.Value);
                     Enqueue(new WaitAnim(0.25f), Team.Enemy);
@@ -6754,7 +6902,7 @@ public partial class Game
                     Util.TileDist(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y) <= Ai.HealRange &&
                     Grid.HasLineOfSight(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y))
                 {
-                    dec = "heal";
+                    _actBranch = "heal";
                     e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "MEDIC", Pal.Good, 16f);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
@@ -6763,7 +6911,7 @@ public partial class Game
                 else if (_aiPlan.Grenade && e.Grenades > 0 && e.ActionsLeft > 0 &&
                     Util.TileDist(e.X, e.Y, _aiPlan.GrenX, _aiPlan.GrenY) <= GrenadeRange)
                 {
-                    dec = "grenade";
+                    _actBranch = "grenade";
                     e.Grenades--;
                     e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "FRAG OUT", Pal.Foe, 16f);
@@ -6774,7 +6922,7 @@ public partial class Game
                     Grid.InBounds(_aiPlan.ItemTx, _aiPlan.ItemTy) &&
                     Util.TileDist(e.X, e.Y, _aiPlan.ItemTx, _aiPlan.ItemTy) <= ItemRange)
                 {
-                    dec = "item";
+                    _actBranch = "item";
                     e.ItemCharge--;
                     // item use takes one action but does NOT necessarily end the turn,
                     // so the enemy can still shoot after laying smoke (if ShootTarget != null).
@@ -6793,10 +6941,11 @@ public partial class Game
                     !_aiPlan.ShoveTarget.IsVip &&
                     Util.ChebyDist(e.X, e.Y, _aiPlan.ShoveTarget.X, _aiPlan.ShoveTarget.Y) == 1)
                 {
-                    dec = "shove";
+                    _actBranch = "shove";
                     // AI SHOVE (Wave 5): slam an adjacent covered soldier 1 tile to expose it (or deal
                     // collision damage if it's pinned). Reuses the player's ShoveAnim verbatim; the action
                     // is spent here (no TIMEOUT). The exposed soldier is then a soft target for the pod.
+                    _actBranch = "shove";
                     e.ActionsLeft = 0;
                     var t = _aiPlan.ShoveTarget;
                     int sdx = Math.Sign(t.X - e.X), sdy = Math.Sign(t.Y - e.Y);
@@ -6806,12 +6955,13 @@ public partial class Game
                 }
                 else if (_aiPlan.Brace && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
                 {
-                    dec = "brace";
+                    _actBranch = "brace";
                     // FUL-8 PIKEMAN: plant the braced lane — the exact flag set the player's own BRACE+FOCUS
                     // arms, so OnUnitEnteredTile reacts through the identical (COMBATTEST-pinned) path: the
                     // first soldier through the cone eats a halved, no-crit, STAGGERING reaction. The plant
                     // lives one round (the enemy BeginTurn wipes OnOverwatch/OwBrace/OwFocused), so holding
                     // the lane costs the PIKEMAN its action EVERY turn — symmetric movement-economy trade.
+                    _actBranch = "brace";
                     e.OnOverwatch = true; e.OwBrace = true; e.OwFocused = true;
                     e.OwDirX = _aiPlan.BraceDirX; e.OwDirY = _aiPlan.BraceDirY;
                     // face down the lane: the silhouette's pike IS the direction read — without this
@@ -6824,7 +6974,7 @@ public partial class Game
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
                 {
-                    dec = "shoot";
+                    _actBranch = "shoot";
                     e.Ammo--;
                     // TEMPO: the enemy shot is 1 action and does NOT end the turn (mirrors the player).
                     e.FiredThisTurn = true;
@@ -6837,14 +6987,14 @@ public partial class Game
                 }
                 else if (_aiPlan.Overwatch && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
                 {
-                    dec = "overwatch";
+                    _actBranch = "overwatch";
                     e.OnOverwatch = true; e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
                     Audio.Play("over");
                 }
                 else if (_aiPlan.Reload && e.ActionsLeft > 0 && e.Ammo < e.Weapon.Clip)
                 {
-                    dec = "reload";
+                    _actBranch = "reload";
                     // W2 THE OPPONENT ACTS — the enemy AMMO ECONOMY, decided rather than defaulted
                     // into (docs/DESIGN.md §5.1). Hostiles used to be handed exactly one clip at spawn
                     // with no reload verb anywhere, so "dry" was PERMANENT. Measured on this tree over
@@ -6855,6 +7005,7 @@ public partial class Game
                     // now RELOADED, on the player's own terms — one action, same clip refill as
                     // Game.DoReload — which makes running a hostile dry a real tempo window the player
                     // can bait and push into, instead of a unit that silently stops existing.
+                    _actBranch = "reload";
                     e.Ammo = e.Weapon.Clip;
                     e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
                     Fx.PopText(e.Pos + new Vector2(0, -30), "RELOADING", Pal.TxtDim, 16f);
@@ -6866,7 +7017,7 @@ public partial class Game
                 }
                 else if (_aiPlan.Hunker && e.ActionsLeft > 0)
                 {
-                    dec = "hunker";
+                    _actBranch = "hunker";
                     e.Hunkered = true; e.ActionsLeft = 0;
                     // W2: the enemy hunker was the one branch that fired in COMPLETE silence — no pop,
                     // no sound, only a small diamond in the status row. It reads identically to the
@@ -6897,7 +7048,11 @@ public partial class Game
                 // action, and the two are not the same claim.
                 else if (AiIdleFix && standing > 0 && e.ActionsLeft > 0 && e.ActionsLeft == actionsBefore)
                 {
-                    dec = "staleplan";
+                    // C5's ammo split is kept over C2's single "staleplan" tag: these are two
+                    // separately reachable paths with different reachability (terminal-hunker 4,
+                    // terminal-reload 0 in 8083 acts), and collapsing them hides that one is dead.
+                    // Stats maps the pair back onto "staleplan" at the publish site — see below.
+                    _actBranch = e.Ammo <= 0 && e.Weapon.Clip > 0 ? "terminal-reload" : "terminal-hunker";
                     if (e.Ammo <= 0 && e.Weapon.Clip > 0)
                     {
                         e.Ammo = e.Weapon.Clip;
@@ -6918,11 +7073,21 @@ public partial class Game
             // the unit's pre-chain action/ammo counts, so the harness can classify idle / dry / no-target
             // without the game itself carrying a counter.
             if (ActProbe != null && e.Alive) ActProbe(e, _aiPlan, actionsBefore, ammoBefore, standing);
-            // C2: the enemy decision mix. `dec == null` means no branch fired at all — the W2
-            // terminal guarantee only covers CONTESTED acts, so during the bleed-out window that
-            // is the correct and expected reading, and Stats files it under all-downed.
+            // Resolve the sentinel ONCE, upstream of the fork, so NEITHER consumer sees "none".
+            // C5's objection to a bare "none" is that it conflates the all-downed bleed-out window
+            // with move-only acts (34.4% of acts at n=2740); C2's mix needs move and idle
+            // separable, because `move` is a reported figure (~8.4%) and `idle` is a load-bearing
+            // ZERO — its ABSENCE is the assertion. Resolving here satisfies both objections.
+            string act = _actBranch == "none" ? (_aiPlan.Path.Count > 0 ? "move" : "idle") : _actBranch;
+            LastActBranch = act;
+            // Both consumers are called side by side at this ONE site. Stats is deliberately NOT
+            // routed through BranchProbe: that is a single static delegate with one subscriber,
+            // which AICOVTEST assigns and nulls, so whichever assigned second would silently win
+            // and the loser would record nothing — the very divergence this reconciliation exists
+            // to prevent. RecordEnemyDecision is already a no-op when Stats is disabled.
+            if (BranchProbe != null) BranchProbe(act, _aiPlan, standing);
             if (Stats.Enabled && e.Alive)
-                Stats.RecordEnemyDecision(dec ?? (_aiPlan.Path.Count > 0 ? "move" : "idle"), standing > 0,
+                Stats.RecordEnemyDecision(StatsVerb(act), standing > 0,
                                           _aiPlan.ShotHit, _aiPlan.ShotExp, _aiPlan.Declined);
             _aiIdx++;
             _aiStage = AiStage.PickNext;
@@ -6963,6 +7128,35 @@ public partial class Game
     /// STANDING (alive, not downed) soldier count — without which an idle count cannot be read,
     /// because an all-downed board idles every hostile by design and supplied 86% of the raw rate).
     public static Action<Unit, EnemyPlan, int, int, int> ActProbe;
+
+    /// C5 THE HARD EDGES — the branch each enemy act actually took (see the census note in
+    /// ActAfterMove). `LastActBranch` is the last one for a reader/debugger; `BranchProbe` is the
+    /// harness hook SIGHTLINE_AICOVTEST counts through: (branch, the plan it executed, the number
+    /// of soldiers still standing — an all-downed board is not a decision).
+    string _actBranch = "none";
+    public static string LastActBranch = "none";
+    public static Action<string, EnemyPlan, int> BranchProbe;
+
+    /// Every branch the enemy exec chain can take, in chain order. The census asserts against
+    /// THIS list, so a new verb that nobody sampled is a coverage failure the day it lands rather
+    /// than three programs later.
+    /// C2/C5 reconciliation: the DECISION MIX names a decision, the CENSUS names a code path.
+    /// The terminal else is one decision (the plan no longer fits the board) reached by two
+    /// mechanically different cleanups, so the census keeps them apart and the mix folds them
+    /// back onto C2's name. NOT folded into "hunker"/"reload" — that would move C2's published
+    /// 23.0/25.0% hunker and 501/419 reload rows, which are the UN-folded ones.
+    internal static string StatsVerb(string b) =>
+        b == "terminal-reload" || b == "terminal-hunker" ? "staleplan" : b;
+
+    public static readonly string[] ActBranches =
+    {
+        "siege", "sap", "relock", "heal", "grenade", "item", "shove", "brace",
+        "shoot", "overwatch", "reload", "hunker", "terminal-reload", "terminal-hunker", "none",
+        // C2/C5 reconciliation: the sentinel is resolved at the publish site, so the census now
+        // sees "move" and "idle" instead of a bare "none". Both MUST be registered here —
+        // AICOVTEST fails on an unregistered label, and that assertion is deliberate.
+        "move", "idle",
+    };
 
     // Enqueue the move steps for the just-planned enemy (shared by the AutoPlay fast path and
     // the post-telegraph path so the move timing/cost accounting is identical either way).

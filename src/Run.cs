@@ -1153,6 +1153,36 @@ public class Run
     /// Soldiers that will deploy next mission (Benched == false), for UI/queries.
     public List<Unit> Deployed => Squad.FindAll(u => !u.Benched);
 
+    /// C5 THE HARD EDGES — THE FIELDING INVARIANT: a run with soldiers must put at least one of
+    /// them on the board.
+    ///
+    /// `Game.ToggleBench` enforces ">= 1 deployed" at the UI, so no CLICK can empty the field —
+    /// but `Benched` is a persisted per-soldier flag with no such guard on the way IN, and
+    /// `SetupMission` builds `Players` straight from `Squad.Where(!Benched)`. A save.json with
+    /// every soldier benched (an edit, a truncated write, an older build's roster) resumed into a
+    /// mission with an EMPTY BOARD: nobody to select, nobody to lose, no way to play the run out.
+    /// Found by SIGHTLINE_SAVEEDGETEST.
+    ///
+    /// The repair is the deployment rule that already exists — best `NextDeployCap` soldiers,
+    /// healthy and senior first — applied only when the field would otherwise be empty, so a
+    /// player's own bench choices are never touched. Returns true when it had to intervene.
+    public bool EnsureFieldable()
+    {
+        if (Squad.Count == 0 || Deployed.Count > 0) return false;
+        // C5 REVIEW FIX: AutoDeploy sizes the field for the NEXT mission (DeployCapFor(Mission+1)),
+        // which is right in the barracks and wrong here — SetupMission has already advanced
+        // Run.Mission, so recovering an all-benched save at mission 2 fielded FIVE where the cap
+        // for the mission about to be played is four. Field to THIS mission's cap, by the same
+        // preference order AutoDeploy uses (healthy + senior first), so the recovery lands on the
+        // squad the game would have fielded anyway.
+        int cap = Math.Min(DeployCapMax, DeployCapFor(Math.Max(1, Mission)) + (HasBoon(Boon.RapidDeploy) ? 1 : 0));
+        var ordered = new List<Unit>(Squad);
+        ordered.Sort(DeployPreference);
+        for (int i = 0; i < ordered.Count; i++) ordered[i].Benched = i >= cap;
+        if (Deployed.Count == 0) Squad[0].Benched = false;   // a cap of 0 is not a reason to field nobody
+        return true;
+    }
+
     /// W9 REVIEW FIX — reconcile the deployment after a ROSTER CHANGE while PRESERVING the player's
     /// own bench choices.
     ///
@@ -1756,8 +1786,8 @@ public class Run
         u.Perks.Add(p);
         switch (p)
         {
-            case Perk.Tank: u.MaxHp += 3; u.Hp += 3; break;
-            case Perk.Sprinter: u.Mobility += 1; break;
+            case Perk.Tank: u.MaxHp += Unit.TankHp; u.Hp += Unit.TankHp; break;
+            case Perk.Sprinter: u.Mobility += Unit.SprinterMob; break;
             // the rest are passive modifiers read at combat/refill time
         }
     }
