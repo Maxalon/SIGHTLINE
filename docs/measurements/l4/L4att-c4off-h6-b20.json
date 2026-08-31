@@ -1,0 +1,2108 @@
+{
+  "instrument": "add-v2",
+  "runs": 20,
+  "runsByMode": {
+    "campaign": 20
+  },
+  "missions": 62,
+  "runWinRate": 10,
+  "runWinRateExStalemate": 10.5,
+  "instrumentHealth": {
+    "campaignRuns": 20,
+    "stalemateLosses": 1,
+    "stalematePct": 5,
+    "frameCapLosses": 0,
+    "abortedRuns": 0,
+    "harnessLossPct": 5
+  },
+  "harness": {
+    "nproc": 4,
+    "startedUtc": "2026-08-31T12:19:27.7578825Z",
+    "loadAtStart": "1.01 0.83 0.49 1/153 6836",
+    "loadAtEnd": "1.01 0.83 0.49 1/165 6849",
+    "elapsedToDataReadySec": 3.2
+  },
+  "avgMissionsCleared": 3.45,
+  "policyGap": {
+    "greedyRuns": 10,
+    "greedyWinRate": 10,
+    "sloppyRuns": 10,
+    "sloppyWinRate": 10,
+    "gap": 0
+  },
+  "pairedPolicy": {
+    "pairs": 10,
+    "concordant": 8,
+    "greedyOnlyWon": 1,
+    "sloppyOnlyWon": 1,
+    "pairedGap": 0,
+    "slots": [
+      {
+        "slot": 20,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 2,
+        "sloppyWin": false,
+        "sloppyMissions": 4,
+        "marginMissions": -2
+      },
+      {
+        "slot": 21,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 4,
+        "sloppyWin": false,
+        "sloppyMissions": 4,
+        "marginMissions": 0
+      },
+      {
+        "slot": 22,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 2,
+        "sloppyWin": false,
+        "sloppyMissions": 2,
+        "marginMissions": 0
+      },
+      {
+        "slot": 23,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 1,
+        "sloppyWin": false,
+        "sloppyMissions": 1,
+        "marginMissions": 0
+      },
+      {
+        "slot": 24,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 5,
+        "sloppyWin": true,
+        "sloppyMissions": 6,
+        "marginMissions": -1
+      },
+      {
+        "slot": 25,
+        "heat": 6,
+        "greedyWin": true,
+        "greedyMissions": 6,
+        "sloppyWin": false,
+        "sloppyMissions": 5,
+        "marginMissions": 1
+      },
+      {
+        "slot": 26,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 2,
+        "sloppyWin": false,
+        "sloppyMissions": 3,
+        "marginMissions": -1
+      },
+      {
+        "slot": 27,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 4,
+        "sloppyWin": false,
+        "sloppyMissions": 4,
+        "marginMissions": 0
+      },
+      {
+        "slot": 28,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 3,
+        "sloppyWin": false,
+        "sloppyMissions": 5,
+        "marginMissions": -2
+      },
+      {
+        "slot": 29,
+        "heat": 6,
+        "greedyWin": false,
+        "greedyMissions": 3,
+        "sloppyWin": false,
+        "sloppyMissions": 3,
+        "marginMissions": 0
+      }
+    ],
+    "pairedMarginMissions": {
+      "n": 10,
+      "mean": -0.5,
+      "se": 0.31
+    }
+  },
+  "endless": {
+    "runs": 0,
+    "depth": {
+      "n": 0,
+      "mean": 0,
+      "median": 0,
+      "p90": 0
+    },
+    "depthGreedy": {
+      "n": 0,
+      "mean": 0,
+      "median": 0,
+      "p90": 0
+    },
+    "depthSloppy": {
+      "n": 0,
+      "mean": 0,
+      "median": 0,
+      "p90": 0
+    },
+    "byHeat": [],
+    "waveCapHits": 0,
+    "frameCapHits": 0
+  },
+  "decisionRichness": {
+    "meaningfulChoicesPerTurn": 1.911,
+    "leadSwingsPerMatch": 0.77,
+    "avgMaxSwing": 61.61,
+    "actingSoldiersPerTurn": 2.707,
+    "armedSoldiersPerTurn": 0.901,
+    "turnsWithAShotPct": 44.3,
+    "choicesPerArmedSoldierTurn": 2.121,
+    "losTargetsPerArmedSoldierTurn": 2.116,
+    "targetChoicesPerArmedSoldierTurn": 0.268,
+    "positionChoicesPerArmedSoldierTurn": 1.853
+  },
+  "byHeatRun": [
+    {
+      "heat": 6,
+      "runs": 20,
+      "runWinRate": 10,
+      "se": 6.7,
+      "avgMissionsCleared": 3.45
+    }
+  ],
+  "intelByHeat": [
+    {
+      "heat": 6,
+      "runs": 20,
+      "earned": 169.8,
+      "heatBonus": 75.6,
+      "spent": 149,
+      "unspent": 20.8
+    }
+  ],
+  "byHeat": [
+    {
+      "heat": 6,
+      "n": 60,
+      "winRate": 73.3,
+      "se": 5.7,
+      "avgTurns": 6.7
+    },
+    {
+      "heat": 7,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 9
+    }
+  ],
+  "byObjective": [
+    {
+      "objective": "Decapitate",
+      "n": 7,
+      "winRate": 42.9,
+      "se": 18.7,
+      "avgTurns": 7.4
+    },
+    {
+      "objective": "Defend",
+      "n": 11,
+      "winRate": 90.9,
+      "se": 8.7,
+      "avgTurns": 8.7
+    },
+    {
+      "objective": "Eliminate",
+      "n": 24,
+      "winRate": 83.3,
+      "se": 7.6,
+      "avgTurns": 4.5
+    },
+    {
+      "objective": "Escort",
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 3
+    },
+    {
+      "objective": "Evac",
+      "n": 4,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4
+    },
+    {
+      "objective": "Hack",
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 7
+    },
+    {
+      "objective": "Rescue",
+      "n": 10,
+      "winRate": 50,
+      "se": 15.8,
+      "avgTurns": 12.2
+    },
+    {
+      "objective": "Sabotage",
+      "n": 4,
+      "winRate": 50,
+      "se": 25,
+      "avgTurns": 4.5
+    }
+  ],
+  "byObjectiveByBucket": [
+    {
+      "objective": "Decapitate",
+      "squad": 5,
+      "hp": "hp90\u002B",
+      "n": 3,
+      "winRate": 66.7,
+      "se": 27.2,
+      "avgTurns": 5
+    },
+    {
+      "objective": "Decapitate",
+      "squad": 6,
+      "hp": "hp90\u002B",
+      "n": 4,
+      "winRate": 25,
+      "se": 21.7,
+      "avgTurns": 9.2
+    },
+    {
+      "objective": "Defend",
+      "squad": 4,
+      "hp": "hp90\u002B",
+      "n": 9,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Defend",
+      "squad": 5,
+      "hp": "hp90\u002B",
+      "n": 2,
+      "winRate": 50,
+      "se": 35.4,
+      "avgTurns": 7.5
+    },
+    {
+      "objective": "Eliminate",
+      "squad": 4,
+      "hp": "hp90\u002B",
+      "n": 20,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 3.2
+    },
+    {
+      "objective": "Eliminate",
+      "squad": 5,
+      "hp": "hp90\u002B",
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Eliminate",
+      "squad": 6,
+      "hp": "hp90\u002B",
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 12
+    },
+    {
+      "objective": "Escort",
+      "squad": 5,
+      "hp": "hp90\u002B",
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 3
+    },
+    {
+      "objective": "Evac",
+      "squad": 4,
+      "hp": "hp90\u002B",
+      "n": 4,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4
+    },
+    {
+      "objective": "Hack",
+      "squad": 5,
+      "hp": "hp90\u002B",
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 7
+    },
+    {
+      "objective": "Rescue",
+      "squad": 4,
+      "hp": "hp90\u002B",
+      "n": 3,
+      "winRate": 33.3,
+      "se": 27.2,
+      "avgTurns": 2.7
+    },
+    {
+      "objective": "Rescue",
+      "squad": 5,
+      "hp": "hp90\u002B",
+      "n": 4,
+      "winRate": 50,
+      "se": 25,
+      "avgTurns": 18.2
+    },
+    {
+      "objective": "Rescue",
+      "squad": 6,
+      "hp": "hp90\u002B",
+      "n": 3,
+      "winRate": 66.7,
+      "se": 27.2,
+      "avgTurns": 13.7
+    },
+    {
+      "objective": "Sabotage",
+      "squad": 4,
+      "hp": "hp90\u002B",
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 3
+    },
+    {
+      "objective": "Sabotage",
+      "squad": 5,
+      "hp": "hp90\u002B",
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 6
+    }
+  ],
+  "byNodeKind": [
+    {
+      "nodeKind": "Boss",
+      "n": 5,
+      "winRate": 40,
+      "se": 21.9,
+      "avgTurns": 7.8
+    },
+    {
+      "nodeKind": "Combat",
+      "n": 21,
+      "winRate": 42.9,
+      "se": 10.8,
+      "avgTurns": 9.5
+    },
+    {
+      "nodeKind": "Elite",
+      "n": 7,
+      "winRate": 71.4,
+      "se": 17.1,
+      "avgTurns": 6
+    },
+    {
+      "nodeKind": "Start",
+      "n": 20,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 3.2
+    },
+    {
+      "nodeKind": "Supply",
+      "n": 9,
+      "winRate": 88.9,
+      "se": 10.5,
+      "avgTurns": 8.3
+    }
+  ],
+  "byBiome": [
+    {
+      "biome": "ARID",
+      "n": 12,
+      "winRate": 58.3,
+      "se": 14.2,
+      "avgTurns": 7.2,
+      "avgGroundTiles": 0
+    },
+    {
+      "biome": "ASH",
+      "n": 6,
+      "winRate": 83.3,
+      "se": 15.2,
+      "avgTurns": 7,
+      "avgGroundTiles": 0
+    },
+    {
+      "biome": "MAGMA",
+      "n": 6,
+      "winRate": 66.7,
+      "se": 19.2,
+      "avgTurns": 13.2,
+      "avgGroundTiles": 0
+    },
+    {
+      "biome": "NEON",
+      "n": 7,
+      "winRate": 57.1,
+      "se": 18.7,
+      "avgTurns": 4.6,
+      "avgGroundTiles": 0
+    },
+    {
+      "biome": "STEEL",
+      "n": 6,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 8.7,
+      "avgGroundTiles": 0
+    },
+    {
+      "biome": "TUNDRA",
+      "n": 6,
+      "winRate": 83.3,
+      "se": 15.2,
+      "avgTurns": 3.7,
+      "avgGroundTiles": 0
+    },
+    {
+      "biome": "VERDANT",
+      "n": 9,
+      "winRate": 66.7,
+      "se": 15.7,
+      "avgTurns": 5.9,
+      "avgGroundTiles": 0
+    },
+    {
+      "biome": "VOID",
+      "n": 10,
+      "winRate": 70,
+      "se": 14.5,
+      "avgTurns": 5.4,
+      "avgGroundTiles": 0
+    }
+  ],
+  "byObjectiveByNodeKind": [
+    {
+      "objective": "Decapitate",
+      "nodeKind": "Boss",
+      "n": 5,
+      "winRate": 40,
+      "se": 21.9,
+      "avgTurns": 7.8
+    },
+    {
+      "objective": "Decapitate",
+      "nodeKind": "Combat",
+      "n": 2,
+      "winRate": 50,
+      "se": 35.4,
+      "avgTurns": 6.5
+    },
+    {
+      "objective": "Defend",
+      "nodeKind": "Combat",
+      "n": 2,
+      "winRate": 50,
+      "se": 35.4,
+      "avgTurns": 7.5
+    },
+    {
+      "objective": "Defend",
+      "nodeKind": "Elite",
+      "n": 1,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Defend",
+      "nodeKind": "Supply",
+      "n": 8,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Eliminate",
+      "nodeKind": "Combat",
+      "n": 4,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 10.5
+    },
+    {
+      "objective": "Eliminate",
+      "nodeKind": "Start",
+      "n": 20,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 3.2
+    },
+    {
+      "objective": "Escort",
+      "nodeKind": "Supply",
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 3
+    },
+    {
+      "objective": "Evac",
+      "nodeKind": "Combat",
+      "n": 4,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4
+    },
+    {
+      "objective": "Hack",
+      "nodeKind": "Combat",
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 7
+    },
+    {
+      "objective": "Rescue",
+      "nodeKind": "Combat",
+      "n": 8,
+      "winRate": 37.5,
+      "se": 17.1,
+      "avgTurns": 13.4
+    },
+    {
+      "objective": "Rescue",
+      "nodeKind": "Elite",
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 7.5
+    },
+    {
+      "objective": "Sabotage",
+      "nodeKind": "Elite",
+      "n": 4,
+      "winRate": 50,
+      "se": 25,
+      "avgTurns": 4.5
+    }
+  ],
+  "byObjectiveByMission": [
+    {
+      "objective": "Decapitate",
+      "mission": 3,
+      "n": 2,
+      "winRate": 50,
+      "se": 35.4,
+      "avgTurns": 6.5
+    },
+    {
+      "objective": "Decapitate",
+      "mission": 6,
+      "n": 5,
+      "winRate": 40,
+      "se": 21.9,
+      "avgTurns": 7.8
+    },
+    {
+      "objective": "Defend",
+      "mission": 2,
+      "n": 6,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Defend",
+      "mission": 3,
+      "n": 2,
+      "winRate": 50,
+      "se": 35.4,
+      "avgTurns": 7.5
+    },
+    {
+      "objective": "Defend",
+      "mission": 4,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Defend",
+      "mission": 5,
+      "n": 1,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Eliminate",
+      "mission": 1,
+      "n": 20,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 3.2
+    },
+    {
+      "objective": "Eliminate",
+      "mission": 4,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 9
+    },
+    {
+      "objective": "Eliminate",
+      "mission": 5,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 12
+    },
+    {
+      "objective": "Escort",
+      "mission": 4,
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 3
+    },
+    {
+      "objective": "Evac",
+      "mission": 2,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4
+    },
+    {
+      "objective": "Evac",
+      "mission": 3,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4
+    },
+    {
+      "objective": "Hack",
+      "mission": 5,
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 7
+    },
+    {
+      "objective": "Rescue",
+      "mission": 2,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 2
+    },
+    {
+      "objective": "Rescue",
+      "mission": 4,
+      "n": 6,
+      "winRate": 83.3,
+      "se": 15.2,
+      "avgTurns": 10.2
+    },
+    {
+      "objective": "Rescue",
+      "mission": 5,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 28.5
+    },
+    {
+      "objective": "Sabotage",
+      "mission": 2,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 3
+    },
+    {
+      "objective": "Sabotage",
+      "mission": 3,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 6
+    }
+  ],
+  "encounterMidrun": [
+    {
+      "row": "Decapitate",
+      "n": 2,
+      "winRate": 50,
+      "se": 35.4,
+      "avgTurns": 6.5,
+      "enemiesStart": 9,
+      "enemiesAdded": 1,
+      "enemiesKilled": 0.5,
+      "clearPct": 5,
+      "reinforcedPct": 50,
+      "avgPressure": 1.5,
+      "squadLoss": 2.5,
+      "dmgTaken": 31,
+      "winN": 1,
+      "winClearPct": 9.1,
+      "killedSum": 1,
+      "forceSum": 20,
+      "winKilledSum": 1,
+      "winForceSum": 11,
+      "winSquadLoss": 0,
+      "winTurns": 7
+    },
+    {
+      "row": "Defend",
+      "n": 3,
+      "winRate": 66.7,
+      "se": 27.2,
+      "avgTurns": 8,
+      "enemiesStart": 7.67,
+      "enemiesAdded": 6.33,
+      "enemiesKilled": 5.67,
+      "clearPct": 40.5,
+      "reinforcedPct": 100,
+      "avgPressure": 0,
+      "squadLoss": 3,
+      "dmgTaken": 39.3,
+      "winN": 2,
+      "winClearPct": 51.6,
+      "killedSum": 17,
+      "forceSum": 42,
+      "winKilledSum": 16,
+      "winForceSum": 31,
+      "winSquadLoss": 2,
+      "winTurns": 9
+    },
+    {
+      "row": "Eliminate",
+      "n": 4,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 10.5,
+      "enemiesStart": 10.5,
+      "enemiesAdded": 0,
+      "enemiesKilled": 3,
+      "clearPct": 28.6,
+      "reinforcedPct": 0,
+      "avgPressure": 2.75,
+      "squadLoss": 5.5,
+      "dmgTaken": 69.5,
+      "winN": 0,
+      "winClearPct": 0,
+      "killedSum": 12,
+      "forceSum": 42,
+      "winKilledSum": 0,
+      "winForceSum": 0,
+      "winSquadLoss": 0,
+      "winTurns": 0
+    },
+    {
+      "row": "Evac",
+      "n": 4,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4,
+      "enemiesStart": 7.5,
+      "enemiesAdded": 0,
+      "enemiesKilled": 0.75,
+      "clearPct": 10,
+      "reinforcedPct": 0,
+      "avgPressure": 0,
+      "squadLoss": 1,
+      "dmgTaken": 35.2,
+      "winN": 4,
+      "winClearPct": 10,
+      "killedSum": 3,
+      "forceSum": 30,
+      "winKilledSum": 3,
+      "winForceSum": 30,
+      "winSquadLoss": 1,
+      "winTurns": 4
+    },
+    {
+      "row": "Hack",
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 7,
+      "enemiesStart": 11,
+      "enemiesAdded": 0,
+      "enemiesKilled": 1,
+      "clearPct": 9.1,
+      "reinforcedPct": 0,
+      "avgPressure": 1,
+      "squadLoss": 5,
+      "dmgTaken": 35,
+      "winN": 0,
+      "winClearPct": 0,
+      "killedSum": 1,
+      "forceSum": 11,
+      "winKilledSum": 0,
+      "winForceSum": 0,
+      "winSquadLoss": 0,
+      "winTurns": 0
+    },
+    {
+      "row": "Rescue",
+      "n": 10,
+      "winRate": 50,
+      "se": 15.8,
+      "avgTurns": 12.2,
+      "enemiesStart": 9.6,
+      "enemiesAdded": 0,
+      "enemiesKilled": 3.6,
+      "clearPct": 37.5,
+      "reinforcedPct": 0,
+      "avgPressure": 0,
+      "squadLoss": 2.4,
+      "dmgTaken": 42.8,
+      "winN": 5,
+      "winClearPct": 46.2,
+      "killedSum": 36,
+      "forceSum": 96,
+      "winKilledSum": 24,
+      "winForceSum": 52,
+      "winSquadLoss": 2.6,
+      "winTurns": 10.8
+    },
+    {
+      "row": "Sabotage",
+      "n": 4,
+      "winRate": 50,
+      "se": 25,
+      "avgTurns": 4.5,
+      "enemiesStart": 7.5,
+      "enemiesAdded": 0,
+      "enemiesKilled": 1.75,
+      "clearPct": 23.3,
+      "reinforcedPct": 0,
+      "avgPressure": 0,
+      "squadLoss": 2,
+      "dmgTaken": 21,
+      "winN": 2,
+      "winClearPct": 33.3,
+      "killedSum": 7,
+      "forceSum": 30,
+      "winKilledSum": 4,
+      "winForceSum": 12,
+      "winSquadLoss": -1,
+      "winTurns": 3
+    },
+    {
+      "row": "KILL",
+      "n": 6,
+      "winRate": 16.7,
+      "se": 15.2,
+      "avgTurns": 9.17,
+      "enemiesStart": 10,
+      "enemiesAdded": 0.33,
+      "enemiesKilled": 2.17,
+      "clearPct": 21,
+      "reinforcedPct": 16.7,
+      "avgPressure": 2.33,
+      "squadLoss": 4.5,
+      "dmgTaken": 56.7,
+      "winN": 1,
+      "winClearPct": 9.1,
+      "killedSum": 13,
+      "forceSum": 62,
+      "winKilledSum": 1,
+      "winForceSum": 11,
+      "winSquadLoss": 0,
+      "winTurns": 7
+    },
+    {
+      "row": "NONKILL",
+      "n": 22,
+      "winRate": 59.1,
+      "se": 10.5,
+      "avgTurns": 8.5,
+      "enemiesStart": 8.64,
+      "enemiesAdded": 0.86,
+      "enemiesKilled": 2.91,
+      "clearPct": 30.6,
+      "reinforcedPct": 13.6,
+      "avgPressure": 0.05,
+      "squadLoss": 2.27,
+      "dmgTaken": 36.6,
+      "winN": 13,
+      "winClearPct": 37.6,
+      "killedSum": 64,
+      "forceSum": 209,
+      "winKilledSum": 47,
+      "winForceSum": 125,
+      "winSquadLoss": 1.46,
+      "winTurns": 7.23
+    }
+  ],
+  "hvt": {
+    "hpBonusBase": 6,
+    "hpBonusPerMission": 1,
+    "aimBonus": 6,
+    "rows": [
+      {
+        "buffed": false,
+        "n": 7,
+        "winRate": 42.9,
+        "se": 18.7,
+        "avgTurns": 7.4,
+        "avgHvtMaxHp": 23
+      }
+    ],
+    "byMission": [
+      {
+        "mission": 3,
+        "buffed": false,
+        "n": 2,
+        "winRate": 50,
+        "se": 35.4,
+        "avgHvtMaxHp": 23
+      },
+      {
+        "mission": 6,
+        "buffed": false,
+        "n": 5,
+        "winRate": 40,
+        "se": 21.9,
+        "avgHvtMaxHp": 23
+      }
+    ]
+  },
+  "shotGap": {
+    "armedSoldierTurns": 409,
+    "meanGap": 0.587,
+    "soleOrDominantPct": 44,
+    "deciles": [
+      68,
+      34,
+      36,
+      30,
+      23,
+      21,
+      8,
+      8,
+      1,
+      180
+    ]
+  },
+  "enemyDecisions": {
+    "contestedActs": 1750,
+    "allDownedActs": 471,
+    "actsWithShot": 782,
+    "declinedPct": 1.79,
+    "preempted": 57,
+    "lanesHeld": 25,
+    "reactionShots": 11,
+    "mix": [
+      {
+        "verb": "hunker",
+        "n": 810
+      },
+      {
+        "verb": "shoot",
+        "n": 711
+      },
+      {
+        "verb": "move",
+        "n": 100
+      },
+      {
+        "verb": "grenade",
+        "n": 30
+      },
+      {
+        "verb": "reload",
+        "n": 25
+      },
+      {
+        "verb": "heal",
+        "n": 16
+      },
+      {
+        "verb": "item",
+        "n": 13
+      },
+      {
+        "verb": "overwatch",
+        "n": 13
+      },
+      {
+        "verb": "brace",
+        "n": 12
+      },
+      {
+        "verb": "siege",
+        "n": 12
+      },
+      {
+        "verb": "sap",
+        "n": 4
+      },
+      {
+        "verb": "shove",
+        "n": 2
+      },
+      {
+        "verb": "staleplan",
+        "n": 2
+      }
+    ],
+    "shotTaken": [
+      0,
+      24,
+      83,
+      279,
+      325
+    ],
+    "shotDeclined": [
+      2,
+      5,
+      7,
+      0,
+      0
+    ],
+    "shotTakenExp": [
+      0,
+      27.68,
+      155.96,
+      786.4,
+      1401.84
+    ],
+    "shotDeclinedExp": [
+      0.6,
+      8.16,
+      15.48,
+      0,
+      0
+    ]
+  },
+  "byMission": [
+    {
+      "mission": 1,
+      "n": 20,
+      "winRate": 100,
+      "se": 0
+    },
+    {
+      "mission": 2,
+      "n": 12,
+      "winRate": 83.3,
+      "se": 10.8
+    },
+    {
+      "mission": 3,
+      "n": 8,
+      "winRate": 50,
+      "se": 17.7
+    },
+    {
+      "mission": 4,
+      "n": 11,
+      "winRate": 63.6,
+      "se": 14.5
+    },
+    {
+      "mission": 5,
+      "n": 6,
+      "winRate": 16.7,
+      "se": 15.2
+    },
+    {
+      "mission": 6,
+      "n": 5,
+      "winRate": 40,
+      "se": 21.9
+    }
+  ],
+  "byDeploy": [
+    {
+      "deploy": 0,
+      "n": 29,
+      "winRate": 65.5,
+      "avgTurns": 7.28,
+      "choicesPerTurn": 1.969,
+      "choicesPerArmed": 2.43,
+      "losTargetsPerArmed": 1.981
+    },
+    {
+      "deploy": 1,
+      "n": 20,
+      "winRate": 70,
+      "avgTurns": 7.15,
+      "choicesPerTurn": 1.618,
+      "choicesPerArmed": 1.818,
+      "losTargetsPerArmed": 2.198
+    },
+    {
+      "deploy": 2,
+      "n": 4,
+      "winRate": 75,
+      "avgTurns": 3.75,
+      "choicesPerTurn": 2.133,
+      "choicesPerArmed": 1.455,
+      "losTargetsPerArmed": 2.864
+    },
+    {
+      "deploy": 3,
+      "n": 9,
+      "winRate": 88.9,
+      "avgTurns": 5.78,
+      "choicesPerTurn": 2.447,
+      "choicesPerArmed": 2.17,
+      "losTargetsPerArmed": 2.019
+    }
+  ],
+  "byArena": [
+    {
+      "arena": 0,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 2,
+      "byMission": [
+        {
+          "mission": 1,
+          "n": 2,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 3,
+      "n": 3,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4.3,
+      "byMission": [
+        {
+          "mission": 1,
+          "n": 2,
+          "winRate": 100
+        },
+        {
+          "mission": 5,
+          "n": 1,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 6,
+      "n": 3,
+      "winRate": 33.3,
+      "se": 27.2,
+      "avgTurns": 4.7,
+      "byMission": [
+        {
+          "mission": 4,
+          "n": 3,
+          "winRate": 33.3
+        }
+      ]
+    },
+    {
+      "arena": 7,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 7.5,
+      "byMission": [
+        {
+          "mission": 4,
+          "n": 2,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 10,
+      "n": 3,
+      "winRate": 66.7,
+      "se": 27.2,
+      "avgTurns": 5,
+      "byMission": [
+        {
+          "mission": 2,
+          "n": 2,
+          "winRate": 100
+        },
+        {
+          "mission": 6,
+          "n": 1,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 11,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 6,
+      "byMission": [
+        {
+          "mission": 3,
+          "n": 2,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 15,
+      "n": 3,
+      "winRate": 66.7,
+      "se": 27.2,
+      "avgTurns": 8.7,
+      "byMission": [
+        {
+          "mission": 2,
+          "n": 2,
+          "winRate": 100
+        },
+        {
+          "mission": 6,
+          "n": 1,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 16,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4,
+      "byMission": [
+        {
+          "mission": 3,
+          "n": 2,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 18,
+      "n": 2,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 2,
+      "byMission": [
+        {
+          "mission": 2,
+          "n": 2,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 19,
+      "n": 4,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 1.8,
+      "byMission": [
+        {
+          "mission": 1,
+          "n": 4,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 20,
+      "n": 4,
+      "winRate": 25,
+      "se": 21.7,
+      "avgTurns": 7.8,
+      "byMission": [
+        {
+          "mission": 3,
+          "n": 2,
+          "winRate": 50
+        },
+        {
+          "mission": 4,
+          "n": 2,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 24,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 4,
+      "byMission": [
+        {
+          "mission": 2,
+          "n": 2,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 26,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 2,
+      "byMission": [
+        {
+          "mission": 1,
+          "n": 2,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 27,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 9,
+      "byMission": [
+        {
+          "mission": 2,
+          "n": 2,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 28,
+      "n": 3,
+      "winRate": 33.3,
+      "se": 27.2,
+      "avgTurns": 22,
+      "byMission": [
+        {
+          "mission": 4,
+          "n": 1,
+          "winRate": 100
+        },
+        {
+          "mission": 5,
+          "n": 2,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 30,
+      "n": 4,
+      "winRate": 75,
+      "se": 21.7,
+      "avgTurns": 6.5,
+      "byMission": [
+        {
+          "mission": 1,
+          "n": 2,
+          "winRate": 100
+        },
+        {
+          "mission": 6,
+          "n": 2,
+          "winRate": 50
+        }
+      ]
+    },
+    {
+      "arena": 31,
+      "n": 4,
+      "winRate": 50,
+      "se": 25,
+      "avgTurns": 10.5,
+      "byMission": [
+        {
+          "mission": 2,
+          "n": 2,
+          "winRate": 100
+        },
+        {
+          "mission": 5,
+          "n": 2,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 32,
+      "n": 1,
+      "winRate": 0,
+      "se": 0,
+      "avgTurns": 7,
+      "byMission": [
+        {
+          "mission": 5,
+          "n": 1,
+          "winRate": 0
+        }
+      ]
+    },
+    {
+      "arena": 33,
+      "n": 3,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 6,
+      "byMission": [
+        {
+          "mission": 1,
+          "n": 2,
+          "winRate": 100
+        },
+        {
+          "mission": 3,
+          "n": 1,
+          "winRate": 100
+        }
+      ]
+    },
+    {
+      "arena": 34,
+      "n": 2,
+      "winRate": 100,
+      "se": 0,
+      "avgTurns": 17.5,
+      "byMission": [
+        {
+          "mission": 4,
+          "n": 2,
+          "winRate": 100
+        }
+      ]
+    }
+  ],
+  "proceduralFallback": {
+    "n": 9,
+    "rate": 14.5,
+    "winRate": 88.9
+  },
+  "arenaFunnel": {
+    "builds": 75,
+    "authoredApplied": 62,
+    "connectivityReject": 0,
+    "proceduralRoll": 13
+  },
+  "actionMix": {
+    "greedy": {
+      "MOVE": 399,
+      "SHOOT": 278,
+      "OVERWATCH": 52,
+      "HUNKER": 41,
+      "BRACE": 41,
+      "FOCUS": 29,
+      "INTEL": 28,
+      "STABILIZE": 25,
+      "SLIPSTREAM": 19,
+      "RELOAD": 19,
+      "DRAG": 10,
+      "MARK": 10,
+      "ITEM:SMOKE": 9,
+      "PIN": 8,
+      "GRAPPLE": 6,
+      "PLANT": 6,
+      "BARREL": 4,
+      "GRENADE": 3,
+      "BEACON": 3,
+      "REARM": 2,
+      "PATCH": 2
+    },
+    "sloppy": {
+      "MOVE": 534,
+      "SHOOT": 267,
+      "HUNKER": 135,
+      "BRACE": 64,
+      "OVERWATCH": 55,
+      "STABILIZE": 34,
+      "INTEL": 31,
+      "SLIPSTREAM": 28,
+      "RELOAD": 27,
+      "ITEM:SMOKE": 24,
+      "FOCUS": 23,
+      "PIN": 12,
+      "DRAG": 12,
+      "GRENADE": 9,
+      "PATCH": 8,
+      "MARK": 7,
+      "PLANT": 7,
+      "BARREL": 5,
+      "REARM": 4,
+      "GRAPPLE": 3,
+      "BEACON": 2,
+      "ITEM:FLASH": 1
+    }
+  },
+  "lossCauses": {
+    "RUN OVER": 12,
+    "CAPTIVE LOST": 4,
+    "VIP LOST": 1,
+    "STALEMATE": 1
+  },
+  "playerClasses": [
+    {
+      "cls": "GUNNER",
+      "shots": 171,
+      "hits": 148,
+      "hitRate": 86.5,
+      "dmg": 835,
+      "kills": 60
+    },
+    {
+      "cls": "ASSAULT",
+      "shots": 190,
+      "hits": 153,
+      "hitRate": 80.5,
+      "dmg": 777,
+      "kills": 50
+    },
+    {
+      "cls": "SHARPSHOOTER",
+      "shots": 117,
+      "hits": 104,
+      "hitRate": 88.9,
+      "dmg": 719,
+      "kills": 42
+    },
+    {
+      "cls": "RANGER",
+      "shots": 70,
+      "hits": 60,
+      "hitRate": 85.7,
+      "dmg": 416,
+      "kills": 25
+    },
+    {
+      "cls": "CORPSMAN",
+      "shots": 24,
+      "hits": 18,
+      "hitRate": 75,
+      "dmg": 73,
+      "kills": 3
+    }
+  ],
+  "soldierDeathsByEnemy": {
+    "GRUNT": 11,
+    "TURRET": 10,
+    "STRIKE": 9,
+    "SHIELD": 9,
+    "HUNTER": 7,
+    "BRUISER": 7,
+    "ELITE": 6,
+    "BERSERKER": 6,
+    "SCOUT": 6,
+    "PIKEMAN": 5,
+    "CUSTODIAN": 5,
+    "SNIPER": 5,
+    "HOUND": 5,
+    "DRONE": 4,
+    "BURN": 4,
+    "WARBRINGER": 3,
+    "SPOTTER": 2,
+    "MORTAR": 2,
+    "SAPPER": 2,
+    "BARREL": 2,
+    "LANCER": 2,
+    "STRIKER": 2,
+    "MEDIC": 2
+  },
+  "enemyComposition": {
+    "factionSpawns": {
+      "HUNTER": 40,
+      "GRUNT": 39,
+      "BRUISER": 34,
+      "ELITE": 30,
+      "BERSERKER": 30,
+      "CUSTODIAN": 30,
+      "SNIPER": 29,
+      "TURRET": 26,
+      "SCOUT": 22,
+      "PIKEMAN": 22,
+      "STRIKER": 17,
+      "SCREENER": 17,
+      "SHIELD": 17,
+      "MEDIC": 17,
+      "MORTAR": 16,
+      "LANCER": 12,
+      "DRONE": 12,
+      "HOUND": 11,
+      "SAPPER": 10,
+      "WARBRINGER": 10,
+      "SPOTTER": 8,
+      "BOMBARD": 6
+    },
+    "defaultSpawns": {
+      "SCOUT": 66,
+      "GRUNT": 25,
+      "HOUND": 14,
+      "DRONE": 14,
+      "LANCER": 9,
+      "SNIPER": 9,
+      "BRUISER": 7,
+      "STRIKER": 6,
+      "SAPPER": 6,
+      "HUNTER": 4,
+      "PIKEMAN": 3,
+      "BERSERKER": 2,
+      "MORTAR": 2,
+      "TURRET": 2,
+      "SCREENER": 2,
+      "WARBRINGER": 1
+    }
+  },
+  "perkPicks": {
+    "OUT": 14,
+    "MRK": 14,
+    "BRK": 11,
+    "CQB": 9,
+    "SKR": 8,
+    "CLH": 8,
+    "GRD": 7,
+    "FST": 6,
+    "LCK": 6,
+    "RFX": 6,
+    "HRD": 5,
+    "GUN": 5,
+    "BND": 5,
+    "MOM": 5,
+    "EXC": 4,
+    "VNT": 3,
+    "TNK": 3,
+    "SGE": 2,
+    "PLT": 2
+  },
+  "specPicks": {
+    "ANC": 5,
+    "BRC": 3,
+    "HHT": 2,
+    "JUG": 2,
+    "SNT": 2,
+    "ADN": 1,
+    "PTH": 1
+  },
+  "shopPurchases": {
+    "FIELD MEDKIT": 50,
+    "WPN: HOLLOW POINT": 49,
+    "WPN: SCOPE": 42,
+    "WPN: STABILIZER": 35,
+    "WPN: EXTENDED MAG": 24,
+    "WPN: BIPOD": 20,
+    "COUNTER-PREP": 11,
+    "FRAG CACHE": 11,
+    "WPN: SUPPRESSOR": 9,
+    "BALLISTIC PLATING": 7,
+    "ARMORY": 6,
+    "COMBAT STIMS": 6,
+    "ADV. TRAINING": 3
+  },
+  "boonPicks": {
+    "RPD": 8,
+    "SHK": 4,
+    "SCV": 4,
+    "FRT": 3,
+    "GHO": 3,
+    "FVR": 3,
+    "EXE": 3,
+    "ADR": 2,
+    "TRR": 2,
+    "PYR": 2,
+    "VNM": 2,
+    "GRN": 2,
+    "MRK": 1,
+    "FDR": 1,
+    "RCL": 1,
+    "FST": 1
+  },
+  "boonProcs": {
+    "FDR": 0,
+    "FST": 10,
+    "PYR": 0,
+    "RCL": 0,
+    "SHK": 3,
+    "TRR": 5
+  },
+  "eventChoicePicks": {
+    "distress:1": 4,
+    "drill:1": 3,
+    "blackmarket:0": 2,
+    "bloodfeud:1": 2,
+    "bloodfeud:2": 2,
+    "drill:0": 2,
+    "grave:0": 2,
+    "grave:1": 2,
+    "informant:1": 2,
+    "relic:1": 2,
+    "reservecall:0": 2
+  },
+  "winRateByBoon": {
+    "RPD": {
+      "runs": 8,
+      "winRate": 0,
+      "se": 0
+    },
+    "SHK": {
+      "runs": 4,
+      "winRate": 0,
+      "se": 0
+    },
+    "SCV": {
+      "runs": 4,
+      "winRate": 25,
+      "se": 21.7
+    },
+    "FRT": {
+      "runs": 3,
+      "winRate": 0,
+      "se": 0
+    },
+    "GHO": {
+      "runs": 3,
+      "winRate": 33.3,
+      "se": 27.2
+    },
+    "FVR": {
+      "runs": 3,
+      "winRate": 66.7,
+      "se": 27.2
+    },
+    "EXE": {
+      "runs": 3,
+      "winRate": 0,
+      "se": 0
+    },
+    "ADR": {
+      "runs": 2,
+      "winRate": 50,
+      "se": 35.4
+    },
+    "TRR": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "PYR": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "VNM": {
+      "runs": 2,
+      "winRate": 50,
+      "se": 35.4
+    },
+    "GRN": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "MRK": {
+      "runs": 1,
+      "winRate": 0,
+      "se": 0
+    },
+    "FDR": {
+      "runs": 1,
+      "winRate": 0,
+      "se": 0
+    },
+    "RCL": {
+      "runs": 1,
+      "winRate": 0,
+      "se": 0
+    },
+    "FST": {
+      "runs": 1,
+      "winRate": 0,
+      "se": 0
+    }
+  },
+  "winRateBySpec": {
+    "ANC": {
+      "runs": 5,
+      "winRate": 20,
+      "se": 17.9
+    },
+    "BRC": {
+      "runs": 3,
+      "winRate": 0,
+      "se": 0
+    },
+    "HHT": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "JUG": {
+      "runs": 2,
+      "winRate": 50,
+      "se": 35.4
+    },
+    "SNT": {
+      "runs": 2,
+      "winRate": 50,
+      "se": 35.4
+    },
+    "ADN": {
+      "runs": 1,
+      "winRate": 0,
+      "se": 0
+    },
+    "PTH": {
+      "runs": 1,
+      "winRate": 0,
+      "se": 0
+    }
+  },
+  "winRateByContract": {},
+  "winRateByPerk": {
+    "OUT": {
+      "runs": 12,
+      "winRate": 8.3,
+      "se": 8
+    },
+    "MRK": {
+      "runs": 11,
+      "winRate": 18.2,
+      "se": 11.6
+    },
+    "BRK": {
+      "runs": 10,
+      "winRate": 10,
+      "se": 9.5
+    },
+    "SKR": {
+      "runs": 8,
+      "winRate": 0,
+      "se": 0
+    },
+    "CQB": {
+      "runs": 8,
+      "winRate": 25,
+      "se": 15.3
+    },
+    "CLH": {
+      "runs": 8,
+      "winRate": 12.5,
+      "se": 11.7
+    },
+    "GRD": {
+      "runs": 7,
+      "winRate": 14.3,
+      "se": 13.2
+    },
+    "FST": {
+      "runs": 5,
+      "winRate": 20,
+      "se": 17.9
+    },
+    "GUN": {
+      "runs": 5,
+      "winRate": 20,
+      "se": 17.9
+    },
+    "LCK": {
+      "runs": 5,
+      "winRate": 20,
+      "se": 17.9
+    },
+    "RFX": {
+      "runs": 5,
+      "winRate": 40,
+      "se": 21.9
+    },
+    "MOM": {
+      "runs": 5,
+      "winRate": 0,
+      "se": 0
+    },
+    "HRD": {
+      "runs": 4,
+      "winRate": 25,
+      "se": 21.7
+    },
+    "EXC": {
+      "runs": 4,
+      "winRate": 0,
+      "se": 0
+    },
+    "BND": {
+      "runs": 4,
+      "winRate": 25,
+      "se": 21.7
+    },
+    "VNT": {
+      "runs": 3,
+      "winRate": 33.3,
+      "se": 27.2
+    },
+    "TNK": {
+      "runs": 3,
+      "winRate": 0,
+      "se": 0
+    },
+    "SGE": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "PLT": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    }
+  },
+  "winRateByPurchase": {
+    "FIELD MEDKIT": {
+      "runs": 17,
+      "winRate": 11.8,
+      "se": 7.8
+    },
+    "WPN: HOLLOW POINT": {
+      "runs": 13,
+      "winRate": 15.4,
+      "se": 10
+    },
+    "WPN: STABILIZER": {
+      "runs": 12,
+      "winRate": 16.7,
+      "se": 10.8
+    },
+    "WPN: SCOPE": {
+      "runs": 11,
+      "winRate": 18.2,
+      "se": 11.6
+    },
+    "COUNTER-PREP": {
+      "runs": 10,
+      "winRate": 10,
+      "se": 9.5
+    },
+    "WPN: EXTENDED MAG": {
+      "runs": 9,
+      "winRate": 11.1,
+      "se": 10.5
+    },
+    "WPN: BIPOD": {
+      "runs": 9,
+      "winRate": 11.1,
+      "se": 10.5
+    },
+    "WPN: SUPPRESSOR": {
+      "runs": 7,
+      "winRate": 0,
+      "se": 0
+    },
+    "ARMORY": {
+      "runs": 6,
+      "winRate": 16.7,
+      "se": 15.2
+    },
+    "FRAG CACHE": {
+      "runs": 6,
+      "winRate": 0,
+      "se": 0
+    },
+    "BALLISTIC PLATING": {
+      "runs": 5,
+      "winRate": 0,
+      "se": 0
+    },
+    "ADV. TRAINING": {
+      "runs": 3,
+      "winRate": 33.3,
+      "se": 27.2
+    },
+    "COMBAT STIMS": {
+      "runs": 3,
+      "winRate": 33.3,
+      "se": 27.2
+    }
+  },
+  "winRateByEventChoice": {
+    "distress:1": {
+      "runs": 4,
+      "winRate": 25,
+      "se": 21.7
+    },
+    "drill:1": {
+      "runs": 3,
+      "winRate": 0,
+      "se": 0
+    },
+    "grave:0": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "bloodfeud:1": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "bloodfeud:2": {
+      "runs": 2,
+      "winRate": 50,
+      "se": 35.4
+    },
+    "relic:1": {
+      "runs": 2,
+      "winRate": 50,
+      "se": 35.4
+    },
+    "drill:0": {
+      "runs": 2,
+      "winRate": 50,
+      "se": 35.4
+    },
+    "reservecall:0": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "blackmarket:0": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "grave:1": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    },
+    "informant:1": {
+      "runs": 2,
+      "winRate": 0,
+      "se": 0
+    }
+  }
+}

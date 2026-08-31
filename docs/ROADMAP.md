@@ -2653,3 +2653,47 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
       20/960 in both of C3's arms and in L3. It has never been mentioned by any wave. It is not a
       C3 defect; it is a property of the instrument that every ladder in this repository inherits.
+
+---
+
+## PROGRAM CONTOUR — CLOSED. THE COMPOSED-TREE LADDER (L4) AND WHAT IT LEAVES OPEN.
+
+All six waves merged; **L4 is the ladder of record** (`docs/measurements/l4/`, base `7315425`,
+960 campaigns, 48/48 chunks asserted). Read its README before quoting any rung.
+
+**What the composition bought.** The flat middle this program opened on is **gone**: steps of
+18.8 / 20.0 / 11.2 / 11.2 / 6.2, monotone, nothing flat, where the pre-CONTOUR tree had `h4→h6` at
+−2.3 and a rung 5 buying exactly zero. Worth sitting with: **C1's lever, measured alone, made
+dispersion WORSE on every metric** — its own review proved that and C1 re-decided to mode 3 on the
+evidence. The shape improved anyway, in composition. **Shape is a property of the tree, not of a
+lever, and no wave can measure it.**
+
+**What it cost.** h6 fell 20.0 → 10.6 and three rungs sit below their floors — though only h6 is a
+real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
+
+### The next program's top item, already attributed
+
+- [ ] **RECOVER THE TOP OF THE LADDER. The dial to reach for first is `Heat.MidTooth`.**
+      Measured at h6 on the same slot sets, one dial at a time: `SIGHTLINE_MIDTOOTH=0` **+6.2**,
+      `SIGHTLINE_BIOMEMECH=0` +1.2, `SIGHTLINE_KILLTREADMILL=1` **0.0**, `SIGHTLINE_AIDECLINE=0`
+      **−3.8** (removing C2 makes h6 *harder* — its dominant effect is +2 points of hunkering, so
+      the post-C2 opponent is *less* lethal at this rung). **All four off reproduces L3's h6 at
+      20.0% to the decimal**, so the levers are the whole story and C5/C6 are gameplay-inert.
+      A partial back-off of C1's tooth is the obvious candidate — it is one integer, it is already
+      dialled, and its effect is the largest single term. **One lever, CRN-paired, then re-measure
+      the whole ladder** — because L4 is precisely the evidence that levers do not compose the way
+      their solo measurements predict.
+
+- [ ] **RESOLVE THE INTERACTION TERM, or stop citing it.** Single-lever removals sum to +3.6
+      against a joint +9.4. The apparent +5.8 interaction would be the most interesting result of
+      the round and it is **not resolved**: chunk-paired t(7)=+2.05, p≈0.08, per-slot deltas
+      `+25 +5 −10 +20 0 +25 +10 0`. It needs more slot sets, not more prose.
+
+- [ ] **The three items C3's and C1's reviews put ahead of everything else still stand**, and two
+      of them are instrument work that must land BEFORE the balance round above or it re-inherits
+      the bias: re-tune `Mission.OpenerTrim` **and re-measure** (roughly half of C3's ladder gain
+      was the opener change it booked as an unintended cost; h4's gain was 100% opener); add a
+      **camping policy** to the flywheel (both existing policies model error, not passivity, so
+      turtling is structurally unmeasurable); and pin `Events.cs` `AddHeat` for measured batches —
+      it contaminates every rung below 8 **upward** while heat 8 is clamped, so the instrument
+      **compresses exactly the region that collapsed in L4.**

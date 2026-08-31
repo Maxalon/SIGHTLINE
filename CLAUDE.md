@@ -486,7 +486,41 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
 >
 >
-> **THE LADDER OF RECORD — PROGRAM CONTOUR wave C1, base commit `17934ee` + C1's own lever,
+> ### ⚠ THE LADDER OF RECORD IS **L4**, ON THE COMPOSED TREE. THE C1 TABLE BELOW IS SUPERSEDED.
+>
+> **L4 — base commit `7315425` (all six CONTOUR waves merged), 6 rungs x 8 CRN slot bases,
+> n=160/rung, 960 campaigns, 48/48 chunks `runs=20` asserted. Raw round: `docs/measurements/l4/`.**
+>
+> | rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+> |---|---|---|---|---|---|---|
+> | **win%** | **71.9** | **53.1** | **33.1** | **21.9** | **10.6** | **4.4** |
+> | binomial SE | 3.55 | 3.95 | 3.72 | 3.27 | 2.44 | 1.62 |
+> | **cluster SE** | 3.65 | 3.53 | 4.72 | 4.11 | 2.20 | 1.48 |
+> | band | 67-83 | 47-63 | 32-48 | 22-38 | 12-28 | 5-15 |
+> | verdict | IN | IN | IN (+1.1) | **OUT -0.1** | **OUT -1.4** | **OUT -0.6** |
+>
+> **Monotone at every step; three of six in band.** Steps: 18.8 / 20.0 / 11.2 / 11.2 / 6.2 —
+> **the flat middle this program opened on is GONE**, and note it went even though C1's lever
+> measured ALONE made dispersion worse on every metric. Shape is a property of the composition.
+>
+> **The open problem is the LEVEL at the top: h6 fell 20.0 -> 10.6.** h4 (-0.1) and h8 (-0.6) sit
+> far inside their own cluster SE and are NOT measured breaches; only h6 is a real move, and even
+> it clears the floor by 0.64 cluster-SE.
+>
+> **ATTRIBUTED** (h6, same slot sets, one dial at a time): `SIGHTLINE_MIDTOOTH=0` **+6.2**,
+> `SIGHTLINE_BIOMEMECH=0` +1.2, `SIGHTLINE_KILLTREADMILL=1` **0.0**, `SIGHTLINE_AIDECLINE=0`
+> **-3.8** (removing C2 makes h6 HARDER). **All four off reproduces L3's h6 at 20.0% to the
+> decimal** — so the four levers are the whole story, C5/C6 are gameplay-inert, and the CRN chain
+> is intact across six merges. C1's tooth is the first dial to reach for.
+> Sum of single removals is +3.6 against a joint +9.4, but that apparent +5.8 interaction is
+> **chunk-paired t(7)=+2.05, p≈0.08 — NOT resolved. Do not quote it as measured.**
+>
+> **No corrective lever was shipped.** Three rungs under floor is a finding to publish, not to
+> repair inside a measurement round.
+>
+> ---
+>
+> **SUPERSEDED (kept for provenance) — PROGRAM CONTOUR wave C1, base commit `17934ee` + C1's own lever,
 > n=320 campaigns per rung (640 at heat 6), 416 chunks all `runs=40` asserted, 16,640 campaigns.
 > Raw round: `docs/measurements/c1/`.**
 >
