@@ -632,6 +632,12 @@ public partial class Game
     /// arithmetic, and the deadlock scene actually draining.
     public string StallSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70000);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -755,6 +761,12 @@ public partial class Game
     /// losing 1 HP to your own verb is silent.
     public string GrappleSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70007);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -895,6 +907,12 @@ public partial class Game
     /// once-per-turn). Prints FIELDTEST: PASS/FAIL.
     public string FieldSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70014);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -983,6 +1001,12 @@ public partial class Game
     /// preserved + recovers faster across a debrief. Prints BENCHTEST: PASS/FAIL.
     public string BenchSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70021);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         StartMission(1);                                  // fresh run + mission 1 deployed
@@ -1096,6 +1120,12 @@ public partial class Game
     ///     low-HP, no-shot grunt. Prints AITEST: PASS/FAIL. No window needed.
     public string AiSquadSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70028);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -1982,6 +2012,12 @@ public partial class Game
     /// empty-deploy guard (defense-in-depth: refuse the layout, never throw).
     public string HeatLadderSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70035);
         NoPersist = true;
         var fails = new List<string>();
 
@@ -2232,6 +2268,12 @@ public partial class Game
     /// window (tile math). Returns a one-line report.
     public string RescueSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70042);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -2356,6 +2398,12 @@ public partial class Game
     /// tile math. Returns a one-line report.
     public string StaggerSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70049);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();
@@ -2411,6 +2459,12 @@ public partial class Game
     /// Tiny window (tile math). Returns a one-line report.
     public string PikemanSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70056);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();
@@ -2556,6 +2610,12 @@ public partial class Game
     /// one-line report.
     public string MoraleSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70063);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();          // KillUnit reads run state; enemy death doesn't touch Fallen but be safe
@@ -3000,6 +3060,12 @@ public partial class Game
     ///     EXTRACT from zone-adjacent move a downed body). Returns a one-line report.
     public string DownSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70070);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();
@@ -3275,6 +3341,12 @@ public partial class Game
     /// overwatch). Needs a tiny window (Game uses tile math). Returns a one-line report.
     public string StatusSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70077);
         NoPersist = true;
         _run = new Run(); _run.Start();
         _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
@@ -3334,6 +3406,12 @@ public partial class Game
     /// Drives the real IssueShoot / TryFlankKillRefund paths on a controlled open field.
     public string SnapRefundSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70084);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -3428,6 +3506,12 @@ public partial class Game
     ///   (d) HighStakes: no field-heal in DebriefSurvivors (survivors carry damage forward).
     public string ContractSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70091);
         NoPersist = true;
         var fails = new List<string>();
 
@@ -3524,6 +3608,12 @@ public partial class Game
     /// Sharpshooter Mark -> Cd 2 and a Gunner Pin -> Cd 2. Deterministic; tiny scene (no run).
     public string CdSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70098);
         NoPersist = true;
         var fails = new List<string>();
 
@@ -3603,6 +3693,12 @@ public partial class Game
     /// Window-free (grid + tile math + static Combat reads only).
     public string ScarSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70105);
         NoPersist = true;
         var fails = new List<string>();
         Faction savedMission = Combat.MissionFaction;   // restore at the end (don't bleed into runtime)
@@ -4537,6 +4633,12 @@ public partial class Game
     // PlayerOverwatchTiles both consult, so a correct cone here means the reaction + the AI routing agree. ──
     public string OwSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70112);
         var fails = new List<string>();
         var w = new Unit { X = 5, Y = 5, OwFocused = true, OwDirX = 1, OwDirY = 0 };   // braced facing east (+X)
         if (!InOwCone(w, 9, 5)) fails.Add("aheadNotInCone");         // straight ahead
@@ -5500,6 +5602,12 @@ public partial class Game
     /// Preserves and restores the real display.json around the round-trip.
     public string TutorialSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70119);
         var fails = new List<string>();
 
         // ---- (1) the drill's arena + build ----------------------------------------------------
@@ -7332,6 +7440,12 @@ public partial class Game
     /// Runs the LIVE (non-NoPersist) path, so it stashes and restores save.json / meta.json.
     public string QuitSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70126);
         var fails = new List<string>();
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
         bool hadSave = false, hadMeta = false;
@@ -7507,6 +7621,12 @@ public partial class Game
     /// display.json / save.json / meta.json are stashed and restored around the body.
     public string BriefingSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70133);
         var fails = new List<string>();
         const float Dt = 1f / 60f;
 
@@ -7707,6 +7827,12 @@ public partial class Game
     /// itself — the draw, not a predicate about the draw.
     public string BackdropSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70140);
         var fails = new List<string>();
         var phases = (Phase[])Enum.GetValues(typeof(Phase));
         bool savedFx = Display.PostFX, savedEn = Display.Enabled;
@@ -9694,6 +9820,12 @@ public partial class Game
     /// (every margin is far outside Ai's 0-3 tie-break jitter, and the gate legs read plan flags).
     public string DeclineSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70147);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         bool ambient = AiDecline;             // what the process was launched with — never forced
