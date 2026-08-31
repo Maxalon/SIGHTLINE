@@ -1,8 +1,10 @@
 # DISTRIBUTION — shipping a SIGHTLINE build
 
-Everything here was measured on this repo (linux-x64, self-contained, .NET SDK 8.0.130)
-during PROGRAM RESONANCE wave F1. Commands are hand-run; **nothing in this document is
-wired to CI, and nothing here may be** (see CLAUDE.md, hard constraints).
+Measured on this repo (linux-x64, self-contained, .NET SDK 8.0.130). The publish matrix, the
+licence status and the player-data section were **re-measured from scratch by PROGRAM CONTOUR
+wave C6 on 2026-08-30**, base commit `17934ee` + `wave/ships`; the F1-era numbers they replace are
+noted where they differ. Commands are hand-run; **nothing in this document is wired to CI, and
+nothing here may be** (see CLAUDE.md, hard constraints).
 
 ---
 
@@ -15,45 +17,101 @@ bash scripts/publish.sh --no-trim  # fallback if trimming ever becomes unsafe ag
 bash scripts/publish.sh --rid win-x64
 ```
 
-The script publishes, then **re-proves persistence against the binary it just built** by
-running `SIGHTLINE_SAVETEST` and `SIGHTLINE_METATEST` on it, and fails the publish if
-either does not say PASS. That check exists because of §3.
+The script publishes, then **re-proves the artifact against the binary it just built** by running
+`SIGHTLINE_SAVETEST`, `SIGHTLINE_METATEST` and (C6) `SIGHTLINE_SHIPTEST` on it, and fails the
+publish if any of the three does not say PASS. The first two exist because of §3; the third exists
+because the source tree can resolve a bundled file the build output is missing (see below).
+
+**Do not publish with a bare `dotnet publish`.** It is not that the flags are wrong — the script
+just passes them — it is that a bare publish skips all three verifications, which is precisely how
+a totally broken build once looked green. C6 additionally made the two §3 mitigations a **build
+error to remove** (`C6GuardTrimmedPersistence` in `Sightline.csproj`): a trimmed publish with
+`JsonSerializerIsReflectionEnabledByDefault` off or `TrimmerRootAssembly` empty now fails to build,
+with the reason and a pointer to §3. Verified by running exactly that command.
 
 ### What ships
 
-`dist/<rid>-<mode>/` contains, and you must ship **all** of it:
+`dist/<rid>-<mode>/` contains **ten files**, and you must ship **all** of them:
 
 | File | Why |
 |---|---|
-| `Sightline` | the game (self-contained: no .NET install needed on the target machine) |
-| `libraylib.so` | raylib is a native library the runtime `dlopen()`s — it cannot be linked into the single file |
-| `assets/` | the font, its OFL licence, and any dropped-in audio |
+| `Sightline` (`Sightline.exe`) | the game (self-contained: no .NET install needed on the target machine) |
+| `libraylib.so` (`raylib.dll`) | raylib is a native library the runtime `dlopen()`s — it cannot be linked into the single file |
+| `assets/NotoMono-Regular.ttf`, `assets/ChakraPetch-Bold.ttf` | the two baked font faces; without them the game boots and silently falls back to raylib's bitmap font |
+| `assets/NotoMono-LICENSE.txt`, `assets/ChakraPetch-LICENSE.txt` | OFL obligation: the licence text ships beside the font it covers |
+| `assets/sfx/CREDITS.txt`, `assets/music/CREDITS.txt` | the drop-in audio provenance ledger (and the directories the file-first loader looks in) |
 | `THIRD-PARTY-NOTICES.txt` | licence obligation (§4) — not optional |
+| `LICENSE` | **the project's own terms.** C6 fix: §4 decided this in CROSSCUT and committed a root `LICENSE`, but nothing ever copied it into a build — every distributable this repo had ever produced shipped the third-party notices and *no statement of its own terms*, so a recipient could not tell what they were allowed to do with it |
 
 Assets are resolved against **the executable's own directory**, not the process working
-directory, so the game runs correctly from a shortcut or a launcher. (Verified: a full
-autoplay campaign launched from `/tmp` loads the font and reaches `RESULT: WIN mission=6`.
-Before the F1 fix it printed `FILEIO: [assets/NotoMono-Regular.ttf] Failed to open file`
-and silently fell back to raylib's built-in font.)
+directory, so the game runs correctly from a shortcut or a launcher. (Verified by C6 against the
+published binary, installed at `/home/user/player path/SIGHTLINE Game` — a path outside the source
+tree, *with a space in it* — against an empty player-data directory: both font atlases load from
+the install directory by absolute path and a full campaign reaches `RESULT: WIN mission=6`. Before
+the F1 fix it printed `FILEIO: [assets/NotoMono-Regular.ttf] Failed to open file` and silently fell
+back to raylib's built-in font.)
+
+**`SIGHTLINE_SHIPTEST` is the guard for this table** (C6). It resolves every entry in
+`Ship.RequiredFiles` **strictly** against `AppContext.BaseDirectory` — deliberately refusing
+`Cfg.AssetPath`'s cwd fallback, which is what made the F1 bug invisible to a suite that only ever
+ran from the source tree — checks each is non-empty, checks the two `.ttf`s carry a real sfnt
+magic, and checks `THIRD-PARTY-NOTICES.txt` actually *names* all eight redistributed components
+rather than merely existing. `scripts/publish.sh` runs it against the published directory on every
+publish. Measured: delete `assets/NotoMono-Regular.ttf` from a published directory and the game
+still boots (one `WARNING:` line, then the bitmap-font fallback) while SHIPTEST reads
+`FAIL (missing:assets/NotoMono-Regular.ttf)`.
+
+**Adding a bundled file means adding it in TWO places** — `Ship.RequiredFiles` and the `.csproj`
+copy list. Those two disagreeing is exactly what the manifest leg exists to name — and C6's own
+first draft shipped them disagreeing: this table said ten files while `RequiredFiles` listed six,
+omitting both `CREDITS.txt` ledgers, so a build output with both deleted read `SHIPTEST: PASS`.
+Two independent reviewers found it separately. The manifest now carries all eight non-binary
+entries (the executable and `libraylib.so` are the artifact itself, not things it resolves).
 
 ---
 
-## 2. The publish matrix (measured)
+## 2. The publish matrix (re-measured, C6, 2026-08-30)
 
-`start` = wall time for one window-free `SIGHTLINE_SAVETEST` launch, median of 10 after a
-warm run. It measures startup + JIT, not frame time.
+`start` = wall time for one window-free `SIGHTLINE_SAVETEST` launch. It measures startup + JIT,
+not frame time. **This round was measured INTERLEAVED** — one launch of each mode per round, nine
+rounds — so all four modes see the same container load. That matters: this box is shared with five
+other agents running balance batches, and a *sequential* pass taken twenty minutes apart put
+`no-trim` at 117 ms and then 184 ms. Read the ORDERING as the result and the absolute numbers as
+"on a loaded four-core container".
 
-| mode | flags | size | start | files |
-|---|---|---|---|---|
-| **release** (default) | `PublishTrimmed` + `PublishReadyToRun` + `PublishSingleFile` | **25 MB** | **95 ms** | 6 |
-| small | `PublishTrimmed` + `PublishSingleFile` | 18 MB | 350 ms | 6 |
-| no-trim | `PublishReadyToRun` + `PublishSingleFile` | 80 MB | 115 ms | 6 |
-| plain | `PublishSingleFile` | 68 MB | 168 ms | 6 |
-| — | folder (no single file) | 75 MB | — | 193 |
+**SIZE CONVENTION: MB = 10^6 bytes**, stated because C6's first draft did not state it and shipped
+a README saying "27 MB" (that was MiB) against a §2 saying 28.4 MB for the same directory. Exact
+byte counts are given so nobody has to guess again.
 
-Trimming is what makes `small` slow: it strips the framework's precompiled ReadyToRun
-code, so everything JITs at startup. Adding ReadyToRun back costs 7 MB and produces the
-**fastest** start of any configuration — hence the default is both.
+| mode | flags | executable | whole directory | files | start (median of 9, min–max) |
+|---|---|---|---|---|---|
+| **release** (default) | `PublishTrimmed` + `PublishReadyToRun` + `PublishSingleFile` | **26.5 MB** (26,531,848 B) | **29.3 MB** (29,284,496 B) | 10 | **169 ms** (102–323) |
+| small | `PublishTrimmed` + `PublishSingleFile` | 16.1 MB | 18.8 MB (18,844,773 B) | 10 | 545 ms (397–696) |
+| no-trim | `PublishReadyToRun` + `PublishSingleFile` | 82.3 MB | 85.1 MB (85,076,690 B) | 10 | 206 ms (144–288) |
+| plain | `PublishSingleFile` | 68.3 MB | 71.0 MB (71,049,575 B) | 10 | 317 ms (256–405) |
+| win-x64 release | cross-published from Linux | 24.8 MB (`.exe`) | 26.9 MB (26,921,328 B) | 10 | not runnable here |
+
+**Sizes are from the final C6 binary; the START COLUMN IS NOT.** The timings were measured on the
+pre-review-fix binary earlier the same day. They were deliberately **not** re-run after the review
+fixes: the container was under nine concurrent reviewers at load ~60, which would have produced a
+worse number rather than a truer one. The review fixes added ~0.9 MB of code and touched nothing on
+the startup path, but that is an argument, not a measurement — treat the start column as attached to
+commit `d3feb90` and re-measure on a quiet box before quoting it anywhere that matters.
+
+Trimming is what makes `small` slow: it strips the framework's precompiled ReadyToRun code, so
+everything JITs at startup. Adding ReadyToRun back costs ~10 MB and produces the **fastest** start
+of any configuration — hence the default is both. On a quiet box the default measured **108–114 ms**
+median-of-10.
+
+**What moved since F1's table**, and why: the file count went 6 -> 10 (the Chakra Petch pair and
+the two `CREDITS.txt` ledgers were added by later waves; `LICENSE` by C6), `small`'s executable
+went 18 -> 15.8 MB, and F1's `size` column was the EXECUTABLE while the row now carries both that
+and the whole shippable directory — the number you actually hand someone.
+
+**`--rid win-x64` cross-publishes cleanly from Linux** (verified C6: 10 files, `Sightline.exe` +
+`raylib.dll` + the same assets and licence set). Its self-tests cannot be run here, so the Windows
+build is **unverified beyond "it produces the right files"** — say so rather than implying it was
+exercised.
 
 ---
 
@@ -71,7 +129,12 @@ trimming additionally turns the reflection fallback **off** by default
 (`InvalidOperationException: Reflection-based serialization has been disabled for this
 application`), which the persistence layer's `catch { }` swallowed.
 
-The fix has three parts, all of which must stay in place:
+> **The old CLAUDE.md line "never publish with `-p:PublishTrimmed=true`" was STALE and actively
+> harmful** — trimmed has been the recommended default since F1 fixed this, and following that line
+> would have cost 57 MB and the fastest start in the matrix. C6 corrected it. Trimmed is the
+> default; what you must not do is publish *without the script*.
+
+The fix has FOUR parts (C6 added the fourth), all of which must stay in place:
 
 1. **`SaveGame` and `Display` use source-generated `JsonSerializerContext`s**
    (`SaveGame.SaveJson`, `Display.DisplayJson`). No reflection, so nothing to strip. Any
@@ -84,6 +147,37 @@ The fix has three parts, all of which must stay in place:
    byte-identical to the untrimmed one (1777 bytes; it previously wrote nothing).
 3. **`Stats.WriteJson` prints its exception** instead of swallowing it. A silent total
    failure is how a broken publish config survives review.
+4. **(C6) The mitigations are now enforced, in two independent places.** MSBuild's
+   `C6GuardTrimmedPersistence` target errors the build if either knob in (2) is removed — narrow
+   by design, because MSBuild cannot possibly know about part (1). Part (1) is covered instead by
+   `SIGHTLINE_SHIPTEST`'s TRIMSAFE leg, which asks each source-generated context whether it can
+   actually see `RunDto` / `MetaDto` / `Display.Dto`. That leg runs in the UNTRIMMED build, where
+   everyone develops — so a new persisted DTO that no `[JsonSerializable]` root can see fails at
+   `qa-sweep` time instead of shipping and losing the player's profile.
+
+**What each knob actually protects, measured (C6 review, second reviewer) — the guard's first error
+text got this wrong and has been corrected.** With `TrimmerRootAssembly` removed and the reflection
+knob kept: `SAVETEST` **passes**, and a run round-trips squad/perks/weapon-mods/card/heat correctly.
+With **both** removed: `SAVETEST`, `METATEST` and `SHIPTEST` all still pass. **Player persistence is
+protected by source generation alone** — part (1) of the fix, working as designed. What the two
+knobs keep alive is the `SIGHTLINE_BALANCE` telemetry export, the one remaining reflective site
+(`NotSupportedException: …parameter names have been trimmed by ILLink` without the root;
+`InvalidOperationException: Reflection-based serialization has been disabled` without the knob).
+Losing the flywheel silently is reason enough for a build error — but the error text must name what
+actually breaks, not something worse.
+
+**Trim-safety verified at the metadata level, not by test coverage** (same review): a
+`MetadataLoadContext` diff of `obj/…/linux-x64/Sightline.dll` against `obj/…/linked/Sightline.dll`
+shows **356 types before trimming, 356 after — zero types removed, no persisted-DTO member
+trimmed.** Rooting the assembly means ILLink removes literally nothing from our code.
+
+**`PublishAot` was NOT tested here.** By inspection it sets `PublishTrimmed`, so it trips the same
+guard and therefore fails safe — but that is inspection, not a measurement.
+
+**Honest scope of the guard:** it catches *removal of the mitigation*, not every way persistence
+can break. A new DTO reachable from a root but with an unsupported member shape, or a trimmer
+warning nobody read, still needs `bash scripts/publish.sh` and its printed verification lines. Do
+not judge a publish by the build log.
 
 **If you change serialization, run `bash scripts/publish.sh` and read its verification
 lines.** Do not judge a publish by the build log.
@@ -111,9 +205,16 @@ Adding another OFL font means one new entry in the FONTS section of
 Nothing else in the shipped build is third-party: all art, audio, shaders and map content
 are generated in-engine (CLAUDE.md, "Art policy").
 
-### The repo's own licence — **DECIDED (PROGRAM CROSSCUT, 2026-08-29)**
+### The repo's own licence — **DECIDED (PROGRAM CROSSCUT, 2026-08-29), SHIPPED (C6, 2026-08-30)**
 
-There is now a root **`LICENSE`**: explicit **all rights reserved**, with a note recording why.
+There is a root **`LICENSE`**: explicit **all rights reserved**, with a note recording why.
+
+**C6 found it was decided but never delivered.** Nothing copied `LICENSE` into the build output, so
+every distributable this repo has ever produced carried `THIRD-PARTY-NOTICES.txt` and no statement
+of its own terms — a recipient of the zip could read what raylib and Noto Mono allow and had
+nothing at all telling them what *this* allows. One `<None Include="LICENSE" .../>` line fixes it;
+`SIGHTLINE_SHIPTEST`'s manifest leg is what keeps it fixed (it reads `FAIL (missing:LICENSE)`
+without that line, which is how the defect was found).
 
 The decision was made on the reversibility argument F1 itself framed, not on taste. Of the three
 options below, all-rights-reserved is the only one that is **one-way reversible**: it can become
@@ -155,7 +256,8 @@ Files in it:
 | `meta.json` | the cross-run profile: salvage, veterans, achievements, unlocks, hall of fame, max heat | permanent |
 | `display.json` | window size, fullscreen, brightness/gamma, colorblind mode, post-FX | permanent |
 | `*.json.bak` | a file that could not be read, moved aside instead of destroyed | until overwritten |
-| `*.json.tmp` | transient — saves write a `.tmp` then rename over the target, so a crash mid-write cannot tear a save | should never persist |
+| `*.json.tmp` | transient — every write goes to a `.tmp` then renames over the target, so a crash mid-write cannot tear a file | should not persist; a *failed* write sweeps its own, but see below |
+| `*.json.selftest-stash` | a self-test moved your profile aside and was killed before putting it back. **Your data, intact** — rename it back over the original | should never persist |
 
 **To uninstall completely**, delete the publish directory and that folder.
 
@@ -171,3 +273,55 @@ Two edge cases worth knowing:
 Saves are versioned (`SchemaVersion`, currently 1) and every persisted enum is guarded by a
 golden fingerprint in `SIGHTLINE_SAVETEST` — appending an enum member is safe, anything
 else fails the test loudly. See CLAUDE.md, "Combat model".
+
+### C6: what the atomic-write claim above was actually worth, measured
+
+The sentence "saves write a `.tmp` then rename" has been in this document since W5 and was
+presented as a property of **the directory**. It was true of `save.json` and `meta.json` and
+**false of `display.json`**, which was a single bare `File.WriteAllText` on the target — and which
+is the most frequently written of the three (every volume drag, every toggle, every one-shot tip
+dismissed). All three now go through the one writer, `SaveGame.WriteAtomic`.
+
+`SIGHTLINE_SHIPTEST` proves it **by mechanism, not by inspection**: it puts a marker in the target,
+holds an open read handle across a real save, and asserts the handle still sees the OLD bytes. A
+rename streams into a new inode and swaps the directory entry, so the old handle keeps the old
+content; a truncate-in-place writer rewrites the same inode and the handle sees the new bytes. That
+difference *is* atomicity. Measured on the pre-fix tree: `SHIPTEST: FAIL
+(missing:LICENSE,displayNotAtomic:handleSawNewBytes)`.
+
+**The full-disk case, measured** (nothing had ever tested it). A 48 KB tmpfs filled to 100% with a
+good `meta.json` already in it, then a live non-`NoPersist` mission 1 driven through the published
+binary: **no exception, the game plays on, and the existing `meta.json` is byte-identical
+afterwards.** A second pass with `SIGHTLINE_SHIPTEST` on the same full filesystem shows every write
+attempt refused (`IOException` / "did not land") with the process still standing. So the game
+degrades to "cannot save" rather than to "lost your profile" — which is the right failure and is
+now a measurement rather than an assertion.
+
+One real thing that full-disk pass found: on `ENOSPC` the old code path leaves a **0-byte
+`<name>.json.tmp` behind forever**, contradicting the "should never persist" line in the table
+above. `WriteAtomic` sweeps it **in the failure path**. Measured side by side: old shape leaves
+`old.json.tmp len=0`, new shape leaves nothing. `SIGHTLINE_SHIPTEST`'s `SweepProbe` proves it by
+forcing a rename to fail (it makes the target a directory) and asserting the `.tmp` is gone; remove
+the sweep and the leg reads `sweep:tmpNotSwept`.
+
+### The exact scope of the atomicity claim — read this before quoting it
+
+**REVIEW FIX (C6, sent back).** This section's first draft said `*.json.tmp` "should never persist,
+**and now does not**", which was an over-claim on precisely the case the sweep does not cover.
+Three separate limits, stated plainly:
+
+1. **The sweep is in the `catch`, so it only runs when the write itself fails.** A `kill -9`, an OOM
+   kill or a power cut *between* `File.WriteAllText(tmp, …)` and `File.Move(tmp, target)` still
+   leaves a `.tmp` behind, and there is **no startup sweep**. That is deliberate: a `.tmp` left by a
+   real crash is the one artefact a maintainer can reason about the crash from, and deleting it at
+   boot would destroy evidence to tidy a directory listing. "A crash mid-write" is the whole reason
+   the rename exists, so asserting the corpse is impossible there was exactly the wrong sentence.
+2. **The probe tests the INODE-SWAP property, not durability.** Holding a handle across the write
+   and finding the old bytes proves a reader — or a crashed process's half-finished work — can
+   never see a torn file. It does **not** prove power-loss safety: that needs an `fsync` of the tmp
+   **and** of the directory before the rename, and this code does neither. So: **safe against
+   process death and concurrent readers; NOT proven against power loss.**
+3. **The mechanism is verified on Unix only.** `Ship.AtomicityProbe` self-skips on Windows (the file
+   semantics differ and the rename path is not observable this way), while `SaveGame.WriteAtomic` —
+   which `display.json` was moved onto — changed behaviour on **all** platforms. The Windows
+   behaviour of that change is **unverified**, not assumed-good.

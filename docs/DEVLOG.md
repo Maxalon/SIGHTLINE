@@ -8977,3 +8977,2687 @@ bodies and resets `bump`; no mid-run Decapitate gets that. **Unspent, and it is 
 - **The first attempt produced ZERO chunks** because a shared-scratchpad copy of the runner had
   been overwritten by another agent. It failed loudly and wrote no data. The runner now lives in
   the repo, and that is the wider lesson: a shared path is not storage.
+
+---
+
+# PROGRAM CONTOUR — wave C6 "SHIPS LIKE A PRODUCT" (2026-08-30, branch `wave/ships`, base `17934ee`)
+
+## THE THESIS
+
+"Builds clean and passes autoplay" is a **development** standard. A **product** standard is a
+fresh machine, an empty profile, a double-clicked binary in a directory nobody chose, and no
+forgiveness. Nine autonomous programs made this game good; none of them walked that path. The one
+time anyone checked a neighbouring case (RESONANCE F1) they found a published build launched from
+the wrong directory **silently lost its font** — a total-failure bug that every self-test in the
+suite passed straight through.
+
+The mechanism behind that, and behind most of what this wave found, is one sentence:
+**every self-test in this project runs from the source tree.** `Cfg.AssetPath` falls back to a
+cwd-relative path when the baked path is missing — deliberate (dev convenience, dropped-in audio)
+and also a **mask**: from the repo root, a file the `.csproj` forgot to copy still resolves, off
+the repo instead of off the build output. The build is broken for a player and green for you.
+
+## WHAT THE WALK FOUND — six defects, none of which any of the 64 existing self-tests could see
+
+**1. Every distributable this repo has ever produced shipped with NO statement of its own terms.**
+PROGRAM CROSSCUT decided the licence (all rights reserved, explicitly not restricting compiled
+builds) and committed a root `LICENSE`. Nothing ever copied it into the output. A recipient of the
+zip could read what raylib and Noto Mono permit and had **nothing at all** telling them what *this*
+permits. One `<None Include="LICENSE" .../>` line; the manifest leg of the new test is what keeps
+it fixed (it reads `FAIL (missing:LICENSE)` without it — that is how the defect was found).
+
+**2. `display.json` was not written atomically**, while `save.json` and `meta.json` were.
+`docs/DISTRIBUTION.md` §5 has claimed ".tmp then rename, so a crash mid-write cannot tear a save"
+for the whole player-data directory since W5. It was true of two files out of three, and false of
+the one written most often — every volume drag, every toggle, every one-shot tip dismissed.
+All three now go through one writer, `SaveGame.WriteAtomic`.
+
+**3. `SIGHTLINE_SAVETEST` fails on any machine whose profile owns `MetaUnlock` ordinal 1**, and
+SAVETEST is on the shipping gate. Its meta block stashed the player's `meta.json` but never
+*cleared* it, then asserted `if (HasUnlock(1)) fails.Add("metaUnlockPhantom")` — a claim about the
+**absence** of an unlock, read off whatever profile happened to be on the machine. Ordinal 1 is
+`StartBoon` (STANDING ORDERS, 70 salvage, the second-cheapest unlock in the game). So a maintainer
+who has bought it runs `scripts/publish.sh`, gets `SAVETEST: FAIL (metaUnlockPhantom)`, and the
+script **refuses to publish a perfectly correct build** because of their own save file. `METATEST`
+already deleted `meta.json` first; SAVETEST now does the same. *Found the way a player would find
+it: with a pre-existing profile sitting in the config directory.*
+
+**4. There was no version anywhere.** A bug report could not name a build. `Hud.cs` even carried
+the comment "a faint version/footer stamp" above a line with no version in it. `<Version>` in the
+`.csproj` is now the single source, read back off the assembly by `Ship.Version` (never a
+hard-coded second copy) and painted on the main-menu footer and the pause card's top-right corner.
+Stamped **v1.0.0**.
+
+**5. The two screens a new player meets first had never been photographed.** Every screenshot hook
+stages a rich profile: `SIGHTLINE_INTRO` **fabricates a mission-3 save** so the CONTINUE button can
+be framed, and `DebugWarRoom` hard-codes a twelve-run career with five legends and two owned
+unlocks. So the cold main menu and the zero-state WAR ROOM had no photograph and no coverage.
+`SIGHTLINE_COLD=1` now selects the genuine first-launch state of both.
+
+**6. `.gitignore` reached `main` as an unresolved merge conflict.** Commit `17934ee` literally
+contains `<<<<<<< HEAD` / `=======` / `>>>>>>> wave/first-hour` as committed lines. Git reads them
+as three harmless patterns so nothing ever failed — but it is the second file a stranger opens, and
+the wave whose job is "what does a stranger receive" is the right one to fix it. Both sides kept.
+
+## THE PublishTrimmed HAZARD — and a stale line that pointed the wrong way
+
+CLAUDE.md said **"Never publish with `-p:PublishTrimmed=true`: it destroys save/load while the game
+still boots."** That was **stale and actively harmful.** F1 fixed the hazard (source-generated JSON
+contexts + `TrimmerRootAssembly` + re-enabled reflection fallback), trimmed has been the
+*recommended default* ever since, and following that line would have cost 57 MB and the fastest
+start in the matrix. Corrected.
+
+What IS true is that a **bare `dotnet publish` skips the verification** — which is exactly how a
+totally broken build once looked green. Three things now stand where a comment used to:
+
+- `scripts/publish.sh` runs `SAVETEST` + `METATEST` + **`SHIPTEST`** against the binary it just
+  built and refuses to report success otherwise.
+- `Sightline.csproj`'s `C6GuardTrimmedPersistence` target makes removing either mitigation a
+  **build error**. Proven non-vacuous: `dotnet publish -p:PublishTrimmed=true
+  -p:JsonSerializerIsReflectionEnabledByDefault=false` now fails with the reason and a §3 pointer.
+- SHIPTEST's TRIMSAFE leg asks each source-generated context whether it can actually see
+  `RunDto` / `MetaDto` / `Display.Dto` — the half of the hazard MSBuild cannot possibly know about,
+  checked in the *untrimmed* build where everyone develops.
+
+**Honest scope:** the guard catches *removal of the mitigation*, not every way persistence can
+break. A DTO reachable from a root but with an unsupported member shape still needs the publish
+script's printed lines. Do not judge a publish by the build log.
+
+## THE NEW SELF-TEST — `SIGHTLINE_SHIPTEST` (wired into `qa-sweep.sh` AND `publish.sh`)
+
+Six legs, all aimed at the seam between the artifact and the machine it lands on:
+
+| leg | what it asserts |
+|---|---|
+| MANIFEST | all 8 entries of `Ship.RequiredFiles` resolve **strictly** against `AppContext.BaseDirectory` — the cwd fallback is explicitly not allowed to carry them — non-empty, and the two `.ttf`s carry a real sfnt magic. (**Six** at first draft, omitting both `CREDITS.txt`; see the review section.) |
+| NOTICES | the shipped `THIRD-PARTY-NOTICES.txt` actually **names** all 5 redistributed components — each keyed on a string unique to its own section — and all 3 of their licences, not merely exists. (First draft called all eight "components" and keyed raylib on the bare substring `"raylib"`, trivially satisfied by `"Raylib-cs"`.) |
+| PROFILE | the player-data dir is an absolute path; a profile written through the real public API reads back off disk **and appears in the file's raw bytes**; and (3b) **a second process of this same binary** banks a sentinel that this one reads back |
+| ATOMIC | `save.json` / `meta.json` / `display.json` are each written by rename, proven **by mechanism** (below) — safe against process death and concurrent readers, **not** power loss (no `fsync`), Unix-only probe — plus a forced-failure probe that a failed write sweeps its own `.tmp` |
+| TRIMSAFE | every persisted DTO is reachable from a source-generated JSON context |
+| VERSION | the assembly carries a `MAJOR.MINOR.PATCH` stamp and the HUD's label contains it |
+
+**How the atomicity leg works, because "I read the code and it looks atomic" is not a test.** Put a
+marker in the target, hold an open read handle across a real save, then read *through that handle*.
+A rename streams into a NEW inode and swaps the directory entry, so the old handle keeps seeing the
+old bytes; a truncate-in-place writer rewrites the SAME inode and the handle sees the new bytes.
+That difference **is** atomicity. Unix-only mechanism, so it self-skips on Windows rather than
+reporting a verdict it cannot reach.
+
+**The second-launch leg is a real fork of the shipped binary.** No hook in this project could ever
+check "quit the game, start it again, your progress is there", because the house rule (never touch
+the player's real profile) makes every hook stash-and-restore *inside one process*. SHIPTEST forks
+`Environment.ProcessPath` with `SIGHTLINE_SHIPCHILD=1`; the child banks a sentinel through the
+ordinary public API and exits; the parent reads it back off disk. Two processes, one player-data
+directory, the shipped code on both sides — and it works from the published **single-file** binary.
+
+> **I fork-bombed the shared container doing this and it is worth writing down.** The first version
+> put the child branch *below* the SHIPTEST branch in `Main`, and the child inherited
+> `SIGHTLINE_SHIPTEST=1`. The child ran SHIPTEST, which forked a grandchild, which ran SHIPTEST…
+> **184 processes** on a box shared with five other agents before it was killed. Two independent
+> guards now stop it and both are commented as load-bearing: the child branch is **first in
+> `Main`**, and the probe **strips every `SIGHTLINE_*` variable** from the child's environment
+> (`XDG_CONFIG_HOME` is not one, so the child stays in the same isolated directory). A self-test
+> that spawns itself needs two guards, not one.
+
+### Proof it FAILS pre-fix — five independent reverts, all run
+
+| revert | SHIPTEST said |
+|---|---|
+| remove `<None Include="LICENSE">` **and** revert `Display.Save` to `File.WriteAllText` | `FAIL (missing:LICENSE,displayNotAtomic:handleSawNewBytes)` |
+| remove the version from `Hud.IntroFooter` | `FAIL (versionNotPainted)` |
+| delete `LICENSE` + `assets/NotoMono-LICENSE.txt` from a **published directory** | `FAIL (missing:assets/NotoMono-LICENSE.txt,missing:LICENSE)` |
+| delete `assets/NotoMono-Regular.ttf` from a **published directory** | `FAIL (missing:assets/NotoMono-Regular.ttf)` — **the exact F1 bug**; the game still boots, prints one `WARNING:` line and silently falls back to the bitmap font |
+| stop the second-launch child writing | `FAIL (secondLaunch:salvageNotCarried)` |
+
+And separately, for fix 3: with a profile owning `StartBoon`, pre-fix
+`SAVETEST: FAIL (metaUnlockPhantom)`; post-fix `SAVETEST: PASS`, and `meta.json` byte-identical
+afterwards.
+
+## THE MEASURED PUBLISH MATRIX (re-measured from scratch, 2026-08-30)
+
+Interleaved — one launch of each mode per round, nine rounds — so all four see the same load on a
+container shared with five other agents. A *sequential* pass twenty minutes apart put `no-trim` at
+117 ms and then 184 ms, which is why the ORDERING is the result and the absolute numbers carry
+"on a loaded four-core box".
+
+> **SIZES SUPERSEDED — see "the corrected matrix" at the end of this section.** The review fixes
+> added ~0.9 MB of code, and this draft never stated whether MB meant 10^6 or 2^20 (it was 10^6 for
+> the directory and MiB in the README, which is the F6 defect). The START column below is still the
+> one of record and is attached to commit `d3feb90`.
+
+| mode | exe | whole directory | files | start (median of 9, min–max) |
+|---|---|---|---|---|
+| **release** (default) | 25.6 MB | 28.4 MB | 10 | **169 ms** (102–323) |
+| small | 15.8 MB | 18.5 MB | 10 | 545 ms (397–696) |
+| no-trim | 82.3 MB | 85.1 MB | 10 | 206 ms (144–288) |
+| plain | 68.3 MB | 71.0 MB | 10 | 317 ms (256–405) |
+| win-x64 release | 24.3 MB (`.exe`) | 26.4 MB | 10 | not runnable here |
+
+On a quiet box the default measured **108–114 ms** median-of-10. File count went **6 → 10** since
+F1 (the Chakra Petch pair and two `CREDITS.txt` ledgers from later waves, `LICENSE` from this one),
+and F1's `size` column was the *executable* where this table carries both that and the directory
+you actually hand someone. `--rid win-x64` cross-publishes cleanly from Linux (10 files,
+`Sightline.exe` + `raylib.dll` + the same asset and licence set); **its self-tests cannot be run
+here, so the Windows build is unverified beyond "it produces the right files."**
+
+## THE PLAYER'S PATH, WALKED
+
+Installed the published directory at `/home/user/player path/SIGHTLINE Game` — outside the source
+tree, **with a space in the path** — against an **empty** player-data directory:
+
+- Both font atlases load **by absolute path from the install directory** (`INFO: FILEIO:
+  [/home/user/player path/SIGHTLINE Game/assets/NotoMono-Regular.ttf] File loaded successfully`).
+- A full campaign runs: `RESULT: WIN mission=6 frame=7654 turns=19`.
+- `SHIPTEST` PASSes from that install, and afterwards the profile directory is **empty** —
+  every file the test wrote was restored away.
+
+### Crash and data safety, measured rather than asserted
+
+**Full disk** (48 KB tmpfs at 100%, a good `meta.json` already in it, live non-`NoPersist` mission 1
+through the published binary): **no exception, the game plays on, and `meta.json` is byte-identical
+afterwards.** A second pass with SHIPTEST on the same filesystem shows every write refused
+(`IOException` / "did not land") with the process still standing. The game degrades to *cannot
+save*, not to *lost your profile*.
+
+That pass also found a real thing: on `ENOSPC` the old code leaves a **0-byte `<name>.json.tmp`
+behind forever**, contradicting the "should never persist" line in DISTRIBUTION §5. Measured side
+by side — old shape leaves `old.json.tmp len=0`, `WriteAtomic`'s sweep leaves nothing.
+
+**Corrupt / truncated / future-version saves and meta** are covered by SAVETEST's three corruption
+legs, which `publish.sh` now runs **against the published binary**; all PASS. **`kill -9` mid-write
+is NOT directly tested** — the write window is sub-millisecond and racing it from a shell is a coin
+flip, not a test. What is tested is the property that makes the outcome safe (the rename), on all
+three files. Stated as a limit, not dressed up as a pass.
+
+## SCREENSHOTS — taken from the PUBLISHED binary, cold profile, and judged
+
+- **Cold main menu** (`SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1`). Correct zero-state: no CONTINUE RUN,
+  DEPLOY SQUAD is the lit primary, caption reads "NEW CAMPAIGN – draft a squad, pick a doctrine,
+  survive 6 operations". `SIGHTLINE v1.0.0` sits in the footer, faint, centred by measurement.
+  Nothing broken or empty. **Judged good.**
+- **Cold WAR ROOM** (`SIGHTLINE_WARROOM=1 SIGHTLINE_COLD=1`). Real zero-states everywhere: HALL OF
+  FAME collapses to "– no legends yet – / Finish a run to enshrine them", achievements show `0/N`,
+  CAREER's WIN RATE is `–` rather than `0%`, BUY chips are unaffordable-red. **But four of the six
+  unlock descriptions are ellipsised mid-word** — see "what I did not fix".
+- **Pause card at TEXT SIZE 120%.** The version sits right-aligned in the card's empty top-right
+  corner, clear of the title and every row. **Judged good.**
+- **Cold main menu at 120%.** Footer stays centred and fits. **But the DIFFICULTY panel's body
+  text overflows its own panel** — see below.
+- **Barracks debrief + campaign map after mission 1** (the genuine first-run state). Roster with
+  HP bars, DEPLOY/BENCH toggles, DEBRIEF lines, a legible DAG with a legend. **Judged good.**
+
+## VERIFICATION
+
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0**, **65/65** self-tests (64 + SHIPTEST), zero
+  `FAIL`, COVERAGE GAP block empty, `PAIRTEST: PASS` (CRN byte-identity intact).
+- Autoplay ×3 in the sweep: no TIMEOUT, no blank RESULT.
+- `bash scripts/publish.sh` green on all four Linux modes plus `--rid win-x64`, with all three
+  self-tests PASSing against each published binary.
+
+## WHAT I DID NOT FIX, AND WHAT IT COSTS
+
+**1. The cold WAR ROOM ellipsises four of six unlock descriptions.** With 0 owned, the six-entry
+catalogue wants 508 px in a 446 px column, so W9's `WarUnlockPlan` shrinks each compact row to ONE
+12 px line and clips with an ellipsis. That is a **deliberate, documented W9 decision** and the
+alternatives it rejected are worse (10 px type breaks the small-text floor; `break`ing off the list
+made an unlock invisible *and unbuyable*). The cost is real and lands on exactly the wrong person:
+**the only player who sees all six unowned is the brand-new one, and they are the one player who
+cannot read what any of them do.** METATEST checks the font size and the hit rect, not
+*readability*. Not fixed here because it is a HUD layout change on a screen other CONTOUR waves may
+be touching, and this wave's lane is the artifact. It is now **photographable**
+(`SIGHTLINE_COLD=1`), which it was not before — that is the durable half.
+
+**2. The intro screen is not fit-tested, and it overflows at TEXT SIZE 120%.** The DIFFICULTY
+panel's body line ("standard difficulty – the designed fight") paints to x≈1266 against a panel
+edge at x≈1239 — **outside its own panel** — and the `[K]` / `[U]` key chips overlap their labels.
+`FITTEST` covers the doctrine / armory / hall-of-fame / draft screens; **the intro is not in its
+list**, so the first screen in the game has never been checked at any scale but 100%. At 100% it is
+clean. Reported precisely rather than fixed, same reason as (1).
+
+**3. A genuine two-process check of `display.json` is impossible headlessly.** `Display.Init` calls
+`Load()` *after* its `if (!enabled) return`, and every shot/autoplay path runs `Init(false)` — by
+design, for headless byte-stability. So settings load-back cannot be verified without a human at a
+keyboard. SHIPTEST's second-launch leg closes the equivalent gap for `meta.json`, which is where
+permanent progress lives; `display.json` is covered only up to "the file is written correctly".
+
+**4. `docs/screenshot.png` was NOT regenerated.** It is current — mission 4/6, HVT GUARDED, a
+board this build still produces — so the brief's condition ("regenerate it if the game no longer
+looks like it") is not met. It is a *worse* hero image than it could be (the 11-second briefing
+card covers the middle of the board), but swapping 700 KB of committed binary for a taste
+preference is not this wave's call to make silently.
+
+**5. The Windows build is unverified beyond its file list.** It cross-publishes cleanly and carries
+the right ten files; nothing here can run it. `Ship.SecondLaunchProbe` and `AtomicityProbe` both
+have Windows-aware paths (the latter self-skips), but neither has been executed on Windows.
+
+**6. Nothing here was balance-measured, and nothing should have been.** No gameplay code changed —
+`PAIRTEST` byte-identity confirms it. The `SIGHTLINE_COLD` hook is shot-only and `NoPersist`-gated;
+the version string is presentation. Quoting a ladder number from this wave would be inventing one.
+
+## WHAT STILL STANDS BETWEEN THIS AND A BUILD YOU WOULD HAND A STRANGER
+
+Ordered by how likely a stranger is to hit it.
+
+1. **No installer, no icon, no window-title art, no `.desktop` file.** A Linux player unzips a
+   directory and runs a file called `Sightline`. Windows will show an unsigned binary and
+   SmartScreen will warn. **Code signing costs money** and is therefore permanently out of scope
+   under this project's rules, but it is the single biggest "is this safe to run?" barrier there.
+2. **The cold WAR ROOM's unreadable unlock list** (above) — the first-run information defect.
+3. **The intro at non-100% text size** (above) — a shipped comfort setting with an unfit screen.
+4. **No crash reporter and no log file.** If the game throws on a player's machine the exception
+   goes to a stdout nobody is reading. The version stamp now lets them *name* a build; there is
+   still nothing to attach to the report.
+5. **Audio has never been heard on real hardware** (RESONANCE's standing item). Every session here
+   runs with `WARNING: AUDIO: Failed to initialize playback device`.
+6. **macOS is entirely untested** — not even a cross-publish was attempted.
+7. **`meta.json` has no export or backup path.** It is the only permanent thing the player owns;
+   the `.bak` beside it is corruption evidence, not a restore.
+
+## C6 — SENT BACK TWICE, AND WHAT THE TWO REVIEWS FOUND
+
+Two independent reviews. **Neither could break the test design** — reviewer 1 reproduced all five
+named reverts plus three more of their own and could not defeat the fork-bomb guards under
+`ulimit -u 250`, from multiple working directories, from an install path with a space, under
+`dotnet run -c Debug`, or nested; reviewer 2 verified trim-safety at the metadata level and upheld
+the `PublishTrimmed` reversal more strongly than the wave had argued it. What failed was
+**precision and bookkeeping**, which is this project's stated worst sin, plus two functional gaps.
+Twelve items, all fixed. The ones worth remembering:
+
+**The manifest did not match the document it guards — found independently by BOTH reviewers.**
+`docs/DISTRIBUTION.md` §1, written by this wave in the same commit, called the output "ten files,
+and you must ship all of them" and listed both `CREDITS.txt` audio ledgers. `Ship.RequiredFiles`
+had **six entries and omitted both**, so a build output with both deleted read `SHIPTEST: PASS` —
+while the array's own doc comment said "the two halves disagreeing is precisely the failure this
+manifest exists to name." **They already disagreed at merge time.** A manifest that does not match
+its document is worse than no manifest, because it gets quoted as evidence. Now eight entries.
+
+**I shipped a leg that could not fail — rule 5, in the wave that quotes rule 5.** The
+`<label>StaleTmp` check ran only after a *successful* `WriteAtomic`, whose `File.Move` has already
+consumed the tmp; it asserted a tautology, a pre-seeded stale `.tmp` still read PASS, and the PASS
+string advertised "no stale `.tmp`" on the strength of it. The sweep is a property of the **failure**
+path and had to be probed there: `SweepProbe` makes the target a **directory**, so the tmp write
+succeeds and the rename cannot, landing control in the catch with a corpse on disk. Remove the
+sweep and it reads `sweep:tmpNotSwept` — verified. The old line survives only as a shape guard,
+renamed `TmpSurvivedSuccessfulWrite`, and the PASS string no longer claims anything for it.
+
+**My probe destroyed a file it did not create.** `Ship.Restore` deleted `<path>.tmp`
+unconditionally, so running `qa-sweep.sh` silently erased a `.tmp` left behind by a real crash —
+the one artefact a maintainer could reason about that crash from. It now stashes the `.tmp`
+siblings alongside the files and puts their bytes back (mtime is necessarily rewritten: the
+production writer uses that exact path, so the test cannot avoid clobbering it and can only restore
+the content). Verified: two pre-seeded crash `.tmp` files come back byte-identical.
+
+**I reintroduced the bug class this wave exists to kill.** `SecondLaunchProbe` used
+`Environment.ProcessPath` unconditionally. Under `dotnet Sightline.dll` that is the **dotnet
+muxer**, so it spawned a bare `dotnet`, which printed usage, exited 0, wrote no sentinel, and gave
+`SHIPTEST: FAIL (secondLaunch:salvageNotCarried)` **on a completely correct build** — the same
+shape as the `metaUnlockPhantom` defect I had just fixed on the same gate, and defended with the
+same excuse ("no current caller trips it"). It now identifies the launcher: apphost/single-file →
+use it; muxer → relaunch as `<muxer> <our .dll>`; neither identifiable → **skip with the reason
+printed in the PASS string**, never fail. Verified PASSing under `dotnet Sightline.dll`,
+`dotnet run`, and the published single-file binary.
+
+**My hermeticity fix made a failure mode worse.** SAVETEST's meta stash lived only in a local
+string while the real file was deleted, so a `kill -9` in that window lost the profile outright.
+Pre-C6 the file was merely *mutated*; post-C6 it was *absent*. Trading "polluted" for "gone", in
+the wave whose thesis is that player data survives a crash. The stash is now a real file moved
+aside by rename (`<name>.json.selftest-stash`, recoverable by hand) and moved back the same way,
+with `WriteAtomic` as the fallback restore instead of a bare `File.WriteAllText` — the exact
+pattern this wave removed everywhere else.
+
+**Two over-claims, both on the sentence next to the thing I did not cover.**
+- §5 said `*.json.tmp` "should never persist, **and now does not**". The sweep is in the `catch`, so
+  a `kill -9` or power cut *between* the tmp write and the rename still leaves one, and there is no
+  startup sweep — deliberately, because that corpse is crash evidence. Corrected to name the limit.
+- The atomicity probe proves the **inode swap**, which covers concurrent readers and process death.
+  It is **not** power-loss durability: that needs an `fsync` of the tmp and of the directory, and
+  this code does neither. Now stated in the PASS string itself, not just the docs.
+
+**My guard's error text was factually false** — and it is the text someone reads at their worst
+moment. It said removing `TrimmerRootAssembly` meant a trimmed build "saves nothing". Reviewer 2
+measured it: with the root removed, `SAVETEST` **passes** and runs round-trip correctly; with
+**both** knobs removed, `SAVETEST`/`METATEST`/`SHIPTEST` all still pass. **Player persistence is
+protected by source generation alone.** What the knobs keep alive is the `SIGHTLINE_BALANCE`
+telemetry export (`NotSupportedException: parameter names have been trimmed by ILLink` /
+`InvalidOperationException: Reflection-based serialization has been disabled`). The guard was right
+to exist and fails safe; its message described the *pre-source-generation* failure and would have
+sent the next maintainer down the wrong road.
+
+**"Bounded wait" was stronger than my code.** `SecondLaunchProbe` called `ReadToEnd()` on two
+redirected pipes *before* `WaitForExit(60_000)`, and `ReadToEnd` has no timeout — a child that
+filled a pipe would have hung the sweep forever. It cannot happen today (the child writes ~15 bytes
+and exits), but the comment claimed more than the code delivered. Both pipes now drain on
+background threads before a deadlined wait.
+
+**A false comment on a line that deletes a save.** The `SIGHTLINE_COLD` block said it was
+"NoPersist-gated … so it can never touch a real profile". The cold path calls `SaveGame.Delete()`,
+which has **no** `NoPersist` guard. What actually protects the player is FUL-2's `introStash`
+capture-and-restore — which already had to exist because the *non*-cold path clobbers the same file
+by writing a staged mission-3 run over it. Net risk unchanged, stated reason wrong.
+
+**Two of my own documents disagreed on a number readers quote.** README said "27 MB" (MiB, from
+`du -sh`); §2 and `publish.sh` said 28.4 MB (decimal) for the same directory. All three now say
+**MB = 10^6 bytes**, explicitly, with exact byte counts.
+
+### The corrected matrix (final C6 binary, MB = 10^6 bytes)
+
+| mode | executable | whole directory | files |
+|---|---|---|---|
+| **release** (default) | 26.5 MB | **29.3 MB** (29,284,496 B) | 10 |
+| small | 16.1 MB | 18.8 MB | 10 |
+| no-trim | 82.3 MB | 85.1 MB | 10 |
+| plain | 68.3 MB | 71.0 MB | 10 |
+| win-x64 release | 24.8 MB (`.exe`) | 26.9 MB | 10 |
+
+**The start-time column from the first draft still stands and is NOT reproduced here as if it were
+fresh.** Those timings were measured on the pre-review binary (`d3feb90`); they were deliberately
+not re-run, because the container was under nine concurrent reviewers at load ~60 and that produces
+a worse number, not a truer one. `docs/DISTRIBUTION.md` §2 carries them with that attribution.
+
+### Also now stated as unverified rather than quietly implied
+
+- The `display.json` mechanism change applies on **all** platforms; `AtomicityProbe` self-skips on
+  Windows, so the Windows behaviour of that change is **unverified**.
+- **`PublishAot` was not tested.** By inspection it sets `PublishTrimmed` and therefore trips the
+  same guard — inspection, not measurement.
+- `SIGHTLINE_SHIPTEST` is the first hook here that writes the live profile **from a second
+  process**. It restores cleanly on success, but a sweep killed mid-SHIPTEST can leave `4242`
+  salvage and a `C6_SECOND_LAUNCH` achievement in whatever profile `XDG_CONFIG_HOME` points at.
+  CLAUDE.md's isolation section now says so, and names the two "a self-test died holding your data"
+  filenames and what to do with each.
+- Dispatch-order quirk, noted not changed: `SIGHTLINE_BALANCE` is handled before `SHIPTEST` in
+  `Main`, so setting both silently runs a balance batch and prints no SHIPTEST line. First-match-
+  wins is the house convention for every hook in that file; `qa-sweep.sh`'s `verdict` already treats
+  a blank capture as a failure.
+
+# PROGRAM "CONTOUR" — wave C1 "THE FLAT MIDDLE"
+
+**Branch `wave/flat-middle`, base `17934ee`.** Brief: the `h4 -> h6` step is the smallest on three
+measured ladders while the ends buy 10-24 points apiece; give the middle of the heat ladder a tooth
+the player could describe in one sentence after the mission, measure it CRN-paired, and do not
+break the LEVEL while fixing the SHAPE.
+
+> **SUPERSEDED IN PART BY §C1-R (the send-back). READ BOTH.** This section is the original wave
+> write-up and it concludes for **mode 1**; the shipped default is **mode 3**, changed on review
+> evidence recomputed from this same archive. Two claims below are formally withdrawn there
+> ("tier 2 is not a difficulty lever", "nothing that was in band left it"), the measurement and
+> mechanism sections stand unchanged, and the shape verdict is restated. Quoting §C1-3/§C1-4 without
+> §C1-R will give you the wrong shipped mode and the wrong shape conclusion.
+
+**Shipped (as revised in §C1-R):** `Heat.MidTooth` (default 3) — BOTH of NO QUARTER's qualitative
+teeth, the +1 per-hit damage and coordination tier 2, move down from rung 8 to EXPOSED (rung 6),
+and rung 6's dead `AiTier = 1` declaration is deleted. `SIGHTLINE_MIDTOOTH=0` restores the pre-C1
+table. New hook `SIGHTLINE_MIDTOOTHTEST`. Raw round and full tables:
+[`docs/measurements/c1/`](measurements/c1/README.md). **416 chunks, every one asserted `runs=40`,
+zero `BAD` — 16,640 campaigns.**
+
+## C1-1. Sample the ladder per RUNG and the finding changes shape
+
+Every published ladder in this project samples `{RECRUIT, 0, 2, 4, 6, 8}`. C1 measured **all ten
+rungs** at n=320 (n=640 at h6), eight disjoint CRN slot sets each, on its own tree:
+
+| rung | RECRUIT | h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| win% | 70.0 | 44.4 | 37.5 | 32.5 | 27.5 | 20.9 | 20.9 | 18.6 | 12.2 | 8.1 |
+| +-SE | 2.6 | 2.8 | 2.7 | 2.6 | 2.5 | 2.3 | 2.3 | 1.5 | 1.8 | 1.5 |
+| **rung N buys** | - | 25.6 | 6.9 | 5.0 | 5.0 | 6.6 | **0.0** | **2.3** | 6.4 | 4.1 |
+
+"`h4 -> h6` is flat" is really **two rungs, and one of them is exactly zero**. Rung 5 (LINGERING
+WOUNDS: +1 enemy, HarshAttrition) buys **0.0 +-3.2** — the only rung on the ladder that cannot be
+distinguished from doing nothing. Rung 6 buys 2.3 +-2.7 against a ladder whose other six rungs
+average 5.7.
+
+## C1-2. The mechanism: a declaration that could never fire
+
+Rung 6 read `Exposed = true, StatDelta = 1, AiTier = 1`. `Heat.AiTier` aggregates with `Math.Max`
+and **rung 4 (ELITE CADRE) already publishes tier 1** — so EXPOSED's advertised coordination tooth
+was a **dead declaration** for two whole programs. W6b wrote it; its own comment ("rungs 6-7 stay
+tier 1") records the fact without noticing the consequence. Nothing caught it because
+`HEATLADDERTEST` pins the CUMULATIVE vector, which a dead declaration by definition does not move.
+Rung 6 shipped +1 body, +1 stat and a concealment flag, and the player climbed two rungs for a stat
+point.
+
+## C1-3. Five candidates, all provably apex-neutral, priced at heat 6
+
+`Heat.MidTooth` is a bitfield (1 = +1 damage moves 8 -> 6, 2 = coordination tier 2 moves 8 -> 6,
+4 = rung 6's stat point moves 6 -> 7), so one binary measured every candidate against one control.
+**DmgDelta sums and AiTier is a Math.Max, so the cumulative vector at heat 8 is IDENTICAL in every
+mode** — the dial cannot push the apex under its >=5 hard floor, by construction rather than by
+hope. Verified, not asserted: the h8 chunks are byte-identical control-vs-lever.
+
+| mode | what moves | n | h6 ctl -> lev | paired delta | +-SE | z |
+|---|---|---|---|---|---|---|
+| **1** | **+1 dmg -> rung 6** | **640** | **18.6 -> 12.0** | **-6.6** | **1.6** | **-4.16** |
+| 3 | +1 dmg AND tier 2 -> rung 6 | 640 | 18.6 -> 13.9 | -4.7 | 1.7 | -2.69 |
+| 2 | tier 2 -> rung 6 alone | 320 | 18.4 -> 20.0 | **+1.6** | 1.9 | +0.80 |
+| 4 | rung 6's stat point -> rung 7 | 320 | 18.4 -> 23.1 | +4.7 | 2.7 | +1.76 |
+| 5 | mode 1 + mode 4 (the "trade") | 320 | 18.4 -> 10.6 | -7.8 | 2.5 | -3.10 |
+
+**The negative result is the more interesting half.** Moving the apex's coordination tier down a
+rung is **not a difficulty lever**: alone it measured **+1.6 in the PLAYER's favour**, and mode 3
+(which bundles it with the damage tooth) is 1.9 points *softer* than mode 1 alone. Two programs of
+table comments call `AiTier` an escalation; over 320 CRN pairs at heat 6 it does not read as one.
+Caveat, per the program's own rule 3: **a CRN round prices CONSEQUENCES and is blind to FEEL.**
+Tier 2 may well change how a fight reads without changing who wins it. Nobody has looked.
+
+Mode 4 is the useful by-product: it **prices a single `StatDelta` rung at 4.7 points**, the first
+time one has been isolated on this ladder.
+
+**Why mode 1 and not mode 3**, which lands a more even 7.0/5.8 split across rungs 5-6 / 7-8: mode 3
+strips NO QUARTER of *every* qualitative tooth (leaving the apex "+1 enemy, +1 stat" — the exact
+complaint the wave opened with), and the component that buys the softening measured with the wrong
+sign on its own. Mode 1 is the only candidate that leaves rungs 6, 7 AND 8 each with a tooth a
+player could name. **The design thesis decided it; the numbers only narrowed the field.**
+
+## C1-4. The shipped ladder — and what did NOT move
+
+| rung | RECRUIT | h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| control | 70.0 | 44.4 | 37.5 | 32.5 | 27.5 | 20.9 | 20.9 | 18.6 | 12.2 | 8.1 |
+| **C1** | **70.0** | **44.4** | **37.5** | **32.5** | **27.5** | **20.9** | **20.6** | **12.0** | **9.4** | **8.1** |
+| +-SE | 2.6 | 2.8 | 2.7 | 2.6 | 2.5 | 2.3 | 2.3 | 1.3 | 1.6 | 1.5 |
+| discordant pairs | 0/320 | 0/320 | 0/320 | 0/320 | 0/320 | 0/320 | 5/320 | 102/640 | 35/320 | 0/320 |
+
+**Six rungs are EXACTLY unchanged — zero discordant pairs out of 320 at each.** `h4 -> h6` goes
+from **-2.3 +-2.7 to -8.9 +-2.6**. Band: nothing that was in band left it — h6 moves from mid-band
+to **exactly its floor (12.0, band 12-28)**, and h0's 2.6-point and h4's 1.1-point misses are the
+control's, untouched. The first n=320 round put h6 at 11.2, i.e. 0.8 *under* the floor; the doubled
+n=640 round is the only reason the lever shipped, and it is why the second eight slot sets were run.
+
+## C1-5. THE HONEST PART — the flat spot moved, it did not vanish
+
+Rungs 7 and 8 now buy 2.7 and 1.2 where they bought 6.4 and 4.1. That is **arithmetic, not a design
+failure, and it is the wave's real finding**: an apex-neutral lever pins h4 (20.9) and h8 (8.1), so
+there are **12.8 points of win-rate for four rungs — 3.2 each.** No redistribution inside that
+window can give rungs 5-8 the ~5.7 points per rung that rungs 1-4 buy. What a lever CAN do, and
+did, is stop one rung taking almost none of it.
+
+**The deficit that causes it sits ABOVE heat 4, not in the middle.** Against the band centres, h0
+is 10.6 points low and h4 is 9.1 low, while h6 and h8 are within 2. The ladder is flat at the
+bottom because its top half has sunk onto it. That is a BASE-difficulty lever, not a `Heat.Mods`
+lever, and it was out of C1's scope. **It is the next thing to price, and it is now the biggest
+open number.**
+
+## C1-6. Two things measured on the way that nobody had written down
+
+**A "heat-N rung" is not a fixed rung.** `Events.cs:460` (`EventOutcomeKind.AddHeat`) lets three
+field-event choices raise a run's HeatLevel mid-campaign, +1 each — so a heat-5 cell contains some
+heat-6 missions. It is the *only* reason the lever is not perfectly inert below rung 6: h5 shows 5
+discordant pairs in 320 (-0.3, z=-0.45) and h4 shows zero, because from h4 the escalation must fire
+twice and in 320 campaigns it never did. Every past "this rung is unaffected" claim on this ladder
+has had this hole in it.
+
+**Two rungs' player-facing copy was painting off the panel.** `Hud.DrawHeatSelector` renders a
+rung's `Desc` at 12px into a 320px card with the body column at x+40, and it neither clips nor
+wraps — it just keeps painting. Measured off a heat-8 intro screenshot: ~7.07 px/char, 278px inside
+the border, **38 characters**. NO QUARTER's shipped line was **57** and LINGERING WOUNDS' was 42;
+both were visibly cut off, and NO QUARTER's clipped clause meant the apex **never named its
+coordination peak at all**. Found by looking at the screenshot, which is what the screenshot rule is
+for. Both now fit, `Heat.DescBudget` records the measurement, and MIDTOOTHTEST asserts the budget
+for every rung of every dial mode so it cannot come back.
+
+## C1-7. The self-test — `SIGHTLINE_MIDTOOTHTEST`, and the proof it can fail
+
+Seven legs, aimed at the SEAM rather than the model (W9's thesis):
+
+- **(A) NO DEAD DECLARATION** — a rung declaring `AiTier = t` must actually RAISE the cumulative
+  tier. *This is the defect.* **Under `SIGHTLINE_MIDTOOTH=0` it FAILS:**
+  `MIDTOOTHTEST: FAIL deadAiTier@rung6 (declares 1, cumulative below is already 1)`.
+- **(B) NO SILENT RUNG** — every rung must move the cumulative (enemy, stat, dmg, tier, flags).
+- **(C) APEX NEUTRALITY** — all eight dial modes must leave the heat-8 vector identical. Proven able
+  to fail by scratch-editing rung 8 to KEEP its DmgDelta (the add-instead-of-move mistake):
+  `FAIL apexMoved(mode1)=(4, 4, 2, 2, 15) vs (4, 4, 1, 2, 15)`, on four modes at once.
+- **(D) THE OFF-SWITCH IS A TRUE CONTROL** — `MIDTOOTH=0` reproduced field-for-field against a
+  literal transcription (the TRUE BAND precedent). One deviation is named inside the test itself:
+  rung 5's copy fix, which is copy-only and applies in every mode.
+- **(E)** per-mode rung shapes as goldens. **(F)** the +1 damage reaching every heat-6 m3 hostile
+  through the whole `SetupMission -> Build -> SpawnEnemies` thread, none at heat 5, exactly one at
+  heat 8. **(G)** the 38-character panel budget, every rung, every mode.
+
+`HEATLADDERTEST`'s golden and `AITEST`'s `DmgDelta(7) != 0` pin both had to move, and both are
+re-aimed rather than deleted: AITEST now asserts the invariant that actually matters — the ladder
+carries the damage point **exactly once**, so the apex cumulative is 1 and never 2.
+
+## C1-8. What C1 did NOT do
+
+- **Rung 5 is untouched and still buys 0.0.** C1 shipped ONE lever and it was rung 6's. LINGERING
+  WOUNDS' +1 body is partly eaten by the 12-hostile spawn cap on late missions, and `HarshAttrition`
+  compounds over a run length the bot rarely reaches (avgMis 3.66 at h5) — **hypotheses, unmeasured.**
+- **The LEVEL was not addressed.** h0 (-10.6) and h4 (-9.1) against band centre are the control's
+  and are untouched. C1 diagnosed them as the cause of the flat bottom and did not spend a lever on
+  them, because the brief scoped the wave to `Heat.Mods` and a base-difficulty lever is not that.
+- **No FEEL measurement of the tier.** Mode 2's +1.6 says tier 2 does not change who wins. It says
+  nothing about whether the fight reads differently, and this instrument structurally cannot.
+- **`avgMis` and `ch/ARMED` are reported but not analysed.** `ch/ARMED` at h6 moves 2.103 -> 2.087,
+  which is noise; C1 makes no decision-density claim.
+- **Objective cross-tabs were not run on the lever.** Every C1 claim is rung-level win-rate, so it
+  did not need one — but a follow-up that wants to say *which fights* got harder at heat 6 must run
+  `byObjectiveByMission` first (rule 1).
+- **The 34 MB raw round is not committed.** It was distilled to a 428 KB per-campaign CSV that
+  re-derives every published number exactly (one 0.01 rounding difference in `avgMis` at h3, where
+  the CSV is the more accurate of the two). The aggregate blocks are gone: `inert_diff.py` cannot be
+  re-run from the archive, and its results are recorded rather than reproducible.
+
+---
+
+# PROGRAM "CONTOUR" — C1-R: the send-back, and the mode changed on the evidence
+
+C1 shipped mode 1 and was returned `merge-after-fixes` by two review lenses. The instrument,
+archive and guard were upheld — a reviewer reproduced the h6 chunks **bit-exactly** from a fresh
+build, corroborated apex-neutrality from the committed samples (h8 pair: 1535 leaf fields, **0
+differ**; h6 pair: 1608 fields, **984 differ** — the h6 difference is what makes the h8 zero mean
+something), and confirmed all seven MIDTOOTHTEST legs provably able to fail. **What failed was the
+conclusion drawn from the numbers.** This section records what changed and why.
+
+## C1-R1. THE SHIPPED MODE CHANGED: 1 → 3
+
+Recomputed from C1's own `chunks.csv`, the rung 1–8 step profiles:
+
+```
+             h1    h2    h3    h4    h5    h6    h7    h8    sum
+control     6.88  5.00  5.00  6.56  0.00  2.34  6.41  4.06  36.25
+mode 1      6.88  5.00  5.00  6.56  0.31  8.59  2.66  1.25  36.25
+mode 3      6.88  5.00  5.00  6.56  0.31  6.72  4.22  1.56  36.25
+```
+
+| metric | control | mode 1 (was shipped) | **mode 3 (now shipped)** |
+|---|---|---|---|
+| SD of the 8 steps (sample, n−1) | 2.36 | 2.89 | 2.44 |
+| L1 deviation from even spacing | 14.38 | 18.75 | 15.00 |
+| L1 deviation from the band's implied profile | 14.69 | 19.06 | 15.31 |
+| L1 from even, inside the rungs 5–8 window | 8.12 | 10.78 | 9.06 |
+| steps < 2.0 points | 1 | 2 | 2 |
+| **sum of rungs 1–8** | **36.25** | **36.25** | **36.25** |
+
+**The sums are identical to the decimal, which confirms C1's zero-sum claim — and is exactly what
+makes the allocation a design choice rather than arithmetic.** C1's original write-up used
+zero-sum-ness to explain away the flattened top; that was the wrong inference from a correct fact.
+The ranking control > mode 3 > mode 1 is identical on all four dispersion metrics.
+
+**The decision, and the four reasons:**
+
+1. **Mode 3 wins every shape metric mode 1 loses**, and shape is what the wave is for.
+2. **The band verdict.** Mode 1's h6 is 12.03 ±1.29 against a floor of 12: **P(true value below the
+   floor) ≈ 0.49**, a coin flip. Mode 3's is 13.91 ±1.37 — 1.4 SE clear (P ≈ 0.08) — and in band at
+   **both** n=320 (13.4) and n=640 (13.9).
+3. **Mode 1's band verdict came from optional stopping.** The first n=320 round read 11.2 (out of
+   band); the round was extended to n=640, read 12.0, and shipped. C1 disclosed the extension — but
+   **disclosure makes optional stopping auditable, not unbiased.** Mode 3 never needed the rule.
+4. **The tension C1 left implicit, resolved.** Mode 1's only advantage was leaving a qualitative
+   tooth on the apex — and that tooth is `AiTier 2`, the one component C1 itself measured as doing
+   nothing. **C1 cannot call tier 2 "not a difficulty lever" and simultaneously pay four shape
+   metrics and a band verdict to keep it at the apex.** Mode 3 is also weakly DOMINANT across that
+   component's full CI: at the bottom (−0.15) mode 3 ≈ mode 1; at the top (+2.33) it is clearly
+   better on band and shape; **it is never worse.**
+
+**The best argument FOR mode 1 — which C1 never made, and the review supplied.** With h4 measured
+at 20.94 against a band asking 30, the band's implied `h4 → h6` step of −10 puts h6 at **10.9
+relative to measured h4**; on that shape-relative reading mode 1's 12.03 is better positioned than
+mode 3's 13.91 and the control's 18.59 is nowhere near either. It is a real argument. It is **not
+self-consistent on this tree**: the same −10-per-two-rungs slope applied to `h6 → h8` demands
+h8 = 0.9 against a measured 8.12 and a hard floor of 5. The shape-relative target can be honoured
+for one step at a time only, and honouring it at `h4 → h6` while ignoring `h6 → h8` is precisely the
+cherry-pick that produced mode 1's flat top. That is why it did not carry the decision — but it
+does replace C1's original, too-easy framing of "nothing that was in band left it".
+
+**What mode 3 costs, recorded not hidden:** NO QUARTER becomes a quantitative row —
+`+1 enemy; +1 stat; the ceiling`. The apex is a wall because of the STACK beneath it, which the
+panel lists in full at heat 8, not because of its own row. C1 pays that legibility cost knowingly.
+
+## C1-R2. Two claims withdrawn, one strengthened
+
+**WITHDRAWN — "moving coordination tier 2 down a rung is not a difficulty lever."** That rested on
+one cell: +1.56 ±1.95, z = +0.80, **95% CI [−2.26, +5.38]** — which does not exclude tier 2 buying
+2.3 points, *more* than rung 6 was buying in the first place. C1 had better evidence in its own
+archive and did not use it. **Four contrasts isolate the same component:**
+
+| contrast | n | lev-only | ctl-only | Δ | ±SE |
+|---|---|---|---|---|---|
+| m2 vs ctl, h6 | 320 | 22 | 17 | +1.56 | 1.95 |
+| m2 vs ctl, h7 | 320 | 13 | 10 | +0.94 | 1.50 |
+| m3 vs m1, h6 | 640 | 30 | 18 | +1.88 | 1.08 |
+| m3 vs m1, h7 | 320 | 6 | 5 | +0.31 | 1.04 |
+| **pooled, inverse-variance (1600 CRN pairs)** | | | | **+1.09** | **0.63** |
+
+z = +1.73, 95% CI **[−0.15, +2.33]**, **wrong-signed in all four cells**. The claim on the record is
+now: *indistinguishable from zero, with a point estimate slightly in the player's favour.*
+
+**WITHDRAWN — "nothing that was in band left it."** True but self-serving. h6 moves from 1.4 points
+ABOVE the band centre to 6.1 BELOW it. The honest reading is the shape-relative one: h6 is now far
+better positioned relative to a measured h4 of 20.9, and **it is the h4 LEVEL that is broken** —
+which is C1's own closing diagnosis, and it now appears in the ladder-of-record entry instead.
+
+**STRENGTHENED — the AddHeat leak is DIRECTIONAL, and it points at C1's own headline.** Heat 8 is
+clamped and cannot leak upward, so every rung below it is contaminated TOWARD the rung above, and
+**the instrument systematically compresses the top of the ladder it is being used to diagnose.**
+Some part of the flat middle/top this program exists to fix may be the instrument, not the design.
+Quantified from the archive: h5's 1.56% flip rate under a lever that can only bite at heat ≥ 6
+implies **≈10% of h5 campaigns reach heat ≥ 6**. C1's campaign-level inertness claims survive it
+(the six 0/320 rungs are exact). ROADMAP now carries it with a cheap fix: a harness pin that
+suppresses `AddHeat` for a measured batch, to be done BEFORE the base-difficulty round.
+
+## C1-R3. Two undeclared effects, now on the record
+
+**The damage tooth is not purely numeric.** `Mission.cs:890-902` says so in its own comment: +1
+`DmgMax` **widens the AI finish band** (`Ai.Plan` scores a kill on `p.Hp <= e.Weapon.DmgMax`), so
+moving it down two rungs moves a **coordination sharpening** down two rungs too. The CRN round
+prices it; C1 never named it. It cuts *toward* the wave's thesis — rung 6 partly re-earns, through
+the finish band, the coordination identity its dead `AiTier = 1` never delivered — and it belongs
+on the record either way, especially next to a headline about coordination.
+
+**The same comment names a watch item C1 did not report:** a wider finish band leans AGAINST the
+BRACE comeback lever, and "the comeback economy is the first re-tune if lead-swings collapse". In
+C1's committed h6 sample pair lead-swings/match holds at 0.9, but average max-swing goes 59.6 → 55.8
+and greedy BRACE usage **146 → 96 (−34%)**. n=40 and not conclusive — but the code told us to look,
+and it is now a ROADMAP item.
+
+**SKIRMISH at heat 6–7 is changed and unmeasured.** `Game.cs` gates the m1–2 heat grace on
+`Mode != GameMode.Skirmish` (W9), so a heat-6 skirmish now takes the +1 enemy damage **from turn
+one**, where before only heat 8 did. `SIGHTLINE_BALANCE` measures campaigns only. DAILY is safe
+(`DailyHeat` is `% 4u`, capped at 3); ENDLESS is safe (`EndlessWaveScale` reads `StatDelta`).
+
+## C1-R4. THE ARCHIVE TOOLING FAILED OPEN — in the wave built to find that
+
+`inert_diff.py` globs the raw chunk JSONs, which C1 deliberately did not commit. Run exactly as
+C1's own README documented it, it printed:
+
+```
+h0: 0 chunk pairs, 0 leaf fields compared, 0 DIFFER  <- INERT
+TOTAL: 0 fields, 0 differ
+```
+
+**A green inertness verdict on zero comparisons** — the same pathology the wave's own test-design
+section warns about, sitting in the wave's own tooling, while the README claimed "nothing published
+here is unreproducible" and the DEVLOG (correctly) said the opposite. Fixed: the script now exits
+non-zero with `NO CHUNKS` and names the reason, and the README states plainly which numbers are
+reproducible (every win-rate figure, from `chunks.csv`) and which are recorded-only (the
+`inert_diff` rounds, the `ch/ARM` column, all per-chunk aggregates).
+
+**And the fixed runner was not in the repo.** `git check-ignore` →
+`.gitignore:57:run_chunk.sh` — a bare filename from an earlier wave's scratch cleanup, which
+matches at any depth and silently swallowed it; L3's copy had been force-added, C1's `git add -A`
+dropped it without a word, leaving **both committed runners inoperable** (they call
+`bash "$HERE/run_chunk.sh"`). The rule now carries explicit `!docs/measurements/**/…` negations for
+all four swallowed names, so the next wave's archive cannot lose its runner either. **C1's own
+headline process lesson was "a shared path is not storage — the runner lives in the repo now", and
+the runner was the one file missing.**
+
+## C1-R5. THE COPY BUDGET COULD NOT EXPRESS A SCALE — and the panel is now structurally safe
+
+C1 measured a 38-character budget off a 100% screenshot and asserted it in a test. The review found
+the hole: `Cfg.Scaled` multiplies any size ≤ `Cfg.UiFontMax` by `Cfg.UiScale` (the settings offer
+0.90/1.00/1.10/**1.20**) while the panel geometry does not scale, so the real budget at 120% is
+~32 characters. Measured at 120% against the border at x=1240: HARDENED (38 chars) reached 1268,
+**28px off the card**; LINGERING WOUNDS (37) reached 1261, **21px off** — *a row C1 had shortened
+from 43 for exactly this reason.* A character count cannot express a scale.
+
+**Fixed structurally rather than by more copy-trimming.** `Hud.DrawHeatSelector` now WRAPS each
+rung's Desc to the measured body column via `WrapText` (which measures through `Cfg.Measure`, so it
+is scale-correct) and sizes the card by the LINE COUNT, with the row step on the house `TextRow`
+scaler so lines cannot overlap either. At `UiScale == 1.0` every number is arithmetically identical
+to the old `132 + rows * 26 + 30`, so the shipped 100% layout is unchanged — verified by
+screenshot. `Heat.DescBudget` survives, correctly labelled: a COPY-QUALITY budget ("should read as
+one line at 100%"), explicitly not the thing that keeps ink inside the border.
+
+C1's original char counts were also off by one: NO QUARTER was **58**, not 57; LINGERING WOUNDS
+**43**, not 42. No conclusion changes, and this project treats stated measurements as load-bearing.
+
+## C1-R6. Test hygiene, on the wave's own rules
+
+- **PASS-banner over-claims removed.** "Every rung of every mode fits the 38-char column" was false
+  (mode 0 is exempt by design and its rung 8 is 58 chars — the defect itself), and "per-mode shapes
+  pinned" covered 0/1/2/3/5 while **4, 6 and 7 had no pin at all**. Shapes are now pinned for all
+  eight modes and the banner says what it actually checked, including *at 100% text size*.
+- **Three assertions that could not fail are gone or made real.** `dialNotRestored` was a tautology
+  (`SetMidTooth` clamps to [0,7], so the `finally` restore always satisfied it) — exactly the
+  pattern C1 invoked against others. `recruitMoved` ran eight identical times inside a loop it did
+  not depend on; it is now one assertion, kept as a guard against a future edit folding `RecruitMod`
+  into `Mods`. The mode-0 `untouchedRung1..5` loop was strictly implied by the mode-1..7 loop.
+- **The shipped-default check was keyed on an ARRAY INDEX** (`shapeGolden[1]`), not on the mode; it
+  now looks up `mt == Heat.ShippedMidTooth`, so reordering the golden list cannot silently make it
+  check a different mode.
+- **`DmgOnBoard` passed vacuously on an empty spawn** (a `foreach` over an empty force asserts
+  nothing). It now fails with `noEnemiesSpawned`.
+- **Two comments the lever falsified** are corrected: `Heat.DmgDelta`'s "today only NO QUARTER
+  carries it, so this is 0 below the rung-8 apex" and `Game.SetupMission`'s "W6c: rung-8 +1 enemy
+  damage (0 below the apex)". Both were false at heats 6–7 the moment the lever landed, three lines
+  from the code that falsified them. **That is the exact defect class this wave was created to
+  find**, and it is the second time in one wave (the first being the dead `AiTier`) that a comment
+  outlived the fact it described.
+- `AITEST`'s `aiTierExposedNot1` tag was a misnomer even before C1 — heat 6's tier came from rung 4,
+  which IS the defect — and is now `aiTierExposedNot2`, asserting what it actually asserts.
+
+## C1-R7. Still not done, after the send-back
+
+- **Rung 5 is untouched and still buys 0.31 — indistinguishable from zero.** C1 fixed the
+  second-flattest rung and left the flattest. Its `+1 enemy` is likely partly eaten by the
+  12-hostile spawn cap and `HarshAttrition` compounds over a run length the bot rarely reaches:
+  **hypotheses, unmeasured.** ROADMAP names the instrumentation to do first.
+- **No lever beat the CONTROL on dispersion.** Mode 3 is the least-bad redistribution, not an
+  improvement over doing nothing on that metric, and the ladder-of-record entry now says so.
+- **Nothing was re-measured for this send-back**, as instructed: mode 3's h5 cell is substituted
+  from mode 1's measured h5 (20.62) and flagged in the archive README, and mode 3's heats −1..3 are
+  unmeasured (cumulative-identical to control below rung 6, and measured exactly the control under
+  mode 1 at six rungs).
+- **SKIRMISH at heat 6–7, the BRACE comeback economy, and the AddHeat directional bias are all
+  unmeasured** and are now ROADMAP items rather than footnotes.
+
+# PROGRAM CONTOUR — Wave C2 "THE OPPONENT DECLINES" (dev; worktree `agent-a1c26e3c14d98312b`, branch `wave/opponent-declines`)
+
+**Base commit `17934ee`** (PROGRAM CROSSCUT composed). The CROSSCUT handoff calls this "the
+single biggest remaining gap in the fight": `Ai.cs:537` scored any tile that had a shot at
+`100 + bestHit`, while every terrain term in the same function is bounded well under ~64 —
+cover 36, height ~28, flank −25, fire −60, overwatch −26. A flat +100 for "a shot exists"
+dominated the whole planner.
+
+## 1. THE DEFECT IS REAL, BUT IT IS NOT THE ONE THE BRIEF DESCRIBES — and the difference decided the wave
+
+The brief's statement of the consequence is that the opponent "ALWAYS shoots if it can see
+anything, **at any hit chance**, from any position." The first thing this wave did was
+instrument that claim, because you cannot fix a decision surface you have never measured.
+
+**Pre-change enemy decision mix**, `SIGHTLINE_AIDECLINE=0`, heat 0, slot set b0, 20 campaigns /
+89 missions, 1076 CONTESTED act-opportunities (the W2 rule: an all-downed board is `Ai.Plan`'s
+empty-plan early return and idles by design — those 376 acts are counted separately and never
+enter the denominator):
+
+| verb | n | share |
+|---|---|---|
+| shoot | 649 | 60.3% |
+| hunker | 158 | 14.7% |
+| move (reposition, no shot) | 114 | 10.6% |
+| heal 47 / grenade 28 / siege 26 / reload 19 / item 16 / brace 10 / staleplan 5 / sap 3 / shove 1 | 155 | 14.4% |
+| **overwatch** | **0** | **0.0%** |
+
+and the shot that was on the table, by hit-chance band:
+
+| hit% band | 0-19 | 20-39 | 40-59 | 60-79 | 80+ |
+|---|---|---|---|---|---|
+| taken | **0** | 17 | 59 | 248 | 325 |
+| E\[dmg]/shot | — | 1.44 | 1.97 | 2.56 | 3.74 |
+
+**The "at any hit chance" half is not supported.** 88% of the opponent's shots land in the top
+two bands and **not one** of 649 was under 20%. On the full 960-campaign round below the bottom
+band is not literally empty but it is close: **54 of 15407 pre-change shots (0.4%)** were under
+20% and 83.7% were at 60%+. The reason is that `bestHit` already contains the hit chance, so the
+term that dominates tile choice also ranks targets sensibly once you are standing somewhere. (The
+smaller probe's exact zero is quoted as what that chunk measured; the pooled 0.4% is the number to
+use.)
+
+**The "from any position" half is exactly right, and it is the whole defect.** The +100 is a
+constant paid for *having* a line of fire, so it is invisible to the target's cover, to the
+shooter's own cover, to height, to a flank and to a player overwatch lane. The opponent will step
+out of full cover into the open for a marginal shot, every time, because 100 > 36.
+
+And the corroborating number the handoff supplied is confirmed dead-on: **the enemy OVERWATCH
+branch fired 0 times in 1076 contested acts.** Not because the branch is wrong — because a shot
+scores a constant and a branch that only runs when there is *no* shot can never compete with one.
+
+## 2. WHAT SHIPPED
+
+`SIGHTLINE_AIDECLINE` (default **ON**; `=0` restores the pre-C2 opponent exactly).
+
+**(a) The tile term.** `Ai.ShotTileValue(bestHit, hitPct)` replaces the constant:
+
+```
+ShotSeat + bestHit * (hitPct / 100)        //  ShotSeat = 18f
+```
+
+`bestHit` is a target-CHOICE comparator (hit chance plus what CONNECTING is worth — exposure,
+the finish band, the squad's focus, crossfire), so weighting it by the probability of actually
+connecting weights it by how likely that is. **It is NOT an expected value and an earlier draft
+of this section said it was.** `bestHit` already contains the hit chance, so the term expands to
+`ShotSeat + hit²/100 + bonuses·hit/100` — a hit-SQUARED weighting. A true EV term would weight
+only the consequence of connecting by `hit`, and would not re-multiply the hit chance by itself.
+The squaring is kept on purpose: it makes the opponent more hit-greedy than an EV maximiser,
+which is what a fight where a soldier dies in ~two connections wants (an EV maximiser is
+indifferent between one 80% shot and four 20% shots; an HP bar is not). But the honest name for
+it is the arithmetic, not "expectation". `ShotSeat` is the option value of holding a line of
+fire at all, priced deliberately at **~one level of cover** (`cover.Level * 18` in the same
+scorer), because that is the trade the term has to arbitrate: *stand in the open with a shot* vs
+*stand behind that wall without one*. **Target selection is untouched** — the loop above still
+ranks targets by `val` exactly as before, which is why AITEST's focus-fire legs still pass.
+
+**(b) The decline gate**, run once per plan, after the sap/grenade/item/shove blocks (those
+already price themselves against the real shot, so they must see it) and before W2's no-shot
+fallback. Dropping `ShootTarget` hands the unit straight to that fallback, which always assigns
+overwatch / hunker / reload / dash — so **a decline can never produce a dead turn**; the no-idle
+invariant is inherited structurally rather than re-argued, and `SIGHTLINE_AIIDLETEST` still covers
+it.
+
+The shot is priced against `Combat.AsIfExposed` — the same shot with the defender's cover taken
+away, which is what an overwatch reaction actually catches (the reaction resolves on every tile
+ENTERED, and a soldier crossing between cover blocks is uncovered on the way). HUNKER is
+deliberately **not** stripped: a hunkered soldier is one that chose not to move, so holding a lane
+against it buys nothing.
+
+```
+worth  = E[dmg now] * (finish band ? 1.6 : 1)
+bar    = max(canWatch ? 0.45 : 0, canDig ? 0.30 : 0) * (1 + 0.20 * min(guns, 3))
+decline if  bar > 0  &&  worth < 3.00 (abs keep)  &&  worth < bar * E[dmg if exposed]
+```
+
+`guns` is the number of soldiers already holding a firing solution on the tile — range and line
+of sight only, no `ComputeOdds`, a handful of Bresenham walks once per plan. It is there because
+**firing and standing still is not free**: Combat's EXPOSED BY FIRE rule hands every soldier that
+can see the unit +12 aim and +12 crit against it until it moves. Holding a lane or digging in does
+not. Under **two or more** guns with cover to hand, the freed action buys SURVIVAL — the one place
+the fallback's overwatch-first order is overridden. Rushers (BERSERKER / HOUND / STRIKER / DRONE /
+the Legion BREAKER's second rage) never decline; that is identity, not tactics, and it is also the
+tempo guard.
+
+**(c) `Combat.ShotOdds.CoverDef`** — the aim `ComputeOdds` actually subtracted for cover. Recorded
+so `AsIfExposed` is a *reconstruction from the model's own numbers* rather than a re-derivation of
+the cover rules that could silently drift from them.
+
+## 3. THE FIRST PRICING WAS WRONG AND THE INSTRUMENT CAUGHT IT
+
+The gate's first version used **absolute expected-damage bars** (1.45 / 0.90), set from the
+pre-wave band means above. On a 20-run probe it declined **35 shots at 80%+ hit chance**, because
+`Combat.ExpectedDamage` is armour-aware: a popgun against a hardened soldier is ~1.0 expected
+damage at *any* hit chance. Declining a clean 90% shot does not read as a smarter opponent, it
+reads as a broken one — and it is also wrong on the merits, because that unit's ALTERNATIVE is
+worth ~1.0 too. **The bar has to move with the unit's own ceiling**, which is what
+`AsIfExposed` gives it. That is why the shipped rule is a ratio.
+
+## 4. THE ONE JUDGEMENT CONSTANT, AND THE TWO MEASUREMENTS THAT BRACKET IT
+
+`Ai.cs` says of `DeclineWatchRatio = 0.45` that it is "the ONE number in this block that is a
+judgement rather than a measurement… declared, not hidden." **That is the accurate framing and
+this section now matches it.** An earlier heading here read "…AND THE MEASUREMENT THAT PRICES IT",
+which claims more than the evidence supports: the measurement prices the **lane** (~0.20), not the
+bar, and the second probe supplies a **ceiling** (1.10 is too high), not a value. The two
+**bracket** 0.45 from opposite sides. Neither pins it, and nothing in this wave does.
+
+**The floor: what a held lane is worth in damage the flywheel can see.**
+`Stats.RecordEnemyReaction` counts enemy lanes held against enemy reaction shots actually FIRED,
+and a deliberate **maximal-decline diagnostic** (`CAL-diag`: watch ratio 1.10, dig 0.00, no
+absolute guard — decline every shot whenever a lane exists) generated a population big enough to
+read:
+
+| chunk | lanes held | of which generic overwatch | reaction shots | **fired** |
+|---|---|---|---|---|
+| CAL-diag h0 b0 | 457 | **442** (15 brace) | 111 | **24%** |
+| CAL-diag h4 b0 | 461 | **455** (6 brace) | 124 | **27%** |
+
+**"Fired", not "paid off"** — the first draft used the latter in this table and in
+`ladder_table.py`, and `Stats.cs`'s own comment was the one that had it right: the counter counts
+*shots taken*, and at the reaction's −10 aim mod a fired reaction often misses. **True payoff is
+strictly below 24%**, which cuts in favour of the shipped bar and is exactly why the wrong word
+had to go.
+
+The diagnostic ran on an interim binary (before the threat-scaled bar and the dig-in preference —
+both change WHICH shots are declined, never what a lane is worth). Times the reaction aim mod, a
+held lane is worth roughly **0.20 of the open shot** in damage the flywheel can see. 0.45 is
+about twice that, and the excess is declared, not hidden. Two things push the other way and only
+one of them is arguable:
+
+1. **Measured, and a real property of the instrument.** `Game.Autopilot.TileExposure` has a term
+   for an enemy PIKEMAN BRACE lane (`InEnemyBraceLane`, +18) and **no term at all for an ordinary
+   enemy overwatch** — its generic "exposed to this gun" +6 is identical whether the hostile is
+   watching or not. The bot does not route around enemy overwatch, so the AREA-DENIAL half of a
+   lane is invisible to the flywheel by construction. Rule 3, checkable in eight lines of
+   `Game.Autopilot.cs`.
+2. **A judgement.** Against a human who reads the board, a held lane also costs tempo and routing.
+   Unmeasured, and stated as unmeasured.
+
+**Why the shipped round cannot corroborate any of this, and the first draft wrongly implied it
+could.** An earlier version of the table above carried two "for scale" rows from the ladder
+(L-BASE 53/194 = 27%, L-DECL 57/267 = 21%) as though they agreed with the diagnostic. **They are a
+different population and I did not disclose it.** `lanesHeld` is `overwatch + brace`, and in the
+shipped round the composition inverts: **L-BASE is 20 overwatch + 174 BRACE**, L-DECL is
+111 + 156. The BASE arm held **20 generic lanes in 26,841 contested acts** — it cannot corroborate
+anything about generic overwatch, and the rows were mostly measuring the PIKEMAN. They are removed
+rather than re-labelled; `CAL-diag`, where 442 of 457 lanes are genuine overwatch, is the only
+place in this wave that measures the thing the bar is about.
+
+**The ceiling: a decline rate large enough to be felt is a worse opponent — suggestive, not
+established.** At a 51% decline rate `CAL-diag` read run completion 55% → 75% on the same 20
+worlds, mission length 5.36 → 5.59 turns, shots/kill 3.211 → 3.307. **Two disclosures the first
+draft owed and did not pay.** (i) On 20 paired worlds that is b = 2, c = 6 discordant, **exact
+two-sided p = 0.29** — a 20-point swing is not even close to significant at that n, and I quoted
+it as though it were a finding. (ii) It is **confounded**: the BEFORE leg is the pre-change binary
+while `CAL-diag` carries BOTH the new tile term AND the maximal-decline gate, so the comparison
+cannot separate them. I disclosed the interim binary for the lane-payoff number and not for this
+one, which is inconsistent. Treat it as a **suggestive probe that a very high decline rate hurts
+the opponent**, direction only, and note that it agrees with the mechanism rather than proving it.
+
+**So the honest summary of this section:** the lane is worth ~0.20 or less (measured, n = 918
+lanes), 1.10 is too high (suggested, p = 0.29), and 0.45 sits between them as a declared
+judgement. The ladder is what prices whether the judgement was affordable, and §5 is that price.
+
+## 5. THE PRICE — the CRN-paired ladder, base `17934ee`, 960 campaigns
+
+One binary. Two arms. The **only** difference between them is `SIGHTLINE_AIDECLINE`, so the
+pairing is as tight as this project can make it: identical executable, identical slot seeds, one
+environment variable. 6 rungs x **4 disjoint slot sets** (`SIGHTLINE_BALANCE_BASE` 0/10/20/30) x
+greedy+sloppy x N=10 = **80 campaigns per rung per arm**. All 48 chunks printed `OK ... runs=20`;
+zero `BAD`. Raw data `docs/measurements/c2/`, table `ladder_table.py`, paired test `paired.py`.
+
+| rung | BASE (`=0`) | DECL (`=1`, shipped) | delta | McNemar p | band | verdict (DECL) |
+|---|---|---|---|---|---|---|
+| RECRUIT | 72.5 ±5.0 | **71.2** ±5.1 | −1.2 | 1.000 | 75 ±8 | in |
+| heat 0 | 42.5 ±5.5 | **41.2** ±5.5 | −1.2 | 1.000 | 55 ±8 | **below by 5.8** |
+| heat 2 | 21.2 ±4.6 | **36.2** ±5.4 | **+15.0** | **0.031** | 40 ±8 | in |
+| heat 4 | 25.0 ±4.8 | **23.8** ±4.8 | −1.2 | 1.000 | 30 ±8 | in |
+| heat 6 | 20.0 ±4.5 | **18.8** ±4.4 | −1.2 | 1.000 | 20 ±8 | in |
+| heat 8 | 10.0 ±3.4 | **7.5** ±2.9 | −2.5 | 0.617 | 10 ±5 | in |
+
+**The aggregate is near-inert. The per-world picture is not, and the second sentence is the
+interesting one.** Four rungs net exactly one discordant pair (−1.2 points); heat 8 nets two. But
+a NET is a difference of two counts, and the counts are large: **124 of 480 paired worlds (25.8%)
+came out differently** — RECRUIT 23/80, h0 29/80, h2 26/80, h4 25/80, h6 17/80, h8 4/80. This
+change is nowhere near inert per world; it is near-inert in aggregate **through cancellation**,
+which is a different and more honest claim. (An earlier draft of this line said "five of six rungs
+move by one discordant pair or less". That is false on its own terms — h8 nets two — and it
+described the net while reading as though it described the worlds.)
+
+**What this round could actually have detected.** McNemar's power is set by the DISCORDANT count,
+not by n, and the minimum detectable |b−c| is about 1.96·√n_d + 1 pairs:
+
+| rung | discordant | flipped | MDE (α=.05) | MDE (family-wise, α=.05/6) |
+|---|---|---|---|---|
+| RECRUIT | 23 | 28.8% | 13.0 pts | 17.1 pts |
+| heat 0 | 29 | 36.2% | 14.4 pts | 19.0 pts |
+| heat 2 | 26 | 32.5% | 13.7 pts | 18.1 pts |
+| heat 4 | 25 | 31.2% | 13.5 pts | 17.7 pts |
+| heat 6 | 17 | 21.2% | 11.4 pts | 14.8 pts |
+| **heat 8** | **4** | 5.0% | **nothing** | **nothing** |
+
+At heat 8 the exact two-sided minimum is 2·(1/2)^4 = **0.125**, so no result at that rung is
+reachable at α = 0.05 whatever the effect. **Every "−1.2, p = 1.000" row above is therefore an
+absence of evidence, not evidence of absence** — this round can exclude a double-digit swing and
+nothing smaller. The brief asked for the ladder to stay in band and it does; it did not, and could
+not, establish that the change is neutral.
+
+**The heat-2 cell, on the one ground that holds.** 19 DECL-only wins against 7 BASE-only,
+p = 0.031 nominal. **It is one of six tests, and 0.031 x 6 = 0.19 — it does not survive
+multiplicity, and I am not claiming it.** That is the whole argument, and it is sufficient.
+
+An earlier draft offered two further reasons and **both were wrong**, so they are recorded here
+rather than quietly deleted. (a) *"The BASE arm's own 21.2 is ten points below L3's h2, so it is
+the baseline that is odd on these slot sets."* A non-sequitur: **McNemar conditions entirely on
+the pairs.** A slot set that is hard hits BOTH arms in the SAME worlds, so it cancels exactly in
+the discordant counts and carries zero evidential weight against a paired result. (b) *"The
+missions-cleared margin is only +0.33."* Backwards. On these 80 h2 pairs a win averages **6.00**
+missions and a loss **2.89**, so a genuine net +12 wins PREDICTS a margin of
+12/80 × 3.11 = **+0.47**. The measured +0.33 is consistent with the effect being real, not
+evidence against it. The honest sentence is just: *one of six rungs produced a nominally
+significant cell that does not survive Bonferroni.*
+
+**The BASE arm is not a re-measurement of L3 — it IS L3, replayed.** `src/` is byte-identical
+between `d814f0c` (L3's base) and `17934ee` (mine), and L3 ran bases 0/10/…/70 while this round
+ran 0/10/20/30. Checked, not assumed: all **24 BASE chunks are byte-identical to L3's
+corresponding chunks** on every field outside `harness` and the new `enemyDecisions` block —
+every per-slot record, win, turn count and shots-per-kill. So all 480 BASE campaigns are L3's own
+first four slot sets, bit for bit.
+
+**An earlier draft claimed the BASE arm "reproduces L3 within 1.6 SE at every rung." That
+sentence is withdrawn.** Quoting a standard error on the difference between a set and its own
+subset is a category error — the difference is deterministic, not sampled, and no SE applies. It
+also failed on its own terms: the h2 gap is 1.71 SE treating the halves as independent, 2.79 SE
+computed correctly for the overlap, and 1.67 even under the draft's own rounded "~6"; 1.6 is the
+one threshold that would have made the sentence true.
+
+**And the deterministic fact exposes a project-level finding about the INSTRUMENT, which is worth
+more than the sentence it replaces.** If the BASE arm is L3's b0-b30, then L3's own two halves can
+be compared directly, and at heat 2 they disagree: **b0-b30 reads 21.2% and b40-b70 reads 41.2%**
+(17/80 vs 33/80). Difference +20.0, SE 7.16, **z = 2.79, p = 0.0052**, and 0.031 after Bonferroni
+×6. **L3's slot space is heterogeneous at heat 2 beyond binomial noise** — the ladder-of-record's
+h2 figure of 31.2% is an average over two populations that differ by twenty points. That is a
+result about the measuring instrument, not about this wave, and it belongs to whoever next quotes
+a four-slot-set rung as if slot sets were interchangeable. It does NOT explain this wave's h2 cell
+(see (a) above: a slot-set effect cancels inside a paired test), and I am not offering it as one.
+
+**heat 0 is below band in BOTH arms** (42.5 and 41.2 against a 47 floor), and the delta between
+them is −1.2 (one discordant pair, p = 1.000). **That miss predates this wave and is now provable
+rather than asserted**: the 42.5 is L3's own b0-b30 replayed bit for bit, and L3's eight-slot-set
+h0 reads 47.5, exactly at the floor. Recorded, not repaired: repairing a rung inside a wave that
+also changes gameplay is the mistake the measurement contract exists to prevent.
+
+## 5b. THE PASSIVITY TRIPWIRE — the fight did not get longer
+
+The brief's item 3 is the real risk in this wave: an opponent that dithers in cover is worse than
+one that shoots badly, and W2 already had to fix an enemy that did not act. Pooled over all 960
+campaigns / 3452 missions:
+
+| | BASE | DECL | delta |
+|---|---|---|---|
+| mission length (turns) | 5.738 | **5.563** | **−0.175** |
+| player shots per kill | 3.153 | **3.157** | +0.004 |
+| player shots / kills | 15911 / 5046 | 15443 / 4891 | — |
+| pooled run completion | 31.9% | 33.1% | +1.25 |
+
+**Fights are DIRECTIONALLY shorter, and I over-stated this in the first draft.** The pooled
+"−0.175 turns, 3% shorter" above treats 3452 missions as independent, and they are not: missions
+nest in campaigns, campaigns are paired, and the independent units are the **24 rung × slot
+cells**. Tested properly on those: **−0.186 ± 0.116 turns, t(23) = −1.60, p ≈ 0.12**, sign test
+14 of 24 cells shorter (p = 0.54). So the correct sentence is *directionally shorter by about
+0.18 turns, not significant at n = 24 cells* — and shots-per-kill is flat at +0.004.
+
+**The tripwire conclusion is untouched, because the tripwire was one-sided.** The failure mode the
+brief named is fights getting LONGER and less decisive; the point estimate is negative on both
+axes and the confidence interval excludes anything like the +0.23-turn lengthening the
+maximal-decline probe showed. Nor did the harness tripwire trip: zero `TIMEOUT`, zero `BAD` chunk,
+and `instrumentHealth.stalemateLosses` stayed 0 across all 48 chunks.
+
+## 5c. THE DECISION MIX, BEFORE AND AFTER, on the full 960-campaign round
+
+Pooled over all six rungs (contested acts only):
+
+| verb | BASE | | DECL | | |
+|---|---|---|---|---|---|
+| | n | share | n | share | |
+| shoot | 15407 | 57.4% | 14510 | **55.4%** | −2.0 pts |
+| hunker | 6176 | 23.0% | 6539 | **25.0%** | +2.0 pts |
+| move (reposition, no shot) | 2255 | 8.4% | 2143 | 8.2% | — |
+| **overwatch** | **20** | **0.07%** | **111** | **0.42%** | **x5.6** |
+| everything else | 2983 | 11.1% | 2869 | 11.0% | — |
+| contested acts | 26841 | | 26172 | | |
+| **acts where the chosen tile HAD a shot** | **17030** | **63.4%** | **16110** | **61.6%** | **−920** |
+| shots DECLINED | 0 | 0.00% | **105** | **0.65%** | — |
+| enemy lanes held / reaction shots | 194 / 53 | 27% | 267 / 57 | 21% | — |
+
+And the SHOT BANDS over the same round — the opponent's own shots got measurably better, which is
+the positional change showing up on the offensive side rather than a decline effect:
+
+| hit% band | 0-19 | 20-39 | 40-59 | 60-79 | 80+ | total |
+|---|---|---|---|---|---|---|
+| BASE taken | 54 (0.4%) | 480 (3.1%) | 1967 (12.8%) | 5750 (37.3%) | 7156 (**46.4%**) | 15407 |
+| DECL taken | 20 (0.1%) | 301 (2.1%) | 1524 (10.5%) | 5083 (35.0%) | 7582 (**52.3%**) | 14510 |
+| DECL declined | 16 | 52 | 33 | 4 | 0 | 105 |
+
+Every band under 60% shrinks and the 80%+ band gains **5.9 points**. E\[dmg] per shot within each
+band is unchanged to two decimals (0.63/1.13/1.75/2.51/3.64 vs 0.70/1.17/1.77/2.55/3.65), which is
+the check that this is a shift in WHICH shots get taken and not a change to the combat model. The
+declines sit where they should: 85 of 105 in the 20-59% bands, four in the 60-79% band (a shot
+whose open-cover reference was far better), none at 80%+.
+
+**The wave's real effect is HUNKERING, and the ×5.6 overwatch figure is the smaller story.** Only
+**105 of the 897 fewer shots** are gate declines; the rest come from the tile term steering units
+onto cover tiles that have no shot at all, where they dig in. So the honest headline is
+**+2.0 points of hunkering**, not +0.35 of overwatch — the overwatch number has the bigger
+multiplier and the smaller effect, and leading with it (as an earlier draft did) inverts their
+importance.
+
+**That matters because DESIGN §3.A's anti-turtle rule cuts at this wave.** "Kill the dominant
+defensive strategy" is written about the player, but an opponent that hunkers 2 points more is
+moving in the direction the section warns about. The mission-length tripwire says it has not cost
+tempo (§5b: directionally shorter, and certainly not longer), so this is not a defect today — but
+**"the opponent hunkers more" is the line a feel review should watch**, not the decline rate. The
+DECLINE itself is 0.65% of the shots on the table; §4 is the argument that small is correct.
+
+## 6. SCREENSHOTS — Rule 3, and what the frames actually show
+
+A CRN batch prices consequences and is blind to feel, so `SIGHTLINE_DECLINESHOT` stages the
+behaviour on the live board and runs the **real** `Ai.Plan`, applying exactly what
+`Game.UpdateEnemy`'s ActAfterMove would apply — the frame is a decision the shipped planner made,
+not a hand-set flag. One soldier behind one high-cover block; one hostile; everything else parked
+behind a high-cover wall down column 16 so the hostile's only shot in the world is the covered
+one. Both frames are `SIGHTLINE_SHOT=760 SIGHTLINE_MISSION=1`; the only difference is the dial.
+
+**Both frames are `SIGHTLINE_SEED=4242`**, so the pair is a genuine controlled contrast rather
+than two similar pictures — same arena, same roster, same shot, differing in the dial and nothing
+else. (An earlier version of these frames was unseeded and the two shots landed on different
+biomes; the write-up then carried a caveat about clock-seeded RNG that was entirely avoidable.
+`SIGHTLINE_SEED` existed the whole time.)
+
+`docs/measurements/c2/shots/decline-on.png` (`SIGHTLINE_AIDECLINE=1`, shipped) —
+`STALKER@(6,0) vs VEGA@(12,3) shotHit=25% E[dmg]=0.71 declined=True -> DECLINED - HOLDING THE LANE`.
+**What I see:** the blue industrial arena; the STALKER top-centre inside its low-cover ring; VEGA
+right-of-centre, gold-ringed, with the grey high-cover block hard against its west face; the
+parked units sealed behind the column-16 wall on the right edge. And the read that matters — the
+INCOMING FIRE card carries a **third** line: *"OVERWATCH LANE — entering draws a reaction."* The
+game itself tells the player the hostile is holding ground it now denies.
+
+`docs/measurements/c2/shots/decline-off.png` (`SIGHTLINE_AIDECLINE=0`) — `shotHit=25%
+E[dmg]=0.71 declined=False -> TOOK THE SHOT`. **Pixel-for-pixel the same board**: same arena, same
+STALKER on the same tile, same VEGA, same card header (`1 hostile bears · best 67% · ~2 dmg /
+worst gun: STALKER — SCOUT`). The single difference in the entire frame is that the third line is
+**gone**. The hostile spent its action on a shot worth 0.71 expected damage and holds nothing.
+
+**Two honest notes.** **(1)** That tooltip line is **pre-existing** — `Hud.cs` has drawn it since
+before this wave (`git diff 17934ee..HEAD -- src/Hud.cs` is empty). This wave did not add the
+read; it created the enemy state that makes the read appear, which is the better half of the deal
+but not the same claim, and the lead's review brief had it the other way round. **(2)** The
+hostile had to be PINNED (a ring of impassable low cover) to stage this at all. The first version
+of the hook left it free and it did something better than declining: **it walked around the block
+and took a 77% flanking shot.** That is the wave working — the tile term is what makes a flank
+outrank a frontal potshot — but it is a different frame, and it is worth recording that on open
+ground the planner's first answer to a covered target is now to out-position it, not to hold fire.
+
+**What the frames do NOT show, contrary to the hook's own former doc comment.**
+`Renderer`'s enemy kill-zone wash is 7-12% alpha and is **below perceptual threshold** on these
+biomes — the code review measured it invisible even at 2.6x contrast. The comment claimed it
+"lights the ground it now denies"; that claim is withdrawn in the code. Worse and more
+interesting: because a plain enemy overwatch has no lane selection, the wash covers nearly the
+whole open board, so even if it were visible it would carry no information. **That is this wave's
+no-lane-selection finding arriving from the render side**, and it is in ROADMAP as its own item.
+
+## 7. THE SELF-TEST, AND THE PROOF IT CAN FAIL
+
+`SIGHTLINE_DECLINETEST`, wired into `scripts/qa-sweep.sh`. Six groups of legs:
+
+1. **`Combat.AsIfExposed` ground-truthed against a REAL `ComputeOdds`** on a board whose cover
+   block has been *physically deleted* — low, high, diagonal-partial, plus an identity leg on an
+   already-exposed shot. This is the reconstruction the whole gate rests on; if it drifts from the
+   cover model the gate silently starts pricing against a fiction. The scene SEARCHES for an
+   attacker tile that both keeps line of sight and reads the requested cover level, and fails
+   loudly (`scene:...`) if it cannot find one.
+2. **`Ai.ShotTileValue` on BOTH sides of the dial.** The pre-C2 branch is pinned to the literal
+   `100 + bestHit`, *and* to the fact that it beat high cover (36) — the defect itself, pinned.
+   The shipped branch must put a 12% shot BELOW that wall, keep a strong shot dominant, and be
+   monotone in the hit chance.
+3. **The gate declines a bad shot** on a live `Ai.Plan` and still spends the action (the W2
+   invariant), on a pinned shooter looking at a high-cover soldier at 21% / E\[dmg] 1.36.
+4. **It does NOT decline** the same shot from the same tile when the target is simply not in cover.
+5. **A rusher never declines** (`Ai.NeverDeclines`).
+6. **Under two or more guns it DIGS IN** rather than offering a lane (`DeclineDigIn` + `Hunker`).
+
+Plus a forced pre-C2 contrast leg that exists only to prove the scene is a genuine decision and
+not a board where nobody would shoot anyway.
+
+**Every shipped-behaviour leg reads the AMBIENT `Game.AiDecline`, so the test fails when the
+feature is off.** Measured, not asserted:
+
+```
+$ SIGHTLINE_DECLINETEST=1 ...
+DECLINETEST: ambient SIGHTLINE_AIDECLINE=1; gate scene [...] shot hit=21% E[dmg]=1.36 -> OVERWATCH
+DECLINETEST: PASS (...)
+
+$ SIGHTLINE_AIDECLINE=0 SIGHTLINE_DECLINETEST=1 ...
+DECLINETEST: ambient SIGHTLINE_AIDECLINE=0; gate scene [...] shot hit=21% E[dmg]=1.36 -> SHOOT
+  gate:didNotDecline(hit=21 exp=1.36)
+  gate:declinedButStillShoots
+  gate:killBoxDidNotDecline
+DECLINETEST: FAIL (gate:didNotDecline(hit=21 exp=1.36),gate:declinedButStillShoots,gate:killBoxDidNotDecline)
+```
+
+**A second review then showed the test was much weaker than "it fails when the feature is off".**
+It perturbed each constant one at a time, rebuilding for each, and found **only two of seven were
+pinned at all**: `ShotSeat` could be set to **0** — deleting the "a line of fire has option value"
+concept DESIGN §5.2 point 1 is entirely about — and the whole suite stayed green. Worse, the
+kill-box leg did not test the kill box: `bar *= 1 + DeclineThreatScale * min(guns, cap)` could be
+**deleted outright** and all three of its assertions still passed, because they only exercised
+`DeclineDigIn = guns >= 2 && canDig`. **The most-argued piece of model in this wave had zero
+coverage.** Four legs were added in response (7-10 above), and every one was proven able to fail:
+
+| constant | lower pin | upper pin |
+|---|---|---|
+| `ShotSeat` 18 | **0 → FAIL** (leg 8) | **35 → FAIL** (leg 2) |
+| `DeclineThreatScale` 0.20 | **0.00 → FAIL** (leg 7) | **2.00 → FAIL** (leg 7) |
+| `DeclineWatchRatio` 0.45 | **0.35 → FAIL** (leg 3) | none |
+<!-- every cell above re-measured on this branch, not taken from the review -->
+| `DeclineDigRatio` 0.30 | **0.00 → FAIL** (leg 10) | none |
+| `DeclineThreatCap` 3 | **0 → FAIL** (leg 7) | none |
+| `DeclineAbsKeep` 3.00 | **0.50 → FAIL** (leg 3) | none — 10.00 passes |
+| `FinishPress` 1.6 | **1.0 → FAIL** (leg 9) | none — 9.0 passes |
+
+**Seven of seven now have at least a lower pin; two have both sides.** Every cell in that table
+was re-run on this branch rather than copied from the review — including the two the review had
+already measured, because a table published under this wave's name should be this wave's
+measurement. The straddle (leg 7) is the
+one that matters most: one scene, evaluated at one gun and at three, with the aim SEARCHED until
+the shot's ratio lands between the two bars. It reports what it found —
+`straddle: aim=82 1gun=SHOOT(58%,exp=2.96) 3gun=DECLINE` — so the archive shows the leg was live
+and not vacuous. Setting the scale to 0 or 2, or the cap to 0, collapses the window and the leg
+fails with `scene:noThreatStraddle` rather than passing quietly.
+
+**The test's own scene was wrong twice before it could fail for the right reason**, and both are
+the program's rule 6 (a correct assertion in the wrong scope is indistinguishable from no
+assertion): the first hand-picked shooting tile had **no line of sight at all**, so there was no
+shot to decline and four legs were failing vacuously; and the exec-site decision labelling put the
+terminal-else's `staleplan` tag inside its dry-weapon arm, so its hunker arm fell through
+unlabelled and reported as `idle`. Both were found by making the test PRINT its scene rather than
+trusting it.
+
+## 8. VERIFICATION
+
+- **Release build 0 warnings / 0 errors.**
+- **`bash scripts/qa-sweep.sh --full` — SWEEP-EXIT=0**, **65/65** self-tests PASS (incl. the new
+  `DECLINETEST`), COVERAGE GAP block empty, PAIRTEST byte-identical, autoplay x3 WIN/LOSE with no
+  TIMEOUT. Full output in `docs/measurements/c2/qa-sweep-full.txt`. (**Two earlier full sweeps
+  were run and DISCARDED**, as `qa-sweep-full.interim.txt` and `.interim2.txt`. Both were green,
+  and both are worthless as a gate for the same reason: `run()` is `dotnet run -c Debug`, which
+  REBUILDS per test, so a source edit landing mid-sweep — even a comment-only one — makes the run
+  span two binaries. The sweep of record was started only after the source tree was frozen, and
+  nothing but documentation changed after it began. A gate that spanned two builds is not a gate,
+  and noticing that twice cost two sweeps. A THIRD run was started after the review's ten
+  documentation fixes and then deliberately KILLED at the lead's instruction: those fixes changed
+  **no build input** —
+  `git diff <pre-fix>..HEAD -- src scripts/qa-sweep.sh Sightline.csproj assets` is empty — so the
+  binary under test was byte-identical to the one that produced the result above, and eleven
+  concurrent sweeps were saturating a four-core box. **No post-fix sweep result exists and none is
+  claimed.** Killing it also truncated `qa-sweep-full.txt` in place, which a routine `git add -A`
+  had already committed as a five-line stub; the log was restored from git and the trap is written
+  up in `docs/measurements/c2/README.md`. A FOURTH sweep then ran after the code review's D1/D3
+  fixes — which DID touch `src/` — and is the log archived above: **SWEEP-EXIT=0, 65/65 PASS,
+  COVERAGE GAP empty, PAIRTEST byte-identical, autoplay x3 LOSE/WIN/LOSE with no TIMEOUT.** It was
+  written to a scratch path and copied into place on success, which is the rule the truncation
+  trap taught.)
+  Notable passes for this diff specifically: `COMBATTEST` and `TRUTHTEST` (the new
+  `ShotOdds.CoverDef` field and the tooltip), `SAVETEST` (no persisted-enum or map-generator
+  movement), `AIIDLETEST` (the no-idle invariant survives declining), `HEATLADDERTEST` (the
+  difficulty axis is untouched), and `AITEST` (focus fire and target selection are untouched).
+- **`SIGHTLINE_DECLINETEST` FAILS with `SIGHTLINE_AIDECLINE=0`** — output in §7.
+- **The INSTRUMENT does not share this code path** — the brief's explicit WATCH OUT. Checked
+  rather than assumed: `grep -nE '\bAi\.[A-Z]' src/Game.Autopilot.cs` returns exactly three
+  hits, **all of them doc comments** ("the Ai.Plan trick", "Ai.Plan-style"). The player-side
+  autopilot re-implements its own scorer and calls nothing in `Ai.cs`, so changing enemy scoring
+  changes the WORLD but not the measuring stick, and the before/after are comparable. (The
+  R0diag above is the second, empirical half of the same check.)
+- **R0diag**: this tree with the dial off vs the base-commit binary, two disjoint slot sets
+  (h0/b0 and h4/b10), diffed to **EMPTY** on both — **1304 and 1216 leaf scalars** respectively
+  (1916 and 1786 lines of normalised JSON), covering every per-slot RunRec, win, loss, turn count
+  and shots-per-kill. The telemetry this wave adds — including the extra `ComputeOdds` +
+  `ExpectedDamage` per plan — is gameplay-inert. (An earlier draft said "2750 aggregate fields on
+  both". The diffs were and are empty, but that number reproduces under no convention I can find:
+  it is neither chunk's leaf count, and quoting one figure for two differently-sized artifacts was
+  wrong twice over.)
+- **48/48 ladder chunks `OK ... runs=20`**, three-layer completion contract on every one.
+- **The ladder binary is the shipped binary.** Three post-ladder tidies landed (comment
+  corrections, a redundant local in `ComputeOdds`, and the gate reusing the odds it had already
+  computed instead of calling `OddsFrom` twice). All three are provably behaviour-neutral, but
+  "provably" is the word this project asks you to check: two ladder chunks — one per ARM
+  (`L-DECL-h2-b0`, `L-BASE-h4-b10`) — were re-run on the final binary and diff **EMPTY** against
+  their archived JSON outside the `harness` block. Archived as `POST-*`.
+
+## 9. WHAT I DID NOT DO, AND WHAT IT COSTS
+
+- **I did not make declining common, and I will not pretend the shipped rate is large.** It is
+  **0.65%** of the shots on the table pooled over the 960-campaign round (1.0-1.4% on the heat-0
+  probe chunks, where the calibration was done). The board carries **15.53 / 15.18 contested enemy
+  acts per mission** (BASE / DECL), and 105 declines fall over 1724 missions — so a player sees
+  the opponent hold fire about **once every sixteen missions**. (An earlier draft wrote "~11.8
+  acts per mission" and "every several missions"; both were wrong and both flattered the wave.)
+  The rate is a deliberate consequence of pricing the gate against a lane measured to FIRE 24% of
+  the time rather than against a target rate; §4's ceiling probe points the same way but is
+  suggestive only (p = 0.29, and confounded). **If a later wave wants a felt decline rate, the
+  thing to fix first is the LANE, not the gate** — see the two open items below.
+- **The enemy overwatch has no lane selection at all.** It is a 360° watch held from wherever the
+  unit happens to be standing (only the PIKEMAN's BRACE picks a cone). That is very likely why
+  only 24% of held lanes ever FIRE — and fewer still connect — which makes the wave's own
+  alternative a weak one. A
+  hostile that chose *where* to watch — a chokepoint, the tile a soldier must cross to reach the
+  objective — would be worth several times what this one is, and would justify a much higher
+  `DeclineWatchRatio`. **Unstarted.**
+- **The instrument cannot see area denial, and I did not fix that either.**
+  `Game.Autopilot.TileExposure` has a `+18` term for an enemy BRACE lane and nothing for an
+  ordinary enemy overwatch. Teaching the bot to route around enemy overwatch would make the
+  flywheel able to price the lane properly — but it would also change the INSTRUMENT, which
+  invalidates every CRN world in the repository, so it is a wave of its own and must not be
+  smuggled into one that also changes gameplay.
+- **`DeclineDigIn` is unexercised in play, as far as I measured.** It is pinned by DECLINETEST
+  leg 6 on a constructed board, but the two probe chunks run with and without it
+  (`CAL-e` / `CAL-f`, same slots, same seeds) came back **identical on every field**, so the
+  "two or more guns AND cover to hand AND a bad shot" conjunction did not occur once in those 20
+  campaigns. **I did NOT instrument it separately over the 960-campaign round**, so "never fires"
+  is not a claim I can make — what I can say is that it did not move a paired probe and that no
+  counter exists for it. A follow-up that cares should add one.
+- **Four of seven constants are still pinned from ONE side only.** `DeclineWatchRatio`,
+  `DeclineDigRatio`, `DeclineThreatCap`, `DeclineAbsKeep` and `FinishPress` have lower pins but no
+  upper one: `DeclineAbsKeep` can be raised to 10.00 and `FinishPress` to 9.0 with the suite green.
+  Both are inert in that direction at the shipped ratios (a 0.45-ratio shot is weak by
+  construction, so the absolute guard cannot bind; and a finish-band target is rare), which is why
+  the missing pin costs nothing today — but a wave that RAISES the ratios inherits an untested
+  guard, and should add the upper legs before it does.
+- **NONE of the seven scoring constants is a measured optimum, `ShotSeat` least of all.** An
+  earlier draft said "the three decline constants were calibrated"; that over-states what the
+  `CAL-*` chunks did. They were a **swept ladder of candidate settings scored on a single
+  20-campaign slot set** — enough to reject an absolute-damage bar and to bound the rate, not
+  enough to locate a value, and no chunk was replicated across slot sets. `DeclineWatchRatio` is
+  the declared judgement §4 now frames correctly; `DeclineDigRatio` and `DeclineAbsKeep` were set
+  by the same reasoning and are, on the shipped round, largely inert (`AbsKeep` cannot bind at a
+  0.45 ratio); `ShotSeat = 18` was never swept at all — it is set to one level of cover because
+  that is the trade the term arbitrates. A wave that wants to move the positional behaviour
+  further should sweep `ShotSeat` across four slot sets before touching the gate.
+- **I did not touch the shot term for a ROUTING unit** (`bestHit * 0.25`, UNDERTOW W3) or the
+  target-selection loop. Both are load-bearing for other tests and neither is the defect.
+- **`byObjectiveByNodeKind` was not consulted for this wave's conclusions.** Nothing here is a
+  per-objective claim, so rule 1 does not bite — but if a follow-up wants to argue that declining
+  helps or hurts a particular objective, it must use the cross-tab.
+- **No CI, no test framework, no new dependency, no asset.** Nothing added that costs money.
+
+# PROGRAM CONTOUR — C5 "THE HARD EDGES" (2026-08-30, dev on `wave/hard-edges`, base `17934ee`)
+
+A robustness / coverage / defect-hunt wave. **No balance lever, and no balance number is quoted
+that this wave did not itself produce.** Its job was the four gaps CROSSCUT declared honestly
+rather than closed, plus a fresh hunt on the composed tree.
+
+## THE THESIS
+
+Every gap on the list has the same shape: **the tests are aimed at a MODEL and the failure lives at
+a SEAM.** W10 asserted five surfaces' layout arithmetic and the game draws forty screens. W9's idle
+guard asserts the player turn and the enemy turn has its own state machine. Every AI test asserts
+that a decision is CORRECT GIVEN A BOARD, and a branch that is never reached is correct on every
+board it never reaches. `save.json`'s guard asks three questions of a file that has thirty fields.
+So this wave's instruments all move the assertion to the seam: audit the DRAW, not the layout;
+guard the frame loop, not the stage machine; census what the opponent DID, not what it should do;
+resume a hostile save and then PLAY it.
+
+## GAP 1 — the text-scale gate now covers the game, not five surfaces
+
+`FITTEST` gains leg **(F), THE SCREEN AUDIT**: forty staged screens, drawn for real at all four
+shipped text sizes, with the geometry read back from the draw calls themselves
+(`Cfg.InkProbe`, `Hud.PlateProbe`, `Hud.ClipProbe`, `Hud.FloorProbe`). It asserts, per screen per
+scale:
+
+1. **every control plate contains its label** (tightest measured margin **1.4px**, the in-mission
+   ammo pip `8/8` at 120%);
+2. **no visible string leaves the canvas** (nearest **8.6px**, the draft's `[R]` hint at 120%);
+3. **nothing is ellipsized** — a geometry audit is structurally blind to this, because a clipped
+   string's painted box FITS; losing the tail is what made it fit;
+4. **nothing paints below the shipped type floor** (measured smallest: 10px authored / 12px
+   rendered);
+5. **the screen drew, and drew ITS OWN frame** — a fingerprint collision between two screen cases
+   means one of them never staged.
+
+Legs A–E are unchanged in substance. What changed for them is **THE SCOPE GUARD**, and it took two
+review rounds to make it mean what it says. CROSSCUT rule 6 asks for a mechanical answer to "is the
+assertion inside the loop?"; the first version counted `Bump` calls placed *next to* the
+assertions, and **the review defeated it in two edits**: create a real 120%-only defect
+(`PlateSlack 1.5 → 1.0`, which fails with 18 violations, all at `@120%`), then gate only the
+ASSERTION on `S == "@100%"` while leaving its bump — **PASS, with a byte-identical count, while 18
+real violations went unreported.**
+
+So the guard is now three things, and the third is the one that earns the claim:
+
+1. **`Check(leg, cond, msg)` bumps and asserts in one statement**, so the number is a count of
+   assertions *evaluated*, and moving, gating or deleting one moves the number with it.
+2. **Every leg must record checks at every scale** (the original guard), which still catches the
+   W5 defect verbatim — demonstrated by gating leg F to `ui == 1f`:
+   `legOutsideScaleLoop:scr:INTRO@90%(0 checks)`, 120 of them.
+3. **A SENSITIVITY CONTROL runs on every invocation.** Binding still cannot see a *narrowed
+   condition*, so FITTEST re-runs the whole screen audit at a deliberately **unshipped 200% text
+   scale**, where fixed-pixel chrome must break, and FAILS if the assertions do not fire there
+   (today: **490 plate / 11 off-canvas / 57 ellipsis** violations, counted and discarded). Against
+   that, the review's step-2 mutation reads
+   `sensitivityDead:labelLeavesPlate never fired at the 200% control`.
+
+**And the residual limit, stated rather than implied:** this proves an assertion RAN at each scale.
+It cannot prove the CONDITION was not narrowed — nothing short of mutation testing can — and the
+200% control is an empirical backstop for that, not a proof. Current run: **14,132 assertions over
+45 legs**, every leg at all four scales, plus the control.
+
+**What leg F does NOT see, stated because "it IS the draw" is the claim that sells it.**
+`Hud.PlateProbe` covers the four button helpers plus `CenterText` — **7 call sites**, not "every
+button in the game"; a control that draws its own plate and label by hand is invisible to it. And
+`Cfg.InkProbe` only sees text routed through `Cfg.Text`/`Cfg.TitleText`: review found **four raw
+`Raylib.DrawTextEx` sites** — the volume fader's label and percentage, and the THREAT CARD's title
+and body — which were therefore invisible to the audit *and* frozen while the rest of the UI scaled,
+on two screens leg F claims to audit. **Fixed** (they now go through `Cfg.Text`/`Cfg.Measure`, which
+is what CLAUDE.md requires); the point that survives is that the probe is only as complete as the
+funnel it sits on, and `grep -c "Raylib.DrawTextEx" src/*.cs` is the check.
+
+Supporting mechanics, all inert in play: `Hud.AnimPin` (audit the settled frame without waiting
+real seconds), `Hud.TimePin` (the chrome's twelve wall-clock reads now route through one `Now()`,
+mirroring `Renderer.TimePin` — CLAUDE.md has said "if you write a test that reads pixels, pin the
+clock" since W4 and only the board could), and one fixed RNG seed per staged screen (the shop slate
+and the event roll are clock-seeded), and **`Hud.MousePin`** — added after review measured the gate
+**flaking at ~3% (1 run in 32)** on a TOOLTIP-HOVER/TOOLTIP-AIM fingerprint collision. Thirty draw
+sites read the live cursor (hover fills, hover cards, and the threat card, which anchors itself at
+it): the clock, the animations and the RNG were pinned and the POINTER was not. The same gap
+explains why this entry's own assertion count differed by 16 between two machines on one commit.
+The audit now parks the pointer off-canvas. Determinism verified 3× on the shipped tree.
+
+## GAP 2 — the enemy turn has a deadlock guard, and it names what stalled
+
+`Game.EnemyStallGuard` runs from `Update` **before the animation pump**. That placement is the whole
+design: while `_anims` is non-empty `Update` returns before the phase switch, so a guard inside
+`UpdateEnemy` is structurally blind to the "an animation never completes" half of the deadlock —
+the same shape of blindness W9 found in the turn-boundary guard. Progress = staging index, stage,
+queue depth, queue head type, and every unit's position/HP/actions/ammo/state; a banner beat resets
+the counter, so a telegraph is never mistaken for a stall. After 480 updates (8 s) with nothing
+moving it prints
+
+```
+ENEMY-STALL: enemy turn made no progress for 480 updates. stage=PickNext
+unit=STALKER/SCOUT #0 at (12,7) hp=7 act=2 ammo=4 plan=none anims=0 head=- turn=1 mission=1 mode=Campaign
+```
+
+and then gets out: the queue is dropped, the stalled unit forfeits its turn, the index advances,
+and if that exhausts the staging list the turn ends. **It runs in real play, not only in autoplay** —
+a batch loses a run, a player loses the session.
+
+`SIGHTLINE_ENEMYSTALLTEST` wedges a real enemy turn (`Game.DebugEnemyWedge`) and asserts: the guard
+fires within its bound (**520 updates measured**, bound 480); the line names unit/stage/plan/queue;
+the wedged turn ENDS (962 further updates); **108 clean enemy turns fire it zero times**; and
+480 x 24 units < the 120,000-frame harness budget, so this door cannot re-open the TIMEOUT. Its
+non-vacuity leg is the one that makes the rest mean anything: **the same wedge with the guard off
+still hangs** after 2929 updates.
+
+## GAP 3 — the enemy DECISION CENSUS, and a correction to the finding it guards
+
+Every branch of the enemy exec chain now tags itself (`Game.ActBranches`, one string assignment per
+enemy act). `SIGHTLINE_AICOVTEST` walks 48 campaigns across heats {0,4,8} x all eight objectives and
+counts what the opponent actually did.
+
+**A ZERO GATE WOULD NOT HAVE CAUGHT THE DEFECT IT IS WRITTEN FOR, and that is the finding.** Measured
+here over 144 campaigns / **8083 enemy acts**: `overwatch` fires **8 times, 0.10%**. The ROADMAP
+records it as "0 of 1595 pre-W2 and 3 of 1589 post". On this tree, at this sample, it is not zero —
+it is once per thousand acts, which is a verb no player will ever see. So the gate is a **RATE**
+(once per 1000 acts) and the effectively-dead branches are a **declared registry**
+(`AiCovKnownRare` = overwatch, relock, shove, with the rates measured here). An *undeclared* branch
+that falls below the rate fails by name; a declared one that climbs back is reported as a stale
+declaration (a note, not a failure — the wave that revives a verb should be told to delete the
+entry, not blocked by it). `SIGHTLINE_AICOVSTRICT=1` treats every declared entry as a failure.
+
+Census at n=2740 acts: `shoot 40.18% · hunker 17.08% · grenade 2.52% · heal 1.90% · siege 1.28% ·
+reload 0.95% · sap 0.47% · brace 0.47% · item 0.36% · shove 0.11% · relock 0.04% · overwatch 0.00% ·
+terminal-hunker 0.22% · terminal-reload 0.04% · none 34.38%`.
+
+**Read the two sample sizes carefully, because they say different things.** The headline
+"overwatch fires 8 times in 8083 acts" is a **144-campaign** run (`SIGHTLINE_AICOVTEST=6`). The
+sweep runs `=2` — **48 campaigns, 2740 acts — and at that n overwatch is 0**. The gate is a rate of
+one per 1000 acts, so at the sweep's n the threshold is **2.74 events**: it is asking "does every
+undeclared branch fire at least 3 times in 2740 acts?", and `item` (10), `sap` (13) and `brace` (13)
+are the marginal ones at 3.6–4.7× the bar. That is a deliberate trade — a bigger n in the pre-merge
+sweep costs minutes — but it means the sweep's version of this gate is a coarse one, and a wave that
+suspects a verb has gone quiet should run `=6` by hand.
+
+The three **backstops** (`terminal-reload`, `terminal-hunker`, `none`) are censused and reported,
+never gated: they exist so W2's no-idle-act invariant holds structurally when a plan goes stale.
+`terminal-reload` measured **0 in 8083 acts**, which is the design working rather than a hole.
+
+**Lane discipline:** C2 owns `Ai.cs`'s shot scoring, the CAUSE of the dead overwatch branch. This
+wave changed no scoring; it owns the test that would have caught it.
+
+## GAP 4 — the defect hunt
+
+### FIXED
+
+1. **The wrapper and the clipper disagreed by less than a pixel, and the player paid three
+   characters.** `WrapText` decides a line fits with `(int)Measure(...) > maxW` — the int cast lets
+   up to a pixel through — while `Clip` decided with the raw float. A 224.7px string in a 224px
+   column was therefore ONE line to `FitWrap` (which stopped shrinking) and TOO WIDE to `Clip`
+   (which ate the tail). Live at the 110% text size: the WAR ROOM painted **"Win a run with no
+   soldiers los…"**. VOICETEST asserts exactly this contract for achievement descriptions and could
+   not see it, because its assertion goes through `WrapCount` — the same int-cast path that called
+   the string fine. Both now ask the width question the same way. Screenshots before/after taken at
+   110%.
+2. **A `null` element in a save's Squad array threw a NullReferenceException on resume.**
+   `FromUnitDto` returns null for a null element and its own comment says "callers skip nulls" —
+   the caller that builds the RUN's roster did not.
+3. **An all-benched roster resumed into a mission with an EMPTY BOARD.** `Game.ToggleBench` enforces
+   ">= 1 deployed" at the UI, so no click can empty the field; `Benched` is also a persisted
+   per-soldier flag with no guard on the way in, and `SetupMission` builds `Players` straight from
+   `Squad.Where(!Benched)`. `Run.EnsureFieldable` now holds the invariant at setup using the
+   deployment rule that already exists (best `NextDeployCap`, healthy and senior first), so a
+   player's own bench choices are never touched.
+4. **`SIGHTLINE_BENCH=1` staged nothing.** `DebugBench` set `Wound = 2` and then called
+   `DebriefSurvivors`, whose recovery step decrements a survivor's wound (`u.Wound--`, `Run.cs`) —
+   so the flag was spent before anything drew and the hook photographed the plain barracks. Found as
+   a frame byte-identical to the audit's CAMPAIGNMAP case. (Two corrections from review: the
+   decrement is the `u.Wound--` arm, not the unhurt-branch's −2; and the hook's docstring premise —
+   "so the BENCH toggle buttons are visible" — is stale, because the DEPLOY/BENCH pill draws on
+   EVERY roster row. What it actually stages now is the WOUNDED(n) line.)
+5. **`AIIDLETEST` was the one self-test in `qa-sweep.sh` not routed through `verdict`** — real, and
+   **the consequence I first published for it was false**, which is worth more than the fix. I wrote
+   that a FAIL there "left `SWEEP-EXIT=0`". It does — but so does *every other* FAIL, because
+   `qa-sweep.sh` **contains no `exit` statement at all**: `_fail` and `_autofail` are set and never
+   read (verified here: assignments at 49/51/53/175/199/208/215, zero reads in a condition that
+   exits). The provenance, established by the lead: W9 shipped `exit 0` as a review fix
+   (`3304c41`), the **W5 merge (`4ba1ed3`) deleted it**, and CLAUDE.md has asserted the gate for two
+   programs since. So this fix is a *precondition* for the exit code to mean the whole sweep — when
+   wave **C3** lands the `exit` (its half; C5 deliberately did not duplicate it), an AIIDLETEST FAIL
+   will now be counted. **CLAUDE.md's "Since W9 the sweep EXITS NON-ZERO on any FAIL line" is false
+   until C3 merges** — left for C3 rather than edited into a conflict.
+   C5's own half of the same defect: `scripts/qa-isolated.sh` ended its `--sweep` branch with
+   `echo "SWEEP-EXIT=$?"`, so the *wrapper* exited 0 whatever the sweep returned. Fixed and proven
+   with a fake sweep returning 7 — old wrapper `WRAPPER-EXIT=0`, new wrapper `WRAPPER-EXIT=7`.
+6. **The PERK CHOOSER's fourteen numbers were transcriptions — and this one is stated carefully,
+   because it is a SEAM and not a live lie.** Every "before > after" line on the card
+   (`HP 8 > 11`, `AIM 68 > 83 vs flanked`, `DMG TAKEN -1 (crits -4)`, ...) was a literal typed
+   beside the resolver's constant. **All fourteen were CORRECT when measured** — nothing shipped a
+   wrong number. What was wrong is that nothing bound them: the card is the only place in the game
+   those numbers appear, so a wave retuning `Unit.PerkAim` to 12 would have left fourteen cards
+   promising +15 with no test in the project able to notice. That is the
+   displayed-hit%-was-not-the-hit-probability class, one screen over, waiting. The lines now read
+   the constants (`Unit.TankHp` / `SprinterMob` are new, and `Run.ApplyPerk` reads the same two),
+   and `TRUTHTEST` gained a leg that MEASURES each claim through the shipped path that grants it —
+   `Run.ApplyPerk` for the stat bumps, a real mission refill for BANDOLIER, `Combat.ComputeOdds`
+   for the aim and crit perks (including SCANNING the board for CLOSE QUARTERS' and MARKSMAN's
+   range gates, so "inside 4 tiles" is measured too), `Combat.HardenedReduce` for the damage cuts —
+   and then asserts the chooser PAINTS its own formatter's string. Proven to fail both ways: set
+   `Unit.PerkAim = 12` with the old literal in place and it reads
+   `perkCardLies:LockOn:'AIM 70 > 85 vs flanked' has no 82`; stop painting the line and it reads
+   `perkCardDidNotPaintItsOwnLine`.
+
+### FOUND, NOT FIXED — with the repro
+
+- **The 12px small-text floor is not met by the shipped UI, at the default scale.** CLAUDE.md
+  declares 12px the floor. Measured at 100%: **10px** on the AUDIO CHECK screen (12 strings at 10px
+  + 63 at 11px = 75 below the floor on one frame) and **11px** on seventeen other screens including
+  the in-mission HUD, the end cards, the WAR ROOM and the EVENT card — **109 strings over exactly 18
+  screens**. Repro: `SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small` lists every one with its authored
+  and rendered size. **Scope, stated accurately after review:** no PRIMARY information is affected —
+  hit%, damage, ammo, objective, unit names and action-bar labels are all ≥12px — and the 11px cases
+  are ~4 call sites repeated across 11 staged screens, so "a re-layout of half the chrome" is fair
+  for AUDIO CHECK and overstated for the rest. **Not fixed** because those call sites sit inside
+  other waves' surfaces and this wave's gate would then enforce a design change nobody has priced.
+  What ships instead is a REGRESSION BOUND **at the measured worst — 10px authored / 9.0px
+  rendered** — so any further shrink fails. (It was first set at 9px authored, one point of slack
+  below the measurement, which would have let a 10→9 regression on AUDIO CHECK pass in silence;
+  review B3.) **Setting a bound at the worst entrenches the breach**, which is the disclosure this
+  rule asks for: the next wave that wants the rule met starts from the list, not from the bound.
+- **Six shrink-to-fit calls reach their floor at 120%** — three WAR ROOM achievement descriptions,
+  one shop body, one prep body, and the same shop body again on the worst-case SHOP-WORST staging
+  (the sixth, which the first draft of this list omitted while quoting the count of six). They still
+  fit — nothing is lost — but they are one authored character from losing a word. Counted in the
+  FITTEST PASS line on every run.
+- **THE SETTINGS ARE BEHIND A DOOR YOU CANNOT OPEN UNTIL YOU ARE IN A FIGHT — and this is an
+  ACCESSIBILITY gap, not a comfort one.** `Update`'s Escape handler is gated on
+  `Phase == PlayerTurn || EnemyTurn`, and the pause card is the sole home of **TEXT SIZE,
+  COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN SHAKE, THREAT PREVIEW, AUTO-CAM and
+  FULLSCREEN** (verified against `DrawPause`). The INTRO — the screen a player meets first — offers
+  CONTINUE / DEPLOY / TRAINING / LAST STAND / WAR ROOM / FIELD MANUAL / SKIRMISH / DAILY /
+  AUDIO CHECK / QUIT and a difficulty dial, and **no settings entry of any kind**. So on first
+  launch a player cannot set the text size or turn on colourblind mode until they have started a
+  mission and pressed Escape. **It compounds the finding above exactly**: the 120% setting that
+  would lift every sub-12px string to ≥12px is behind the door that cannot be opened.
+  **BARRACKS is worse:** `case Phase.Barracks` has no Escape handler at all — no pause card, no
+  route back to the intro, no field manual (`K` is gated on `Phase.Intro`) — so on the screen where
+  a player deliberates over perks, the shop and the node pick, the only exits are forward or the
+  window's close button. (Not a soft-lock: forward always exists. Draft, SkirmishSetup, WarRoom,
+  Codex, AudioCheck and the end cards all take Escape — walked and confirmed.)
+  **Correction to my first write-up:** VOLUME *is* reachable outside a mission — the four faders
+  live on AUDIO CHECK (`Hud.Audition.cs`), which the intro opens with `U`.
+  Not fixed here — it is a keymap and menu-structure change across five phases, on surfaces this
+  wave does not own — but it is filed as a real open item rather than "a UX decision", and
+  `QUITTEST`, which asserts the arm/confirm/checkpoint contract, **asserts nothing about
+  reachability from any phase**, which is the half that is broken.
+- **`plan=none` is what the stall line prints when the stall is at `PickNext`**, because the plan
+  for that unit has not been made yet. Truthful, but the diagnosis is weaker at that stage than at
+  `ActAfterMove`. Left as is rather than fabricating a plan to name.
+- **String-vs-string overprint is not asserted, and my first reason for that was wrong.** I wrote
+  "no z-order signal"; `Cfg.InkProbe` fires **in draw order**, so z-order is exactly what it does
+  have. What is missing is an **occlusion** signal — whether an opaque fill landed between two
+  strings — and acquiring one means funnelling **230** raw `Raylib.DrawRectangle*` calls in
+  `Hud.cs` and **87** in `Renderer.cs` through a `Cfg.Rect` seam. That is a real refactor and
+  declining it is a scope call, not an impossibility: the project already asserts overprint in two
+  hand-scoped places (FITTEST's own armory tag-vs-blurb leg and the hall-of-fame score-vs-name leg),
+  so this is a gap with a known price.
+
+## VERIFICATION
+
+- Release build **0 warnings / 0 errors**.
+- `bash scripts/qa-isolated.sh --sweep --full` (the house sweep with the isolation exports the
+  contract requires, now a committed script instead of four lines a reader has to remember):
+  every line PASS, COVERAGE GAP empty, autoplay x3 clean (LOSE m3 / LOSE m1 / LOSE m5, no TIMEOUT),
+  PAIRTEST byte-identical. FITTEST's final line: 40 screens, **14,132 assertions over 45 legs**,
+  every leg at all four scales, plus the 200% sensitivity control. **On the sweep's exit code, read
+  fix 5 above and do not quote `SWEEP-EXIT=0` as a whole-sweep verdict**: `qa-sweep.sh` has no
+  `exit`, so the code is the last `echo`'s. C5's wrapper now propagates whatever the sweep returns;
+  C3 restores the sweep's own `exit`. Coverage, DERIVED (never typed — this footer has been
+  wrong six times): **67 hooks exist in `src/`, 67 run**, up from 64 at the base commit — this wave
+  adds ENEMYSTALLTEST, AICOVTEST and SAVEEDGETEST. COVERAGE GAP block empty.
+- **Every fix ships a test proven to FAIL on the pre-fix tree** (reverted, run, output pasted in the
+  handoff): the ellipsis leg, the staging fingerprint, the scope guard, the enemy stall guard, both
+  save shapes, and both AICOVTEST modes.
+
+## THE INSTRUMENTS THIS WAVE LEAVES BEHIND
+
+| hook | what it holds |
+|---|---|
+| `SIGHTLINE_FITTEST` (leg F) | 40 screens x 4 text scales, audited on a live frame |
+| `SIGHTLINE_FITDUMP=1\|small` | per-screen ink/plate census; every string below the 12px floor |
+| `SIGHTLINE_ENEMYSTALLTEST` | the enemy-turn deadlock guard, wedge and all |
+| `SIGHTLINE_AICOVTEST=<N>` | the enemy decision census (`SIGHTLINE_AICOVSTRICT=1` drops the waivers) |
+| `SIGHTLINE_SAVEEDGETEST` | eight hostile `save.json` shapes through the real resume path |
+| `Hud.TimePin` / `Hud.AnimPin` | the chrome's clock and entrance animations, pinnable for any pixel test |
+# PROGRAM CONTOUR — WAVE C3 "THE TWO GAMES"
+
+**Branch `wave/two-games`. Base commit `17934ee`** (CROSSCUT composed — the L3 ladder's tree).
+Raw data, runners and readouts: `docs/measurements/c3/`. Gate: `SIGHTLINE_CLASSTEST`.
+
+## THE FINDING, RE-ESTABLISHED ON THIS TREE
+
+960 campaigns, 48 chunks, all `runs=20`, `byObjectiveByNodeKind` and `byObjectiveByMission`:
+
+| on mid-run campaign nodes (Combat + Elite) | win% | ±SE | n |
+|---|---|---|---|
+| **KILL** — Eliminate, Decapitate | **38.5** | 3.1 | 247 |
+| **NON-KILL** — the other six | **81.5** | 1.1 | 1243 |
+| **gap** | **43.0** | 3.3 | |
+
+`byObjectiveByMission` says the same thing at fixed depth: at **m5**, `Eliminate` 23.8% (n=42)
+against `Sabotage` 83.9% (n=31) and `Evac` 93.8% (n=16). The brief's figures (38.3 / 83.4, and
+Sabotage 96.8 at m5) came from W8's own round on a different composition; they replicate in
+direction and magnitude, and the cells with n<40 differ inside their own error. **W8's trap is
+real and it is worth restating: `Eliminate`'s POOLED row on this tree is 89.1%, because 960 of its
+1155 rows are mission 1.** The pooled table is in `agg.py`'s output and it is the wrong table.
+
+## 1. THE INSTRUMENT — because a win rate cannot say WHY
+
+Nothing recorded what the enemy force GREW to, or how much of it a squad actually had to beat, so
+every mechanism for the gap was equally plausible. `Stats.MissionRec` gains two per-mission
+counters — `EnemiesAdded` (bodies spawned after deploy by ANY reinforcement path) and
+`MaxPressure` (the high-water anti-turtle rung) — and the report gains an **ENCOUNTER COMPLETION**
+block, console and JSON, restricted to mid-run node kinds for W8's exact reason. Its load-bearing
+column is `clear%` = killed / (deploy force + reinforcements): the share of the encounter actually
+FOUGHT, and the only column that can tell "this class wins the fight" from "this class never has
+the fight". The same columns are repeated restricted to **won** missions, because a low `clear%`
+otherwise has two readings that point in opposite directions.
+
+**Proven inert before it was used**: `inert.py` diffs every pre-existing field of 8 paired chunks
+(2 rungs × 4 slot sets, same worlds, pristine vs instrumented binary) — **9,848 aggregate fields,
+zero moved.**
+
+## 2. THE MECHANISM — three candidates refuted by measurement, one survives
+
+`enc.py B1`, mid-run nodes, 960 campaigns:
+
+| row | n | win% | turns | force | +rf | clear% | rf% | prs | WON n | WON clear% |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Eliminate | 139 | 37.4 | 8.53 | 7.78 | 1.69 | 48.8 | 41.0 | 1.55 | 52 | 100.0 |
+| Decapitate | 108 | 39.8 | 5.42 | 9.06 | 0.55 | 14.4 | 20.4 | 0.79 | 43 | 25.3 |
+| Defend | 425 | 78.1 | 8.64 | 5.56 | 6.48 | 35.5 | 100.0 | 0.00 | 332 | 40.2 |
+| Escort | 247 | 83.0 | 8.12 | 8.41 | 0.00 | 17.4 | 0.0 | 0.00 | 205 | 14.0 |
+| Evac | 98 | 90.8 | 5.68 | 8.14 | 0.00 | 4.1 | 0.0 | 0.00 | 89 | **3.3** |
+| Hack | 102 | 81.4 | 3.67 | 8.96 | 0.04 | 14.6 | 2.0 | 0.16 | 83 | 14.5 |
+| Rescue | 220 | 83.6 | 5.44 | 8.35 | 0.00 | 14.5 | 0.0 | 0.00 | 184 | 12.2 |
+| Sabotage | 151 | 79.5 | 3.76 | 5.71 | 0.00 | 24.1 | 0.0 | 0.00 | 120 | 25.8 |
+| **KILL** | 247 | 38.5 | 7.17 | 8.34 | 1.19 | 33.6 | 32.0 | 1.22 | 95 | 62.0 |
+| **NON-KILL** | 1243 | 81.5 | 6.73 | 7.12 | 2.22 | 24.3 | 34.4 | 0.01 | 1013 | **25.1** |
+
+**(a) FORCE SIZE — refuted.** KILL deploys 8.34 bodies, NON-KILL 7.12 — but the NON-KILL average
+is dragged down entirely by the two objectives the game *already* eases on purpose (`Defend` 5.56
+via FUL-4's opener trim, `Sabotage` 5.71 via `Mission.Build`'s explicit easing). The four
+untrimmed non-kill objectives deploy **8.14 – 8.96**, at or above the kill class. `Escort` deploys
+8.41 and wins 83.0%; `Eliminate` deploys 7.78 and wins 37.4%. Force size does not order the classes.
+
+**(b) TURN PRESSURE / MISSION LENGTH — refuted.** KILL 7.17 turns, NON-KILL 6.73. `Defend` is the
+LONGEST objective in the game at 8.64 turns and wins 78.1%. And `Hack` carries *the same
+anti-turtle clock as Eliminate* and wins 81.4%.
+
+**(c) REINFORCEMENT VOLUME — refuted, and this is the one worth stating loudly.** `Defend` takes
+**6.48** added bodies per mission and is reinforced on **100%** of missions; `Eliminate` takes 1.69
+on 41%. Defend wins 78.1%, Eliminate 37.4%. **Nearly four times the reinforcements and twice the
+win rate.** Volume is not it.
+
+**(d) WHAT SURVIVES: the win condition's dependence on beating the force.** A WON non-kill mission
+kills **25.1%** of the force it deployed against — `Evac` **3.3%** (0.27 bodies of 8.14),
+`Rescue` 12.2%, `Escort` 13.3%, `Hack` 14.5%, `Sabotage` 25.8%. **FIVE of the eight objectives are
+routinely won by declining three quarters of the encounter.** The two kill objectives cannot
+decline any of it.
+
+**FIVE, NOT SIX — `DEFEND` DOES NOT DECLINE ANYTHING, AND THE REVIEW WAS RIGHT TO CATCH IT.**
+Defend's won-mission clear% is 40.2 and its raw body count is **4.28 kills per mission — 92% of
+Eliminate's 4.65, and more than any other non-kill objective in the game.** Its low percentage is a
+DENOMINATOR artifact: it fields 5.59 at deploy and is then replenished with 6.47 more, so its
+denominator is 12.04, the largest on the board. Defend does not walk past its encounter, it
+**outlasts a bigger one**. And Defend is 34% of the whole non-kill cell (425 of 1243), so the
+pooled `NONKILL` clear% of 25.1 is itself dragged UP by the one objective that fights hardest.
+Strip Defend out and the remaining five read 0.32–1.41 kills a mission against deploy forces of
+5.7–8.5. The finding survives — it is just five objectives, and the honest version is stronger
+about which five.
+
+That is not a difficulty bug inside an objective. It is two different games sharing a UI, and the
+only thing separating them is whether the mission can end while the enemy is still standing.
+
+**Where (c) DOES bite, and it is an interaction, not a volume.** On `Eliminate` — and on no other
+objective in the game — a reinforcement is also **win condition**. The anti-turtle clock's second
+arm therefore does not raise the price of the finish line there; it MOVES it. 41.0% of mid-run
+Eliminates took at least one wave, and over those missions the waves averaged ~4.1 bodies on top
+of a 7.78-body deploy force. On `Hack` and `Decapitate` the same clock adds the same bodies and
+the win condition does not move — which is exactly why Hack reads 81.4% with `prs` 0.16 and
+`Eliminate` reads 37.4% with `prs` 1.55.
+
+**A fifth candidate, named and NOT ruled out: the measuring bot.** `Game.SmartStep` is what chose
+to walk past those fights. A player who fights anyway on an `Evac` would see a much smaller gap.
+That does not rescue the design — the point is that declining is *available and dominant*, and the
+flywheel is the thing that found it — but this wave did not measure a fight-anyway policy, and
+`clear%` is a joint property of the game and of the bot. Said plainly rather than buried.
+
+## 3. THE DESIGN CALL — it is a defect, and it is TWO defects
+
+`docs/DESIGN.md` was the deciding document, not the win rate.
+
+**The variety is a FEATURE and it is kept.** §3.F wants runs to differ by *combinations*, and a
+campaign that alternates "clear the room" with "get in and out" is exactly that. Making all eight
+objectives demand attrition would delete the best thing about the objective roster. **Any lever
+that closes this gap by making the six harder was rejected on that ground alone.**
+
+**Defect one: the fork is a FALSE CHOICE (§3.A).** "A decision is interesting only if no option
+dominates, the options are asymmetric, and *the player can make it informed*." The campaign map
+named the objective and nothing named the class, so the single largest predictor of a node's
+difficulty — bigger than any step on the heat ladder — was the one property the player could not
+read. A fork whose dominant term is invisible is a non-decision wearing a decision's costume.
+
+**Defect two: it is a difficulty SPIKE the player cannot see coming (§3.D).** The within-run curve
+is 98 / 83 / 77 / 78 / 73 / 68 — the stair-step §3.D asks for. A mid-run kill node sits at 38.5%
+*inside* that curve. §3.D's rule is "pace spikes; give the player a beat to find footing" and
+"don't front-load anxiety"; an unreadable 43-point step is the same failure one layer up.
+
+So the answer is **one information change and one mechanical lever**, and they do different jobs:
+the information change makes the choice real, the lever pulls the spike toward the curve. Neither
+alone is the answer, and the wave claims neither is sufficient.
+
+## 4. THE LEVER — the anti-turtle clock stops moving ELIMINATE's finish line
+
+`Game.ClockMayReinforce`. The clock has two arms and they are not the same thing:
+
+- the **AIM ramp** (+3/+4 per rung to 4 rungs) makes a slow squad's position worse — untouched,
+  banner and HUD meter and all;
+- the **REINFORCEMENT wave** (rungs 2–4) adds bodies — suppressed on `Eliminate` **only**.
+
+`Hack` and `Decapitate` carry the same clock and keep both arms, because their win condition does
+not count bodies. `SIGHTLINE_KILLTREADMILL=1` restores the pre-C3 clock exactly.
+
+**`Decapitate` is therefore this round's WITHIN-ROUND CONTROL on the class**, and `Hack` is the
+control on the clock. If either had moved, something other than the lever moved it.
+
+### The measurement
+
+Two rounds on ONE binary — `B1` = `SIGHTLINE_KILLTREADMILL=1`, `L1` = defaults — 6 rungs × 8
+disjoint CRN slot sets × greedy+sloppy = **960 campaigns per arm on identical worlds**, 96 chunks,
+all `OK ... runs=20`.
+
+**THE LEVER'S OFF PATH IS THE LADDER OF RECORD'S OWN TREE**, and the proof is now against COMMITTED
+data. `l3repro.py` compares B1 to the **L3 archive** (`docs/measurements/l3/`, the tree the ladder
+of record was measured on, and the same eight slot sets) at two levels: **48 chunk pairs, 59,010
+pre-existing aggregate fields (1,075–1,335 per chunk), zero differences**, and — the level that
+actually matters — **960 of 960 campaigns identical on BOTH outcome and missions-cleared.** So B1
+is not merely "a baseline I ran"; it is L3, reproduced campaign-for-campaign, and `L1 − B1` prices
+the lever and nothing else.
+
+*This replaces the proof an earlier draft cited.* That draft pointed at `samearm.py D0 B1` (67,956
+fields) — but `trim.sh` had deleted the D0 round as redundant, so **the documented command matched
+zero files and printed a pass over no data**. That is precisely the failure CLAUDE.md's W1 contract
+exists to eliminate, and the second time this program has shipped it. Both `samearm.py` and
+`inert.py` now **exit 2 on an empty comparison**, and the claim above rests on data that is in the
+repository.
+
+| rung | B1 | L1 | Δ | ±cluster SE (L1) | band | verdict |
+|---|---|---|---|---|---|---|
+| RECRUIT | 71.2 | **73.1** | +1.9 | 4.90 | 75±8 | in |
+| heat 0 | 47.5 | **55.0** | **+7.5** | 4.53 | 55±8 | in — on target |
+| heat 2 | 31.2 | **34.4** | +3.2 | 5.04 | 40±8 | in, **but see below** |
+| heat 4 | 23.8 | **25.6** | +1.8 | 2.58 | 30±8 | in |
+| heat 6 | 20.0 | **20.0** | 0.0 | 3.78 | 20±8 | in — on target |
+| heat 8 | 6.9 | **7.5** | +0.6 | 2.31 | 10±5 | in |
+
+**All six rungs are inside their bands.** Two qualifications, both of which the review supplied and
+both of which belong next to the table rather than in a footnote:
+
+- **"Monotone at every step" is not something this lever achieved.** The BASELINE arm is already
+  monotone (71.2 > 47.5 > 31.2 > 23.8 > 20.0 > 6.9). It is a pre-existing property of the tree.
+- **±3.5–3.9 understates a rung's sampling error, and the eight slot sets are not exchangeable
+  draws.** A rung is 8 clusters of 20 campaigns, and the clusters disagree: L1's heat-2 slot sets
+  read **45, 25, 20, 10, 50, 40, 45, 40**. The cluster SE (SD of the eight slot-set means / √8) is
+  **5.04** against a binomial 3.75 — and **the cluster SE exceeds the binomial at five of six
+  rungs** (ratios 1.40 / 1.15 / 1.34 / 0.75 / 1.20 / 1.11), so the binomial figure is 11–40% too
+  small everywhere but heat 4. The same is true of B1 (ratios 1.08–1.48, heat 4 again the
+  exception), i.e. this is a property of the slot sets, not of the lever.
+  **So heat 2 is not robust.** It clears its floor by 2.38 points = **0.47 cluster SE**; the
+  jackknife worst case (drop the strongest slot set) is **32.14 against a floor of 32**; its paired
+  p is 0.0625. The honest sentence, and the one that replaces "L3's one miss is closed": **heat 2
+  moved from 0.8 below the floor to 2.4 above it, which is inside the rung's own slot-set noise.**
+
+**±SE of any kind is the WRONG error bar for the DIFFERENCE between two CRN arms.** B1 and L1
+played the same 960 worlds, so the statistic is the paired one (`paired.py`, a McNemar table built
+from each chunk's own PER-SLOT RECORDS block):
+
+| rung | pairs | lever-only wins | baseline-only wins | p (2-sided) | Δ missions cleared |
+|---|---|---|---|---|---|
+| RECRUIT | 160 | 4 | 1 | 0.375 | +0.05 |
+| heat 0 | 160 | **13** | 1 | **0.0018** | +0.37 |
+| heat 2 | 160 | 5 | 0 | 0.0625 | +0.35 |
+| heat 4 | 160 | 3 | 0 | 0.250 | +0.21 |
+| heat 6 | 160 | 0 | 0 | 1.000 | +0.09 |
+| heat 8 | 160 | 1 | 0 | 1.000 | +0.08 |
+| **ALL** | **960** | **26** | **2** | **<0.0001** | **+0.19** |
+
+### THE LADDER GAIN AND THE MISSION-1 CHANGE ARE ONE TRANSACTION, NOT TWO
+
+**This is the review's F1 and it is the most important correction in this write-up.** An earlier
+draft of this section claimed the ladder result here and booked the mission-1 change fifty lines
+later as an unintended cost, as though they were separate ledger entries. They are the same entry:
+mission 1 is always an `Eliminate`, so it is the largest population the lever touches, and **roughly
+half the headline ladder gain is the opener.**
+
+Stratifying the paired test on whether the **baseline** survived mission 1 is a legitimate CRN
+conditional — the two arms play identical worlds and the lever is the only difference, so the
+stratum is defined on a pre-lever fact:
+
+| stratum | pairs | B1 | L1 | Δ | L-only : B-only | p |
+|---|---|---|---|---|---|---|
+| all pairs (the headline) | 960 | 33.44 | 35.94 | **+2.50** | 26 : 2 | 3×10⁻⁶ |
+| **baseline SURVIVED m1** | 936 | 34.29 | 35.68 | **+1.39** | 15 : 2 | **0.0024** |
+| baseline LOST m1 | 24 | 0.00 | 45.83 | +45.83 | 11 : 0 | 0.00098 |
+
+**Eleven of the 24 extra run wins come from 2.5% of campaigns** — the ones the opener was killing.
+Per rung, holding the opener fixed:
+
+| rung | Δ all pairs | Δ opener held fixed | opener's share |
+|---|---|---|---|
+| RECRUIT | +1.88 | +1.88 | 0% |
+| heat 0 | +7.50 | **+4.58** (p=0.039) | 39% |
+| heat 2 | +3.12 | **+1.31** (p=0.50) | 58% |
+| heat 4 | +1.88 | **+0.00** | **100%** |
+| heat 6 | 0.00 | 0.00 | — |
+| heat 8 | +0.62 | +0.64 | 0% |
+
+So: **heat 2's move above its floor is majority opener, and heat 4's gain is entirely opener.**
+The claim this wave is entitled to make is the +1.39 pooled, p=0.0024, concentrated at heat 0 and
+RECRUIT — a real, significant mid-run effect, measured the right way. It is not "the ladder went up
+7.5 points at heat 0 and, separately, the opener got easier".
+
+### The post-lever cross-tab
+
+| on mid-run nodes | B1 | L1 |
+|---|---|---|
+| KILL | 38.5 ±3.1 (n=247) | **45.3 ±3.1** (n=256) |
+| NON-KILL | 81.5 ±1.1 (n=1243) | 81.8 ±1.1 (n=1280) |
+| **gap** | **43.0 ±3.3** | **36.5 ±3.3** |
+
+`byObjectiveByNodeKind`, the cells that moved: `Eliminate` Combat 39.6 → **53.3** (n≈106), Elite
+30.3 → 32.4 (n≈33), Supply 73.2 → 82.8, Start 97.5 → 99.8.
+`byObjectiveByMission`, `Eliminate`: m2 63.3 → 76.7, m3 40.9 → 54.5, m4 55.1 → 64.7, m5 23.8 → 29.5.
+
+**The control held — but only one of the two I claimed is a control.**
+
+**`Decapitate` is the real one** and it does its job: it carries the clock at `prs` 0.79 and takes
+a wave on 20.4% of its mid-run missions, so the arm this lever removes is genuinely live on it, and
+it still moves only 39.8 → 41.7, inside its own ±4.6. Its BOSS cell — n≈472/509, the largest cell
+in the game — is flat at 68.0 → 67.8. That is a control with something to lose.
+
+**`Hack` is not, and I should not have called it one.** `PressureGrace` is 4 turns and Hack's mean
+mid-run mission is **3.67 turns**, so the clock essentially never engages on it: `prs` 0.16,
+reinforced on **2.0%** of missions. "Identical to the last digit across the arms" is therefore very
+nearly a tautology — the lever removes an arm Hack had all but never fired. Restated as what it
+actually is: **evidence that the change is scoped to the objective it names, not evidence that the
+clock's second arm is harmless where it fires.** Only Decapitate carries the latter.
+
+The other five non-kill rows move by −0.2 to +0.6.
+
+**An independent cross-check, from a channel that is not the Stats block.** `SpawnReinforcements`
+echoes every wave to the console under AutoPlay. On the same 20 campaigns at `h0-b0`, the baseline
+log carries **13** `REINFORCEMENTS:` lines and the lever log **5** — the residual five are Hack and
+Decapitate, which keep the arm. DEFEND's own `WAVE:` schedule reads 82 → 85 across the two, which
+is **not** the lever reaching Defend but more Defend missions being played at all because runs
+survive longer; per mission `enc.py` holds it still at 6.48 → 6.47. Four raw logs are archived for
+this (`docs/measurements/c3/{B1,L1}-h{0,4}-b0.log`).
+
+**And the mechanism reads back exactly as designed**: `Eliminate`'s reinforcements go 1.69 → 0.00
+and its reinforced share 41.0% → 0.0%, while its mean anti-turtle rung is 1.55 → **1.50** — the aim
+arm is alive and the clock still bites. Turns barely move (8.53 → 8.63): the squad is not finishing
+*faster*, it is finishing *at all*.
+
+**One number in an earlier draft of this paragraph was read the wrong way round, and the review
+caught it.** `Eliminate`'s mid-run `clear%` goes 48.8 → 59.5, and I wrote that as "more of the
+force gets killed". It is not: **the numerator is flat (4.62 → 4.65 bodies killed per mission) and
+the DENOMINATOR shrank** (7.78 + 1.69 = 9.47 → 7.82 + 0.00 = 7.82). The squad kills the same number
+of hostiles; there are simply fewer of them to kill. That is the same denominator artifact that
+makes `Defend` look like it declines its encounter, one row up — and it is a good reason to read
+`clear%` and the raw `killed` column together, always.
+
+**A finding in the lever's favour that this wave did not claim and the review supplied.** The worry
+that removing the wave would make mid-run `Eliminate` a shorter, thinner fight is refuted by the
+data: it got **longer** (8.53 → 8.63 turns) at a flat body count, and against the full mid-run field
+it is the **second-longest objective, kills more bodies per mission than anything else in the
+game** (4.65 vs Defend's 4.28 and everything else under 1.5), and is the **second most lethal to
+the squad**. Whatever else is wrong with the kill class, "boring" is not it.
+
+### The within-run curve
+
+| mission | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| B1 | 97.5 | 82.7 | 77.1 | 77.7 | 73.5 | 68.0 |
+| **L1** | **99.8** | **84.8** | **78.7** | **78.7** | **75.5** | **67.8** |
+| n (L1) | 960 | 442 | 718 | 572 | 437 | 509 |
+
+Still the monotone ramp §3.D asks for (the m3/m4 tie is inside its own error, as it was before).
+
+### MISSION 1: I OVERSHOT, AND THE DESIGN DEFENCE I FIRST REACHED FOR IS NOT AVAILABLE
+
+An earlier draft called this "nearly unlosable" and filed it under costs. Both halves were wrong.
+
+**It was not "nearly" — at the difficulties people play, it was never lost.** Mission-1 losses per
+160 campaigns, baseline → lever:
+
+| | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
+|---|---|---|---|---|---|---|
+| B1 | 0 | 7 | 7 | 5 | 2 | 3 |
+| **L1** | **0** | **0** | **0** | **0** | 1 | 1 |
+
+**640 consecutive campaigns at RECRUIT / h0 / h2 / h4 with zero mission-1 losses.** And it is
+structural rather than lucky: **22 of the 24 baseline mission-1 losses were the reinforcement
+wave** (the two arms play identical worlds, so the 24 → 2 difference IS the wave). After X2's
+`OpenerTrim` takes a body off the opening force and this wave takes the wave off it, the opener is
+a **fixed force that cannot grow against a full squad** — its entire failure mode was one mechanic
+and that mechanic is now absent from it.
+
+**The §3.D / §3.G defence does not hold, and I am recording that rather than arguing it.**
+
+- §3.D forbids front-loading anxiety — but **X2 already discharged that**, and 97.5% is not
+  front-loaded anxiety by any reading. §3.D's *other* half ("too easy → boredom") is the live risk
+  now, and **pillar 5, "stakes that bite", is on the far side of a 100.0%-over-640 opener.**
+- §3.G's "scripted, low-stakes first mission" was a real justification while onboarding lived in
+  mission 1. **RESONANCE T1 moved it into a dedicated `GameMode.Training` drill.** An unlosable
+  *campaign* opener therefore buys nothing §3.G asks for and only spends pillar 5.
+- And the control X2 itself cited: it justified `OpenerTrim` by pointing at RECRUIT's "100%, zero
+  losses in 40" as the **easiest-difficulty control**. Every rung up to heat 4 now matches that
+  control.
+
+**The fix is the next wave's, and it is named, not vague.** `Mission.OpenerTrim` is an existing,
+measured dial (shipped at 1; `SIGHTLINE_OPENERTRIM=0` is the pre-X2 opener). Backing some of it
+out is one lever — which is why it is not in this round — and it **will move heat 2 and heat 4
+down**, because the table above shows those rungs' gains are 58% and 100% opener. So it is a lever
+*plus a re-measured ladder*, not a tweak. It is the top item in ROADMAP.
+
+### The side effects, checked and recorded straight (`top.py`, 960 vs 960)
+
+`choices/ARMED-soldier-turn` 2.305 → 2.290, `meaningful-choices/turn` 3.197 → 3.200,
+`lead-swings/match` 0.726 → 0.731, `avg max-swing` 49.25 → 49.64, `turns-with-a-shot` 57.4% →
+57.8%, policy-gap mean shot 0.542 → 0.542. **Nothing moved outside noise.** That matters because
+X2's opener trim bought its win rate partly by making the opening fight less contested
+(lead-swings 0.79 → 0.61); this lever did not.
+
+## 5. THE INFORMATION CHANGE — the fork says which game it is
+
+`Run.IsKillObjective` is the single source of truth; every surface asks it, so the game can never
+tell the player one thing and score another. Two words, used identically everywhere:
+
+- **PITCHED** — the field must be cleared; the fight IS the objective.
+- **TASKED** — the objective ends it, *and the force can be left standing*.
+
+The second clause is deliberate and it is the honest half. The flywheel's optimal policy already
+declines those fights (a won `Evac` kills 3.3% of its force); hiding that only taxed the players
+who had not worked it out. §3.A's complaint about a dominant line is that it exists, not that it
+is known — and §3.B says telegraph.
+
+Four surfaces, all reading the same predicate:
+
+1. **The campaign-map node label** gains a drawn class mark in a 12px gutter left of the objective
+   name (the name is unchanged — W9 cut this label to one line for overprint reasons and it stays
+   one line).
+2. **The hover tooltip** gains a class row directly under the node name, above force/payout/reward
+   — the class is the headline property, so it goes first. `EVENT` nodes get no row: they are not
+   fights and their `Card.Objective` is a placeholder that must not be read as one.
+3. **A two-entry class key** on its own row under the node-kind legend. Deliberately not merged
+   into that row: two taxonomies answering different questions ("what node is this" / "what ends
+   this mission") must not share a key. FUL-12's rule binds — a mark the map draws and the key does
+   not name is an unexplained glyph.
+4. **The legacy deploy card** (shown only when the map is unavailable) gains the tag, so the two
+   forks can never disagree.
+
+**THE SHAPES WERE CHOSEN AGAINST `DrawNodeIcon`, AND THE FIRST PAIR WAS KILLED BY A SCREENSHOT.**
+The first pass used a filled diamond (PITCHED) and a hollow ring (TASKED). Reading the shot:
+`NodeKind.Boss` is *already* "a solid diamond inside a ring tick", and the boss node is **always**
+Decapitate — i.e. always PITCHED — so on the one node where glyph and mark are guaranteed to
+co-occur the mark would have read as a duplicate of the node icon. `NodeKind.Combat`'s crosshair
+already carries a hollow circle, so the ring collided too. The shipped marks are **crossed blades**
+and an **empty tile-square**: diagonal strokes and an orthogonal outline are the two silhouettes
+the node vocabulary (chevron, cross, delta, fork, diamond, crosshair) does not use.
+
+**Colour is redundant, and the two colours were picked on purpose.** `Pal.Foe` and `Pal.Good` are
+the only two palette entries `SetColorblind` remaps, so the marks stay separable under
+`SIGHTLINE_CB=1` — and shape carries them regardless (§3.H: never hue alone).
+
+**Layout arithmetic, since the barracks card height is derived.** `mapChrome` goes 58 → 74 (a 19px
+class-key row, bottom pad 14 → 11). The card is `contentH + mapChrome + mapH` with
+`mapH = Clamp(800 − 24 − contentH − mapChrome, 150, 250)`; the clamp only binds above
+`contentH = 552`, and the worst case is a `RosterMax = 6` roster + the 5-line report cap + a KIA
+line = **546**, so `h = 776` for every reachable roster. A screenshot at the worst case confirms it.
+`RosterMax` is a hard constant, so this is arithmetic, not hope — but the margin is **6 points of
+contentH**, down from 22, and a seventh roster row would break it (it would have broken the pre-C3
+card too, at 798 of 800).
+
+### Screenshots read and judged
+
+All at 1280×800 under Xvfb/llvmpipe:
+
+- **the fork, default staging** (`SIGHTLINE_CAMPAIGN=1 SIGHTLINE_SHOT=90`) — the class key reads as
+  its own row; the reachable node's square sits cleanly left of `RESCUE`. First pass with the
+  diamond/ring pair was rejected here (see above) and the row gap went 16 → 19px because the two
+  keys read as one four-item row.
+- **the TASKED tooltip** (`+ SIGHTLINE_MAPHOVER=1`) — "STANDARD − EXTRACT" / green square "TASKED −
+  it ends when the task is done" / "Standard force +26 intel" / the enemy hint. Hierarchy correct:
+  class above economy.
+- **the PITCHED tooltip** (`+ SIGHTLINE_MAPCOL=5`, which stages the boss column — the only node
+  kind guaranteed to be a kill objective) — "BOSS − DECAPITATE" / red X "PITCHED − it ends when the
+  field is clear" / "+34 intel" / "BOSS: WARLORD".
+- **a colourblind pass** of that same frame (`SIGHTLINE_CB=1`) — orange X / teal square, both still
+  separable, and the silhouettes carry it independently of hue.
+- **the worst-case card** (`SIGHTLINE_ROSTER=6 SIGHTLINE_REPORT=5`) — six soldier rows, five report
+  lines, both legend rows, nothing clipped.
+
+Two new shot hooks: `SIGHTLINE_MAPHOVER=<k>` parks the cursor on the k-th reachable node (it reads
+`Hud.NodeBtns`, which the map publishes as it draws, so it necessarily lags a frame); and
+`SIGHTLINE_MAPCOL=<n>` moves `DebugCampaignMap`'s staged column off its hardcoded 3.
+
+## 6. THE GATE — `SIGHTLINE_CLASSTEST`, and it FAILS on the pre-C3 tree
+
+Four legs; wired into `scripts/qa-sweep.sh` (derived counts balance at 65 in `src/` and 65 run).
+
+- **(A) MODEL** — over the whole `Objective` enum, `IsKillObjective` is true for exactly
+  `{Eliminate, Decapitate}`, by enum value AND by telemetry name; an unparseable name is not a kill
+  objective; and the member count is pinned at 8 so appending a ninth objective cannot silently
+  inherit "not a kill objective".
+- **(B) DRAW — the fork** — paints the REAL barracks frame and reads strings at the draw call
+  (`Cfg.CaptureText`) and class marks at the draw site (`Hud.CaptureClassMarks`, null in normal
+  play). Both classes are staged deterministically by overwriting the reachable nodes' cards, so
+  the two passes differ only in the class. Asserts the key names both marks, that the mark census
+  is `choices + 1` of the staged class and exactly 1 of the other, that the objective label is
+  still painted beside the mark, and the 12px floor.
+- **(C) DRAW — the tooltip** — parks the real cursor on a real `NodeBtns` rect and redraws, so the
+  tooltip is reached through the shipped hover predicate. Asserts it paints THIS node's class line
+  and NOT the other one, and that it still carries the intel row it carried before.
+- **(D) LEVER** — runs the real `UpdatePressure` at turn 7 (rung 2, the first wave rung) and counts
+  bodies: `Eliminate` adds none while `Combat.PressureAim` still rises and the rung still reaches
+  2; `Hack` and `Decapitate` add bodies and their aim/rung are identical to Eliminate's; `Evac` has
+  no clock at all; and `ClockWavesOnEliminate = true` restores the waves.
+
+**Proof it can fail** (`prefix_revert.py apply` — reverts the four behaviours and leaves the test
+wired, then `git checkout -- src/`):
+
+```
+CLASSTEST: FAIL pitched:noKeyPitched, pitched:noKeyTasked, pitched:marks=0 want2,
+pitched:otherMarks=0, pitched:tooltipMissingClass, tasked:noKeyPitched, tasked:noKeyTasked,
+tasked:marks=0 want2, tasked:otherMarks=0, tasked:tooltipMissingClass, elimAdded=2
+```
+
+Eleven failures across every leg the wave added, including the lever (`elimAdded=2` — the pre-C3
+clock put two bodies into an `Eliminate`).
+
+**The test caught FOUR of its own bugs before it caught anything else.** Two are the recorded
+CROSSCUT rules, and two are new and worth adding to them:
+
+- *Rule 6, an assertion in the wrong scope.* Leg D read `Pressure` after the LAST of five staged
+  clocks (Evac's 0) instead of Eliminate's, so `elimRung` failed for a reason unrelated to the
+  lever. Each arm now carries its own rung out.
+- *A gate that fails for the wrong reason is noise.* Leg B's first version swept the 12px floor
+  over the whole frame and failed on `WHITE FORD` at 11px — the campaign map's region-name strip,
+  which is `FitSize(11, 8)`. Scoped to the strings this wave paints; the pre-existing breach is
+  recorded below and NOT fixed.
+- **A DRAW test must not leave state on the screen for the next one.** The hover step of the
+  PITCHED pass left the cursor parked on a node; the TASKED pass's first draw then sometimes drew
+  a tooltip — which paints a class mark of its own — and the mark census came back one too high.
+  Whether it did depended on the seed-dealt map layout, so it failed intermittently. The run is now
+  `Util.Reseed`ed, the cursor is parked off the map before each pass, and a new leg asserts that an
+  un-hovered draw paints **no** tooltip, which is what makes the census a statement about the
+  labels and the key.
+- **A DRAW test must not assume a rect it read from a PREVIOUS frame is still there.** `DrawBarracks`
+  gives the card a 0.15 s slide-down entrance (`PanelAnim("barracks")`), so the whole map — and
+  every rect `NodeBtns` publishes — moves by up to 16 px between two consecutive draws taken inside
+  that window. Parking the cursor on a rect read from the previous draw therefore missed the node
+  about half the time. **It missed 3 runs in 4 under `dotnet run -c Debug`** (where the first draw
+  is slow enough to land mid-entrance) **while passing 8 of 8 on the Release binary** — so "it
+  passes" was a statement about which binary you ran it on. The hover now re-reads the rect,
+  re-parks and re-draws until the tooltip appears, exiting on the *intel* row that predates this
+  wave so the loop can never be satisfied by the thing under test. Now 6/6 under the sweep's exact
+  invocation and 8/8 on the Release binary (`classtest_x8.sh`).
+
+## 6a. A DEFECT IN THE PRE-MERGE GATE ITSELF — `qa-sweep.sh` had no exit statement
+
+This was found the only way it was ever going to be: **this wave's own new self-test failed inside
+a `--full` sweep and the sweep still reported `SWEEP-EXIT=0`.**
+
+`scripts/qa-sweep.sh` has a long header, written at the W9 merge, explaining that a FAIL line, a
+non-empty COVERAGE GAP or a TIMEOUT must make the sweep exit non-zero *"so it is a gate rather than
+a report for a reader to notice"*, and CLAUDE.md repeats the claim in its own words. Every path in
+the script faithfully accumulates `_fail` / `_autofail` — **and the script then ends on an `echo`,
+so its exit status was that echo's. Zero. Always.** `grep -n 'exit ' scripts/qa-sweep.sh` returned
+three comment lines and no statement.
+
+So **every "qa-sweep --full green, SWEEP-EXIT=0" claim made in this repository before this wave was
+reporting the exit code of an echo.** The PASS/FAIL lines printed above it were real and a human
+reading them would have caught a failure; the machine-checkable gate the lead relies on at merge
+was not there. Fixed: `_fail` and `_autofail` now decide a real `exit`, with a `!! SWEEP FAILED`
+line naming it. Verified in both directions — a tree with a failing CLASSTEST exits 1 and prints
+the line; the shipped tree exits 0.
+
+While wiring it, one more hole: **`AIIDLETEST` was the only self-test line not routed through
+`verdict`**, so a FAIL there printed and was never recorded. Harmless while nothing consumed
+`_fail`; load-bearing now. Routed.
+
+## 7. VERIFICATION
+
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0** (and for the first time in this repo that
+  statement means something; see §6a), 65 of 65 self-tests PASS (CLASSTEST among them), COVERAGE
+  GUARD block empty, PAIRTEST byte-identical, autoplay ×3 `LOSE m3 / WIN m6 / WIN m6` — no TIMEOUT,
+  no blank. Verified in the other direction too: a tree with the wave reverted exits **1** and
+  prints `!! SWEEP FAILED`.
+- `SIGHTLINE_CLASSTEST` run **8× on the Release binary and 6× under the sweep's own
+  `dotnet run -c Debug`** — 14 PASS, 0 FAIL. Both were needed: the flake §6 describes only ever
+  showed up on the Debug path.
+- **A flake in someone else's test, recorded rather than hidden.** One `--full` sweep out of four
+  printed `CONTRASTTEST: FAIL`. Run standalone it PASSES (`glyph-vs-plate >= 4.5:1 on all 9
+  labels`, 6.51–13.50) and the other three sweeps passed it. CONTRASTTEST reads real pixels through
+  the post-FX shader under llvmpipe on a shared four-core box; that is the most plausible cause and
+  this wave did not touch the main menu, `Pal`, or `Display`. **Flagged, not explained** — and now
+  that the sweep has a real exit code, a 1-in-4 pixel-test flake is a merge-blocker rather than a
+  line someone skims past, so it is worth someone's wave.
+- 96 measurement chunks, every one `OK ... runs=20`; zero `BAD`.
+
+## 8. WHAT I DID NOT DO, AND WHAT IT COST
+
+- **I OVERSHOT ON MISSION 1, and the first draft of this write-up disguised it by splitting one
+  transaction into two.** The full accounting is in §4 (the stratified paired table) and §4's
+  mission-1 subsection; the short version is that ~half the headline ladder gain is the opener, the
+  opener is now unlosable at every rung up to heat 4 (0 losses in 640 campaigns), and the design
+  defence I first reached for (§3.G's low-stakes first mission) stopped being available when
+  RESONANCE T1 moved onboarding into its own drill mode. **The claim this wave is entitled to is
+  the opener-held-fixed +1.39 (p=0.0024), not the +2.50 headline.** Backing the opener out is the
+  next wave's top item and it needs a re-measured ladder, because heat 2 and heat 4 will move down.
+- **The gap is 36.5 points, not zero, and this wave does not claim to have closed it.** It moved
+  43.0 → 36.5 — **6.5 points of a 43-point structural difference**, or 15%. The lever addresses
+  ELIMINATE's half of the kill class and nothing else.
+- **DECAPITATE's half is untouched, on purpose.** Its mid-run row is 41.3 / 42.5 (Combat / Elite)
+  and its mechanism was already located by W8 and L3 — `Mission.Build` de-stacks the FINALE by 3–4
+  bodies and resets `bump`, and no mid-run Decapitate gets that. That lever is still unspent and it
+  is still the right next one. I kept off it deliberately so this round would have a within-class
+  control; using it here would have left nothing to check the lever against.
+- **I did not price the reward.** The brief's own framing is that a 43-point spread "might be
+  correct if the game tells the player which one they are choosing **and prices the reward
+  accordingly**". This wave did the first half. `MissionNode.Intel` is depth-scaled and
+  kind-scaled and is blind to the objective class, so a PITCHED node pays a TASKED node's rate for
+  a much harder fight. That is a small change and a full round to price, and it is the obvious
+  next-wave lever. **Unmeasured, not shipped.**
+- **The bot's declining policy is not separated from the game's.** `clear%` is a joint property of
+  the design and of `Game.SmartStep`. A `SIGHTLINE_*POLICY`-style dial that forces the bot to
+  engage on non-kill objectives (the shape W8 used for `SIGHTLINE_HVTPOLICY`) would split them.
+  Not built.
+- **A 2.1% harness-forced-loss floor that nobody has ever mentioned.** `instrumentHealth.
+  stalemateLosses` reads **20 of 960 in BOTH arms and 20 of 960 in the L3 archive** — identical,
+  because it is a property of the worlds and not of any lever. Every ladder figure this project has
+  published sits on top of it. Not this wave's to fix; nobody owns it, and it should be somebody's.
+- **The anti-turtle clock is now weaker on ELIMINATE, and turtling is not merely unmeasured — it
+  is UNMEASURABLE with this harness.** That is a stronger and more uncomfortable statement than the
+  draft's "I did not measure it", and it is the correct one. The flywheel has exactly two policies,
+  `greedy` and `sloppy`, and `sloppy` is an **error** model, not a **passivity** model: neither
+  camps, and `SmartStep` hunkers only as a terminal fallback. **No policy in the instrument could
+  reveal a turtle exploit**, so no number in this write-up — or in any previous one — bears on it.
+  Three things make that worse rather than better here: the lever touches only the **41% slowest**
+  Eliminates (the other 59% were never reinforced at all), i.e. **precisely the missions where a
+  player was already taking their time**; what remains as a disincentive is the aim arm alone,
+  whose measured mean high-water rung is **1.50**, below the rung 2 at which the wave arm fired;
+  and the design argument in §4 is an argument (*a slow Eliminate already punishes itself, because
+  the force stays on the board*), not a measurement. `SIGHTLINE_KILLTREADMILL=1` is the switch back.
+  **A camping policy in the flywheel is a prerequisite for anyone pricing this, and it is now its
+  own ROADMAP item rather than a line in mine.**
+- **A pre-existing 12px-floor breach, found and left.** `Hud.DrawCampaignMap`'s region-name strip is
+  `FitSize(rn, 11, 8, ...)` and paints at 8–11px; CLAUDE.md's floor is 12. It is not alone —
+  the WAR ROOM footer's stat labels are `FitSize(11, 8)` and the requisition slate's effect line
+  and reroll label are `FitSize(12, 9)` — so the "floor" is in practice a guideline that FITTEST
+  enforces where it looks.
+  Recorded here as the breach it is; out of this wave's charter to move, because raising those
+  strips to 12px risks overflowing the columns they were fitted to.
+- **`heat 6` moved by exactly nothing at the RUN level — and my first explanation for it was
+  wrong.** I wrote "at h6 the runs that reach a mid-run Eliminate are already lost". The archive
+  refutes that outright: **h6 has the LARGEST mission-level gain of any rung — mid-run `Eliminate`
+  19.0 → 36.4, +17.3 (n=21/22).** The missions are won; they just do not convert. The real reason is
+  small numbers: **only 6 of 160 h6 campaigns differ between the arms at all**, none of the six
+  crossed the win line, and at h6's ~20% base rate zero conversions out of six touched campaigns is
+  the *expected* outcome. The discordance sequence across the rungs is 5 / 14 / 5 / 3 / **0** / 1,
+  and P(0 | Poisson mean 2.0) = 0.135. **Unremarkable, not mysterious** — and it is a good example
+  of why a run-completion ladder is a blunt instrument for a per-mission lever.
+- **I did not put mission 1's stakes back.** The opener went 97.5% → 99.8% (24 losses in 960 → 2)
+  because it is always an `Eliminate` and therefore the largest population the lever touches. See
+  the within-run curve above. One lever per round is the rule that kept this measurable, so the
+  fix — if it is one — belongs to the next wave and belongs on `Mission.OpenerTrim`.
+- **The `EVENT`-node tooltip has no class row and no mark.** Correct (an event is not a fight), but
+  it means the map's marked/unmarked distinction now carries two meanings: "TASKED" and "not a
+  fight at all". The legend does not say so.
+- **No onboarding for the two words.** PITCHED/TASKED appear on the map, the tooltip, the key and
+  the deploy card, but the FIELD MANUAL (`Codex.cs`) does not define them and T1's just-in-time
+  tips do not introduce them. The key row is the only teaching surface.
+
+# PROGRAM CONTOUR — WAVE C4 "EIGHT BIOMES ARE PAINT" (2026-08-30, dev on wave/biome-mechanical)
+
+**Branch** `wave/biome-mechanical` off `main` at **`17934ee`** (CROSSCUT composed — the tree the
+L3 ladder of record was measured on). Files touched: `src/Terrain.cs` (new), `Grid.cs`,
+`Combat.cs`, `Ai.cs`, `Game.cs`, `Game.Autopilot.cs`, `Game.Harness.cs`, `Renderer.cs`, `Hud.cs`,
+`Codex.cs`, `Stats.cs`, `Program.cs`, `scripts/qa-sweep.sh`.
+
+## The finding
+
+`grep -ci biome` returned **0** in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs`. The game had
+eight biomes and **not one of them changed how the fight worked.** Wave V3 "SURFACES" and HORIZON
+W6 had given them a real visual identity — a fissure that snakes across six tiles, a frost drift,
+a moss patch — and every one of those motifs was a lie: the fissure went nowhere, the drift did
+nothing, the patch was a colour. This wave is the other half.
+
+## What shipped — THREE biomes, THREE axes, five still paint
+
+| biome | mechanic | the one sentence the player gets |
+|---|---|---|
+| **VERDANT** | **UNDERGROWTH** (cover axis) | *"The ferns give LOW COVER from every angle — but only against fire from more than 2 tiles away. Close in to strip it."* |
+| **TUNDRA** | **SLICK ICE** (movement axis) | *"Crossing a frost drift costs HALF a step, so the drift is a fast lane — for both sides."* |
+| **MAGMA** | **THERMAL VENTS** (sight axis) | *"No one can see across a steaming fissure, forcing a crossing costs movement, and touching one sets you alight."* |
+
+STEEL / ARID / ASH / VOID / NEON are **still paint**. That is a decision, not an omission: three
+mechanics the player can name beat eight they cannot tell apart, and the five are the round's
+built-in control (see the cross-tab below). `Terrain.Tag()` returns null for them and BIOMETEST
+**asserts** they stamp nothing, so a future wave that gives one of them a mechanic has to change
+that line and say so.
+
+## The mechanism: symmetry is STRUCTURAL, not promised
+
+Every rule lives in one of the three functions **both sides already ask for the truth**:
+
+| mechanic | seam | consequence |
+|---|---|---|
+| undergrowth | `Grid.GetCover` | a cover LEVEL, so high ground / a DRONE / a SYNDICATE optic see over it, the exposed-crit bonus and the LOCK-ON flank perk price it, `Ai`'s `cover.Level * 18` scores it and the HUD's pip draws it — with no second implementation to drift |
+| slick ice | `Grid.CostMap` | the one movement model: `Ai.Plan`'s reachable set, the player's move overlay, the path preview and the VIP leash all widen together |
+| thermal vents | `Grid.HasLineOfSight` (via a new `IsVapor`, joining smoke rather than high cover) + `CostMap` + `OnUnitEnteredTile` | every sight read on both sides routes around it; the crossing toll is in half-tiles and the burn is the existing 3.6 fire sear |
+
+Nothing in `src/Terrain.cs` reads `a.Team`. The layer is stamped once per mission through
+`Util.Hash3` — **zero `Util.Rng` draws, no `System.Random`** — so CRN pairing is untouched.
+(The stronger claim this paragraph originally made, "from `(MapSeed, mission)`", is **false** and
+is corrected in the addendum: `Terrain.Stamp` is pure, but the BOARD also keys on the reserved set,
+which `Mission.Build` drew from `Util.Rng`.) It is **not persisted** (`SaveGame` never serialises a `Grid`; verified
+`Tiles`/`Height`/`Smoke`/`Fire`/`Barrel` appear nowhere in it), so `GroundKind` is **not** a
+fourteenth persisted-by-ordinal enum and SAVETEST's hashes are unchanged.
+
+### What Ai.cs actually needed
+
+The honest answer is **less than expected, and that is the design working.** Because the three
+rules live in the three truth functions, the planner re-prices itself: `OddsFrom(g, e, tx, ty, p)`
+already computes odds *from the candidate tile*, so a hostile facing a soldier in the undergrowth
+automatically prefers closing inside 2 tiles (where the ferns are worth nothing); `reach` is the
+shared cost map, so ice widens the enemy's options with no code; `HasLineOfSight` is the same
+function, so vents cut the planner's shots, its overwatch and its focus cones.
+
+What the AI genuinely could **not** derive is a preference about *ending* a move on hot ground.
+Three explicit terms were added:
+
+* `Ai.cs` — `if (g.Grid.IsVent(tx, ty)) score -= 34;` beside the existing `IsFire → −60`.
+  **Deliberately smaller than fire's and smaller than the `100 + bestHit` a shot is worth**: a
+  vent is a price, not a wall, so a hostile that can only reach a killing angle by standing on the
+  crack takes it and eats the burn. That is the same bet the player is offered.
+* `Game.Autopilot.cs` — `TileExposure += 12` on a vent, on the same scale as its `IsFire → 20`,
+  so the balance bot does not walk the squad into the fissure and hand the wave a win-rate drop
+  that is a *bot* defect rather than a design consequence.
+* `Game.cs` VIP leash — the escorted asset is neither parked on a vent nor routed through one when
+  a cooler lane exists (mirroring the existing fire-route term).
+
+## Legibility — five surfaces, because a rule you cannot see is invisible unfairness
+
+1. **The board.** `Renderer.DrawGround` gives each mechanic a material that carries on **VALUE**
+   (so it survives greyscale and `SIGHTLINE_CB`) **plus a rim** (so a patch reads as a *region
+   with a boundary*, not as scattered decoration): a dark fern mat with light blades, a pale drift
+   plate with a bright fracture and a travelling specular, a dark crevasse with a hot seam.
+   `DrawVentSteam` draws the vent's steam **above the figures beside `DrawSmoke`**, in the same
+   soft-grey visual family — because what it is telling you is exactly what smoke tells you.
+2. **The banner** — `MISSION 3 - VERDANT - UNDERGROWTH`.
+3. **The briefing card** — the one-sentence rule, appended in `Game.BeginBriefing` (NOT in
+   `Voice.Brief`, which is under a zero-`Util.Rng` contract and whose VOICETEST pre-measures its
+   own three lines; the card auto-sizes to its row count).
+4. **The shot tooltip** — a soldier in the ferns reads **`UNDERGROWTH  -20 aim past 2`**, not
+   `LOW COVER`. "LOW COVER" on a tile with no block beside it reads as a bug.
+5. **The hover threat card + the CODEX** (FIELD CRAFT tab, beside COVER and FLANKING — they are
+   cover/movement/sight rules and that is the tab that teaches cover, movement and sight).
+
+### THE ART FOLLOWS THE MECHANIC — the capture that forced it
+
+The first MAGMA screenshot is the most useful artifact this wave produced. V3's **decorative**
+board-scale fissure and per-tile veins were still drawn, in the same orange, on the same board, as
+the new **real** vents. The result was a field of orange squiggles in which **no player could have
+told which line burns them.** That is worse than no mechanic at all.
+
+The rule that came out of it, and it is general: **when a biome's mechanic is live, the biome's
+DECORATIVE version of that same motif is retired.** `DrawBiomeFeatures` returns early on the three
+mechanical biomes; the MAGMA per-tile vein is suppressed entirely when the board carries vents;
+and the ambient per-tile signature skips any tile that has mechanical ground. Orange on a MAGMA
+board now means exactly one thing. The other five biomes keep their V3 features unchanged.
+
+Two more capture-driven repairs, both caught by looking rather than by a test:
+* **The fern had no edge.** First capture: blades, no rim — at a squint that photographs as
+  texture, not as a place you can decide to stand in. Added the boundary rim.
+* **The fissure was ten scattered singles.** The walker wandered at 0.9 rad/step and cover tiles
+  ate a third of its steps. Dropped to 0.55 and forced two cracks per board; it now reads as a
+  line with **fords** — and the fords are load-bearing, not cosmetic: a *continuous* 1-wide crack
+  is a total sight barrier (Bresenham supercover always passes through a 1-wide wall), which would
+  cut the board in half for shooting and stall the fight.
+
+Judged captures: VERDANT (three dark fern regions with bright rims, cover keeps the top of the
+value hierarchy), TUNDRA (narrow outlined lanes after the drift budget was cut 42 -> 34 — the
+first capture was a *lake*, not a lane), MAGMA (a broken vertical crack down the right third),
+and MAGMA under `SIGHTLINE_CB=1` — where "**more** legible than in colour" was **wrong** and is
+corrected in the addendum: value legibility is identical (+145.5/−28.9 vs +141.0/−28.9); what CB
+actually buys the vent is HUE SEPARATION from MAGMA's own warm palette.
+
+## THE MEASUREMENT — declared, including the part that is bad
+
+Full round in `docs/measurements/c4/` with the exact command lines. **Base `17934ee`. One lever
+(`SIGHTLINE_BIOMEMECH`), same binary, same snapshot, same slots. 3 rungs x 2 arms x 8 disjoint CRN
+slot sets x greedy+sloppy = 160 campaigns per (rung, arm), 960 per round, twice (uninstrumented +
+instrumented). All 96 chunks printed `OK ... runs=20`; zero `BAD`.**
+
+| rung | A (mechanic ON) | B (pre-C4 board) | delta | ±SE(delta) | L3 of record | floor | verdict |
+|---|---|---|---|---|---|---|---|
+| heat 0 | **43.8%** | 47.5% | −3.7 | 5.6 | 47.5 | 47 | ~~3.2 BELOW the floor~~ **⚠ see addendum: chunk-paired t = −1.07, NOT a measured breach** |
+| heat 2 | **30.0%** | 31.2% | −1.3 | 5.2 | 31.2 | 32 | t = −0.19 |
+| heat 4 | **25.6%** | 23.8% | +1.9 | 4.8 | 23.8 | 22 | t = +0.51 |
+
+**Arm B reproduces the L3 ladder to the decimal on all three rungs.** With the flag off this
+branch is the same game as `17934ee`, so every point of difference in column A is the ground layer
+and nothing else. **None of the three deltas reaches its own standard error** and the ladder stays
+monotone — but heat 0 was sitting *exactly* on its band floor beforehand, so the point estimate
+puts it under. **The wave did not stay in band at heat 0.** It also cannot claim the move is
+noise: the round could not resolve it at n=160, which is not the same statement.
+
+### The cross-tab, and the finding worth keeping
+
+A pooled rung now mixes two populations that are no longer the same game. `Stats` gained a
+read-only `byBiome` block (proven inert: **1304 and 1256 fields diffed on the R0diag pair, zero
+differing**, with only `harness{}` and the new block excluded — the same exclusion W1 makes).
+Pooled across all three rungs, **mission** win rate:
+
+| population | A n | A win | B n | B win | delta | ±SE(delta) |
+|---|---|---|---|---|---|---|
+| MAGMA * | 219 | 80.4% | 220 | 84.5% | −4.2 | 3.6 |
+| TUNDRA * | 218 | 81.2% | 223 | 84.8% | −3.6 | 3.6 |
+| VERDANT * | 212 | 83.5% | 226 | 85.4% | −1.9 | 3.5 |
+| **MECHANICAL (3)** | 649 | **81.7%** | 669 | **84.9%** | **−3.2** | **2.1** |
+| **PAINT (5, control)** | 1070 | 81.1% | 1124 | 80.9% | **+0.3** | 1.7 |
+
+> ~~**A SYMMETRIC RULE IS NOT A NEUTRAL RULE.** All three mechanics point the same way and cost
+> the player 2-4 points of mission win rate on the boards that carry them, while the five paint
+> biomes read **+0.3 ± 1.7** — flat.~~
+> **⚠ SUPERSEDED — see the C4 ADDENDUM below.** Chunk-clustered the DiD is −3.19 ± 1.98,
+> **t = −1.61** (sign test 17/24): a DIRECTION, not a result. "All three point the same way" is a
+> pooling artifact — per rung only MAGMA is consistently negative; TUNDRA flips at h2 and VERDANT
+> at h4. The correct sentence is: *the three mechanical boards moved −3.2 ± 2.1, direction
+> consistent, MAGMA the only biome consistent across rungs, not resolved at n=160.*
+
+*Hypothesised mechanism — **REFUTED in this same archive**, see the addendum:* each rule makes the
+exchange harder to resolve, and a longer exchange favours the side with more bodies. Per-biome
+`avgTurns` says otherwise (MAGMA 6.36 / TUNDRA 6.18 / VERDANT 5.58 against paint 5.36-6.47 — the
+longest-fight biome in the batch has no mechanic). *Caveat on the control:* the paint rows are not clean, because a run mauled on a
+MAGMA mission arrives at the next (paint) mission weaker. They read flat anyway.
+
+**Decision density did not move** at heat 0 (`meaningful-choices/turn` 3.581 -> 3.502,
+`ch/ARMED` 2.314 -> 2.269 — TRUE BAND instrument, not comparable to anything before 2026-08-29).
+W4's law predicted this: the wave shipped a positioning lever *and* a threat lever at once, and
+`CountMeaningfulChoices`' two halves respond with opposite signs.
+
+## The test — and it fails on the pre-feature tree
+
+`SIGHTLINE_BIOMETEST` (`Game.BiomeSelfTest`, wired into `scripts/qa-sweep.sh`). It pins the
+**mechanic's effect** on constructed boards — a cover level, a hit%, a Dijkstra cost, a
+line-of-sight verdict, an HP total, an AI destination — never the presence of a field. Six blocks:
+the stamper (3 mechanical biomes stamp their own kind, **5 paint biomes stamp nothing**,
+determinism per `(seed, mission)`, reserved tiles untouched, and a **density sweep over 24 seeds x
+3 missions per biome** with per-biome floor/ceiling); undergrowth; ice; vents; the AI; the
+off switch.
+
+Two of its assertions found real defects during development, which is the point of writing a test
+that measures rather than one that checks:
+* the **sparsity floor** caught a drift that laid down **two** tiles and a fissure that laid down
+  **one** — the walkers were breaking out of their loop at the board edge instead of reflecting.
+  A mechanic that silently vanishes on some seeds is worse than one that is merely small.
+* the **flood ceiling** caught VERDANT covering 73 of 198 tiles on its first tuning, a board where
+  cover has stopped meaning anything. Hence the hard per-biome tile budget.
+
+The AI leg is the one worth describing, because there is only one honest way to test "the enemy
+understands the new board": run the SAME scene twice, record the tile `Ai.Plan` chose, make **that
+exact tile** a vent, re-plan, and assert it abandons it.
+
+**Proof it can fail** — the same binary with the flag off (`SIGHTLINE_BIOMEMECH=0`, which is the
+pre-C4 board exactly):
+
+```
+BIOMETEST: FAIL (noGround[TUNDRA],noTag[2],noGround[VERDANT],noTag[3],noGround[MAGMA],noTag[7],
+groundTooSparse[TUNDRA]=0,groundTooSparse[VERDANT]=0,groundTooSparse[MAGMA]=0,stampIgnoresMission,
+foliageNoCoverAtRange,foliageDefense=0,foliageDiagonal,foliageFromWest,oddsMissedFoliage,
+highGroundBlindToFoliage,foliageAimDelta=0,iceStep=2,iceReachCost=12,iceLaneNoExtraReach,
+ventDidNotBlockSight,commandingSawThroughVent,ventNotVapor,ventStep=2,ventNoSear=0,
+ventDidNotIgnite,ventParkedNotReignited,aiParkedOnVent,iceGaveTheAiNothing)
+```
+
+29 distinct assertions across all three biomes and both AI legs.
+
+## Gates
+
+* `dotnet build -c Release` — **0 warn / 0 err**.
+* `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0**, 65/65 self-tests PASS (was 64; +BIOMETEST),
+  COVERAGE GAP empty, autoplay x3 clean.
+* `SIGHTLINE_PAIRTEST=1` — **PASS**, both legs byte-identical (`h0 slot0 WIN/WIN 28 turns`,
+  `h4 slot1 LOSE/LOSE 8 turns`). The layer takes zero `Util.Rng` draws, as designed.
+* Autoplay x3 — LOSE m6 / LOSE m3 / WIN m6. No TIMEOUT, no exception.
+
+## What I did NOT do — read this before quoting anything above
+
+1. **Five of the eight biomes are still paint.** STEEL, ARID, ASH, VOID and NEON change nothing.
+   Declared, asserted by BIOMETEST, and deliberate.
+2. ~~**The heat-0 rung is 3.2 points below its band floor**~~ — **⚠ corrected in the addendum**:
+   that is a point estimate crossing a threshold (chunk-paired **t = −1.07**), not a measured
+   breach. What IS resolved is that the cost sits on **mission 1** (`Start` t = −4.53). The wave
+   did not repair either. Levers, all **unpriced**: thinning the layer on m1 (the targeted one the
+   wave never found), the per-biome tile budgets, `Terrain.FoliageMinDist`, `Terrain.VentStepExtra`.
+3. **The mechanism behind the −3.2 mission-level cost is a hypothesis, not a measurement.** "A
+   longer exchange favours the side with more bodies" was not tested.
+4. **The autopilot's vent weight (12) is below fire's (20) even though a vent is PERMANENT and
+   fire gutters out in 3 turns.** That asymmetry is an unpriced defect in the *instrument*. I did
+   not change it after the round and then publish the better of two arms; at n=160 the round could
+   not have resolved 12 from 20 anyway.
+5. **No per-biome ladder.** `byBiome` splits MISSION win rate, not campaign win rate; a
+   campaign-level split would need a biome-forced batch mode that does not exist.
+6. **RECRUIT, heat 6 and heat 8 were not measured.** Three rungs at n=160/arm was the budget.
+7. **The mechanics are not taught by the tutorial/drill.** The drill is pinned to STEEL, so a new
+   player meets a mechanic for the first time on a live mission with only the briefing card, the
+   banner and the codex. W5's onboarding work is the right home for that and this wave did not
+   touch it.
+8. ~~**The ambient particle layer was not re-cut.**~~ — **⚠ the wrong layer.** The reviewer
+   measured it: the ambient particles are round motes and are harmless. The real collision was
+   TUNDRA's per-tile Snow SIGNATURE — paired pale diagonal hairlines, the drift's own fracture
+   motif at ~half the alpha, on ~55% of floor tiles — which this wave's skip only suppressed *on*
+   mechanical tiles. Fixed in the addendum (M3), board-wide, like the MAGMA vein.
+9. **One new wall-clock read in `Renderer.cs`** (shared by `DrawGround` and `DrawVentSteam`), so
+   CLAUDE.md's count of 45 is now 46. Screenshots were never byte-stable; `PAIRTEST` is the
+   determinism gate and it is green.
+10. **`GroundKind` is not persisted and that is load-bearing.** If a future wave ever serialises a
+    Grid mid-mission, this enum joins the append-only set and needs a SAVETEST fingerprint.
+
+## C4 ADDENDUM — TWO INDEPENDENT REVIEWS, EIGHT + FOUR FIXES (2026-08-30)
+
+Both reviewers passed the engineering (0/0, SWEEP-EXIT=0, PAIRTEST byte-identical, no save-format
+break, no unwinnable board in 800 stamped missions, no stall in 17 forced-biome autoplays, no
+hot-path cost) and both sent the wave back on **claims and coverage**. Everything below is either a
+correction to something C4 asserted, or a defect its own tests could not see.
+
+### THE BIG ONE — the cost is on MISSION 1, and C4 never asked where
+
+`byNodeKind` has been in every chunk of this archive since W1 and C4 never published it. `Start` is
+mission 1 — exactly ONE per campaign, so it carries no within-campaign clustering, which is why it
+resolves when the pooled rung cannot. Chunk-paired over all 24 chunks (reproduced from C4's own
+archive with the committed `aggregate_nodekind.py`):
+
+| node kind | A | B | paired Δ | SE | **t** | n/arm |
+|---|---|---|---|---|---|---|
+| **Start** (m1) | **91.7%** | **96.0%** | **−4.37** | **0.97** | **−4.53** | 480 |
+| Combat | 78.2% | 77.5% | +1.13 | 1.89 | +0.60 | ~490 |
+| Elite | 72.3% | 77.0% | −3.98 | 3.43 | −1.16 | ~240 |
+| Supply | 89.2% | 89.0% | −0.27 | 1.55 | −0.17 | ~280 |
+| Boss | 66.5% | 64.3% | +4.10 | 4.31 | +0.95 | ~245 |
+
+h0 alone: `Start` −4.37, SE 1.75, **t = −2.50**. `byObjective` agrees — **Eliminate −3.55 ± 1.12,
+t = −3.16**, and Eliminate is m1's objective in the baseline rotation.
+
+> **The ground layer's cost is concentrated on the opening mission.** That is the front-loaded
+> anxiety `DESIGN.md` §3.D forbids and the exact failure X2's `Mission.OpenerTrim` exists to
+> prevent. C4 declared "h0 is under the floor" and never asked WHERE. It also points at a cheaper,
+> more targeted lever than any of the three the wave named: **suppress or thin the layer on
+> mission 1.** Unpriced; ROADMAP.
+
+### THE CLAIMS C4 GOT WRONG, corrected at every site
+
+1. **"A SYMMETRIC RULE IS NOT A NEUTRAL RULE" was bold in DEVLOG, ROADMAP *and* CLAUDE.md, and it
+   is a direction, not a result.** Chunk-clustered DiD **−3.19 ± 1.98, t = −1.61**, sign test
+   17/24. And "all three point the same way" is a POOLING ARTIFACT: per rung only MAGMA is
+   consistently negative; TUNDRA flips at h2 (+1.9), VERDANT at h4 (+5.7), and individually both
+   are indistinguishable from zero. Restated everywhere as: *the three mechanical boards moved
+   −3.2 ± 2.1, direction consistent, MAGMA the only biome consistent across rungs, not resolved at
+   n=160.*
+2. **"3.2 BELOW the floor" was a bolded verdict on a point estimate.** Chunk-paired h0 is
+   **t = −1.07**. The README's own "the round could not resolve it at n=160" was right; the verdict
+   column was not. The table now prints the paired SE and t instead of a verdict.
+3. **The hypothesised mechanism is REFUTED in C4's own archive.** It proposed "a longer exchange
+   favours the side with more bodies". Per-biome `avgTurns`, instrumented A arm: MAGMA 6.36,
+   TUNDRA 6.18, VERDANT 5.58 — against paint biomes 5.36 (STEEL) to **6.47 (VOID)**. The
+   longest-fight biome in the batch has no mechanic. Whatever is happening, it is not that.
+4. **"Every tile is derived from (MapSeed, mission)" is false.** `StampBiomeGround` also passes a
+   `reserved` set built from unit and fixture positions, which come out of `Util.Rng` in
+   `Mission.Build`; holding (MapSeed=424242, mission=3) fixed and varying only the ambient stream
+   gives 10-11 distinct boards. **Nothing depends on the stronger claim** — zero draws is what CRN
+   needs and that is independently proven — but the sentence was wrong in `Terrain.cs`, `Grid.cs`,
+   `Game.cs`, `CLAUDE.md` and `FEATURES.md`. All five now say the true half: `Terrain.Stamp` is
+   pure and takes zero draws; the BOARD keys on the reserved set too.
+5. **The colourblind claim was refuted by measurement.** Seam-vs-floor luminance on the same vent
+   tile and seed: colour **+145.5 / −28.9**, `SIGHTLINE_CB=1` **+141.0 / −28.9** — value legibility
+   is identical and marginally *lower* in CB, so "more legible in CB" was wrong. What is true is
+   **hue separation**: in colour the seam sits inside MAGMA's own warm palette near the barrel and
+   cache amber, while the CB cream is a hue the room does not otherwise contain. VERDANT is the
+   biome that genuinely improves under CB. The code comment also cited a CB advantage that no
+   longer exists (the per-tile vein giving up orange) — the vein is now suppressed outright.
+6. **`docs/measurements/c4/run_chunk.sh` did not exist.** The README promised the round was
+   re-runnable and a bare `run_chunk.sh` pattern at `.gitignore:57` had silently swallowed it —
+   **the third consecutive wave hit by the same line.** Committed, and `.gitignore` now carries
+   `!docs/measurements/**/run_chunk.sh` (plus the four sibling patterns) so an archive's runner can
+   never be dropped again.
+
+### THE TESTS THAT DID NOT TEST WHAT THEY SAID
+
+**The AI leg was a COMPOSITE, and C4 singled it out as the opposite.** The reviewer mutated
+`Ai.cs`'s vent weight one value at a time: `−34 → 0` **PASS**, `−34 → −1` **PASS**, `−34 → +200`
+(inverted incentive!) **PASS**. It only failed when `VentStepExtra` was zeroed too — so
+`Grid.CostMap`'s toll was carrying the whole result, with `Ai.Plan`'s `Util.RandRange(0,3)`
+tie-break jitter as a further confound. There are now **two** legs with two different claims:
+
+* **(a) composite** — the behavioural claim, which is real: with everything the game ships, nothing
+  lets a hostile end its move on hot ground. Jitter now pinned with `Util.Reseed` on both plans, so
+  a "different tile" cannot be noise.
+* **(a2) isolated** — `Terrain.VentStepExtra` temporarily zeroed so CostMap gives no signal, jitter
+  pinned, and the tile asserted still REACHABLE at the same cost (otherwise "declined" is
+  indistinguishable from "could not get there"). A single vent changes no sightline that starts or
+  ends on it — `HasLineOfSight` tests neither endpoint — so the only thing left that can move the
+  planner is the term in `Ai.cs`.
+
+Mutation results after the fix — all four now fail, and this is the proof that matters:
+
+| mutation | before | after |
+|---|---|---|
+| `Ai.cs` vent weight `−34 → 0` | PASS | **FAIL** (`aiTermDoesNothing`) |
+| `Ai.cs` vent weight `−34 → +200` | PASS | **FAIL** (`aiTermDoesNothing`) |
+| `Terrain.VentStepExtra 6 → 7` | PASS | **FAIL** (`ventStep=9,ventUncrossable=9`) |
+| `Terrain.VentBurnTurns 2 → 1` | PASS | **FAIL** (`ventBurnTurns=1,ventBurnConst=1`) |
+
+Two of those were **self-referential assertions** — `vc[9,5] != 2 + Terrain.VentStepExtra` and
+`ventBurn != Terrain.VentBurnTurns` pass for *any* value of the constant. Both now pin the LITERAL
+as well as the constant: the literal catches a changed constant, the constant catches a code path
+that ignores it and hardcodes a number. `VentStepExtra = 7` mattered particularly: it makes a vent
+**uncrossable by every unit in the game**, silently turning the fissure into a wall, and the test
+waved it through. A new invariant leg asserts `2 + VentStepExtra <= 8` and says why.
+`aiEndedOnAVent` was redundant with `aiParkedOnVent` (one vent tile in the scene) and is dropped.
+**`Terrain.VentBurnTurns` was dead code** — `TickHazards` hardcoded `2` — so the vent now re-ignites
+for its own constant. Both tuning numbers became `static` rather than `const`: a `const` folds at
+compile time, which made the literal pin *unreachable code* and (caught by the 0-warning build) it
+could never have failed.
+
+**The density guard measured a board that never occurs in play.** The sweep ran on `OpenGrid()` —
+every tile floor, `reserved = null`. On real `SetupMission` boards the layer fell below C4's own
+floor on **43/200 MAGMA, 25/200 TUNDRA, 21/200 VERDANT**, MAGMA's minimum was **1 vent tile**, and
+13/200 boards had ≤4 — i.e. C4's own stated failure ("a mechanic that silently vanishes on some
+seeds is worse than one that is merely small") was still happening on ~1 MAGMA mission in 5, while
+the budgets 44/34/24 barely bound anything. The sweep now builds **real missions** through the real
+`SetupMission` with the biome pinned by `SIGHTLINE_FORCEBIOME`, and pins mean, min, flood and a
+thin-board share. The open-grid bound is kept as a separate, weaker, clearly-scoped claim about the
+stamper's own ceiling. **BIOMETEST prints the measured densities in its PASS line every sweep**, so
+a comment can never drift from the shipped value again — which is exactly how this defect survived.
+
+### THE FOUR DESIGN/LEGIBILITY MUST-FIXES
+
+**M1 — MECHANICAL GROUND ON A PLATEAU RENDERED AS ZERO PIXELS.** `Terrain.Free` gated on
+`grid.IsFloor`, which is `Tiles==Floor && !Barrel` and has never looked at `Height`. `DrawGround`
+runs before `DrawElevation`, which paints the plateau top with a **fully opaque** rect offset by
+`-lift`. So fern and ice on raised ground were invisible: a soldier could stand on raised
+undergrowth and take omnidirectional low cover **with no mark on the board at all**, and a raised
+vent kept only its steam, drawn at the un-lifted tile centre. Two of ~nine vents on the
+photographed board. Fixed at the SOURCE — the layer never stamps on `Height > 0` — because a
+plateau already carries its own rule (high ground sees over low cover) and stacking a second one on
+it is muddier than keeping them apart. **BIOMETEST structurally could not see this**: `OpenGrid()`
+sets `Height = 0` everywhere. There is now a direct leg that builds a plateau and asserts nothing
+lands on it, plus a `groundOnPlateau` assertion on the real-board sweep.
+
+**M2 — THE SHIPPED DENSITY WAS NOT THE STATED DENSITY.** `Terrain.cs` claimed VERDANT targeted
+"~18-22% of the 198-tile board"; C4's own `byBiome.avgGroundTiles` over 24 instrumented chunks said
+**12.1%** (23.99 tiles). MAGMA's 9.66 tiles across *two* walkers is ~4.8 per crack — on some seeds a
+scatter of singles rather than a line, which makes the fords story true on some boards and
+meaningless on others; and a captured VERDANT "patch" was five separate single tiles, contradicting
+this file's own rationale that a patch "has to be several tiles wide or it is just a decorated
+tile". Re-tuned against real boards (more patches, more lobes, larger lobes; the fissure's
+*deliberate* ford rate cut 18% → 8% because the involuntary gaps from cover already supply them,
+and the walk lengthened). Measured after, on real boards: **VERDANT 35.0 (19-44) = 17.7%, TUNDRA
+18.3 (10-34) = 9.2%, MAGMA 13.0 (7-20) = 6.6%** — MAGMA's real minimum goes 1 → 7. The comment now
+states the measured shipped numbers and BIOMETEST prints them.
+
+**M3 — C4 BROKE ITS OWN NEW RULE, ON ITS OWN BIOME.** The wave's headline rule was "when a biome's
+mechanic is live, the biome's decorative version of that motif is retired" — and TUNDRA's Snow
+signature draws **paired pale diagonal hairlines** (210,232,248 @0.18) on ~55% of floor tiles while
+the drift's mechanical fracture is **a pale diagonal hairline** (226,244,255 @0.34). Identical
+motif, ~2× alpha apart. C4's skip only stopped the double-draw *on* a mechanical tile and left the
+decoy everywhere else. Now suppressed board-wide when `AnyIce`, exactly as the MAGMA vein is
+suppressed when `AnyVent`. Two lesser collisions fixed with it: an **isolated ice tile** drew all
+four rim edges — a complete bright box on the tile grid, which is the game's cursor/selection
+language — and now gives up its outline (a rim traces a LANE; one tile has no lane); and the fern
+rim wore **(142,210,130)**, sitting on `Pal.Good` (74,222,128), the hue this palette reserves for
+"bonus / available action" against §3.H's one-accent-one-job — pulled to a desaturated olive
+(178,198,108) with the value contrast unchanged. *And the layer C4 apologised for in its own "what
+I did not do" — the ambient particles — was the wrong one: those are round motes and are harmless.*
+
+**M4 — TWO MODES NEVER ANNOUNCED THE RULE.** `BeginBriefing` returns early for anything but
+CAMPAIGN, so SKIRMISH, DAILY, LAST STAND and TRAINING stamp the ground layer and never compose the
+card that states it. The LAST STAND banner had no `BiomeMechTag()` at all — endless stamps the
+ground and announced it nowhere — and the campaign **FINALE** banner dropped the tag too. Both
+banners patched; the non-campaign modes now get the one-sentence rule on the banner's SUB-line,
+the surface they already have, and only when nothing else has claimed it.
+
+### Smaller items, all declared
+
+* **Double sear.** `OnUnitEnteredTile` ran the fire block and the vent block as two unconditional
+  `if`s, so a tile that was both on fire and a vent charged `BurnDamage` **twice** in one step (a
+  grenade or barrel can light a vent tile: `LightFire` only requires Floor, and a vent is floor).
+  One sear per step now, fire named first. The round was measured WITH the double charge, so its
+  published cost is an upper bound; the fix only ever reduces damage. Pinned by a `doubleSear` leg.
+* **The intel cache is reserved at radius 0** while the doc comment said "all with their rings".
+  Comment corrected rather than the code: the cache is an optional pickup, not a win condition, and
+  a soldier detouring for it may reasonably pay for the ground around it.
+* **No `avoidVent` leash pass.** Fire gets a two-pass VIP leash (an `avoidFire` pass first); vents
+  get score penalties only, and a penalty is not a veto, so the Escort asset can be routed through
+  a vent and seared. C4's archive shows no measurable harm (Escort −0.74 ± 1.99) but "mirroring the
+  existing fire-route term" understated the asymmetry. Recorded, unrepaired.
+* **"The gaps are the fords" is overstated, and there is a mobility cliff under it.** Treating
+  vents as walls, **47/200 (23.5%) of MAGMA boards** have an objective fixture or hostile with no
+  vent-free route — on a quarter of MAGMA missions crossing is *mandatory*. And a vent step costs
+  **8 half-tiles**, exactly a full-mobility soldier's entire single-action walk, so a **wounded**
+  soldier (budget 6) cannot enter one at all; 15 tiles across 200 boards have every walkable
+  neighbour a vent, where a wounded soldier can never move again (it can still shoot, so no stall).
+  The codex now states the real number instead of "costs extra movement".
+* **The CODEX documented three mechanics that did not exist** when `SIGHTLINE_BIOMEMECH=0` — the
+  entries were added unconditionally. Gated. A fourth entry now names the five rooms that have NO
+  ground rule, because a player could not otherwise tell "no rule" from "undocumented".
+* **The briefing card's rule line looked exactly like the three flavour lines** and sat last. It
+  gets a `GROUND — ` prefix and the em dash its neighbours use.
+* **No screenshot hook.** Every comparable visual feature ships one; judging C4 meant hunting
+  seeds. `SIGHTLINE_BIOMESHOT` added (pair with `SIGHTLINE_FORCEBIOME` + `SIGHTLINE_SHOT=760`).
+* **CLAUDE.md's clock-read count was fixed in one place and stale in another** (line 393 still said
+  45). Both now say 46.
+* **Flagged for C5, not mine:** `Hud.DrawThreatCard` draws with raw `Raylib.DrawTextEx` at fixed
+  12/14px, bypassing `Cfg.Text` and the TEXT SIZE setting, which CLAUDE.md forbids explicitly.
+  Pre-existing — W10's FITTEST does not cover this card — but C4 put its longest, most rule-dense
+  strings on it.
+
+### What this addendum does NOT do
+
+1. **It does not re-measure the round.** Instructed not to, and the numbers all reproduced exactly.
+   The consequence is stated plainly and in three places: **the shipped layer is no longer the
+   measured layer** (M1 moved it off plateaus, M2 raised density), so `docs/measurements/c4/` is a
+   pre-fix price and C5 owes it a re-measure before anyone quotes it as the cost of what ships.
+2. **It does not repair the mission-1 concentration**, the mobility cliff, the mandatory-crossing
+   share, or the leash asymmetry. All four are in ROADMAP with their numbers.
+3. **It does not give the five paint biomes a mechanic.** Still declared, still asserted.

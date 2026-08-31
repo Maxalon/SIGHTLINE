@@ -23,11 +23,18 @@ public struct ShotOdds
     public int CritChance;  // 0..100
     public int DmgMin, DmgMax;
     public int CoverLevel;  // 0/1/2
+    public int CoverDef;    // C2: the aim actually subtracted for that cover (0/10/20/40 - halved when Partial,
+                            // 0 when seesOver/DRONE/Syndicate negates it, 40 for a SHIELD arc). Recorded so a
+                            // caller can reconstruct the SAME shot with the cover taken away without
+                            // re-deriving the cover model - see Combat.AsIfExposed.
     public bool Flanked;
     public bool Hunkered;
     public bool HighGround;  // attacker fires from raised terrain onto a lower foe
     public bool SeesOver;    // high ground negates the target's LOW cover
     public bool Partial;     // diagonal-at-range: target only partly obscured (half cover)
+    public bool Foliage;     // C4/VERDANT: the target's cover is UNDERGROWTH — omnidirectional, and
+                             // gone the moment you close inside Terrain.FoliageMinDist. The HUD says
+                             // so, because "LOW COVER" on a tile with no block beside it is a lie.
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
     public bool Ambush;      // attacker fired from concealment (one-shot bonus)
     public bool ExposedFire; // target fired last turn and stayed put — exposed by fire (HORIZON W1)
@@ -455,6 +462,10 @@ public static class Combat
             DmgMin = a.Weapon.DmgMin,
             DmgMax = a.Weapon.DmgMax,
             CoverLevel = coverLevel,
+            CoverDef = coverDef,          // C2: the exact subtraction above — see AsIfExposed
+            // C4: only true when the cover the defender is ACTUALLY getting is the fern mat — a
+            // shield arc or a see-over both clear it below/above, so it can never mislabel a block.
+            Foliage = cover.Foliage && !seesOver && coverLevel == 1,
             Flanked = flanked,
             Hunkered = d.Hunkered,
             HighGround = highGround,
@@ -479,6 +490,34 @@ public static class Combat
             DmgMinEff  = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMin, crit: false, telegraph: false)),
             DmgMaxEff  = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMax, crit: false, telegraph: false)),
         };
+    }
+
+    /// C2 THE OPPONENT DECLINES — the SAME shot with the defender's COVER taken away.
+    ///
+    /// Why it exists: an enemy planner deciding whether a shot is worth its action needs a
+    /// reference to judge it against, and the honest reference is "what would this exact shot be
+    /// worth if that soldier were caught in the open?" — because that is precisely what an
+    /// overwatch reaction catches (the reaction resolves on every tile ENTERED, and a soldier
+    /// crossing between two cover blocks is uncovered on the way). The ratio of the two prices a
+    /// shot RELATIVE to the unit's own ceiling, which is the only way a weak gun or an armoured
+    /// target doesn't read as "a bad shot": both legs move together and the ratio stays ~1.
+    ///
+    /// It is a RECONSTRUCTION, not a re-derivation: `CoverDef` is the exact aim ComputeOdds
+    /// subtracted, and +18 is the exposed-target crit bonus from the same function, so this
+    /// cannot drift from the cover model as long as both live here. SIGHTLINE_DECLINETEST
+    /// ground-truths it against a real ComputeOdds on a physically uncovered board.
+    ///
+    /// HUNKER IS DELIBERATELY NOT STRIPPED. A hunkered soldier is one that chose NOT to move, so
+    /// holding a lane against it buys nothing — the reference must stay pessimistic there.
+    /// PURE: struct copy + arithmetic, no RNG, no mutation.
+    public static ShotOdds AsIfExposed(in ShotOdds o)
+    {
+        var r = o;
+        if (o.CoverLevel == 0 && o.CoverDef == 0) return r;      // already exposed: identity
+        r.HitChance = Util.Clamp(o.HitChance + o.CoverDef, 3, 95);
+        r.CritChance = Util.Clamp(o.CritChance + (o.CoverLevel != 0 && !o.Hunkered ? 18 : 0), 0, 100);
+        r.CoverLevel = 0; r.CoverDef = 0; r.Flanked = false; r.Partial = false;
+        return r;
     }
 
     /// True when attacker `a` shooting defender `d` is a CROSSFIRE: at least one OTHER living

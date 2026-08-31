@@ -25,6 +25,20 @@ public class EnemyPlan
     public bool Reload;                 // W2: the gun is empty — spend the action changing the mag
     public bool IdleRepair;             // W2 (harness accounting): this plan's action exists only
                                         // because of the wave's terminal else — dash or dig-in.
+    // ── C2 THE OPPONENT DECLINES ─────────────────────────────────────────────────────────
+    // The shot that was ON THE TABLE from the tile this plan chose, whether or not it is taken.
+    // ShotHit is its hit chance (-1 = the chosen tile had no shot at all); ShotExp is the
+    // graze/armor-aware expected damage of that same shot (Combat.ExpectedDamage). Declined is
+    // set only when the planner had that shot and deliberately dropped it for a better use of
+    // the action. Read by Game.UpdateEnemy for the Stats decision mix and by DECLINETEST; the
+    // pair is computed once per plan, never per reachable tile.
+    public int ShotHit = -1;
+    public float ShotExp;
+    public bool Declined;
+    // C2: this decline was taken BECAUSE the unit is under several guns, so the action it frees
+    // should buy SURVIVAL (dig in) rather than a lane. Read by the no-shot fallback below, which
+    // otherwise always prefers overwatch to hunker.
+    public bool DeclineDigIn;
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -33,6 +47,94 @@ public static class Ai
 {
     public const int HealRange = 4;    // tiles a medic can mend across
     public const int HealAmount = 4;   // HP restored per heal
+
+    // ── C2 THE OPPONENT DECLINES — the prices ────────────────────────────────────────────
+    // SHOTSEAT: what a line of fire is worth on its own, before any expectation of hitting.
+    // Deliberately ~one level of cover (cover.Level * 18), because that is the trade the term
+    // has to arbitrate: "stand in the open with a shot" vs "stand behind that wall without
+    // one". The pre-C2 value of this seat was 100, against terrain terms bounded under ~64.
+    //
+    // The two BARS are RATIOS, not absolute damage, and the first draft of this wave got that
+    // wrong in a way worth recording. An absolute expected-damage bar (1.45 / 0.90) declined
+    // 35 shots at 80%+ hit chance in a 20-run probe, because Combat.ExpectedDamage is
+    // armour-aware: a popgun against a hardened soldier is ~1.0 expected damage at ANY hit
+    // chance. Declining a clean 90% shot does not read as a smarter opponent, it reads as a
+    // broken one — and it is also wrong on the merits, because that unit's ALTERNATIVE is worth
+    // ~1.0 too. The bar has to move with the unit's own ceiling.
+    //
+    // So the shot is priced against Combat.AsIfExposed — the SAME shot with the defender's
+    // cover taken away, which is what an overwatch reaction actually catches (the reaction
+    // resolves on every tile ENTERED, and a soldier crossing between cover blocks is uncovered
+    // on the way). ratio = E[dmg now] / E[dmg if they were caught in the open], in (0, 1].
+    //   WATCH ratio 0.45 (the unit can hold a lane from this tile): the higher of the two, and
+    //   the ONE number in this block that is a judgement rather than a measurement. What the
+    //   flywheel can see says LOWER: a held enemy lane was measured firing 24-27% of the time
+    //   (n=457/461 lanes, the maximal-decline diagnostic in docs/measurements/c2/), which times
+    //   the reaction's -10 aim mod makes a lane worth ~0.20 of the open shot. The excess is the
+    //   part the flywheel is structurally blind to — Game.Autopilot.TileExposure carries +18 for
+    //   an enemy BRACE lane and NOTHING for an ordinary enemy overwatch, so the bot walks into
+    //   enemy kill-zones and the AREA-DENIAL half of a lane cannot be priced. 0.45 is roughly
+    //   twice the visible value and no more; it is declared, not hidden, and the ladder is what
+    //   prices whether it was affordable (it moved five of six rungs by one discordant pair).
+    //   DIG ratio 0.30 (in cover, no lane): lower. Hunkering buys -25 to be hit and no crit; it
+    //   is real, but it is damage DENIED, not damage dealt, so it displaces less.
+    // With NEITHER available the shot is always taken — there is nothing to prefer to it.
+    //
+    // ABSKEEP 3.00 is the feel guard the ratio alone does not give: a shot already worth this
+    // much expected damage is taken whatever the ratio says, so a genuinely damaging shot is
+    // never passed up. It sits just above the pre-wave 60-79% band's measured mean (2.51), i.e.
+    // above "a solid shot", and it is inert at the shipped ratios (a 0.45-ratio shot is weak by
+    // construction) — it is there so that raising the ratios later cannot produce an opponent
+    // that passes up real damage.
+    //
+    // THE GUNS ON ME. Firing and then standing still is not free: Combat's EXPOSED BY FIRE rule
+    // (ExposedFireAim/Crit, +12/+12, symmetric for both teams) hands every soldier that can see
+    // this unit a sharper shot at it until it moves again. Holding a lane or digging in does not.
+    // So the more soldiers already have a firing solution on the tile the unit is standing on,
+    // the more a MARGINAL shot costs it — and the bar it has to clear rises with them. Capped at
+    // three guns; one soldier is a duel, three is a kill box, and past three it saturates.
+    internal const float DeclineThreatScale = 0.20f;
+    internal const int DeclineThreatCap = 3;
+    internal const float ShotSeat = 18f;
+    internal const float DeclineWatchRatio = 0.45f;
+    internal const float DeclineDigRatio = 0.30f;
+    internal const float DeclineAbsKeep = 3.00f;
+    // A killing blow is worth more than its damage number — it takes a gun off the board for
+    // the rest of the fight — so a shot in the finish band is pressed at a discount.
+    internal const float FinishPress = 1.6f;
+
+    /// C2: what a line of fire from this tile is worth to the per-tile scorer. NOT an expected
+    /// value despite the shape — `bestHit` already contains `hitPct`, so this expands to
+    /// `ShotSeat + hitPct^2/100 + bonuses*hitPct/100`. See the call site for why the squaring is
+    /// deliberate. Extracted so
+    /// SIGHTLINE_DECLINETEST can pin the arithmetic of the one line this wave changed, on both
+    /// sides of its dial, without reconstructing a whole board — the pre-C2 branch is the literal
+    /// constant it replaced.
+    ///   `bestHit` — the winning target's CHOICE value from this tile (hit chance plus what
+    ///               connecting is worth: exposure, the finish band, focus, crossfire).
+    ///   `hitPct`  — that same target's REAL hit chance from this tile.
+    internal static float ShotTileValue(float bestHit, int hitPct)
+        => Game.AiDecline
+             ? ShotSeat + bestHit * (Util.Clamp(hitPct, 0, 100) / 100f)
+             : 100 + bestHit;                                        // the pre-C2 constant
+
+    /// C2: the archetypes that never decline, because declining is not what they ARE. The
+    /// rushers (BERSERKER/HOUND/STRIKER/DRONE and the Legion BREAKER's second rage) are the
+    /// game's pressure valve — Ai.cs already gives them a 3.0-3.6 advance weight and an
+    /// overwatch discount so they eat reaction fire to close. An opponent whose chargers
+    /// suddenly took cover would not read as smarter, it would read as broken, and it would
+    /// remove the tempo the patient archetypes are measured against.
+    ///
+    /// ELITE IS DELIBERATELY NOT ON THIS LIST, and the review was right that the rationale above
+    /// describes it (advW 3.4, the same owEnd 9f discount, never broken off). The exclusion is a
+    /// judgement, not an oversight: an ELITE is a BOSS, it is the archetype most likely to survive
+    /// long enough for a held lane to pay, and a boss that visibly picks its moment reads as
+    /// competent where a charger doing the same reads as broken. It is also the one body whose
+    /// damage output most rewards waiting for a better shot. If a later wave wants chargers and
+    /// bosses to behave alike, change the SET — but change this comment with it.
+    static bool NeverDeclines(Unit e)
+        => e.RagesTwice || e.Cls == "BERSERKER" || e.Cls == "HOUND"
+        || e.Cls == "STRIKER" || e.Cls == "DRONE";
 
     // W6b — COORDINATION TIER (0..2): the apex of the Heat ladder scales by PLAYING BETTER,
     // not just by piling stats onto the saturating StatDelta/88-aim clamp. Published
@@ -97,6 +199,7 @@ public static class Ai
         int bestCost = 0;
         float bestScore = float.NegativeInfinity;
         Unit bestShotTarget = null;
+        int bestShotHit = 0;             // C2: hit chance of bestShotTarget from bestTile
         // W2 THE OPPONENT ACTS — the best FULL-BUDGET (two-action) destination, tracked by the same
         // per-tile scorer in the same pass. It is the terminal else of the no-shot fallback: when a
         // unit has a spare action and nothing to spend it on, it spends it on GROUND. Tracking it
@@ -416,6 +519,7 @@ public static class Ai
             // best shootable target from this tile (must keep an action to fire)
             Unit shoot = null;
             float bestHit = -1f;
+            int shootHit = 0;            // C2: the REAL hit chance of `shoot` from this tile
             // W2 THE OPPONENT ACTS — the AMMO GATE. `Ammo` appeared in this file at exactly two
             // lines (the PIKEMAN plant gate and the overwatch fallback), NEITHER of them here, so a
             // hostile with an empty weapon still planned a ShootTarget. A non-null ShootTarget then
@@ -523,7 +627,7 @@ public static class Ai
                         val += Util.Clamp((12 - p.Hp) * 0.25f, 0f, 3f);
                     }
 
-                    if (val > bestHit) { bestHit = val; shoot = p; }
+                    if (val > bestHit) { bestHit = val; shoot = p; shootHit = odds.HitChance; }
                 }
             }
 
@@ -533,13 +637,47 @@ public static class Ai
             float score = 0;
             // UNDERTOW W3: a ROUTING unit is panicking — a shot is a minor opportunistic bonus, NOT "king",
             // so the flee/distance terms below dominate and it actually breaks contact (it may still take a
-            // wild potshot if one lines up). A steady unit values having a shot above all else.
-            if (shoot != null) score += routing ? bestHit * 0.25f : 100 + bestHit;
+            // wild potshot if one lines up).
+            //
+            // C2 THE OPPONENT DECLINES — the shot competes on its MERITS instead of on a constant.
+            // The pre-C2 term was `100 + bestHit`, and every terrain term in this same function is
+            // bounded well under ~64 (cover 36, height ~28, flank -25, fire -60, overwatch -26).
+            // A flat +100 for "a shot exists" therefore DOMINATED the whole scorer: any tile with a
+            // 3% shot outranked any tile without one, so the opponent always shot if it could see
+            // anything, from anywhere, at any odds. It never declined, never repositioned for a
+            // better angle, and its overwatch branch was measurably dead.
+            //
+            // The replacement weights the shot by the probability of actually connecting. Say what
+            // that arithmetic IS, because "expected value" is not literally true and an earlier
+            // version of this comment claimed it: `bestHit` is `odds.HitChance + bonuses`, so
+            // `ShotSeat + bestHit * hit/100` expands to
+            //
+            //     18  +  hit^2/100  +  bonuses * hit/100
+            //
+            // — a hit-SQUARED term, not an expectation. A true EV term would weight only the
+            // consequence of connecting (`bonuses`) by `hit`, and would not re-multiply the hit
+            // chance by itself. The squaring is deliberate and kept: it makes the planner more
+            // hit-greedy than an EV maximiser, which is what a fight this short wants (an EV
+            // maximiser is indifferent between one 80% shot and four 20% shots; a soldier's HP bar
+            // is not). But it is a WEIGHTING, not an expectation, and the honest name is the
+            // arithmetic. `ShotSeat` is the option value of holding a line of fire at all, priced
+            // at roughly one level of cover. Target SELECTION is untouched: the loop above still
+            // ranks targets by `val` exactly as before.
+            if (shoot != null)
+                score += routing ? bestHit * 0.25f : ShotTileValue(bestHit, shootHit);
             score += cover.Level * 18;                           // value cover
             score += g.Grid.HeightAt(tx, ty) * 14;               // seize the high ground
             if (cover.Flanked) score -= 25;
             score -= actionsToReach * 6;                         // prefer cheaper moves slightly
             if (g.Grid.IsFire(tx, ty)) score -= 60;              // never voluntarily stand in fire (hazards)
+            // C4 / MAGMA — the enemy must not park on a thermal vent. The penalty is deliberately
+            // SMALLER than fire's 60 and smaller than the 100+bestHit a shot is worth: a vent is a
+            // price, not a wall, so a hostile that can only reach a killing angle by standing on
+            // the crack will still take it and eat the burn. That is the same bet the player is
+            // offered. (The MOVEMENT half of the toll is already in Grid.CostMap, so `reach` here
+            // has priced the crossing before this loop ever sees the tile; this term is only about
+            // ENDING the move there.)
+            if (g.Grid.IsVent(tx, ty)) score -= 34;
             // wariness of an explosive barrel the squad could shoot to catch it in the blast
             for (int bdx = -1; bdx <= 1; bdx++)
                 for (int bdy = -1; bdy <= 1; bdy++)
@@ -756,6 +894,7 @@ public static class Ai
                 bestTile = (tx, ty);
                 bestCost = c;
                 bestShotTarget = shoot;
+                bestShotHit = shootHit;
             }
             // W2: best tile that costs BOTH actions to reach (same score, no re-scoring, no new draw).
             if (actionsToReach >= 2 && score > bestDashScore) { bestDashScore = score; bestDash = (tx, ty); }
@@ -769,6 +908,22 @@ public static class Ai
         }
 
         plan.ShootTarget = bestShotTarget;
+
+        // C2: the shot ON THE TABLE from the tile this plan chose — captured here, BEFORE the
+        // sap/grenade/item/shove blocks below can claim the action, so the decision mix can tell
+        // "the opponent declined it" from "something better came up". UNCONDITIONAL: one extra
+        // ComputeOdds + ExpectedDamage per PLAN (the tile loop above already runs hundreds), and
+        // gating it on the dial made the pre-C2 arm report "no shot on the table" for a shot that
+        // was plainly there. PURE: ComputeOdds has been side-effect free since W9 and
+        // ExpectedDamage takes no RNG draw, so this cannot move a CRN-paired world (proven by the
+        // C2 R0diag chunks, which diff 2750 aggregate fields to empty).
+        ShotOdds shotOdds = default;     // the odds behind ShotHit/ShotExp; reused by the gate below
+        if (bestShotTarget != null)
+        {
+            shotOdds = OddsFrom(g, e, bestTile.x, bestTile.y, bestShotTarget);
+            plan.ShotHit = bestShotHit;
+            plan.ShotExp = Combat.ExpectedDamage(bestShotTarget, shotOdds);
+        }
 
         // COORDINATION 2 (feedback): telegraph a genuine fall-back — the unit was low, found
         // no worthwhile shot, and chose to withdraw to a new tile. Pop it so the player reads
@@ -936,6 +1091,58 @@ public static class Ai
             }
         }
 
+        // ── C2 THE OPPONENT DECLINES — the decision itself ───────────────────────────────
+        // Everything above chose WHERE to stand. This chooses whether the shot from there is
+        // worth the action, judged against what else the action can buy from that same tile.
+        //
+        // Dropping ShootTarget hands the unit straight to the (W2-hardened) fallback block
+        // below, which ALWAYS assigns overwatch / hunker / reload / dash. So a decline can
+        // never produce a dead turn: the no-idle invariant is inherited structurally rather
+        // than re-argued here, and SIGHTLINE_AIIDLETEST still covers it.
+        //
+        // Ordered AFTER the sap/grenade/item/shove blocks on purpose: those already price
+        // themselves against the real shot (the grenade block reads its hit chance), so they
+        // must see the shot the planner actually had, not a declined null.
+        if (Game.AiDecline && plan.ShootTarget != null && !routing
+            && !plan.Grenade && plan.SapTile == null && !plan.UseItem && plan.ShoveTarget == null
+            && plan.RelockTile == null && plan.HealTarget == null && !plan.Brace
+            && plan.SiegeCharge == null && plan.MoveActions < 2 && !NeverDeclines(e))
+        {
+            // The alternatives, read from the tile the unit will actually be standing on and
+            // gated exactly as the fallback block gates them — a bar the exec would refuse is
+            // not an alternative. (W2's lesson: plan what the exec will accept.)
+            bool cmdW = g.Grid.HeightAt(bestTile.x, bestTile.y) - g.Grid.HeightAt(nearest.X, nearest.Y) >= 2;
+            bool canWatch = e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented)
+                            && g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y, cmdW);
+            bool canDig = g.Grid.GetCover(bestTile.x, bestTile.y, nearest.X, nearest.Y).Level > 0;
+            float bar = Math.Max(canWatch ? DeclineWatchRatio : 0f, canDig ? DeclineDigRatio : 0f);
+            // ...raised by the guns already trained on this tile (see DeclineThreatScale). Range
+            // and line of sight only — no ComputeOdds, so this is a handful of Bresenham walks
+            // once per plan, not per reachable tile.
+            int guns = 0;
+            foreach (var p in players)
+                if (p.Ammo > 0 && Util.TileDist(p.X, p.Y, bestTile.x, bestTile.y) <= p.Weapon.MaxRange
+                    && g.Grid.HasLineOfSight(p.X, p.Y, bestTile.x, bestTile.y)) guns++;
+            bar *= 1f + DeclineThreatScale * Math.Min(guns, DeclineThreatCap);
+            // The reference: this same shot with the target's cover taken away. Built from
+            // `shotOdds`, the odds already computed above for the decision mix — the gate adds no
+            // ComputeOdds of its own (the plan pays exactly one, whether or not it declines).
+            float expOpen = Combat.ExpectedDamage(plan.ShootTarget, Combat.AsIfExposed(shotOdds));
+            float worth = plan.ShotExp
+                        * (plan.ShootTarget.Hp <= e.Weapon.DmgMax ? FinishPress : 1f);
+            if (bar > 0f && expOpen > 0f && worth < DeclineAbsKeep && worth < bar * expOpen)
+            {
+                plan.Declined = true;
+                plan.ShootTarget = null;
+                // Under two or more guns, with cover to hand, the freed action buys SURVIVAL.
+                // A watch is an offer to trade next turn; hunkering (-25 to be hit, no crit) is a
+                // refusal to trade at all, and refusing is the right answer in a kill box. This is
+                // the ONE place the no-shot fallback's overwatch-first order is overridden, and it
+                // is overridden only on a tile that actually has cover.
+                plan.DeclineDigIn = guns >= 2 && canDig;
+            }
+        }
+
         // if no shot is possible and we still have an action after moving, hunker/overwatch
         if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null && !plan.UseItem && plan.ShoveTarget == null)
         {
@@ -960,6 +1167,8 @@ public static class Ai
                 // W2: mirror ActAfterMove's own overwatch gate. A Disoriented unit's watch is refused
                 // by the exec, and the plan had no way of knowing — so it planned a watch, the exec
                 // declined it, and the unit stood still. Plan what the exec will actually accept.
+                // C2: a decline taken under two or more guns digs in instead of watching.
+                else if (plan.DeclineDigIn && coverHere.Level > 0) plan.Hunker = true;
                 else if (sees && e.Ammo > 0 && !routing
                          && (!Game.AiIdleFix || !e.HasStatus(StatusKind.Disoriented))) plan.Overwatch = true;
                 else if (coverHere.Level > 0) plan.Hunker = true;

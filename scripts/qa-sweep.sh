@@ -65,6 +65,7 @@ echo -n "BEACONTEST : "; verdict "$(SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACO
 echo -n "COMBATTEST : "; verdict "$(SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1)"
 echo -n "SAVETEST   : "; verdict "$(SIGHTLINE_SAVETEST=1 run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1)"
 echo -n "AITEST     : "; verdict "$(SIGHTLINE_AITEST=1 run | grep -oE "AITEST: (PASS|FAIL)" | head -1)"
+echo -n "DECLINETEST: "; verdict "$(SIGHTLINE_DECLINETEST=1 run | grep -oE "DECLINETEST: (PASS|FAIL)" | head -1)"
 echo -n "BANDTEST   : "; verdict "$(SIGHTLINE_BANDTEST=1 run | grep -oE "BANDTEST: (PASS|FAIL)" | head -1)"
 echo -n "ITEMTEST   : "; verdict "$(SIGHTLINE_ITEMTEST=1 run | grep -oE "ITEMTEST: (PASS|FAIL)" | head -1)"
 echo -n "STATUSTEST : "; verdict "$(SIGHTLINE_STATUSTEST=1 run | grep -oE "STATUSTEST: (PASS|FAIL)" | head -1)"
@@ -82,6 +83,7 @@ echo -n "CONTRACTTEST: "; verdict "$(SIGHTLINE_CONTRACTTEST=1 run | grep -oE "CO
 echo -n "SHOVETEST  : "; verdict "$(SIGHTLINE_SHOVETEST=1 run | grep -oE "SHOVETEST: (PASS|FAIL)" | head -1)"
 echo -n "CONCEALTEST: "; verdict "$(SIGHTLINE_CONCEALTEST=1 run | grep -oE "CONCEALTEST: (PASS|FAIL)" | head -1)"
 echo -n "HAZARDTEST : "; verdict "$(SIGHTLINE_HAZARDTEST=1 run | grep -oE "HAZARDTEST: (PASS|FAIL)" | head -1)"
+echo -n "BIOMETEST  : "; verdict "$(SIGHTLINE_BIOMETEST=1 run | grep -oE "BIOMETEST: (PASS|FAIL)" | head -1)"
 echo -n "BENCHTEST  : "; verdict "$(SIGHTLINE_BENCHTEST=1 run | grep -oE "BENCHTEST: (PASS|FAIL)" | head -1)"
 echo -n "DRAFTTEST  : "; verdict "$(SIGHTLINE_DRAFTTEST=1 run | grep -oE "DRAFTTEST: (PASS|FAIL)" | head -1)"
 echo -n "METATEST   : "; verdict "$(SIGHTLINE_METATEST=1 run | grep -oE "METATEST: (PASS|FAIL)" | head -1)"
@@ -91,10 +93,18 @@ echo -n "MODETEST   : "; verdict "$(SIGHTLINE_MODETEST=1 run | grep -oE "MODETES
 echo -n "HORDETEST  : "; verdict "$(SIGHTLINE_HORDETEST=1 run | grep -oE "HORDETEST: (PASS|FAIL)" | head -1)"
 echo -n "DEATHTEST  : "; verdict "$(SIGHTLINE_DEATHTEST=1 run | grep -oE "DEATHTEST: (PASS|FAIL)" | head -1)"
 echo -n "HEATLADDERTEST: "; verdict "$(SIGHTLINE_HEATLADDERTEST=1 run | grep -oE "HEATLADDERTEST: (PASS|FAIL)" | head -1)"
+echo -n "MIDTOOTHTEST: "; verdict "$(SIGHTLINE_MIDTOOTHTEST=1 run | grep -oE "MIDTOOTHTEST: (PASS|FAIL)" | head -1)"
 echo -n "SNAPTEST   : "; verdict "$(SIGHTLINE_SNAPTEST=1 run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOTEST  : "; verdict "$(SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1)"
-echo -n "AIIDLETEST : "; SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1
+# C5 THE HARD EDGES — DEFECT: this was the ONE self-test in the sweep not routed through
+# `verdict`, so an AIIDLETEST FAIL printed "FAIL" and the sweep still exited 0. W9 built `verdict`
+# precisely so the exit code means the whole sweep, and this line was missed by it.
+# C3: this was the ONE self-test line still not routed through `verdict` — a FAIL here printed and
+# was never recorded. It did not matter while the script had no exit statement at all; now that it
+# has one, it does. (`tail -1` is kept: this test prints two candidate lines and the last is the
+# verdict.)
+echo -n "AIIDLETEST : "; verdict "$(SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1)"
 # RESONANCE A3: the AUDIO CHECK audition screen's listing/label/measurement contract.
 echo -n "AUDITIONTEST: "; verdict "$(SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1)"
 echo -n "AMBIENTTEST: "; verdict "$(SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1)"
@@ -112,6 +122,11 @@ echo -n "FUL11PROBE : "; verdict "$(SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL1
 echo -n "ONRAMPTEST : "; verdict "$(SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1)"
 echo -n "OPENERTEST : "; verdict "$(SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1)"
 echo -n "HVTTEST    : "; verdict "$(SIGHTLINE_HVTTEST=1 run | grep -oE "HVTTEST: (PASS|FAIL)" | head -1)"
+# CONTOUR C3 THE TWO GAMES: the objective-CLASS contract. Model (exactly Eliminate+Decapitate of
+# the eight are PITCHED) + DRAW (the campaign fork paints the class mark, the key and the hover
+# tooltip's class line, both classes staged, read at the draw call) + LEVER (the anti-turtle clock
+# adds no bodies to an ELIMINATE while its aim ramp still rises; Hack/Decapitate unchanged).
+echo -n "CLASSTEST  : "; verdict "$(SIGHTLINE_CLASSTEST=1 run | grep -oE "CLASSTEST: (PASS|FAIL)" | head -1)"
 # RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
 # but were never run by this sweep - the integration review caught it. THREATTEST prints
 # "NAME PASS" with no colon, like EXPOSURETEST.
@@ -137,9 +152,25 @@ echo -n "GEOMTEST   : "; verdict "$(SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTES
 # numbers against rolled outcomes (no test had ever read a displayed quantity); GRAPPLETEST is the
 # FIRST coverage the GRAPPLE verb has ever had; STALLTEST asserts the autopilot's own
 # "never a RESULT: TIMEOUT" contract instead of leaving it in a comment.
+# C6 SHIPS LIKE A PRODUCT: the DISTRIBUTABLE's own contract — the bundled-file manifest resolved
+# strictly next to the binary, the licence obligations, the player-data directory, the atomicity of
+# all three writers, trim-safe serialization, and the build stamp. HONEST SCOPE: run from HERE it
+# is testing bin/Debug/net8.0/, so its manifest leg proves the .csproj copies what it claims. The
+# leg that matters most — "is the artifact a player receives complete?" — can only be judged
+# against a published directory, and `bash scripts/publish.sh` runs SHIPTEST there on every publish.
+echo -n "SHIPTEST   : "; verdict "$(SIGHTLINE_SHIPTEST=1 run | grep -oE "SHIPTEST: (PASS|FAIL)" | head -1)"
 echo -n "TRUTHTEST  : "; verdict "$(SIGHTLINE_TRUTHTEST=1 run | grep -oE "TRUTHTEST: (PASS|FAIL)" | head -1)"
 echo -n "GRAPPLETEST: "; verdict "$(SIGHTLINE_GRAPPLETEST=1 run | grep -oE "GRAPPLETEST: (PASS|FAIL)" | head -1)"
 echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLTEST: (PASS|FAIL)" | head -1)"
+# C5 THE HARD EDGES: the ENEMY-turn half of the no-deadlock contract (STALLTEST covers the player
+# turn), and the enemy DECISION CENSUS — every branch of the enemy exec chain must be REACHED, at
+# a rate a player could actually meet. AICOVTEST=6 walks 144 campaigns (~25 s; N=2 gave ~2470 acts, below the AiCovMinActs floor that keeps the rate verdict from being a Poisson draw); the effectively-dead
+# branches it tolerates are named in Game.Harness.cs's AiCovKnownRare and printed on every run.
+echo -n "ENEMYSTALLTEST: "; verdict "$(SIGHTLINE_ENEMYSTALLTEST=1 run | grep -oE "ENEMYSTALLTEST: (PASS|FAIL)" | head -1)"
+echo -n "AICOVTEST  : "; verdict "$(SIGHTLINE_AICOVTEST=6 run | grep -oE "AICOVTEST: (PASS|FAIL)" | head -1)"
+# C5: the HOSTILE SAVE — eight edited/truncated/older-build save.json shapes through the real
+# resume path. W9 asked this of meta.json; save.json had never been asked.
+echo -n "SAVEEDGETEST: "; verdict "$(SIGHTLINE_SAVEEDGETEST=1 run | grep -oE "SAVEEDGETEST: (PASS|FAIL)" | head -1)"
 
 # W1 TRUE INSTRUMENT: the autopilot's ROUTE through the campaign DAG (the sampling frame every
 # published balance number was drawn through) and the frame/RNG independence of gameplay.
@@ -230,3 +261,21 @@ _ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' "$_SELF" | sort -u | wc -l)
 echo "($_have self-tests exist in src/; this sweep ran $_ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped")."
 echo " Both counts are derived from env-var NAMES, not line shapes. Every line above must read"
 echo " PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+
+# ── CONTOUR C3: THE EXIT CODE, WHICH HAD NEVER BEEN WIRED ──────────────────────────────────────
+# W9's block at the top of this file says, at length, that a FAIL line / a COVERAGE GAP / a TIMEOUT
+# must make the sweep exit non-zero "so it is a gate rather than a report for a reader to notice",
+# and CLAUDE.md repeats the claim. Every path faithfully accumulated `_fail` and `_autofail` — and
+# then the script ENDED ON AN `echo`, so its exit status was that echo's, i.e. 0, always. C3 found
+# it the only way anyone was going to: its own new self-test failed inside a --full sweep and the
+# sweep still reported SWEEP-EXIT=0.
+#
+# Every "qa-sweep --full green, SWEEP-EXIT=0" claim made before this line existed was therefore
+# reporting the exit code of an echo. The PASS/FAIL lines were real; the code above them was not.
+_rc=0
+[ "$_fail" = 1 ] && _rc=1
+[ "$_autofail" = 1 ] && _rc=1
+if [ "$_rc" != 0 ]; then
+  echo "!! SWEEP FAILED - see the FAIL / COVERAGE GAP / AUTOPLAY lines above. DO NOT MERGE."
+fi
+exit $_rc

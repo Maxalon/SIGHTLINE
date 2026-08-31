@@ -17,6 +17,15 @@ public class Grid
     public int[,] CoverSeed;    // PURELY VISUAL: stable per-tile identity of the drawn cover VOLUME
     public int[,] Fire;         // environmental fire: turns remaining a tile burns (hazards)
     public bool[,] Barrel;      // explosive barrel present on a tile (hazards)
+    // C4 "EIGHT BIOMES ARE PAINT": what a floor tile is MADE OF (see src/Terrain.cs). Stamped
+    // once per mission via Util.Hash3 — ZERO Util.Rng draws (the property CRN needs), though the
+    // board is keyed on the reserved set too, not on (MapSeed, mission) alone — and read
+    // by the three functions BOTH teams already ask for the truth: GetCover, CostMap and
+    // HasLineOfSight. NOT persisted (SaveGame never serialises a Grid).
+    public GroundKind[,] Ground;
+    // Fast "does this board have any at all" flags, so the hot paths (HasLineOfSight is called
+    // W*H*foes times per threat rebuild) pay one static bool + one field read on a normal board.
+    public bool AnyFoliage, AnyIce, AnyVent;
 
     public const int HighCoverHp = 2;   // chips to crack High -> Low
     public const int LowCoverHp = 1;    // chips to clear Low -> Floor
@@ -31,7 +40,44 @@ public class Grid
         CoverSeed = new int[W, H];
         Fire = new int[W, H];
         Barrel = new bool[W, H];
+        Ground = new GroundKind[W, H];
         ClearCoverSeeds();
+    }
+
+    // ---------- C4: the biome GROUND layer ----------
+    // Every predicate gates on Terrain.Enabled as well as the tile, so SIGHTLINE_BIOMEMECH=0
+    // makes the whole layer inert even on a board a harness stamped by hand.
+    public GroundKind GroundAt(int x, int y) =>
+        Terrain.Enabled && InBounds(x, y) ? Ground[x, y] : GroundKind.None;
+    /// VERDANT fern: low cover from every angle, but only against fire from beyond
+    /// Terrain.FoliageMinDist (the rule itself lives in GetCover, the one truth both teams read).
+    public bool IsFoliage(int x, int y) =>
+        Terrain.Enabled && AnyFoliage && InBounds(x, y) && Ground[x, y] == GroundKind.Undergrowth;
+    /// TUNDRA drift: half-price to step onto (see CostMap).
+    public bool IsIce(int x, int y) =>
+        Terrain.Enabled && AnyIce && InBounds(x, y) && Ground[x, y] == GroundKind.Ice;
+    /// MAGMA fissure: opaque, dear to cross, and it sets you alight.
+    public bool IsVent(int x, int y) =>
+        Terrain.Enabled && AnyVent && InBounds(x, y) && Ground[x, y] == GroundKind.Vent;
+
+    public void ClearGround()
+    {
+        Array.Clear(Ground, 0, Ground.Length);
+        AnyFoliage = AnyIce = AnyVent = false;
+    }
+
+    /// Recompute the three "board has any" flags after a stamp.
+    public void RefreshGroundFlags()
+    {
+        AnyFoliage = AnyIce = AnyVent = false;
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++)
+                switch (Ground[x, y])
+                {
+                    case GroundKind.Undergrowth: AnyFoliage = true; break;
+                    case GroundKind.Ice:         AnyIce = true;     break;
+                    case GroundKind.Vent:        AnyVent = true;    break;
+                }
     }
 
     // ---- PURELY VISUAL: stable cover-volume identity (W4 review fix) -------------------------
@@ -177,10 +223,16 @@ public class Grid
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < W && y < H;
     public TileType At(int x, int y) => Tiles[x, y];
     public bool IsCover(int x, int y) => InBounds(x, y) && Tiles[x, y] != TileType.Floor;
-    // High cover OR an active smoke cloud blocks line of sight (and overwatch) through a tile.
+    // High cover OR an opaque VAPOUR (smoke cloud / MAGMA steam vent) blocks line of sight
+    // (and overwatch) through a tile.
     public bool BlocksSight(int x, int y) =>
-        InBounds(x, y) && (Tiles[x, y] == TileType.HighCover || Smoke[x, y] > 0);
+        InBounds(x, y) && (Tiles[x, y] == TileType.HighCover || IsVapor(x, y));
     public bool IsSmoke(int x, int y) => InBounds(x, y) && Smoke[x, y] > 0;
+    /// Anything OPAQUE that a commanding (tier-2) shooter cannot see over either: a smoke cloud
+    /// or a MAGMA thermal vent's steam column. C4: the vent joins smoke here rather than joining
+    /// HighCover, because a fissure is a screen, not a wall — it grants no cover, it just blinds.
+    public bool IsVapor(int x, int y) =>
+        InBounds(x, y) && (Smoke[x, y] > 0 || (Terrain.Enabled && AnyVent && Ground[x, y] == GroundKind.Vent));
 
     /// Reset all smoke (called at mission build).
     public void ClearSmoke() { Array.Clear(Smoke, 0, Smoke.Length); }
@@ -271,15 +323,15 @@ public class Grid
             bool stepX = e2 > -dy, stepY = e2 < dx;
             if (stepX && stepY && !pointBlank)
             {
-                bool cornerA = overHighCover ? IsSmoke(cx + sx, cy) : BlocksSight(cx + sx, cy);
-                bool cornerB = overHighCover ? IsSmoke(cx, cy + sy) : BlocksSight(cx, cy + sy);
+                bool cornerA = overHighCover ? IsVapor(cx + sx, cy) : BlocksSight(cx + sx, cy);
+                bool cornerB = overHighCover ? IsVapor(cx, cy + sy) : BlocksSight(cx, cy + sy);
                 if (cornerA && cornerB) return false;
             }
             if (stepX) { err -= dy; cx += sx; }
             if (stepY) { err += dx; cy += sy; }
             // endpoint reached after step?
             if (cx == x1 && cy == y1) return true;
-            bool blocked = overHighCover ? IsSmoke(cx, cy) : BlocksSight(cx, cy);
+            bool blocked = overHighCover ? IsVapor(cx, cy) : BlocksSight(cx, cy);
             if (blocked) return false;
         }
     }
@@ -290,6 +342,8 @@ public class Grid
         public int Level;     // 0 none, 1 low, 2 high
         public bool Flanked;  // had adjacent cover, but not protecting from this angle
         public bool Partial;  // diagonal-at-range: defender only partly obscured -> half defense
+        public bool Foliage;  // C4/VERDANT: this level is UNDERGROWTH (omnidirectional, distance-gated),
+                              // not a terrain block — the HUD labels it differently and no block chips
         public int Defense
         {
             get { int d = Level == 2 ? 40 : (Level == 1 ? 20 : 0); return Partial ? d / 2 : d; }
@@ -344,12 +398,30 @@ public class Grid
             best = horiz ? LevelAt(Util.Sign(dx), 0) : (vert ? LevelAt(0, Util.Sign(dy)) : 0);
         }
 
+        // C4 / VERDANT — UNDERGROWTH. Standing in the ferns is LOW cover from EVERY angle, but
+        // only against fire from beyond Terrain.FoliageMinDist tiles: close in and the foliage is
+        // worth nothing. It is a FLOOR under the terrain read, never a bonus on top of it — a
+        // soldier already behind a high block gains nothing, and a soldier the block does not
+        // protect (flanked, or only half-covered on a diagonal) is lifted to a clean low cover.
+        // Deliberately a cover LEVEL and not a separate aim modifier, so every existing rule that
+        // knows about cover — high ground and a SYNDICATE optic see over LOW cover, a DRONE
+        // ignores cover, the crit-vs-exposed bonus, the LOCK-ON flank perk, Ai's cover scoring,
+        // the HUD's cover pip — prices it correctly with no second implementation to drift.
+        bool foliage = false;
+        if (Terrain.Enabled && AnyFoliage && InBounds(tx, ty) && Ground[tx, ty] == GroundKind.Undergrowth
+            && Math.Max(Math.Abs(dx), Math.Abs(dy)) > Terrain.FoliageMinDist
+            && (best == 0 || (best == 1 && partial)))
+        {
+            best = 1; partial = false; foliage = true;
+        }
+
         bool anyAdjacent = false;
         int[,] dirs = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
         for (int i = 0; i < 4; i++)
             if (IsCover(tx + dirs[i, 0], ty + dirs[i, 1])) anyAdjacent = true;
 
-        return new CoverInfo { Level = best, Partial = partial, Flanked = best == 0 && anyAdjacent };
+        return new CoverInfo { Level = best, Partial = partial, Foliage = foliage,
+                               Flanked = best == 0 && anyAdjacent };
     }
 
     // ---------- Pathfinding (8-directional Dijkstra) ----------
@@ -399,6 +471,18 @@ public class Grid
                 }
 
                 int step = diagonal ? 3 : 2;
+                // C4 — the GROUND has a price, and BOTH teams pay it out of this one cost map
+                // (Ai.Plan, the player's move overlay, the VIP leash and every reachability probe
+                // all come through here, so there is no second movement model to keep in step).
+                //   TUNDRA ice   — half a step: the drift is a fast LANE you can ride.
+                //   MAGMA  vent  — dear: the fissure is a barrier you force a crossing through,
+                //                  and OnUnitEnteredTile charges the second half of the toll in HP.
+                if (Terrain.Enabled)
+                {
+                    var gk = Ground[nx, ny];
+                    if (gk == GroundKind.Ice && AnyIce) step = diagonal ? Terrain.IceStepDiag : Terrain.IceStepOrth;
+                    else if (gk == GroundKind.Vent && AnyVent) step += Terrain.VentStepExtra;
+                }
                 int nc = cc + step;
                 if (nc > maxCost) continue;
                 if (cost[nx, ny] == -1 || nc < cost[nx, ny])

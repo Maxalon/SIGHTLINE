@@ -17,6 +17,25 @@ seeds (mix of WIN/LOSE, no exceptions):
   stat and damage point the dial promises, leaving only the qualitative flags. The grace is now gated on
   `Mode != GameMode.Skirmish`; MODETEST pins that a skirmish's force answers the dial AND that the campaign's
   mission-1 grace is untouched.
+- **BIOME MECHANICS — THE GROUND HAS RULES (CONTOUR C4, `src/Terrain.cs`):** three of the eight biomes now
+  change how the fight works, on three different axes; the other five are still paint and say so.
+  **VERDANT — UNDERGROWTH:** the fern mats are LOW COVER FROM EVERY ANGLE, but only against fire from more than
+  2 tiles away, so they cannot be flanked and the counter is to CLOSE (a cover *level* inside `Grid.GetCover`,
+  so high ground / a DRONE / a SYNDICATE optic see over it exactly as they see over any low block, and the HUD
+  badge reads `UNDERGROWTH -20 aim past 2`). **TUNDRA — SLICK ICE:** stepping onto a frost drift costs HALF a
+  step (`Grid.CostMap`), so a drift is a fast lane visible as a bulge in the move overlay — for both sides.
+  **MAGMA — THERMAL VENTS:** a steaming fissure BLOCKS LINE OF SIGHT like smoke (it joins `Grid.IsVapor`, not
+  the terrain — it gives no cover at all), forcing a crossing costs extra movement, and touching one sears +
+  ignites you; the gaps in the crack are the FORDS, and parking on a vent keeps you burning. The layer is
+  stamped once per mission through `Util.Hash3` with **zero `Util.Rng` draws** and is not persisted;
+  `Terrain.Stamp` is pure, though the resulting BOARD also keys on the reserved set (unit and
+  fixture positions), so it is not a function of `(MapSeed, mission)` alone. Never stamped on RAISED
+  terrain — a plateau top is painted opaque over the ground layer, so ground there would be a rule
+  with no pixels. Hard per-biome tile budget; real-board density is pinned by BIOMETEST and printed
+  in every sweep (VERDANT ~35 tiles / TUNDRA ~18 / MAGMA ~13 of 198). Legible on five surfaces: the board material (value-carried +
+  rimmed, colorblind-safe), the mission banner tag, the briefing card's one-sentence rule, the shot tooltip /
+  hover threat card, and the CODEX FIELD CRAFT tab. `SIGHTLINE_BIOMETEST`; `SIGHTLINE_BIOMEMECH=0` restores the
+  pre-C4 board exactly. Priced CRN-paired at n=160/rung/arm — see DEVLOG §C4 for the declared heat-0 move.
 - **CROSS-RUN META-PROGRESSION — WAR ROOM (HORIZON W3):** the game finally has LEGS beyond one sitting. A persistent
   profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
   legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all
@@ -119,10 +138,15 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **PERK BUILD-DEPTH (FRONTIER W3):** the deadest false-choice perks are now distinct verbs — **MOMENTUM** (kill on
   your turn refunds +1 action), **PLATING** (ablative -2 dmg/hit while ≥half HP), **OUTRUNNER** (+1 mob + move
   immune to overwatch). (`Combat.KillRefundsAction/IgnoresOverwatch`; enum stayed append-only.)
-- **Anti-turtle PRESSURE CLOCK (AGENCY W1):** on camp-friendly objectives (Elim/Hack/Decapitate) a graced
-  clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) + reinforcement waves — so turtling is
-  strictly worse than advancing. `PRES` rung-pip meter in the top bar; `Game.PressureRungFor/UpdatePressure/
-  SpawnReinforcements/PressureClockObjective`. `SIGHTLINE_PRESSURE`.
+- **Anti-turtle PRESSURE CLOCK (AGENCY W1; second arm re-scoped by CONTOUR C3):** on camp-friendly objectives
+  (Elim/Hack/Decapitate) a graced clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) +
+  reinforcement waves — so turtling is strictly worse than advancing. **C3: the reinforcement arm no longer
+  fires on ELIMINATE**, the one objective whose win condition counts bodies, where an added body did not raise
+  the price of the finish line but moved it (measured: 41% of mid-run Eliminates took a wave, ~4.1 bodies on a
+  7.8-body force). The aim ramp, banner and meter are untouched, and Hack/Decapitate keep both arms.
+  `Game.ClockMayReinforce`; `SIGHTLINE_KILLTREADMILL=1` restores the pre-C3 clock. `PRES` rung-pip meter in the
+  top bar; `Game.PressureRungFor/UpdatePressure/SpawnReinforcements/PressureClockObjective`.
+  `SIGHTLINE_PRESSURE`.
 - **Visible randomness mitigation (AGENCY W1):** the shot tooltip surfaces the graze floor + streak-breaker
   (`DMG GRAZE n / min-max`, `+N STEADYING`) via `ShotOdds.GrazeFloor/StreakBonus` — missing a high-% shot reads
   as less of a betrayal. `SIGHTLINE_TOOLTIP`. **RESONANCE Q1 (D3):** the STEADYING bonus is now folded into
@@ -309,6 +333,15 @@ seeds (mix of WIN/LOSE, no exceptions):
   **hashed column plan** (FUL-9: every route gets >=1 Eliminate, >=1 Defend-or-
   Rescue, <=1 Escort; boss always Decapitate); the 8-objective rotation remains
   the SKIRMISH/offer fallback. Shown in the HUD.
+- **Objective CLASS, named on the fork (CONTOUR C3):** the eight objectives split into two that end only
+  when hostile bodies fall (**PITCHED** — Eliminate, Decapitate) and six that end on a task (**TASKED** —
+  the rest), and on mid-run campaign nodes that split is worth 36.5 win-rate points. The campaign map now
+  says which: a drawn class mark beside each reachable node's label (crossed blades / an empty tile-square —
+  shapes chosen against the node-kind glyph vocabulary, colour redundant and colourblind-remapped), a
+  two-entry key under the node-kind legend, a class line at the top of the node hover tooltip
+  ("PITCHED - it ends when the field is clear" / "TASKED - it ends when the task is done"), and the tag on
+  the legacy deploy card. Single source of truth `Run.IsKillObjective`; gate `SIGHTLINE_CLASSTEST`; shot
+  hooks `SIGHTLINE_MAPHOVER=<k>` (park the cursor on the k-th choice) and `SIGHTLINE_MAPCOL=<n>`.
 - **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
   ~80% of missions) dealt from a **per-run no-repeat deck** derived purely from
   the run's MapSeed (FUL-9: an arena never repeats within a run; the displayed
@@ -484,8 +517,12 @@ seeds (mix of WIN/LOSE, no exceptions):
 ## PROGRAM APEX — the top end becomes real
 - **The ladder's top exists:** the heat 7-8 / IRON VETERANS zero-roster crash is fixed (a shattered command
   drafts emergency conscripts to the AttritionFloor — the rung still shrinks a surviving roster, never zeroes
-  it), and heat 8 has its first measured completion (~25%, a wall not a flat). **NO QUARTER now adds +1 enemy
-  weapon damage** (m3+, initial force). Heat rungs 6+ raise a data-driven **`Ai.Tier`** — at the apex the AI
+  it), and heat 8 has its first measured completion (~25%, a wall not a flat). **The +1 enemy weapon damage**
+  (m3+, initial force) shipped on NO QUARTER here, and **CONTOUR C1 moved it — together with coordination
+  tier 2 — down to EXPOSED (rung 6)**, the rung that had been buying 2.3 points and whose own `AiTier`
+  declaration could never fire. `SIGHTLINE_MIDTOOTH=0` restores both to the apex; `SIGHTLINE_MIDTOOTHTEST`
+  pins the table, and the intro DIFFICULTY panel now wraps and grows so a rung's copy cannot paint off the
+  card at any text scale. Heat rungs 4+ raise a data-driven **`Ai.Tier`** — from rung 6 the AI
   coordinates harder (tighter smoke discipline capped short of certainty, stronger focus/crossfire pull)
   instead of just aiming better; Tier 0 is byte-identical to the shipped constants. (`SIGHTLINE_HEATLADDERTEST`.)
 - **Planner-resolver truthfulness:** the enemy planner now sees the commanding (2-tier) LoS the resolver
@@ -810,6 +847,37 @@ branch point.
   `Hud.VerbTable` + `Hud.VerbHelp`, i.e. the same `ActionDesc` switch the action bar's hover
   tooltip reads, so help and manual cannot drift. CODEXTEST asserts every verb has a home.
 
+## PROGRAM CONTOUR — WAVE C2 "THE OPPONENT DECLINES" (the enemy's shot competes on its merits)
+
+- **A shot is no longer worth a constant.** `Ai.Plan`'s per-tile term was `100 + bestHit` against
+  terrain terms bounded under ~64 (cover 36, height ~28, flank −25, fire −60, player-overwatch
+  −26), so the opponent paid ANY positional price for a line of fire. It is now
+  `Ai.ShotTileValue` = `ShotSeat` (18, deliberately one level of cover) plus the target's choice
+  value weighted by the REAL probability of connecting. Target SELECTION is untouched. Measured
+  over 960 CRN-paired campaigns: the opponent chooses a tile with a shot **920 fewer times**,
+  shoots on 55.4% of contested acts instead of 57.4% and hunkers on 25.0% instead of 23.0%.
+- **The opponent can DECLINE.** After the sap/grenade/item/shove blocks and before W2's no-shot
+  fallback, a shot is dropped when it is worth less than a bar times **the same shot with the
+  defender's cover taken away** (`Combat.AsIfExposed` — what an overwatch reaction actually
+  catches; HUNKER is deliberately not stripped). The bar rises with the guns already trained on
+  the tile, because firing and standing still hands each of them Combat's EXPOSED BY FIRE
+  +12 aim / +12 crit. Under **two or more** guns with cover to hand the freed action digs in
+  rather than offering a lane. Rushers (BERSERKER/HOUND/STRIKER/DRONE/the Legion BREAKER's second
+  rage) never decline. Dropping the target hands the unit to W2's fallback, so a decline can never
+  produce a dead turn.
+- **The enemy OVERWATCH branch is no longer dead** — 20 of 26841 contested acts before, **111 of
+  26172** after. Still small, and the reason is recorded in ROADMAP: an enemy overwatch is a
+  360-degree watch held from wherever the unit stands, and only 24-27% of held lanes ever FIRE
+  (measured where the lanes are genuinely overwatch rather than the PIKEMAN's braced cone; at the
+  reaction's −10 aim a fired shot often misses, so true payoff is lower still).
+- **The ENEMY DECISION MIX is instrumented** (`Stats.RecordEnemyDecision`): the branch that
+  actually fired on every CONTESTED act, named at the branch rather than re-derived from state,
+  plus the shot that was on the table split taken / DECLINED / preempted across five hit-chance
+  bands with graze- and armour-aware expected damage per band; and `Stats.RecordEnemyReaction`
+  counts lanes held against reaction shots fired. Prints in the `SIGHTLINE_BALANCE` report and the
+  aggregate JSON. `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly (proven inert:
+  1304 and 1216 leaf scalars diffed to empty against the base-commit binary on two slot sets).
+
 ## PROGRAM RESONANCE — WAVE W2 "THE OPPONENT ACTS" (the enemy stops freezing mid-fight)
 
 - **No CONTESTED enemy act-opportunity ends with NO branch having fired.** `Ai.Plan`'s
@@ -841,3 +909,68 @@ branch point.
 - **The enemy HUNKER is audible and visible** — it was the one branch of the eleven that fired in
   complete silence. It now pops "HUNKERED" and plays the player's own hunker cue, **except during
   the bleed-out window**, where it stays silent by design.
+
+---
+
+## PROGRAM CONTOUR — WAVE C6 "SHIPS LIKE A PRODUCT" (the artifact becomes a thing you can hand someone)
+
+Everything here is about the **built artifact**, not the game model. No gameplay code changed
+(`PAIRTEST` byte-identical). Rationale and measurements: `docs/DEVLOG.md` §C6; the shipping
+contract itself is `docs/DISTRIBUTION.md`.
+
+### A version stamp
+- **`Ship.Version`** reads `<Version>` off the assembly at runtime — one source (`Sightline.csproj`),
+  never a hard-coded second copy. Currently **1.0.0**.
+- **`Ship.VersionLabel`** ("SIGHTLINE v1.0.0") is painted in the **main-menu footer** and in the
+  **pause card's top-right corner**, so a player filing a bug can name the build without quitting.
+
+### The shipped file set is now declared, and enforced
+- **`Ship.RequiredFiles`** is the manifest of all **eight** files that must sit next to the
+  executable: both font faces, both OFL licence texts, both `CREDITS.txt` audio-provenance ledgers,
+  `THIRD-PARTY-NOTICES.txt`, and the project's own **`LICENSE`** (which had been decided, committed,
+  and never copied into any build output).
+- A published directory is **10 files**: `Sightline` + `libraylib.so` + `assets/` (2 fonts,
+  2 licences, 2 `CREDITS.txt`) + `THIRD-PARTY-NOTICES.txt` + `LICENSE`.
+
+### Atomic writes across the whole player-data directory
+- **`SaveGame.WriteAtomic`** is now the ONE writer for `save.json`, `meta.json` **and
+  `display.json`** — serialise to `<name>.tmp`, then `rename(2)` over the target. `display.json`
+  previously truncated its own target in place, and it is the most frequently written of the three.
+- The **failure path** sweeps the stale `.tmp`, which a measured full-disk run showed the old shape
+  leaves behind permanently. **Scope, plainly:** the sweep runs only when the write itself fails, so
+  a `kill -9` or power cut between the tmp write and the rename still leaves one — deliberately, as
+  crash evidence, with no startup sweep. The rename makes the write safe against **process death and
+  concurrent readers**; it is **not** proof of power-loss durability (no `fsync` of the tmp or the
+  directory), and the probe that verifies it is **Unix-only** while the change itself applies to all
+  platforms.
+
+### `SIGHTLINE_SHIPTEST` — the distributable's self-test (in `qa-sweep.sh` and `publish.sh`)
+Six legs: the bundled manifest resolved **strictly** against `AppContext.BaseDirectory` (refusing
+`Cfg.AssetPath`'s cwd fallback, which is what hid RESONANCE F1's missing font from every test in
+the suite); the notices file actually **naming** all 5 redistributed components and all 3 of their
+licences, each keyed on a string unique to its own section; the player-data
+directory rooted plus a profile round-trip through disk **and through a real second process of the
+shipped binary** (which resolves the apphost, the published single-file exe *or* a `dotnet <dll>`
+relaunch, and reports a skip rather than failing a good build if it can identify none); all three
+writers proven atomic **by mechanism** (an open handle held across the write must still see the old
+inode's bytes) plus a forced-failure probe for the `.tmp` sweep; every persisted DTO reachable from
+a source-generated JSON context; and the version stamp present and painted.
+
+`scripts/publish.sh` runs it **against the published directory**, which is the only place the
+manifest leg tests the artifact a player receives.
+
+### The `PublishTrimmed` hazard, enforced rather than described
+- **`C6GuardTrimmedPersistence`** (an MSBuild target in `Sightline.csproj`) makes a trimmed publish
+  **fail to build** if `JsonSerializerIsReflectionEnabledByDefault` is off or `TrimmerRootAssembly`
+  is empty, naming the reason and pointing at `docs/DISTRIBUTION.md` §3.
+- Trimmed is the **recommended default** and has been since F1 fixed the hazard; the old
+  "never publish trimmed" line in CLAUDE.md was stale. What must not happen is a publish that skips
+  `scripts/publish.sh` and therefore skips all three verifications.
+
+### `SIGHTLINE_COLD=1` — photograph the first launch
+A shot-only modifier that makes a profile-driven screenshot hook render its **zero state** instead
+of a staged demo one. `SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1` shows the main menu with no save (the
+hook otherwise fabricates a mission-3 one to frame CONTINUE); `SIGHTLINE_WARROOM=1
+SIGHTLINE_COLD=1` shows the WAR ROOM with an empty profile (the hook otherwise hard-codes a
+twelve-run career). Before this, the two screens a new player meets first had never been
+photographed.

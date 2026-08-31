@@ -60,7 +60,10 @@ public static class Cfg
     ///   <= UiFontMax (18px)  full scale        — the layer that needed this
     ///   18 -> 40px           eased toward 1.0  — subheads/values
     ///   >= 40px              1.0               — titles, banners, the end cards
-    static float Scaled(float size)
+    /// C5: internal (was private) so the FITTEST screen audit can report the RENDERED size of a
+    /// string next to its authored one — the 12px small-text floor is a rule about pixels on
+    /// glass, and the authored number alone does not state it at any scale but 100%.
+    internal static float Scaled(float size)
     {
         if (UiScale == 1f) return size;                      // fast path: the default changes nothing
         if (size <= UiFontMax) return size * UiScale;
@@ -88,9 +91,19 @@ public static class Cfg
     /// Null in every normal run (one predictable branch, no allocation, no behaviour change).
     public static System.Collections.Generic.List<(string text, float size)> CaptureText;
 
+    /// C5 THE HARD EDGES — the INK PROBE. `CaptureText` above records WHAT was painted; this
+    /// records WHERE, in real screen pixels, so a self-test can audit a live frame's geometry
+    /// instead of transcribing the draw site's arithmetic into the test (the failure mode the
+    /// CROSSCUT handoff calls out: "a test that asserts the values the HUD *should* read").
+    /// Fired from both text entry points with (text, top-left, painted box, authored size,
+    /// tint alpha 0..1 — an entrance fade paints invisible ink and must not read as a defect).
+    /// Null in every normal run: one predictable branch, no allocation, no behaviour change.
+    public static Action<string, Vector2, Vector2, float, float> InkProbe;
+
     public static void Text(string t, Vector2 pos, float size, float spacing, Color tint)
     {
         if (CaptureText != null) CaptureText.Add((t, size));
+        if (InkProbe != null) InkProbe(t, pos, Measure(t, size, spacing), size, tint.A / 255f);
         Raylib.DrawTextEx(FontFor(size), t, pos, Scaled(size), spacing, tint);
     }
     public static Vector2 Measure(string t, float size, float spacing) =>
@@ -101,6 +114,7 @@ public static class Cfg
     public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint)
     {
         if (CaptureText != null) CaptureText.Add((t, size));
+        if (InkProbe != null) InkProbe(t, pos, TitleMeasure(t, size, spacing), size, tint.A / 255f);
         Raylib.DrawTextEx(TitleFontFor(size), t, pos, Scaled(size), spacing, tint);
     }
     public static Vector2 TitleMeasure(string t, float size, float spacing) =>

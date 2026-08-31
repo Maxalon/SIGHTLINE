@@ -54,6 +54,102 @@ public partial class Game
         }
     }
 
+    /// C2 harness hook (screenshot only): SIGHTLINE_DECLINESHOT — the OPPONENT DECLINES, staged
+    /// on the live board so one frame can be judged. Rule 3 of the program's own rules: a CRN
+    /// batch prices CONSEQUENCES and is structurally blind to FEEL, so this behaviour needs eyes.
+    ///
+    /// It clears a pocket of the real arena and seats two identical GRUNTs at the same range from
+    /// two identical soldiers. The only difference is a single HIGH COVER block: the LEFT pair's
+    /// soldier is behind it, the RIGHT pair's is in the open. Then it runs the REAL Ai.Plan for
+    /// each hostile and applies exactly what Game.UpdateEnemy's ActAfterMove would apply — so the
+    /// frame is a decision the shipped planner made, not a hand-set flag.
+    ///
+    /// With SIGHTLINE_AIDECLINE=1 (shipped) the left hostile declines its covered shot and wears
+    /// the accent "OW" badge, and the INCOMING FIRE card gains its "OVERWATCH LANE — entering
+    /// draws a reaction" line (which is PRE-EXISTING in Hud.cs, not added by this wave — the hook
+    /// only creates the state that makes it appear). An earlier version of this comment also
+    /// claimed Renderer's kill-zone wash "lights the ground it now denies"; it does not, visibly.
+    /// The wash is 7-12% alpha and sits below perceptual threshold on a warm biome — and because
+    /// a plain enemy overwatch has no lane selection, it covers nearly the whole open board, so
+    /// even seen it would carry no information. Both facts are C2 findings, in ROADMAP. With
+    /// SIGHTLINE_AIDECLINE=0 the SAME hostile on the SAME board takes the shot and holds no lane:
+    /// the two frames are the wave. Pair with SIGHTLINE_SHOT=760 (the briefing card holds ~11 s).
+    public void DebugDeclineShot()
+    {
+        DebugWakeAll();
+        // A clean pocket: floor everywhere, plus a HIGH-COVER wall down column 16 that everything
+        // NOT part of the scene is parked behind. Without it the staged hostile simply shot one of
+        // the parked soldiers instead (measured: both staged shooters reported hit=78% at a body
+        // 11 tiles away in the open) and the frame staged nothing.
+        for (int x = 1; x <= Grid.W - 2; x++)
+            for (int y = 0; y <= Grid.H - 1; y++) { Grid.Tiles[x, y] = TileType.Floor; Grid.Barrel[x, y] = false; }
+        for (int y = 0; y <= Grid.H - 1; y++) { Grid.Tiles[16, y] = TileType.HighCover; Grid.SetCoverHp(16, y); }
+        int park = 0;
+        foreach (var u in Players.Concat(Enemies))
+        {
+            if (!u.Alive) continue;
+            u.X = Grid.W - 1; u.Y = Math.Min(Grid.H - 1, park++); u.Bob = 0f; u.Facing = 0f; u.SyncPos();
+        }
+
+        var soldier = AlivePlayers().FirstOrDefault(u => !u.IsVip);
+        var foe = AliveEnemies().FirstOrDefault();
+        if (soldier == null || foe == null) return;
+
+        // ONE soldier, behind ONE high-cover block. Everything else is behind the wall, so the
+        // hostile's only shot in the world is the covered one — which is the decision on trial.
+        soldier.X = 12; soldier.Y = 3; soldier.Bob = 0f; soldier.Facing = 0f; soldier.SyncPos();
+        Grid.Tiles[11, 3] = TileType.HighCover; Grid.SetCoverHp(11, 3);
+
+        // Searched, not hand-picked: a hand-picked tile is one Bresenham detail away from having
+        // no line of sight at all, and then there is no shot to decline.
+        int ax = -1, ay = -1;
+        for (int y = 0; y < Grid.H && ax < 0; y++)
+            for (int x = 3; x <= 7 && ax < 0; x++)
+            {
+                if (!Grid.IsFloor(x, y)) continue;
+                if (!Grid.HasLineOfSight(x, y, 12, 3)) continue;
+                if (Grid.GetCover(12, 3, x, y).Level != 2) continue;
+                ax = x; ay = y;
+            }
+        if (ax < 0) { Console.WriteLine("DECLINESHOT: staging FAILED (no shooting tile)"); return; }
+        foe.X = ax; foe.Y = ay; foe.Bob = 0f; foe.Facing = 0f; foe.SyncPos();
+        foe.Aim = 65; foe.Ammo = foe.Weapon.Clip; foe.BeginTurn();
+        // Ring it in LOW cover. Two jobs: it makes DIGGING IN a real alternative, and it PINS the
+        // unit (Grid.IsFloor excludes any cover tile), which the first version of this hook needed
+        // and did not have — on open ground the planner's answer to a covered target is to FLANK
+        // it, and it duly walked around the block and took a 77% shot. That is the wave working,
+        // but it is a different frame. This one is the case where no better tile exists.
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = ax + dx, ny = ay + dy;
+                if (!Grid.InBounds(nx, ny)) continue;
+                Grid.Tiles[nx, ny] = TileType.LowCover; Grid.SetCoverHp(nx, ny);
+            }
+
+        _aiUnits = new System.Collections.Generic.List<Unit> { foe };
+        var all = new System.Collections.Generic.List<Unit>(Players); all.AddRange(Enemies);
+        Combat.AllUnits = all;
+        PlanEnemySquad();
+
+        // run the REAL planner and apply exactly what Game.UpdateEnemy's ActAfterMove would
+        var pl = Ai.Plan(this, foe);
+        if (pl.ShootTarget != null) { foe.FiredThisTurn = true; foe.MovedAfterFire = false; }
+        else if (pl.Overwatch) { foe.OnOverwatch = true; foe.ActionsLeft = 0; }
+        else if (pl.Hunker) { foe.Hunkered = true; foe.ActionsLeft = 0; }
+        string what = pl.ShootTarget != null ? "TOOK THE SHOT"
+                    : pl.Declined ? (pl.Hunker ? "DECLINED - HUNKERED" : "DECLINED - HOLDING THE LANE")
+                    : "NO SHOT";
+        int ex = pl.Path.Count > 0 ? pl.Path[^1].x : foe.X, ey = pl.Path.Count > 0 ? pl.Path[^1].y : foe.Y;
+        Console.WriteLine($"DECLINESHOT: {foe.Name}@({foe.X},{foe.Y})->({ex},{ey}) vs {soldier.Name}@(12,3) "
+                        + $"shotHit={pl.ShotHit}% E[dmg]={pl.ShotExp:0.00} declined={pl.Declined} "
+                        + $"ow={pl.Overwatch} hunker={pl.Hunker} -> {what}");
+        Fx.PopText(foe.Pos + new Vector2(0, -34), what, pl.ShootTarget != null ? Pal.Foe : Pal.Accent, 15f);
+        ShowBanner($"{pl.ShotHit}% SHOT AVAILABLE - {what}", true);
+        Selected = null;
+    }
+
     /// Harness hook (screenshot only): drive the anti-turtle pressure clock to its max rung so a
     /// single frame shows the PRESSURE meter filled in the top bar (and its escalation banner).
     public void DebugPressure()
@@ -170,6 +266,14 @@ public partial class Game
     public string ConcealSelfTest()
     {
         NoPersist = true;                       // never touch the save file in a test
+        // LEAD FIX (C4 merge): this test was CLOCK-SEEDED while 41 other harness reseed calls
+        // exist, so its pod placement varied run to run and the suppressor legs
+        // (suppressedShotDidNotBreak / suppressedTargetPodAsleep) failed at a low rate — 0/6
+        // standalone in both Debug and Release, but it took down a --full sweep, which is the only
+        // place it matters. C3's exit statement is what turned that into a refusal rather than a
+        // line nobody read. A gate test that depends on the wall clock is a gate that fails
+        // randomly; pinning the stream is the same fix C5 applied per screen in FITTEST.
+        Util.Reseed(90210);
         var fails = new System.Collections.Generic.List<string>();
         StartMission(1);
         if (!SquadConcealed) fails.Add("notConcealedAtStart");
@@ -528,6 +632,12 @@ public partial class Game
     /// arithmetic, and the deadlock scene actually draining.
     public string StallSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70000);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -651,6 +761,12 @@ public partial class Game
     /// losing 1 HP to your own verb is silent.
     public string GrappleSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70007);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -791,6 +907,12 @@ public partial class Game
     /// once-per-turn). Prints FIELDTEST: PASS/FAIL.
     public string FieldSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70014);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -879,6 +1001,12 @@ public partial class Game
     /// preserved + recovers faster across a debrief. Prints BENCHTEST: PASS/FAIL.
     public string BenchSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70021);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         StartMission(1);                                  // fresh run + mission 1 deployed
@@ -992,6 +1120,12 @@ public partial class Game
     ///     low-HP, no-shot grunt. Prints AITEST: PASS/FAIL. No window needed.
     public string AiSquadSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70028);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -1233,12 +1367,20 @@ public partial class Game
             // rungs 4-7 hold tier 1 (Math.Max aggregation) and NO QUARTER stays the tier-2 apex.
             if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(3) != 0) fails.Add("aiTierLowHeatNot0");
             if (Sightline.Heat.AiTier(4) != 1 || Sightline.Heat.AiTier(5) != 1) fails.Add("aiTierEliteCadreNot1");
-            if (Sightline.Heat.AiTier(6) != 1 || Sightline.Heat.AiTier(7) != 1) fails.Add("aiTierExposedNot1");
+            // C1 THE FLAT MIDDLE: tier 2 moved from NO QUARTER down to EXPOSED, so heats 6-7 are
+            // tier 2 now. The old tag here read "aiTierExposedNot1", which was ALREADY a misnomer
+            // before C1 — heat 6's tier came from rung 4, not from EXPOSED, and that dead rung-6
+            // declaration is the defect C1 found. Named for what it actually asserts now.
+            if (Sightline.Heat.AiTier(6) != 2 || Sightline.Heat.AiTier(7) != 2) fails.Add("aiTierExposedNot2");
             if (Sightline.Heat.AiTier(8) != 2) fails.Add("aiTierNoQuarterNot2");
-            // W6c data pin: +1 enemy damage is the rung-8 apex ONLY (0 through RELENTLESS, so
-            // heats 0-7 spawn today's weapons byte-for-byte; the default param keeps every
-            // harness Mission.Build call at 0).
-            if (Sightline.Heat.DmgDelta(7) != 0) fails.Add("dmgDeltaBelowApexNot0");
+            // W6c data pin, RE-AIMED BY C1 THE FLAT MIDDLE: the +1 enemy damage moved down from
+            // the rung-8 apex to EXPOSED (rung 6), so the "one rung below is clean" control moves
+            // with it — heat 5 now, heat 7 no longer. The pin that MATTERS is unchanged and is
+            // asserted here explicitly: the ladder carries the damage point exactly ONCE, so the
+            // apex cumulative is still 1 and never 2. (SIGHTLINE_MIDTOOTHTEST proves the same
+            // invariant across all eight modes of the dial, and that MIDTOOTH=0 restores 7 -> 0.)
+            if (Sightline.Heat.DmgDelta(5) != 0) fails.Add("dmgDeltaBelowExposedNot0");
+            if (Sightline.Heat.DmgDelta(6) != 1) fails.Add("dmgDeltaExposedNot1");
             if (Sightline.Heat.DmgDelta(8) != 1) fails.Add("dmgDeltaNoQuarterNot1");
 
             // (b) the smoke/flash damp read: tier 0 == the shipped constants EXACTLY; tier 2
@@ -1513,10 +1655,19 @@ public partial class Game
     /// so the BENCH toggle buttons are visible (S3-A).
     public void DebugBench()
     {
-        // wound two soldiers so the BENCH button appears in their rows
-        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
+        // C5 THE HARD EDGES — DEFECT: this hook staged NOTHING. It set Wound = 2 and then called
+        // DebriefSurvivors, whose recovery step decrements the wound (`u.Wound--`, Run.cs) for a
+        // survivor of a cleared mission — so the flag was already spent by the time anything drew,
+        // and `SIGHTLINE_BENCH=1` photographed the plain barracks. FITTEST's screen audit found it
+        // as a frame byte-identical to the CAMPAIGNMAP case's. The wound is now applied AFTER the
+        // debrief, which is the order the docstring always claimed.
+        //
+        // The docstring's premise is ALSO stale, and left corrected rather than repeated: the
+        // DEPLOY/BENCH pill is drawn on EVERY roster row (Hud.DrawSquadRow), not only on wounded
+        // ones, so what this hook actually stages now is the WOUNDED(n) rank line beside it.
         _run.JumpTo(2);
         _run.DebriefSurvivors();
+        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
         _run.PendingPerks.Clear();
         _run.PendingSpecs.Clear();
         _shopDone = true;
@@ -1529,9 +1680,13 @@ public partial class Game
     ///   SIGHTLINE_ROSTER=<n>  grows the squad to n soldiers (recruits, name-deduped) so the
     ///                         barracks panel's WORST-CASE height (6 rows) can be screenshot;
     ///   SIGHTLINE_REPORT=<n>  pads the debrief to n report lines (the 5-line display cap).
+    ///   SIGHTLINE_MAPCOL=<n>  jump to mission n instead of 3, so a shot (or CLASSTEST) can stage a
+    ///                         fork whose choices include the BOSS column — always Decapitate, and
+    ///                         therefore the only node kind GUARANTEED to be a PITCHED choice.
     public void DebugCampaignMap()
     {
-        _run.JumpTo(3);                  // visit cols 0-2; current sits at mission 3
+        int col = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAPCOL"), out int mc) && mc > 0 ? mc : 3;
+        _run.JumpTo(col);                // visit cols 0..col-1; current sits at mission `col`
         _run.DebriefSurvivors();
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ROSTER"), out int nRoster))
         {
@@ -1645,8 +1800,38 @@ public partial class Game
             }
             foe.Alert = AlertLevel.Alert;
             Selected = s; RecomputeMoveCost();
-            if (hover) { AimMode = false; KbCursor = true; CurX = foe.X; CurY = foe.Y; }
+            if (hover)
+            {
+                AimMode = false; KbCursor = true; CurX = foe.X; CurY = foe.Y;
+                // LEAD FIX (C4 merge): TOOLTIP-HOVER used to differ from TOOLTIP-AIM only by the
+                // KEYBOARD cursor, while the screen audit parks Hud.MousePin off-board at
+                // (-4000,-4000) — so the mouse-driven THREAT CARD, the thing this screen exists to
+                // audit, never drew in either, and the two frames collided outright whenever the
+                // foe seat fell through. That is the intermittent
+                // `screenNotStaged:TOOLTIP-HOVER(identical frame to TOOLTIP-AIM)` a reviewer
+                // measured at ~3% of runs and traced to the audited draw path reading the live
+                // pointer. Pinning the pointer ONTO the foe makes the card draw by construction,
+                // so the screen audits what it claims to and the collision cannot recur.
+                Hud.MousePin = Util.TileCenter(foe.X, foe.Y);
+            }
             else { AimMode = true; AimTarget = foe; }
+        }
+
+        // LEAD FIX (C4 merge), the actual root cause. Everything that distinguished HOVER from AIM
+        // lived inside `if (foe != null)` above — and `foe` is `Enemies.FirstOrDefault(e => e.Alive)`,
+        // so on any staging where no hostile is alive the two screens were byte-identical BY
+        // CONSTRUCTION, and the audit's frame fingerprint correctly reported a collision. That is
+        // the intermittent `screenNotStaged:TOOLTIP-HOVER(identical frame to TOOLTIP-AIM)`,
+        // measured at ~3% over 32 runs by one reviewer and 1-in-4 here in Debug. Pinning the
+        // pointer inside the foe branch alone did NOT fix it, because that branch is exactly the
+        // one that does not run. So the hover state is now established unconditionally, falling
+        // back to the soldier when there is no hostile to hover.
+        if (hover)
+        {
+            AimMode = false; KbCursor = true;
+            var at = Enemies.FirstOrDefault(e => e.Alive) ?? s;
+            CurX = at.X; CurY = at.Y;
+            Hud.MousePin = Util.TileCenter(at.X, at.Y);
         }
     }
 
@@ -1827,6 +2012,12 @@ public partial class Game
     /// empty-deploy guard (defense-in-depth: refuse the layout, never throw).
     public string HeatLadderSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70035);
         NoPersist = true;
         var fails = new List<string>();
 
@@ -1892,7 +2083,11 @@ public partial class Game
             }
         }
         DmgAtHeat("noQuarterDmg", 8, 1);   // apex: every spawned weapon carries the +1
-        DmgAtHeat("heat7Dmg", 7, 0);       // one rung below: untouched
+        // C1 THE FLAT MIDDLE moved the +1 down to EXPOSED (rung 6), so heat 7 now carries it too
+        // and the "one rung below is untouched" control moves with it, to heat 5. Both legs are
+        // deliberately kept: the pair is what proves the damage arrives at exactly one rung.
+        DmgAtHeat("heat6Dmg", 6, 1);       // C1: the tooth's new home
+        DmgAtHeat("heat5Dmg", 5, 0);       // one rung below: untouched
 
         // ── W1 TRUE INSTRUMENT: the ladder's SHAPE, pinned ──────────────────────────────
         // Everything above proves heat's effects REACH the board. Nothing proved what the rungs
@@ -1904,9 +2099,14 @@ public partial class Game
         // applied to the difficulty axis: re-tuning the ladder is allowed, doing it SILENTLY is not.
         // TO RE-TUNE: change Heat.Mods, run SIGHTLINE_HEATLADDERTEST, paste the printed "actual"
         // string in below — and re-measure every rung you moved.
+        // C1 THE FLAT MIDDLE re-tuned rungs 6 and 8 (the +1 per-hit damage AND coordination tier 2
+        // both moved 8 -> 6) and re-measured every rung it moved; levels 6 and 7 changed 0 -> 1 in
+        // the dmg slot and 1 -> 2 in the aiTier slot. SIGHTLINE_MIDTOOTHTEST pins the OTHER modes
+        // of that dial and the structural invariants; this line stays the ladder's single
+        // cumulative fingerprint.
         const string rungShapeGolden =
             "-1:-1,-1,0,0|0:0,0,0,0|1:1,0,0,0|2:1,1,0,0|3:2,1,0,0|4:2,1,0,1|" +
-            "5:3,1,0,1|6:3,2,0,1|7:3,3,0,1|8:4,4,1,2";
+            "5:3,1,0,1|6:3,2,1,2|7:3,3,1,2|8:4,4,1,2";
         {
             var sb = new System.Text.StringBuilder();
             for (int lv = Heat.Min; lv <= Heat.Max; lv++)
@@ -1922,7 +2122,7 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; NO QUARTER +1 dmg on every m3 weapon, none at heat 7; rung shape (enemy,stat,dmg,aiTier) pinned for all 10 levels)"
+            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; the heat +1 dmg on every m3 weapon at heats 6 and 8, none at heat 5; rung shape (enemy,stat,dmg,aiTier) pinned for all 10 levels)"
             : "HEATLADDERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -2068,6 +2268,12 @@ public partial class Game
     /// window (tile math). Returns a one-line report.
     public string RescueSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70042);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -2192,6 +2398,12 @@ public partial class Game
     /// tile math. Returns a one-line report.
     public string StaggerSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70049);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();
@@ -2247,6 +2459,12 @@ public partial class Game
     /// Tiny window (tile math). Returns a one-line report.
     public string PikemanSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70056);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();
@@ -2392,6 +2610,12 @@ public partial class Game
     /// one-line report.
     public string MoraleSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70063);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();          // KillUnit reads run state; enemy death doesn't touch Fallen but be safe
@@ -2780,6 +3004,30 @@ public partial class Game
     /// woken pod + the "!"-telegraphed linked pod (HEARD THE GUNS pop, CONTACT! banner + sub).
     /// Picks the dormant pod with the smallest closest-member gap to another dormant pod
     /// (<= LinkRange) so a link is guaranteed to fire on any seed that allows one.
+    /// C4 — SIGHTLINE_BIOMESHOT: stage a board that SHOWS the ground layer, for the screenshot
+    /// harness. Every comparable visual feature in this project ships one; C4 did not, and judging
+    /// its three biomes meant hunting seeds by hand and re-rolling MapSeed until a good board
+    /// appeared. Pair with SIGHTLINE_FORCEBIOME=<2|3|7> and SIGHTLINE_SHOT=760 (the briefing card
+    /// holds the middle of the board until ~frame 700), and with SIGHTLINE_CB=1 for the second
+    /// pass. It only clears the things that OCCLUDE the ground — the briefing card and the banner —
+    /// and parks the KEYBOARD cursor on a mechanical tile. NOTE: that does not raise the hover
+    /// threat card, which reads the real MOUSE position; the cursor is there so the capture shows
+    /// the tile highlight over mechanical ground, and the card still has to be judged live.
+    /// Purely presentational: no Util.Rng draw, no persistence, no change to the board itself.
+    public void DebugBiomeShot()
+    {
+        BriefLines = null; BriefTimer = 0f;      // the card sits over the middle of the board
+        BannerTimer = 0f;
+        SquadConcealed = false;
+        // put the keyboard cursor on a mechanical tile if this board has one, so the capture also
+        // shows the hover threat card's GROUND line rather than only the material.
+        for (int x = 0; x < Grid.W && !_biomeShotCursor; x++)
+            for (int y = 0; y < Grid.H && !_biomeShotCursor; y++)
+                if (Grid.GroundAt(x, y) != GroundKind.None && Grid.IsFloor(x, y) && UnitAt(x, y) == null)
+                { CurX = x; CurY = y; KbCursor = true; _biomeShotCursor = true; }
+    }
+    bool _biomeShotCursor;
+
     public void DebugPodShot()
     {
         SquadConcealed = false;                 // the wake must not be masked by squad stealth
@@ -2812,6 +3060,12 @@ public partial class Game
     ///     EXTRACT from zone-adjacent move a downed body). Returns a one-line report.
     public string DownSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70070);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         _run = new Run(); _run.Start();
@@ -3087,6 +3341,12 @@ public partial class Game
     /// overwatch). Needs a tiny window (Game uses tile math). Returns a one-line report.
     public string StatusSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70077);
         NoPersist = true;
         _run = new Run(); _run.Start();
         _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
@@ -3146,6 +3406,12 @@ public partial class Game
     /// Drives the real IssueShoot / TryFlankKillRefund paths on a controlled open field.
     public string SnapRefundSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70084);
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
 
@@ -3240,6 +3506,12 @@ public partial class Game
     ///   (d) HighStakes: no field-heal in DebriefSurvivors (survivors carry damage forward).
     public string ContractSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70091);
         NoPersist = true;
         var fails = new List<string>();
 
@@ -3336,6 +3608,12 @@ public partial class Game
     /// Sharpshooter Mark -> Cd 2 and a Gunner Pin -> Cd 2. Deterministic; tiny scene (no run).
     public string CdSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70098);
         NoPersist = true;
         var fails = new List<string>();
 
@@ -3415,6 +3693,12 @@ public partial class Game
     /// Window-free (grid + tile math + static Combat reads only).
     public string ScarSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70105);
         NoPersist = true;
         var fails = new List<string>();
         Faction savedMission = Combat.MissionFaction;   // restore at the end (don't bleed into runtime)
@@ -3560,6 +3844,448 @@ public partial class Game
         return fails.Count == 0
             ? "ITEMTEST: PASS (smoke blocks+decays LoS, barricade=cover, loadouts map)"
             : "ITEMTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_BIOMETEST) — wave C4 "EIGHT BIOMES ARE PAINT".
+    ///
+    /// Pins the MECHANIC'S ACTUAL EFFECT on a constructed board, never the presence of a field:
+    /// every leg measures a number the game would use (a cover level, a hit%, a Dijkstra cost, a
+    /// line-of-sight verdict, an HP total, an AI destination) with and without the ground under it.
+    ///
+    /// It reads the AMBIENT Terrain.Enabled deliberately, so `SIGHTLINE_BIOMEMECH=0` — the flag that
+    /// restores the pre-C4 board exactly — makes it FAIL. That is the "a test that cannot fail is not
+    /// a test" proof, and it is the same switch the CRN A/B round was measured on.
+    /// Measured real-board densities, appended by the density leg and printed in the PASS line —
+    /// so the number that SHIPS is visible in the sweep output rather than living in a comment
+    /// that drifted (which is exactly what happened between C4's first cut and its review).
+    string BiomeDensityNote = "";
+
+    public string BiomeSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        BiomeDensityNote = "";
+
+        Grid OpenGrid()
+        {
+            var gr = new Grid();
+            for (int x = 0; x < gr.W; x++)
+                for (int y = 0; y < gr.H; y++) { gr.Tiles[x, y] = TileType.Floor; gr.Height[x, y] = 0; }
+            gr.ResetCoverHp();
+            return gr;
+        }
+        Unit Shooter(int x, int y, Team t) {
+            var u = new Unit { Name = "U", Cls = "GRUNT", Team = t, X = x, Y = y, Hp = 10, MaxHp = 10,
+                               Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ═══ 1. THE STAMPER — three mechanical biomes, five that are still paint ═══════════════
+        // (declared, not hidden: STEEL/ARID/ASH/VOID/NEON must stamp NOTHING, so a future wave that
+        // gives one of them a mechanic has to change this line and say so.)
+        int[] mechIdx = { Terrain.BiomeTundra, Terrain.BiomeVerdant, Terrain.BiomeMagma };
+        var mechKind = new Dictionary<int, GroundKind> {
+            { Terrain.BiomeTundra, GroundKind.Ice }, { Terrain.BiomeVerdant, GroundKind.Undergrowth },
+            { Terrain.BiomeMagma, GroundKind.Vent } };
+        for (int bi = 0; bi < Biome.All.Length; bi++)
+        {
+            var gs = OpenGrid();
+            Terrain.Stamp(gs, bi, 4242, 3, null);
+            int n = 0; bool wrongKind = false;
+            for (int x = 0; x < gs.W; x++)
+                for (int y = 0; y < gs.H; y++)
+                    if (gs.Ground[x, y] != GroundKind.None)
+                    { n++; if (mechKind.TryGetValue(bi, out var want) && gs.Ground[x, y] != want) wrongKind = true; }
+            bool mechanical = Array.IndexOf(mechIdx, bi) >= 0;
+            if (mechanical && n == 0) fails.Add($"noGround[{Biome.All[bi].Name}]");
+            if (!mechanical && n != 0) fails.Add($"paintBiomeStamped[{Biome.All[bi].Name}]");
+            if (wrongKind) fails.Add($"wrongKind[{Biome.All[bi].Name}]");
+            if (mechanical && Terrain.Tag(bi) == null) fails.Add($"noTag[{bi}]");
+            if (!mechanical && Terrain.Tag(bi) != null) fails.Add($"paintBiomeTagged[{bi}]");
+        }
+
+        // DENSITY — ON REAL BOARDS. The first version of this leg swept `OpenGrid()` (every tile
+        // floor, `reserved = null`), which is a board that NEVER OCCURS IN PLAY: on a real
+        // `SetupMission` board, cover, barrels, plateaus, unit rings and objective rings eat a large
+        // share of every walk. The C4 review measured the gap and it was the whole ballgame — the
+        // open-grid sweep passed while VERDANT shipped at 12.1% against a stated target of 18-22%,
+        // MAGMA's real minimum was ONE vent tile, and 43/200 MAGMA boards fell under this leg's own
+        // floor. A guard that measures a board the game never builds is not a guard.
+        //
+        // So: build REAL missions through the real SetupMission, with the biome pinned by the
+        // existing SIGHTLINE_FORCEBIOME hook, and pin the density that actually SHIPS. Bounds are
+        // deliberately tight around the measured values, so a stamper re-tune has to come here and
+        // restate them rather than drifting silently (which is exactly what happened once already).
+        {
+            string savedForce = Environment.GetEnvironmentVariable("SIGHTLINE_FORCEBIOME");
+            try
+            {
+                foreach (int bi in mechIdx)
+                {
+                    Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", bi.ToString());
+                    int lo = int.MaxValue, hi = 0, sum = 0, boards = 0, thin = 0, raised = 0;
+                    for (int sd = 0; sd < 10; sd++)
+                        for (int m = 1; m <= 4; m++)
+                        {
+                            NoPersist = true;
+                            _run = new Run(); _run.Start(); _run.MapSeed = sd * 7919 + 13;
+                            _run.HeatLevel = 0;
+                            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate,
+                                                                 ModName = "STANDARD", Reward = RewardKind.None };
+                            SetupMission(m);
+                            int n = CountGroundTiles();
+                            for (int x = 0; x < Grid.W; x++)
+                                for (int y = 0; y < Grid.H; y++)
+                                    if (Grid.Ground[x, y] != GroundKind.None && Grid.HeightAt(x, y) > 0) raised++;
+                            lo = Math.Min(lo, n); hi = Math.Max(hi, n); sum += n; boards++;
+                            if (n < (bi == Terrain.BiomeMagma ? 7 : 12)) thin++;
+                        }
+                    double mean = sum / (double)boards;
+                    // (a) M1 — NOTHING may be stamped on raised terrain: a plateau top is painted
+                    //     opaque over the ground layer, so any tile here is a rule with no pixels.
+                    if (raised != 0) fails.Add($"groundOnPlateau[{Biome.All[bi].Name}]={raised}");
+                    // (b) the mechanic must actually be PRESENT on the board the player gets
+                    double loMean = bi == Terrain.BiomeMagma ? 12.0 : (bi == Terrain.BiomeTundra ? 15.0 : 25.0);
+                    if (mean < loMean) fails.Add($"realMeanTooSparse[{Biome.All[bi].Name}]={mean:F1}");
+                    if (mean > 46.0) fails.Add($"realMeanFlood[{Biome.All[bi].Name}]={mean:F1}");
+                    // (c) and it must not VANISH on a minority of seeds — the failure this wave
+                    //     claimed to have fixed on an open grid and had NOT fixed in play.
+                    if (lo < 4) fails.Add($"realMin[{Biome.All[bi].Name}]={lo}");
+                    if (thin * 4 > boards) fails.Add($"realThinBoards[{Biome.All[bi].Name}]={thin}/{boards}");
+                    if (hi > 52) fails.Add($"realFlood[{Biome.All[bi].Name}]={hi}");
+                    BiomeDensityNote += $" {Biome.All[bi].Name}~{mean:F1}({lo}-{hi})";
+                }
+            }
+            finally { Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", savedForce); }
+        }
+        // the OPEN-GRID generator bound is kept as a separate, weaker claim, clearly scoped:
+        // it pins the stamper's own ceiling, not the board's.
+        foreach (int bi in mechIdx)
+        {
+            int hi = 0;
+            for (int sd = 0; sd < 24; sd++)
+                for (int m = 1; m <= 3; m++)
+                {
+                    var gs = OpenGrid();
+                    Terrain.Stamp(gs, bi, sd * 7919 + 13, m, null);
+                    int n = 0;
+                    for (int x = 0; x < gs.W; x++)
+                        for (int y = 0; y < gs.H; y++) if (gs.Ground[x, y] != GroundKind.None) n++;
+                    hi = Math.Max(hi, n);
+                }
+            if (hi > 52) fails.Add($"openGridFlood[{Biome.All[bi].Name}]={hi}");
+        }
+
+        // determinism: the SAME (seed, mission) stamps byte-identically, a different mission does not.
+        // This is the CRN contract — the layer must derive from Hash3 and take ZERO Util.Rng draws.
+        {
+            var g1 = OpenGrid(); var g2 = OpenGrid(); var g3 = OpenGrid();
+            Terrain.Stamp(g1, Terrain.BiomeMagma, 777, 2, null);
+            Terrain.Stamp(g2, Terrain.BiomeMagma, 777, 2, null);
+            Terrain.Stamp(g3, Terrain.BiomeMagma, 777, 3, null);
+            bool same = true, differs = false;
+            for (int x = 0; x < g1.W; x++)
+                for (int y = 0; y < g1.H; y++)
+                {
+                    if (g1.Ground[x, y] != g2.Ground[x, y]) same = false;
+                    if (g1.Ground[x, y] != g3.Ground[x, y]) differs = true;
+                }
+            if (!same) fails.Add("stampNotDeterministic");
+            if (!differs) fails.Add("stampIgnoresMission");
+        }
+
+        // reserved tiles are never covered (a soldier must not deploy standing in a fissure)
+        {
+            var gr = OpenGrid();
+            var res = new HashSet<(int x, int y)>();
+            for (int x = 0; x < gr.W; x++) for (int y = 0; y < gr.H; y++) if ((x + y) % 3 == 0) res.Add((x, y));
+            Terrain.Stamp(gr, Terrain.BiomeVerdant, 99, 1, res);
+            foreach (var (x, y) in res) if (gr.Ground[x, y] != GroundKind.None) fails.Add("stampedReserved");
+        }
+
+        // ═══ 1b. M1 — RAISED TERRAIN CARRIES NO GROUND ════════════════════════════════════════
+        // `DrawElevation` paints a plateau top with a FULLY OPAQUE rect AFTER `DrawGround`, so any
+        // mechanical ground on a raised tile is a rule with ZERO pixels behind it. The stamper
+        // excludes Height > 0 at the source; this pins it. It is deliberately a DIRECT leg as well
+        // as a real-board one, because the open-grid helper sets Height = 0 everywhere and could
+        // never have caught this — the reason the defect shipped.
+        foreach (int bi in mechIdx)
+        {
+            var gr = OpenGrid();
+            for (int x = 0; x < gr.W; x++)
+                for (int y = 0; y < gr.H; y++)
+                    if (x >= 4 && x <= 13) gr.Height[x, y] = 1;     // a wide plateau across the middle
+            int onRaised = 0, onFlat = 0;
+            for (int sd = 0; sd < 12; sd++)
+            {
+                Terrain.Stamp(gr, bi, sd * 104729 + 7, 1, null);
+                for (int x = 0; x < gr.W; x++)
+                    for (int y = 0; y < gr.H; y++)
+                        if (gr.Ground[x, y] != GroundKind.None)
+                        { if (gr.HeightAt(x, y) > 0) onRaised++; else onFlat++; }
+            }
+            if (onRaised != 0) fails.Add($"stampedRaised[{Biome.All[bi].Name}]={onRaised}");
+            if (onFlat == 0) fails.Add($"plateauAteEverything[{Biome.All[bi].Name}]");
+        }
+
+        // ═══ 2. VERDANT / UNDERGROWTH — the COVER axis ════════════════════════════════════════
+        {
+            var gr = OpenGrid();
+            gr.Ground[9, 5] = GroundKind.Undergrowth; gr.RefreshGroundFlags();
+
+            // at range: LOW cover from EVERY angle, labelled as foliage, and NOT flankable
+            var far = gr.GetCover(9, 5, 14, 5);
+            if (far.Level != 1 || !far.Foliage || far.Partial) fails.Add("foliageNoCoverAtRange");
+            if (far.Defense != 20) fails.Add($"foliageDefense={far.Defense}");
+            var diag = gr.GetCover(9, 5, 14, 10);          // a diagonal angle gets the same protection
+            if (diag.Level != 1 || !diag.Foliage) fails.Add("foliageDiagonal");
+            if (gr.GetCover(9, 5, 5, 5).Level != 1) fails.Add("foliageFromWest");
+
+            // inside FoliageMinDist it is worth NOTHING — that is the counter, and it is the half a
+            // player has to be able to feel: close, and the ferns stop mattering.
+            var close = gr.GetCover(9, 5, 9 + Terrain.FoliageMinDist, 5);
+            if (close.Level != 0 || close.Foliage) fails.Add("foliageStillCoversUpClose");
+
+            // it is a FLOOR, not a bonus: a real high block still reads HIGH, not HIGH+fern
+            gr.Tiles[10, 5] = TileType.HighCover; gr.ResetCoverHp();
+            if (gr.GetCover(9, 5, 14, 5).Level != 2) fails.Add("foliageBrokeHighCover");
+            gr.Tiles[10, 5] = TileType.Floor; gr.ResetCoverHp();
+
+            // high ground SEES OVER it, exactly as it sees over any low block
+            var atk = Shooter(14, 5, Team.Player); var def = Shooter(9, 5, Team.Enemy);
+            var flat = Combat.ComputeOdds(gr, atk, def);
+            if (!flat.Foliage || flat.CoverLevel != 1) fails.Add("oddsMissedFoliage");
+            gr.Height[14, 5] = 1;
+            var high = Combat.ComputeOdds(gr, atk, def);
+            if (!high.SeesOver || high.CoverLevel != 0 || high.Foliage) fails.Add("highGroundBlindToFoliage");
+            gr.Height[14, 5] = 0;
+
+            // and it is worth EXACTLY 20 points of the attacker's hit chance (the number the badge
+            // prints), measured against the same shot with the fern removed
+            gr.Ground[9, 5] = GroundKind.None; gr.RefreshGroundFlags();
+            var bare = Combat.ComputeOdds(gr, atk, def);
+            if (bare.HitChance - flat.HitChance != 20) fails.Add($"foliageAimDelta={bare.HitChance - flat.HitChance}");
+            if (!bare.Flanked && bare.CoverLevel != 0) fails.Add("bareTileNotExposed");
+        }
+
+        // ═══ 3. TUNDRA / SLICK ICE — the MOVEMENT axis ════════════════════════════════════════
+        {
+            var gr = OpenGrid();
+            var bareCost = gr.CostMap(2, 5, (x, y) => false, out _, 12);
+            int bareReach = bareCost[8, 5];               // 6 orthogonal steps = 12 half-tiles
+            for (int x = 3; x <= 16; x++) gr.Ground[x, 5] = GroundKind.Ice;
+            gr.RefreshGroundFlags();
+            var iceCost = gr.CostMap(2, 5, (x, y) => false, out _, 12);
+            if (iceCost[3, 5] != Terrain.IceStepOrth) fails.Add($"iceStep={iceCost[3, 5]}");
+            if (bareReach != 12) fails.Add($"bareReach={bareReach}");
+            if (iceCost[8, 5] != 6) fails.Add($"iceReachCost={iceCost[8, 5]}");
+            // the lane genuinely reaches FURTHER on the same budget: (14,5) is 12 tiles out and
+            // unreachable on foot, reachable on the drift.
+            if (bareCost[14, 5] != -1) fails.Add("bareLaneAlreadyReached");
+            if (iceCost[14, 5] < 0) fails.Add("iceLaneNoExtraReach");
+            // ice is a movement rule ONLY — it is not cover and it does not blind
+            if (gr.GetCover(8, 5, 14, 5).Level != 0) fails.Add("iceGaveCover");
+            if (!gr.HasLineOfSight(2, 5, 16, 5)) fails.Add("iceBlockedSight");
+        }
+
+        // ═══ 4. MAGMA / THERMAL VENTS — the SIGHT axis (plus the toll) ════════════════════════
+        {
+            var gr = OpenGrid();
+            if (!gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("openSightBroken");
+            gr.Ground[9, 5] = GroundKind.Vent; gr.RefreshGroundFlags();
+            if (gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("ventDidNotBlockSight");
+            // steam is not a wall: a COMMANDING (tier-2 height) shooter sees over HIGH COVER but
+            // must not see through a vent — the vent joins smoke, not the terrain.
+            if (gr.HasLineOfSight(4, 5, 14, 5, true)) fails.Add("commandingSawThroughVent");
+            if (!gr.IsVapor(9, 5)) fails.Add("ventNotVapor");
+            // it gives NO cover to whoever is standing on it (it is a screen, not a block)
+            if (gr.GetCover(9, 5, 14, 5).Level != 0) fails.Add("ventGaveCover");
+            // sight around it still works — the fords are the whole reason the fissure has gaps
+            if (!gr.HasLineOfSight(4, 6, 14, 6)) fails.Add("ventBlockedAdjacentLane");
+            // the MOVEMENT half of the toll. The first version asserted
+            // `vc[9,5] == 2 + Terrain.VentStepExtra`, which is SELF-REFERENTIAL: it passes for any
+            // value of the constant, including VentStepExtra = 7, which makes a vent uncrossable by
+            // EVERY unit in the game and silently turns the fissure into a wall. Assert the LITERAL,
+            // and assert the invariant that literal exists to protect.
+            var vc = gr.CostMap(8, 5, (x, y) => false, out _, 99);
+            if (vc[9, 5] != 8) fails.Add($"ventStep={vc[9, 5]}");
+            // INVARIANT: a full-mobility (4) soldier must always be able to FORCE a crossing —
+            // 8 half-tiles is exactly one action's budget. Anything dearer and the mechanic stops
+            // being a price and becomes terrain. (A WOUNDED soldier already cannot enter one; that
+            // is declared in DEVLOG C4, not asserted here, because it is the current behaviour.)
+            if (2 + Terrain.VentStepExtra > 8) fails.Add($"ventUncrossable={2 + Terrain.VentStepExtra}");
+
+            // the HP half of the toll, through the real Game seam both teams move through
+            Grid = gr; Players = new List<Unit>(); Enemies = new List<Unit>();
+            Vip = null; CaptiveLocked = false; SquadConcealed = false; Phase = Phase.PlayerTurn;
+            Objective = Objective.Eliminate; EvacZone.Clear();
+            var walker = Shooter(9, 5, Team.Player); Players.Add(walker);
+            int hp0 = walker.Hp;
+            OnUnitEnteredTile(walker);
+            if (walker.Hp != hp0 - Unit.BurnDamage) fails.Add($"ventNoSear={hp0 - walker.Hp}");
+            if (!walker.HasStatus(StatusKind.Burning)) fails.Add("ventDidNotIgnite");
+            // and PARKING on one keeps you burning — otherwise the safest tile on the board would be
+            // the one nothing can see through (the turtle DESIGN.md 3.A forbids)
+            walker.Statuses.Clear();
+            TickHazards();
+            if (!walker.HasStatus(StatusKind.Burning)) fails.Add("ventParkedNotReignited");
+            // Terrain.VentBurnTurns was DEAD CODE: TickHazards hardcoded `2`, so mutating the
+            // constant 2 -> 1 changed nothing and no test could see it. Pin the DURATION the
+            // constant actually produces, so the constant has to matter.
+            // TWO assertions, and it needs both. `== Terrain.VentBurnTurns` alone is SELF-REFERENTIAL
+            // — mutating the constant 2 -> 1 passed it, which is the very defect this leg exists to
+            // close (and the same shape as the old `ventStep` assertion). The LITERAL catches a
+            // changed constant; the CONSTANT catches a code path that ignores it and hardcodes a
+            // number, which is how VentBurnTurns became dead in the first place.
+            int ventBurn = 0;
+            foreach (var st in walker.Statuses) if (st.Kind == StatusKind.Burning) ventBurn = st.Turns;
+            if (ventBurn != 2) fails.Add($"ventBurnTurns={ventBurn}");
+            if (Terrain.VentBurnTurns != 2) fails.Add($"ventBurnConst={Terrain.VentBurnTurns}");
+            if (ventBurn != Terrain.VentBurnTurns) fails.Add("ventBurnIgnoresConst");
+
+            // DOUBLE SEAR: a tile that is BOTH on fire and a vent must charge ONE sear per entry,
+            // not two (the fire branch and the vent branch used to be separate unconditional ifs).
+            var both = Shooter(4, 4, Team.Player); Players.Add(both);
+            gr.Ground[4, 4] = GroundKind.Vent; gr.RefreshGroundFlags();
+            gr.LightFire(4, 4, Grid.FireTurns);
+            int bhp = both.Hp; both.Statuses.Clear();
+            OnUnitEnteredTile(both);
+            if (bhp - both.Hp != Unit.BurnDamage) fails.Add($"doubleSear={bhp - both.Hp}");
+            // a walker on ordinary floor is untouched by the same tick (the guard is the ground, not the tick)
+            var safe = Shooter(2, 9, Team.Player); Players.Add(safe);
+            int shp = safe.Hp; safe.Statuses.Clear();
+            TickHazards(); OnUnitEnteredTile(safe);
+            if (safe.Hp != shp || safe.HasStatus(StatusKind.Burning)) fails.Add("floorTileBurned");
+        }
+
+        // ═══ 5. THE OPPONENT UNDERSTANDS THE NEW BOARD ════════════════════════════════════════
+        //
+        // C4 REVIEW — WHAT THIS BLOCK USED TO CLAIM, AND WHY THAT WAS WRONG. The wave singled the
+        // leg below out as "the only honest way to test that the enemy understands the new board".
+        // It was not: it is a COMPOSITE. The reviewer mutated Ai.cs's vent weight one value at a
+        // time and the test passed at -34 -> 0, at -1, and even INVERTED to +200 — because
+        // Grid.CostMap's +6 toll alone moves the plan, with Ai.Plan's Util.RandRange(0,3) tie-break
+        // jitter as a further confound. It only failed when the CostMap toll was zeroed TOO.
+        // So there are now TWO legs with two different claims, and the jitter is pinned in both.
+        //
+        // (a) COMPOSITE — the behavioural claim, and it is a real one: with everything the game
+        //     ships, nothing lets a hostile end its move on hot ground. Run the same scene twice
+        //     and watch it abandon the exact tile it just chose.
+        {
+            Grid = OpenGrid(); Players = new List<Unit>(); Enemies = new List<Unit>();
+            Vip = null; CaptiveLocked = false; SquadConcealed = false; Phase = Phase.EnemyTurn;
+            Objective = Objective.Eliminate; EvacZone.Clear();
+            var soldier = Shooter(3, 5, Team.Player); Players.Add(soldier);
+            var foe = Shooter(12, 5, Team.Enemy); Enemies.Add(foe);
+            RefreshCombatRoster();
+            // PIN THE JITTER. Ai.Plan draws Util.RandRange(0,3) per candidate tile; over the same
+            // reachable set the same seed replays the same per-tile jitter, so the two plans differ
+            // ONLY by the vent. Without this a "different tile" can be pure noise.
+            Util.Reseed(9001);
+            var p0 = Ai.Plan(this, foe);
+            (int x, int y) t0 = p0.Path.Count > 0 ? p0.Path[p0.Path.Count - 1] : (foe.X, foe.Y);
+            if (p0.Path.Count == 0) fails.Add("aiDidNotMoveAtAll");
+            else
+            {
+                Grid.Ground[t0.x, t0.y] = GroundKind.Vent; Grid.RefreshGroundFlags();
+                foe.X = 12; foe.Y = 5; foe.SyncPos(); foe.BeginTurn();
+                Util.Reseed(9001);
+                var p1 = Ai.Plan(this, foe);
+                (int x, int y) t1 = p1.Path.Count > 0 ? p1.Path[p1.Path.Count - 1] : (foe.X, foe.Y);
+                if (t1.x == t0.x && t1.y == t0.y) fails.Add("aiParkedOnVent");
+                // (`aiEndedOnAVent` was here and was redundant — the scene holds exactly one vent
+                // tile, so it could only ever restate `aiParkedOnVent`. Dropped.)
+            }
+        }
+        // (a2) ISOLATED — Ai.cs's OWN term, with the CostMap toll switched off so it cannot carry
+        //      the result. This is the leg that fails on `score -= 34` -> 0 and on an inverted
+        //      weight. With VentStepExtra = 0 the vent costs nothing to enter, the jitter is pinned
+        //      to the same stream, and a single vent tile changes no sightline that STARTS or ENDS
+        //      on it (HasLineOfSight tests neither endpoint) — so the ONLY thing that can move the
+        //      planner off its own chosen tile is the term in Ai.cs.
+        {
+            int savedToll = Terrain.VentStepExtra;
+            try
+            {
+                Terrain.VentStepExtra = 0;
+                Grid = OpenGrid(); Players = new List<Unit>(); Enemies = new List<Unit>();
+                Vip = null; CaptiveLocked = false; SquadConcealed = false; Phase = Phase.EnemyTurn;
+                Objective = Objective.Eliminate; EvacZone.Clear();
+                var soldier = Shooter(3, 5, Team.Player); Players.Add(soldier);
+                var foe = Shooter(12, 5, Team.Enemy); Enemies.Add(foe);
+                RefreshCombatRoster();
+                Util.Reseed(4242);
+                var q0 = Ai.Plan(this, foe);
+                (int x, int y) u0 = q0.Path.Count > 0 ? q0.Path[q0.Path.Count - 1] : (foe.X, foe.Y);
+                if (q0.Path.Count == 0) fails.Add("aiIsoDidNotMove");
+                else
+                {
+                    Grid.Ground[u0.x, u0.y] = GroundKind.Vent; Grid.RefreshGroundFlags();
+                    // the tile must still be REACHABLE at the same cost — otherwise "declined"
+                    // would be indistinguishable from "could not get there" (the exact confound
+                    // this leg exists to remove).
+                    var reach = Grid.CostMap(foe.X, foe.Y, (x, y) => false, out _, foe.MoveBudget * 2);
+                    if (reach[u0.x, u0.y] < 0) fails.Add("aiIsoTileUnreachable");
+                    foe.X = 12; foe.Y = 5; foe.SyncPos(); foe.BeginTurn();
+                    Util.Reseed(4242);
+                    var q1 = Ai.Plan(this, foe);
+                    (int x, int y) u1 = q1.Path.Count > 0 ? q1.Path[q1.Path.Count - 1] : (foe.X, foe.Y);
+                    if (u1.x == u0.x && u1.y == u0.y) fails.Add("aiTermDoesNothing");
+                }
+            }
+            finally { Terrain.VentStepExtra = savedToll; }
+        }
+        // (b) the enemy's REACH is the shared cost map, so an ice lane widens the exact set of tiles
+        //     Ai.Plan gets to choose from — no second movement model, nothing for the AI to miss.
+        {
+            Grid = OpenGrid(); Players = new List<Unit>(); Enemies = new List<Unit>();
+            Phase = Phase.EnemyTurn; Objective = Objective.Eliminate; EvacZone.Clear();
+            var foe = Shooter(2, 5, Team.Enemy); Enemies.Add(foe);
+            var bare = Grid.CostMap(foe.X, foe.Y, (x, y) => false, out _, foe.MoveBudget * 2);
+            for (int x = 3; x <= 16; x++) Grid.Ground[x, 5] = GroundKind.Ice;
+            Grid.RefreshGroundFlags();
+            var iced = Grid.CostMap(foe.X, foe.Y, (x, y) => false, out _, foe.MoveBudget * 2);
+            int gained = 0, lost = 0;
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (bare[x, y] < 0 && iced[x, y] >= 0) gained++;
+                    if (bare[x, y] >= 0 && iced[x, y] < 0) lost++;
+                }
+            if (gained <= 0) fails.Add("iceGaveTheAiNothing");
+            if (lost != 0) fails.Add($"iceTookReachAway={lost}");
+        }
+
+        // ═══ 6. THE OFF SWITCH — SIGHTLINE_BIOMEMECH=0 restores the pre-C4 board EXACTLY ══════
+        {
+            bool was = Terrain.Enabled;
+            Terrain.Enabled = false;
+            var gr = OpenGrid();
+            gr.Ground[9, 5] = GroundKind.Undergrowth;
+            gr.Ground[10, 5] = GroundKind.Vent;
+            gr.Ground[11, 5] = GroundKind.Ice;
+            gr.RefreshGroundFlags();
+            if (gr.GetCover(9, 5, 14, 5).Level != 0) fails.Add("offSwitchFoliage");
+            if (!gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("offSwitchVentSight");
+            var c = gr.CostMap(12, 5, (x, y) => false, out _, 99);
+            if (c[11, 5] != 2 || c[10, 5] != 4) fails.Add("offSwitchCosts");
+            if (gr.IsVent(10, 5) || gr.IsIce(11, 5) || gr.IsFoliage(9, 5)) fails.Add("offSwitchPredicates");
+            var gs = OpenGrid(); Terrain.Stamp(gs, Terrain.BiomeMagma, 5, 1, null);
+            for (int x = 0; x < gs.W; x++)
+                for (int y = 0; y < gs.H; y++) if (gs.Ground[x, y] != GroundKind.None) fails.Add("offSwitchStamped");
+            Terrain.Enabled = was;
+        }
+
+        return fails.Count == 0
+            ? "BIOMETEST: PASS (3 biomes mechanical on 3 axes, 5 still paint; NO ground on raised terrain; "
+              + "undergrowth = omnidirectional low cover past " + Terrain.FoliageMinDist
+              + " tiles and worth exactly 20 aim, gone up close, seen over from height; ice halves the step and "
+              + "widens the shared reach; a vent blinds even a commanding shooter, gives no cover, costs a "
+              + "full-mobility soldier's whole walk to enter, sears ONCE on entry even when also on fire, and "
+              + "re-ignites for VentBurnTurns on parking; the AI declines a vent BOTH composite AND with the "
+              + "CostMap toll zeroed, jitter pinned; stamp pure, off-switch clean; REAL-BOARD density"
+              + BiomeDensityNote + ")"
+            : "BIOMETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_HAZARDTEST): environmental-hazard mechanics — a barrel blocks
@@ -3907,6 +4633,12 @@ public partial class Game
     // PlayerOverwatchTiles both consult, so a correct cone here means the reaction + the AI routing agree. ──
     public string OwSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70112);
         var fails = new List<string>();
         var w = new Unit { X = 5, Y = 5, OwFocused = true, OwDirX = 1, OwDirY = 0 };   // braced facing east (+X)
         if (!InOwCone(w, 9, 5)) fails.Add("aheadNotInCone");         // straight ahead
@@ -4870,6 +5602,12 @@ public partial class Game
     /// Preserves and restores the real display.json around the round-trip.
     public string TutorialSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70119);
         var fails = new List<string>();
 
         // ---- (1) the drill's arena + build ----------------------------------------------------
@@ -5393,11 +6131,45 @@ public partial class Game
         void Tight(ref float best, ref string tag, float v, string what)
         { if (v < best) { best = v; tag = what; } }
 
+        // -- C5 THE HARD EDGES - THE SCOPE GUARD -------------------------------------------
+        // CROSSCUT rule 6: "a correct assertion in the wrong scope is indistinguishable from no
+        // assertion" - W5 wrote the right guard for the longest string on the squad screen and
+        // put it OUTSIDE the scale loop, and CHROMETEST's own blurb leg sat outside its loop for
+        // a wave. Prose cannot enforce that, so this test now COUNTS the assertions it evaluates,
+        // per leg, per scale: an assertion that has drifted out of the loop records checks at one
+        // scale index only, and the tally below FAILS on it by name. Every leg (A-E, and one row
+        // per audited screen) must record at least one check at EVERY shipped scale.
+        int scaleIdx = 0;
+        var legChecks = new Dictionary<string, int[]>();
+        void Bump(string leg)
+        {
+            if (!legChecks.TryGetValue(leg, out var row)) legChecks[leg] = row = new int[Display.UiScaleLevels.Length];
+            row[scaleIdx]++;
+        }
+        // C5 REVIEW FIX (E1) — THE COUNTER AND THE ASSERTION ARE ONE STATEMENT.
+        // The first version bumped and asserted separately, so the number counted BUMPS. The review
+        // defeated it in two edits: introduce a real 120%-only defect (PlateSlack 1.5 -> 1.0, which
+        // FAILS with 18 violations, all @120%), then condition only the ASSERTION on
+        // `S == "@100%"` while leaving its bump — PASS, with a byte-identical headline count, while
+        // 18 real violations went unreported. `Check` cannot be separated from what it asserts, so
+        // the number now means "assertions EVALUATED".
+        // AND THE LIMIT, STATED RATHER THAN IMPLIED: this proves each assertion RAN at each scale.
+        // It cannot prove the CONDITION was not itself narrowed — nothing short of mutation testing
+        // can. What it buys is that the natural way to lose coverage (moving, gating or deleting an
+        // assertion) now moves the number with it.
+        void Check(string leg, bool ok, string fail)
+        {
+            Bump(leg);
+            if (!ok) fails.Add(fail);
+        }
+        int screens = 0;
+
         try
         {
             foreach (float ui in Display.UiScaleLevels)
             {
                 Cfg.UiScale = ui;
+                scaleIdx = Array.IndexOf(Display.UiScaleLevels, ui);
                 string S = $"@{(int)(ui * 100)}%";
 
                 // ---- (A) the MID-RUN FIELD DOCTRINE card ------------------------------------
@@ -5411,20 +6183,22 @@ public partial class Game
                         float ink = Hud.BoonOfferInkBottom(b);
                         float chooseTop = ch - Hud.BoonOfferChooseUp;
                         Tight(ref mA, ref tA, chooseTop - ink, $"{BoonDef.Code(b)}{S}");
-                        if (ink + pad > chooseTop)
-                            fails.Add($"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
+                        Check("A", !(ink + pad > chooseTop),
+                              $"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
                         // ...and no wrapped line may exceed the column it was wrapped to
                         foreach (var (line, _) in Hud.WrapLinesForTest(BoonDef.Desc(b), Hud.BoonOfferBodyW, Hud.BoonOfferFs))
-                            if (Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1)
-                                fails.Add($"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                        {
+                            Check("A", !(Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1),
+                                  $"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                        }
                     }
                     // [ CHOOSE ] itself must land inside the card
                     float cbot = ch - Hud.BoonOfferChooseUp + Cfg.Measure("[ CHOOSE ]", Hud.BoonOfferFs, 1f).Y;
-                    if (cbot + pad > ch) fails.Add($"chooseBelowCard{S}({cbot:0}>{ch})");
+                    Check("A", !(cbot + pad > ch), $"chooseBelowCard{S}({cbot:0}>{ch})");
                     // and the whole block (title 92px above, ACTIVE strip 40px below) fits the canvas
                     int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
-                    if (y0 - 92 < 8) fails.Add($"boonTitleOffTop{S}({y0 - 92})");
-                    if (y0 + ch + 40 > Cfg.ScreenH) fails.Add($"boonBlockOffBottom{S}({y0 + ch + 40})");
+                    Check("A", !(y0 - 92 < 8), $"boonTitleOffTop{S}({y0 - 92})");
+                    Check("A", !(y0 + ch + 40 > Cfg.ScreenH), $"boonBlockOffBottom{S}({y0 + ch + 40})");
                 }
 
                 // ---- (B) the ARMORY weapon row ---------------------------------------------
@@ -5442,8 +6216,8 @@ public partial class Game
                         float bw = Cfg.Measure(blurb, Hud.ArmoryBlurbFs, 1f).X;
                         float budget = Hud.ArmoryBlurbWidth();
                         Tight(ref mB, ref tB, budget - bw, $"{k}blurb{S}");
-                        if (bw > budget) fails.Add($"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
-                        if (blurbBot + pad > Hud.ArmoryRowH) fails.Add($"armoryBlurbBelowRow{S}");
+                        Check("B", !(bw > budget), $"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
+                        Check("B", !(blurbBot + pad > Hud.ArmoryRowH), $"armoryBlurbBelowRow{S}");
                         float nameRight = Hud.ArmoryTextX + Cfg.Measure(name, Hud.ArmoryNameFs, 1f).X;
                         foreach (var (tag, fs) in new[] { ("EQUIPPED", Hud.ArmoryTagFs),
                                                           ($"[ {Game.ArmoryCost} INTEL ]", Hud.ArmoryTagFs),
@@ -5455,12 +6229,12 @@ public partial class Game
                             // two independent strings may share a BAND or a COLUMN, never both
                             bool xOverlapBlurb = tagLeft < Hud.ArmoryTextX + bw + pad;
                             bool yOverlapBlurb = tagBot + pad > blurbTop && tagTop < blurbBot + pad;
-                            if (xOverlapBlurb && yOverlapBlurb)
-                                fails.Add($"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
-                            if (tagLeft < nameRight + 12)
-                                fails.Add($"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
-                            if (tagBot + pad > Hud.ArmoryRowH) fails.Add($"armoryTagBelowRow:{k}{S}");
-                            if (tagTop < 2) fails.Add($"armoryTagAboveRow:{k}{S}");
+                            Check("B", !(xOverlapBlurb && yOverlapBlurb),
+                                  $"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
+                            Check("B", !(tagLeft < nameRight + 12),
+                                  $"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
+                            Check("B", !(tagBot + pad > Hud.ArmoryRowH), $"armoryTagBelowRow:{k}{S}");
+                            Check("B", !(tagTop < 2), $"armoryTagAboveRow:{k}{S}");
                         }
                     }
                 }
@@ -5480,17 +6254,17 @@ public partial class Game
                             { Name = worstName, Cls = cls, Rank = rank, Kills = 999, Heat = 8, Won = true };
                             float subW = Cfg.Measure(Hud.WarLegendSub(l), Hud.WarLegendSubFs, 1f).X;
                             Tight(ref mC, ref tC, textW - subW, $"{rank[0]}{cls[0]}sub{S}");
-                            if (subW > textW)
-                                fails.Add($"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
+                            Check("C", !(subW > textW),
+                                  $"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
                             string score = Hud.WarLegendScore(l);
                             float scw = Cfg.Measure(score, Hud.WarLegendScoreFs, 1f).X;
                             float nameW = Cfg.Measure(l.Name, Hud.WarLegendNameFs, 1f).X;
                             float scoreLeft = colW - Hud.WarLegendPadR - scw;
                             float nameRight = Hud.WarLegendTextX + nameW;
                             Tight(ref mC, ref tC, scoreLeft - nameRight, $"{rank[0]}{cls[0]}name{S}");
-                            if (score.Length > 0 && scoreLeft < nameRight + 12)
-                                fails.Add($"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
-                            if (scw > textW) fails.Add($"legendScoreOverruns{S}");
+                            Check("C", !(score.Length > 0 && scoreLeft < nameRight + 12),
+                                  $"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
+                            Check("C", !(scw > textW), $"legendScoreOverruns{S}");
                         }
                 }
 
@@ -5501,17 +6275,17 @@ public partial class Game
                     {
                         float lw = Cfg.Measure(dl, Hud.DraftDeployFs, 1f).X;
                         Tight(ref mD, ref tD, dbw - lw, $"DEPLOY{S}");
-                        if (lw + 8 > dbw) fails.Add($"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
+                        Check("D", !(lw + 8 > dbw), $"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
                     }
                     float rw = Cfg.Measure(Hud.DraftRerollLabel, Hud.DraftRerollFs, 1f).X;
                     Tight(ref mD, ref tD, rrw - rw, $"REROLL{S}");
-                    if (rw + 8 > rrw) fails.Add($"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
+                    Check("D", !(rw + 8 > rrw), $"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
                     float bw2 = Cfg.Measure("BACK", Hud.DraftBackFs, 1f).X
                               + Cfg.Measure("[Esc]", Hud.DraftBackHintFs, 1f).X;
                     Tight(ref mD, ref tD, bkw - bw2, $"BACK{S}");
-                    if (bw2 + 12 > bkw) fails.Add($"backLabelOverruns{S}({bw2:0}>{bkw})");
-                    if (Hud.DraftBtnRowW() > Cfg.ScreenW - 24)
-                        fails.Add($"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
+                    Check("D", !(bw2 + 12 > bkw), $"backLabelOverruns{S}({bw2:0}>{bkw})");
+                    Check("D", !(Hud.DraftBtnRowW() > Cfg.ScreenW - 24),
+                          $"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
                 }
 
                 // ---- (E) the DRAFT operator card's text columns -----------------------------
@@ -5521,21 +6295,71 @@ public partial class Game
                     {
                         float w2 = Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X;
                         Tight(ref mE, ref tE, bw - w2, $"blurb{S}");
-                        if (w2 > bw) fails.Add($"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
+                        Check("E", !(w2 > bw), $"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
                     }
                     foreach (var ab in new[] { "RUN&GUN", "BLITZ", "STEADY", "SUPPRESS", "PATCH",
                                                "MARK", "GRAPPLE", "SLIPSTREAM", "SUPPR. FIRE" })
                     {
                         float w2 = Cfg.Measure("ABILITY: " + ab, Hud.DraftAbilityFs, 1f).X;
                         Tight(ref mE, ref tE, aw - w2, $"ability{S}");
-                        if (w2 > aw) fails.Add($"draftAbilityClips{S}:{ab}");
+                        Check("E", !(w2 > aw), $"draftAbilityClips{S}:{ab}");
                     }
                     int gridW = 3 * Hud.DraftCardW() + 2 * Hud.DraftGridGap;
-                    if (gridW > Cfg.ScreenW - 24) fails.Add($"draftGridOffCanvas{S}({gridW})");
+                    Check("E", !(gridW > Cfg.ScreenW - 24), $"draftGridOffCanvas{S}({gridW})");
                 }
+
+                // ---- (F) THE SCREEN AUDIT - every screen the game can draw, on a LIVE FRAME ---
+                // W10's gate covered five surfaces; the rest of the product was asserted at 100%
+                // or not at all. This leg stages each screen, DRAWS it, and reads the ink and the
+                // control plates back from the draw calls themselves (Cfg.InkProbe /
+                // Hud.PlateProbe) - so it observes what the game paints rather than a
+                // transcription of the layout arithmetic, and a screen that throws while drawing
+                // is a failure too. Inside the loop by construction: it takes the scale.
+                screens = ScreenAudit(S, fails, Check);
             }
         }
-        finally { Cfg.UiScale = savedScale; }
+        finally { Cfg.UiScale = savedScale; Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+
+        // ── C5 REVIEW FIX (E1) — THE SENSITIVITY CONTROL, run on every invocation ────────────
+        // Binding the counter to the assertion (Check, above) makes the number mean "assertions
+        // evaluated" — but the review's step 2 shows what that still cannot see: narrow the
+        // CONDITION to one scale and the count does not move. Nothing structural can catch that,
+        // so this catches it EMPIRICALLY, the way AIIDLETEST proves its own probe: re-run the whole
+        // screen audit at a deliberately UNSHIPPED 200% text scale, where the fixed-pixel chrome
+        // must break, and require the assertions to FIRE. If a leg has been gated to one scale, or
+        // its tolerance loosened into uselessness, this control goes quiet and the test fails —
+        // which is exactly what happens to the review's step-2 mutation.
+        // The 200% pass is DIAGNOSTIC ONLY: its violations are counted, never added to `fails`.
+        var control = new List<string>();
+        try
+        {
+            Cfg.UiScale = 2.0f;
+            scaleIdx = 0;                       // the control's checks are not part of the coverage tally
+            ScreenAudit("@200%CONTROL", control, (leg, ok, msg) => { if (!ok) control.Add(msg); });
+        }
+        catch (Exception ex) { fails.Add("sensitivityControlThrew:" + ex.GetType().Name); }
+        finally { Cfg.UiScale = savedScale; Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+
+        int ctlPlate = 0, ctlInk = 0, ctlClip = 0;
+        foreach (var c in control)
+        {
+            if (c.StartsWith("labelLeavesPlate")) ctlPlate++;
+            else if (c.StartsWith("inkOffCanvas")) ctlInk++;
+            else if (c.StartsWith("textEllipsized")) ctlClip++;
+        }
+        if (ctlPlate == 0)
+            fails.Add("sensitivityDead:labelLeavesPlate never fired at the 200% control");
+        if (ctlInk + ctlClip == 0)
+            fails.Add("sensitivityDead:neither inkOffCanvas nor textEllipsized fired at the 200% control");
+
+        // THE SCOPE GUARD's verdict (see the note above the counter).
+        foreach (var kv in legChecks)
+            for (int i = 0; i < kv.Value.Length; i++)
+                if (kv.Value[i] == 0)
+                    fails.Add($"legOutsideScaleLoop:{kv.Key}@{(int)(Display.UiScaleLevels[i] * 100)}%(0 checks)");
+        int totalChecks = 0;
+        foreach (var kv in legChecks) foreach (int n in kv.Value) totalChecks += n;
+        if (legChecks.Count < 6) fails.Add($"scopeGuardVacuous(legs={legChecks.Count})");
 
         notes.Add($"doctrine {mA:0}px@{tA}");
         notes.Add($"armory {mB:0}px@{tB}");
@@ -5546,11 +6370,1058 @@ public partial class Game
             ? $"FITTEST: PASS ({BoonDef.All.Length} doctrine cards, 5 weapon rows x 3 tags, "
               + $"{Run.Ranks.Length}x5 legend rows, 5 deploy labels and the operator card fit their "
               + $"chrome at all {Display.UiScaleLevels.Length} shipped text sizes - tightest margins: "
-              + string.Join(", ", notes) + ")"
+              + string.Join(", ", notes)
+              + $"; C5 leg F: {screens} screens DRAWN and audited at every scale - every control "
+              + $"plate contains its label (tightest {_fitPlateMargin:0.0}px @{_fitPlateTag}), no "
+              + $"visible string leaves the canvas (nearest {_fitEdgeMargin:0.0}px @{_fitEdgeTag}), "
+              + $"nothing is ellipsized, smallest type {_fitMinSize:0.#}px authored @{_fitMinAuthTag} "
+              + $"and {_fitMinRendered:0.#}px RENDERED @{_fitMinTag} (tracked separately - the "
+              + $"smallest authored size and the smallest ink need not be the same screen), "
+              + $"{_fitFloors} shrink-to-fit calls "
+              + $"reach their floor; {totalChecks} assertions over {legChecks.Count} legs, every "
+              + $"leg evaluated at all {Display.UiScaleLevels.Length} scales, and a 200% CONTROL "
+              + $"pass fires them ({ctlPlate} plate / {ctlInk} off-canvas / {ctlClip} ellipsis "
+              + $"violations at a scale the game does not ship) so the gate is proven live on this "
+              + $"run rather than merely counted)"
             : $"FITTEST: FAIL ({fails.Distinct().Count()} violations; first 14: "
               + string.Join(",", fails.Distinct().Take(14)) + ")";
     }
 
+
+
+
+
+
+
+    // ─── C5 THE HARD EDGES — THE PERK CARD'S NUMBERS, MEASURED (a TRUTHTEST leg) ───────────────
+    /// W9's finding was that the shot tooltip's numbers were a transcription of what the resolver
+    /// was SUPPOSED to do. The PERK CHOOSER is the same shape one screen over: fourteen
+    /// "before > after" lines the player picks a permanent upgrade from, every number typed by
+    /// hand beside the resolver's constant. They agreed. Nothing bound them, and nothing would
+    /// have said so — the card is the only place in the game those numbers appear, so a retune of
+    /// `Unit.PerkAim` would have left fourteen cards quietly lying.
+    ///
+    /// This leg DRAWS the real chooser, captures the line it PAINTS (`Cfg.CaptureText`, the same
+    /// seam TooltipTruthFails uses), and compares the numbers in it against a MEASUREMENT taken
+    /// through the shipped code path for that perk:
+    ///   * TANK / SPRINTER  — `Run.ApplyPerk` on a real soldier: the stat afterwards IS the claim.
+    ///   * BANDOLIER        — a real mission setup, which is where grenades are refilled.
+    ///   * the aim perks    — `Combat.ComputeOdds` in the stated condition, minus the same shot
+    ///                        without the perk.
+    ///   * the crit perks   — the same, on `CritChance`.
+    ///   * HARDENED/BULWARK — `Combat.HardenedReduce`, the one source of truth for damage taken.
+    ///   * COOLHEADED       — the attacker's hit% against a defender who has it.
+    /// A perk with no painted line and no measurable claim is fine; a perk with a line whose
+    /// numbers do not match the measurement is a lie on the card.
+    public string PerkCardTruthFails()
+    {
+        var fails = new List<string>();
+        var grid = new Grid();   // a fresh Grid is all floor at height 0 (see Grid())
+
+        Unit Soldier(int aim = 60, int x = 3, int y = 5)
+            => new Unit { Name = "PROBE", Cls = "ASSAULT", Team = Team.Player, Aim = aim, Mobility = 7,
+                          Hp = 10, MaxHp = 10, Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true, X = x, Y = y };
+        Unit Foe(int x, int y, int hp = 10, int maxHp = 10)
+            => new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, Aim = 60, Mobility = 6,
+                          Hp = hp, MaxHp = maxHp, Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true, X = x, Y = y };
+
+        /// hit% delta a perk buys the ATTACKER on this exact shot.
+        int AimDelta(Perk p, Unit a, Unit d)
+        {
+            int plain = Combat.ComputeOdds(grid, a, d).HitChance;
+            a.Perks.Add(p);
+            int perked = Combat.ComputeOdds(grid, a, d).HitChance;
+            a.Perks.Remove(p);
+            return perked - plain;
+        }
+        int CritDelta(Perk p, Unit a, Unit d, bool highGround = false)
+        {
+            if (highGround) { grid.Height[a.X, a.Y] = 2; }
+            int plain = Combat.ComputeOdds(grid, a, d).CritChance;
+            a.Perks.Add(p);
+            int perked = Combat.ComputeOdds(grid, a, d).CritChance;
+            a.Perks.Remove(p);
+            if (highGround) grid.Height[a.X, a.Y] = 0;
+            return perked - plain;
+        }
+
+        // THE MEASUREMENTS. Each entry answers "what does the shipped code actually do?" as a
+        // function of the soldier the card is offered to — never as a literal.
+        //   stat  : the value the perk changes, before -> after, through Run.ApplyPerk
+        //   delta : the aim/crit/damage swing ComputeOdds or HardenedReduce actually produces
+        //   gate  : the RANGE at which a range-gated perk stops applying, found by scanning
+        var deltas = new Dictionary<Perk, List<int>>();
+
+        // -- aim perks: measure the swing AND, for the range-gated pair, the gate itself ---------
+        {
+            var a = Soldier(); var d = Foe(a.X + 2, a.Y);
+            int cq = AimDelta(Perk.CloseQuarters, a, d);
+            // the gate: the largest distance at which CLOSE QUARTERS still fires
+            int cqGate = 0;
+            for (int dist = 1; dist <= 10; dist++)
+            {
+                var dd = Foe(a.X + dist, a.Y);
+                if (AimDelta(Perk.CloseQuarters, a, dd) > 0) cqGate = dist;
+            }
+            deltas[Perk.CloseQuarters] = new List<int> { cq, cqGate };
+
+            var a2 = Soldier(); int mk = 0, mkGate = 99;
+            for (int dist = 1; dist <= 12; dist++)
+            {
+                var dd = Foe(a2.X + dist, a2.Y);
+                int sw = AimDelta(Perk.Marksman, a2, dd);
+                if (sw > 0 && dist < mkGate) { mkGate = dist; mk = sw; }
+            }
+            deltas[Perk.Marksman] = new List<int> { mk, mkGate };
+
+            var a3 = Soldier(); var d3 = Foe(a3.X + 3, a3.Y); d3.Hunkered = true;
+            deltas[Perk.Siegebreaker] = new List<int> { AimDelta(Perk.Siegebreaker, a3, d3) };
+
+            // LOCK-ON fires on FLANKED, and the shared predicate is the same one W9 bound the
+            // tooltip badge to.
+            var a4 = Soldier(); a4.Perks.Add(Perk.LockOn);
+            deltas[Perk.LockOn] = new List<int> { Combat.LockOnAim(a4, flanked: true) };
+        }
+        // -- crit perks --------------------------------------------------------------------------
+        {
+            var a = Soldier();
+            deltas[Perk.Executioner] = new List<int> { CritDelta(Perk.Executioner, a, Foe(a.X + 3, a.Y, hp: 3)) };
+            deltas[Perk.GiantSlayer] = new List<int> { CritDelta(Perk.GiantSlayer, a, Foe(a.X + 3, a.Y)) };
+            deltas[Perk.Vantage] = new List<int> { CritDelta(Perk.Vantage, a, Foe(a.X + 3, a.Y), highGround: true) };
+            var ds = Foe(a.X + 3, a.Y); ds.Suppress = 1;
+            deltas[Perk.Breaker] = new List<int> { CritDelta(Perk.Breaker, a, ds) };
+        }
+        // -- damage-taken perks, through the ONE reduction path ----------------------------------
+        {
+            var d = Soldier();
+            int plain = Combat.HardenedReduce(d, 9, crit: false, telegraph: false);
+            d.Perks.Add(Perk.Hardened);
+            int flat = plain - Combat.HardenedReduce(d, 9, crit: false, telegraph: false);
+            int onCrit = plain - Combat.HardenedReduce(d, 9, crit: true, telegraph: false);
+            d.Perks.Remove(Perk.Hardened);
+            deltas[Perk.Hardened] = new List<int> { flat, onCrit };
+
+            var b = Soldier();                                    // full HP => Bulwark active
+            int bPlain = Combat.HardenedReduce(b, 9, crit: false, telegraph: false);
+            b.Perks.Add(Perk.Bulwark);
+            deltas[Perk.Bulwark] = new List<int> { bPlain - Combat.HardenedReduce(b, 9, crit: false, telegraph: false) };
+        }
+        {
+            var atk = Foe(3, 5); var def = Soldier(60, 6, 5);
+            int plain = Combat.ComputeOdds(grid, atk, def).HitChance;
+            def.Perks.Add(Perk.CoolHeaded);
+            deltas[Perk.CoolHeaded] = new List<int> { plain - Combat.ComputeOdds(grid, atk, def).HitChance };
+        }
+        // -- the two STAT BUMPS, through the real applier ----------------------------------------
+        {
+            var u = Soldier(); int hp0 = u.MaxHp; Run.ApplyPerk(u, Perk.Tank);
+            deltas[Perk.Tank] = new List<int> { u.MaxHp - hp0 };
+            var v = Soldier(); int mob0 = v.Mobility; Run.ApplyPerk(v, Perk.Sprinter);
+            deltas[Perk.Sprinter] = new List<int> { v.Mobility - mob0 };
+        }
+        // -- BANDOLIER through the path that actually hands out grenades: a real mission ---------
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            var s = g.Players.FirstOrDefault(u => u != null && !u.IsVip);
+            if (s == null) fails.Add("noSoldierForBandolier");
+            else
+            {
+                int before = s.Grenades;
+                s.Perks.Add(Perk.Bandolier);
+                g.DebugResetupMission();
+                var s2 = g.Players.FirstOrDefault(u => u != null && u.Name == s.Name);
+                if (s2 == null) fails.Add("bandolierSoldierVanished");
+                else deltas[Perk.Bandolier] = new List<int> { s2.Grenades - before };
+            }
+        }
+
+        // ---- now READ THE CARD, for real -------------------------------------------------------
+        // TWO assertions per perk, and they are different assertions:
+        //   (i)  the chooser PAINTS the string its own formatter returns — the observation binding
+        //        W9's review demanded (a test that only checks the formatter proves nothing about
+        //        the panel);
+        //   (ii) the numbers IN that string are the ones the measurement above produced.
+        foreach (var kv in deltas)
+        {
+            var perk = kv.Key;
+            var swing = kv.Value;
+            var cap = new List<(string text, float size)>();
+            Unit who;
+            var g2 = new Game { NoPersist = true };
+            who = g2.DebugStagePerkOffer(perk);
+            if (who == null) { fails.Add("noOfferedSoldier:" + perk); continue; }
+            string formatted = Hud.PerkDeltaLineForTest(who, perk);
+            if (string.IsNullOrEmpty(formatted)) { fails.Add("noDeltaLineForOfferedPerk:" + perk); continue; }
+            try
+            {
+                Cfg.CaptureText = cap;
+                Raylib.BeginDrawing();
+                g2.DrawHudLayer();
+                Raylib.EndDrawing();
+            }
+            finally { Cfg.CaptureText = null; }
+
+            if (!cap.Any(c => c.text == formatted))
+                fails.Add($"perkCardDidNotPaintItsOwnLine:{perk}:'{formatted}'");
+
+            var got = System.Text.RegularExpressions.Regex.Matches(formatted, @"\d+")
+                .Select(m => int.Parse(m.Value)).ToList();
+            // The claim the line makes, rebuilt from the OFFERED soldier and the MEASURED swing.
+            var want = new List<int>();
+            switch (perk)
+            {
+                case Perk.Tank: want.Add(who.MaxHp); want.Add(who.MaxHp + swing[0]); break;
+                case Perk.Sprinter: want.Add(who.Mobility); want.Add(who.Mobility + swing[0]); break;
+                case Perk.LockOn:
+                case Perk.Siegebreaker: want.Add(who.Aim); want.Add(who.Aim + swing[0]); break;
+                case Perk.CloseQuarters:
+                case Perk.Marksman: want.Add(who.Aim); want.Add(who.Aim + swing[0]); want.Add(swing[1]); break;
+                case Perk.Bandolier: want.Add(1 + who.BonusGrenades); want.Add(1 + who.BonusGrenades + swing[0]); break;
+                case Perk.Hardened: want.Add(swing[0]); want.Add(swing[1]); break;
+                default: want.Add(swing[0]); break;
+            }
+            foreach (int n in want)
+                if (!got.Contains(n))
+                    fails.Add($"perkCardLies:{perk}:'{formatted}' has no {n} (measured {string.Join("/", want)})");
+        }
+
+        return fails.Count == 0 ? "" : string.Join(",", fails.Distinct());
+    }
+
+    /// Harness: stage the barracks PERK CHOOSER on a real run with `p` as the left offer and a
+    /// no-delta perk on the right, so exactly one delta line is painted.
+    public Unit DebugStagePerkOffer(Perk p)
+    {
+        if (_run == null || _run.Squad == null || _run.Squad.Count == 0) { _run = new Run(); _run.Start(); }
+        _shopDone = true;
+        _run.PendingSpecs.Clear();
+        _run.BoonOffer.Clear();
+        _run.PendingPerks.Clear();
+        var who = _run.Squad.FirstOrDefault(u => u != null && !u.IsVip) ?? _run.Squad[0];
+        who.Perks.Remove(p);
+        _run.PendingPerks.Add(new PerkOffer { Unit = who, A = p, B = Perk.Reflexes });
+        Phase = Phase.Barracks;
+        return who;
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_SAVEEDGETEST: THE HOSTILE SAVE ─────────────────────────
+    /// W9 asked "what does a hand-edited meta.json do to the game?" and found three shapes that
+    /// each killed a screen outright. It never asked the same question of `save.json`, whose guard
+    /// (D2, R2) stops at three shapes: unparseable, no squad, and a schema from the future. Every
+    /// other field is read as written.
+    ///
+    /// This drives the shapes a real corrupted / edited / truncated / older-build save produces,
+    /// through the REAL resume path (`ContinueRun`) and then through 300 updates and a drawn frame
+    /// — because "loads without throwing" is not the contract; "you can play it" is. A shape that
+    /// crashes, that resumes with nobody on the board, or that puts a number on the HUD the run
+    /// cannot mean, is a defect.
+    public static string SaveEdgeSelfTest()
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadSave = false, hadMeta = false; string saveStash = null, metaStash = null;
+        try
+        {
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+
+        // A real save, written by the game, as the base every shape is edited FROM. Hand-writing
+        // the JSON would test a fiction; this is the file the game actually produces.
+        string good = null;
+        try
+        {
+            Util.Reseed(9001);
+            var seed = new Game();                 // live path: StartMission writes the checkpoint
+            seed.StartMission(1);
+            good = System.IO.File.ReadAllText(sp);
+        }
+        catch (Exception ex) { fails.Add("couldNotWriteABaseSave:" + ex.GetType().Name); }
+
+        /// Apply one edit to the base save, resume it, and play it. Returns the resumed Game
+        /// (null if the resume was refused, which is a legitimate outcome — refusing a broken
+        /// save is a repair; crashing on it is not).
+        Game Resume(string what, Func<string, string> edit, bool expectRefusal)
+        {
+            if (good == null) return null;
+            try
+            {
+                System.IO.File.WriteAllText(sp, edit(good));
+                var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                bool ok = g.ContinueRun();
+                if (!ok)
+                {
+                    // A refusal is the right answer for a file that cannot be read at all, and
+                    // DATA LOSS for one that can: the recovery path MOVES save.json aside, so a
+                    // shape that should have resumed and did not has just cost a player their run.
+                    if (!expectRefusal) fails.Add($"refusedAResumableSave:{what}");
+                    // ...and a refusal MUST take the file with it. `Hud` draws CONTINUE RUN off
+                    // `SaveGame.Exists`, so a save that is refused but left in place is D2's
+                    // "button that did nothing, forever, with no banner and no stash". This is the
+                    // assertion that catches a guard which drops bad data on the WRONG SIDE of its
+                    // own usability check (C5 review B2).
+                    if (System.IO.File.Exists(sp))
+                        fails.Add($"refusedButLeftTheButton:{what}(save.json still offers CONTINUE)");
+                    return null;
+                }
+                if (expectRefusal) fails.Add($"acceptedAnUnusableSave:{what}");
+                // it has to be PLAYABLE, not merely loaded
+                if (g.Players.Count == 0) fails.Add($"resumedWithNoSquad:{what}");
+                if (g.AlivePlayers().Count == 0) fails.Add($"resumedWithNobodyAlive:{what}");
+                for (int i = 0; i < 300 && g.Phase != Phase.Win && g.Phase != Phase.Lose; i++)
+                    g.Update(1f / 60f);
+                Raylib.BeginDrawing();
+                g.Draw();                              // the HUD reads the run's numbers
+                Raylib.EndDrawing();
+                return g;
+            }
+            catch (Exception ex)
+            {
+                fails.Add($"threw:{what}:{ex.GetType().Name}:{Short(ex.Message)}");
+                return null;
+            }
+        }
+
+        try
+        {
+            // (1) MISSION out of range, in both directions. ContinueRun clamps the number it SETS
+            //     UP with and leaves `Run.Mission` as written — so the board is mission 6 while
+            //     every readout, reward and cap still reads 999.
+            var far = Resume("mission=999", s => s.Replace("\"Mission\": 1,", "\"Mission\": 999,"), false);
+            if (far != null && far.RunState != null && far.RunState.Mission > Run.MaxMissions)
+                fails.Add($"missionNotClamped:{far.RunState.Mission}(>{Run.MaxMissions})");
+            var zero = Resume("mission=0", s => s.Replace("\"Mission\": 1,", "\"Mission\": 0,"), false);
+            if (zero != null && zero.RunState != null && zero.RunState.Mission < 1)
+                fails.Add($"missionNotClamped:{zero.RunState.Mission}(<1)");
+            var neg = Resume("mission=-7", s => s.Replace("\"Mission\": 1,", "\"Mission\": -7,"), false);
+            if (neg != null && neg.RunState != null && neg.RunState.Mission < 1)
+                fails.Add($"missionNotClamped:{neg.RunState.Mission}(<1)");
+
+            // (2) A soldier with NO NAME. `Name` is the one string the DTO reads raw, and it is a
+            //     dictionary key (BondTally), a save key and a HUD string.
+            Resume("name=null", s => s.Replace("\"Name\":", "\"Name\": null, \"NameWas\":"), false);
+
+            // (3) A soldier of an UNKNOWN CLASS — what an older/newer build's roster looks like.
+            Resume("cls=WIZARD", s => s.Replace("\"Cls\": \"", "\"Cls\": \"WIZARD"), false);
+
+            // (4) EVERYBODY BENCHED. Nothing in the DTO stops it, and a run you cannot field is a
+            //     run you cannot lose or leave.
+            var benched = Resume("allBenched", s => s.Replace("\"Benched\": false", "\"Benched\": true"), false);
+            if (benched != null && benched.Players.Count == 0)
+                fails.Add("allBenchedFieldsNobody");
+
+            // (5) A roster twice RosterMax — the barracks lays out six rows.
+            Resume("doubleRoster", s =>
+            {
+                int i = s.IndexOf("\"Squad\": [");
+                if (i < 0) return s;
+                int open = s.IndexOf('{', i);
+                int depth = 0, j = open;
+                for (; j < s.Length; j++) { if (s[j] == '{') depth++; else if (s[j] == '}') { depth--; if (depth == 0) break; } }
+                string one = s.Substring(open, j - open + 1);
+                var sb = new System.Text.StringBuilder(s.Substring(0, open));
+                for (int k = 0; k < 12; k++) { sb.Append(one.Replace("\"Name\": \"", $"\"Name\": \"X{k}")); sb.Append(','); }
+                sb.Append(s.Substring(open));
+                return sb.ToString();
+            }, false);
+
+            // (6) A BOND naming somebody who is not on the roster.
+            Resume("phantomBond", s => s.Contains("\"BondTally\": {}")
+                ? s.Replace("\"BondTally\": {}", "\"BondTally\": {\"NOBODY\": 3}")
+                : s.Replace("\"BondTally\": {", "\"BondTally\": {\"NOBODY\": 3,"), false);
+
+            // (7) TRUNCATION — the classic half-written file. Must be refused, not read.
+            Resume("truncated", s => s.Substring(0, s.Length / 2), true);
+
+            // (8) A save whose squad array holds a null element.
+            Resume("nullSquadMember", s => s.Replace("\"Squad\": [", "\"Squad\": [null,"), false);
+
+            // (9) A squad array of NOTHING BUT nulls — the shape that tells a "no soldiers" guard
+            //     apart from a "no elements" guard. It must be refused AND stashed like any other
+            //     unusable file; accepting it leaves a CONTINUE button over an empty roster.
+            Resume("allNullSquad", s =>
+            {
+                int i = s.IndexOf("\"Squad\": [");
+                if (i < 0) return s;
+                int open = s.IndexOf('[', i);
+                int depth = 0, j = open;
+                for (; j < s.Length; j++) { if (s[j] == '[') depth++; else if (s[j] == ']') { depth--; if (depth == 0) break; } }
+                return s.Substring(0, open) + "[null, null]" + s.Substring(j + 1);
+            }, true);
+        }
+        finally
+        {
+            try
+            {
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (System.IO.File.Exists(sp + ".bak")) System.IO.File.Delete(sp + ".bak");
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "SAVEEDGETEST: PASS (9 hostile save shapes resume into a PLAYABLE run or are refused "
+              + "AND STASHED: mission out of range in both directions, a nameless soldier, an "
+              + "unknown class, an all-benched roster, a double-length roster, a phantom bond, a "
+              + "truncated file, a null squad member and an all-null squad — none throws, none "
+              + "fields an empty board, and no refusal leaves a CONTINUE button behind it"
+              + (notes.Count > 0 ? "; " + string.Join(", ", notes) : "") + ")"
+            : "SAVEEDGETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_AICOVTEST: THE ENEMY DECISION CENSUS ────────────────────
+    /// The test that would have caught a branch firing ZERO times in 1595 enemy turns.
+    ///
+    /// THE STANDING FINDING (CROSSCUT, docs/ROADMAP.md): the enemy OVERWATCH branch was measured
+    /// taken 0 times in 1595 pre-W2 enemy act-opportunities and 3 times in 1589 post-W2 — a whole
+    /// verb of the opponent's vocabulary that does not exist in play. Nothing in the project could
+    /// see it: every AI test asserts that a DECISION IS CORRECT GIVEN A BOARD, and a branch that
+    /// is never reached is correct on every board it never reaches. The gap is not a missing
+    /// assertion about overwatch; it is the absence of any assertion about REACHABILITY.
+    ///
+    /// So this walks real campaigns and counts which of `Game.ActBranches` the opponent actually
+    /// takes. A branch that never fires over the whole sample is a coverage FAILURE by name.
+    ///
+    /// A ZERO GATE WOULD NOT HAVE CAUGHT IT, AND SAYING SO IS THE POINT. Measured on this tree
+    /// (144 campaigns, 8083 enemy acts): `overwatch` fires **8 times, 0.10%**. So "the branch is
+    /// never taken" is not literally true here — it is taken about once per thousand acts, which
+    /// is a verb no player will ever see, and a test that only asked "> 0?" would have passed the
+    /// pre-W2 tree on a large enough sample too. The gate is therefore a RATE, and the set of
+    /// effectively-dead branches is a DECLARED REGISTRY:
+    ///
+    ///   * any branch firing below `AiCovRareRate` (once per 1000 enemy acts) must be NAMED in
+    ///     `AiCovKnownRare`. An undeclared branch that falls that low FAILS, by name — which is
+    ///     precisely what would have happened to `overwatch` the day it went quiet, instead of a
+    ///     human noticing three programs later;
+    ///   * a DECLARED branch that climbs back above the rate is reported as a stale declaration
+    ///     (a note, not a failure — the wave that revives a verb should not be blocked by the
+    ///     registry that recorded it as dead, it should be told to delete the entry);
+    ///   * `SIGHTLINE_AICOVSTRICT=1` treats every declared entry as a failure. That is the mode
+    ///     that fails on today's tree, and it is this test's proof that it can fail at all.
+    ///
+    /// THE BACKSTOPS ARE NOT VERBS. `terminal-reload` / `terminal-hunker` exist so W2's
+    /// no-idle-act invariant holds STRUCTURALLY when a plan goes stale, and `none` is the tag for
+    /// "no branch fired" (the bleed-out window). They are censused and reported, never gated:
+    /// `terminal-reload` measured 0 in 8083 acts, which is the design working, not a hole.
+    // "move" and "idle" join the backstops rather than the gated verb list (C5's call): they are
+    // resolutions of the sentinel, not verbs the planner chose. `idle` in particular is expected to
+    // read ZERO on a contested batch — C2 measured exactly 0 across ~53k contested acts — so a
+    // non-zero idle means a branch LOST ITS LABEL, which is the acceptance oracle for this merge.
+    static readonly string[] AiCovBackstops = { "terminal-reload", "terminal-hunker", "none", "move", "idle" };
+    /// The declared effectively-dead branches, with the rate measured at the base of this wave
+    /// (8083 acts): overwatch 0.10%, relock 0.06%, shove 0.05%. Delete an entry when its verb
+    /// climbs back above the rate — the PASS line will tell you which.
+    // COMPOSITION FINDING (lead, at the C2+C5 merge — neither wave could see this alone).
+    // "overwatch" was declared effectively-dead by C5 against the PRE-C2 opponent, where it fired
+    // 8 times in 8083 acts. C2's decline gate revived it: on the composed tree the same batch reads
+    // 86/8083 (1.06%), an order of magnitude above the rate, and AICOVTEST's own STALE DECLARATION
+    // note demanded its removal. That note firing is the test working exactly as designed.
+    // "sap" is MARGINAL at the sweep's N: 10/8083 (0.12%) here, but 2/2473 (0.08%) at N=2, which
+    // FAILS. The rate gate is 0.10%, so at N=2 the threshold is ~2.7 events and a Poisson draw
+    // decides it. Recorded, not papered over — the fix is a floor on acts, not a declaration.
+    static readonly string[] AiCovKnownRare = { "relock", "shove" };
+    /// Once per 1000 enemy acts. Below this a verb exists in the code and not in the game.
+    const double AiCovRareRate = 0.001;
+    /// The rate verdict needs a sample in which the threshold is a COUNT, not a coin flip.
+    /// At the sweep's old N the batch was ~2470 acts, so `AiCovRareRate` came to ~2.5 expected
+    /// events and a branch sitting near the line flipped PASS/FAIL between runs: `sap` read
+    /// 10/8083 (0.12%, PASS) and 2/2473 (0.08%, FAIL) on the same tree. A flaky gate is not a
+    /// gate. Below this floor the rate verdict is SKIPPED and said to be skipped — the
+    /// unregistered-label and never-fired assertions still run, because those are not rate-based.
+    const int AiCovMinActs = 6000;
+    public static string AiCoverageSelfTest(int campaigns)
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        var count = new Dictionary<string, long>();
+        foreach (var b in ActBranches) count[b] = 0;
+        long acts = 0, contested = 0, unknown = 0;
+        bool strict = Environment.GetEnvironmentVariable("SIGHTLINE_AICOVSTRICT") == "1";
+
+        BranchProbe = (branch, plan, standing) =>
+        {
+            acts++;
+            if (standing > 0) contested++;
+            if (count.ContainsKey(branch)) count[branch]++;
+            else { unknown++; count[branch] = 1; }        // a new branch nobody registered
+        };
+
+        var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
+                           Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
+        int slot = 0, played = 0, missions = 0;
+        foreach (int heat in new[] { 0, 4, 8 })
+            foreach (var o in objs)
+                for (int rep = 0; rep < campaigns; rep++)
+                {
+                    Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+                    Util.Reseed(310000 + slot++);
+                    var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true, ForcedObjective = o };
+                    g.StartMission(1);
+                    int frame = 0;
+                    while (frame++ < 40000 && g.Phase != Phase.Win && g.Phase != Phase.Lose)
+                        g.Update(1f / 60f);
+                    played++;
+                    missions += g.RunState != null ? Math.Max(1, g.RunState.Mission) : 1;
+                }
+        BranchProbe = null;
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", null);
+
+        // ---- the verdict ----------------------------------------------------------------------
+        var census = new List<string>();
+        foreach (var b in ActBranches)
+        {
+            long c = count[b];
+            double rate = acts > 0 ? c / (double)acts : 0;
+            census.Add($"{b}={c}({100.0 * rate:0.00}%)");
+            if (Array.IndexOf(AiCovBackstops, b) >= 0) continue;      // structural, not a verb
+            bool declared = Array.IndexOf(AiCovKnownRare, b) >= 0;
+            if (acts < AiCovMinActs) { }        // sample too small to resolve the rate — see AiCovMinActs
+            else if (rate < AiCovRareRate)
+            {
+                if (!declared)
+                    fails.Add($"branchEffectivelyDead:{b}={c}/{acts}({100.0 * rate:0.00}% < {100.0 * AiCovRareRate:0.00}%)");
+                else if (strict)
+                    fails.Add($"declaredDeadBranch:{b}={c}/{acts}");
+                else
+                    notes.Add($"DEAD-BY-DECLARATION:{b}={c}/{acts}");
+            }
+            else if (declared && rate >= 2 * AiCovRareRate)   // 2x, so a branch sitting ON the line does not flip the note run to run
+                notes.Add($"STALE DECLARATION:{b}={c}/{acts}({100.0 * rate:0.00}%) is above the rate — delete it from AiCovKnownRare");
+        }
+        // vacuity: a census of nothing proves nothing, and the rate gate needs enough acts for
+        // "once per thousand" to be a measurable statement at all.
+        if (acts < 1500) fails.Add($"vacuousCensus(acts={acts})");
+        if (contested < acts / 2) notes.Add($"contested={contested}/{acts}");
+        if (unknown > 0) fails.Add($"unregisteredBranch(count={unknown}) — add it to Game.ActBranches");
+        // and the probe has to be wired to the chain it claims to census
+        if (count["shoot"] == 0) fails.Add("probeNotWired(no shots seen at all)");
+
+        return fails.Count == 0
+            ? $"AICOVTEST: PASS ({played} campaigns / {missions} missions / {acts} enemy acts "
+              + $"({contested} contested); every enemy verb fires at least once per "
+              + (acts < AiCovMinActs
+                   ? $"[RATE VERDICT SKIPPED: {acts} acts < {AiCovMinActs} floor] "
+                   : "")
+              + $"{(int)(1 / AiCovRareRate)} acts except the {AiCovKnownRare.Length} declared "
+              + $"effectively-dead ones. census: " + string.Join(" ", census)
+              + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "") + ")"
+            : $"AICOVTEST: FAIL ({string.Join(",", fails.Distinct())}) census: "
+              + string.Join(" ", census) + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "");
+    }
+
+    /// C5 (review E3): an animation that never completes — the OTHER deadlock. Harness-only; the
+    /// enemy turn enqueues one when `Game.DebugEnemyAnimWedge` is set, and `Game.Update` then
+    /// returns at the animation pump every frame without ever reaching the phase switch.
+    class StuckAnim : Anim
+    {
+        public override bool Update(Game g, float dt) => false;   // never done, by construction
+        public override void Draw(Game g) { }
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_ENEMYSTALLTEST ──────────────────────────────────────────
+    /// The ENEMY-TURN half of the no-deadlock contract, asserted the only way a deadlock guard
+    /// honestly can be: by DEADLOCKING THE ENEMY TURN and watching what happens.
+    ///
+    ///  (A) THE ARM — with the turn wedged, the guard fires within its own bound and the line it
+    ///      prints NAMES the unit, the stage and the planner branch. A guard that fires silently
+    ///      is the W9 TIMEOUT again: an agent gets a frame count and no diagnosis.
+    ///  (B) THE ESCAPE — the wedged turn ENDS. Not "eventually, at the harness frame cap": the
+    ///      guard forfeits the stalled unit and, when that exhausts the staging list, hands the
+    ///      turn back. Real play is where this matters; a batch loses a run, a player loses the
+    ///      session.
+    ///  (C) NON-VACUITY, and this is the leg that makes the whole test mean something — the SAME
+    ///      wedge with `EnemyStallGuardOn = false` (the pre-guard tree) must NOT recover. If it
+    ///      did, the wedge would be proving nothing and (A)/(B) would pass on a tree with no
+    ///      guard in it at all.
+    ///  (D) NO FALSE POSITIVES — real missions, no wedge, hundreds of real enemy turns: the guard
+    ///      must never fire. A stall guard that trips in a healthy fight would silently forfeit
+    ///      hostile turns and quietly move every balance number in the project.
+    ///  (E) THE BUDGET — the guard has to bite before the harness frame budget, or a TIMEOUT is
+    ///      reachable again through this door. Pinned against Game.AutoFrameCap, exactly as
+    ///      STALLTEST pins AutoMaxRunTurns.
+    public static string EnemyStallSelfTest()
+    {
+        var fails = new List<string>();
+        int armFrames = -1, escapeFrames = -1, noGuardFrames = -1;
+        string armLine = "";
+        long enemyTurnsSeen = 0;
+
+        // ---- (A) + (B): wedge a real enemy turn -----------------------------------------------
+        {
+            Util.Reseed(4242);
+            EnemyStallFires = 0; LastEnemyStall = ""; EnemyStallGuardOn = true;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            // play forward until the enemy turn is actually running
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase != Phase.EnemyTurn) fails.Add("neverReachedAnEnemyTurn");
+            else
+            {
+                DebugEnemyWedge = true;
+                int before = EnemyStallFires;
+                int spun = 0;
+                while (EnemyStallFires == before && spun++ < EnemyStallFrames + 240) g.Update(1f / 60f);
+                armFrames = spun;
+                armLine = LastEnemyStall;
+                if (EnemyStallFires == before) fails.Add($"guardNeverFired(after {spun} wedged updates)");
+                if (armFrames > EnemyStallFrames + 120) fails.Add($"guardFiredLate({armFrames})");
+                // the diagnosis has to be a diagnosis
+                foreach (var must in new[] { "stage=", "unit=", "plan=", "anims=", "mission=" })
+                    if (!armLine.Contains(must)) fails.Add("stallLineMissing:" + must);
+                if (armLine.Contains("unit=<none")) fails.Add("stallLineNamesNoUnit");
+
+                // (B) the turn gets OUT — bounded by one fire per staged hostile.
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int e2 = 0;
+                while (g.Phase == Phase.EnemyTurn && e2++ < budget) g.Update(1f / 60f);
+                escapeFrames = e2;
+                if (g.Phase == Phase.EnemyTurn)
+                    fails.Add($"wedgedTurnNeverEnded(after {e2} updates, fires={EnemyStallFires})");
+                DebugEnemyWedge = false;
+            }
+        }
+
+        // ---- (B2) THE ANIMATION HALF — the deadlock a guard inside UpdateEnemy cannot see ------
+        // `Update` returns at the animation pump while the queue is non-empty, so it never reaches
+        // the phase switch: a guard called from `UpdateEnemy` is not merely late here, it is NEVER
+        // CALLED. The first version of this test only wedged the stage machine (its own stall line
+        // said `anims=0`), so it passed on the placement it argues against — review E3.
+        int animArm = -1, animEscape = -1; string animLine = "";
+        {
+            Util.Reseed(4242);
+            EnemyStallGuardOn = true;
+            int before = EnemyStallFires;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase != Phase.EnemyTurn) fails.Add("neverReachedAnEnemyTurn(animWedge)");
+            else
+            {
+                DebugEnemyAnimWedge = true;
+                int spun = 0;
+                while (EnemyStallFires == before && spun++ < EnemyStallFrames + 240) g.Update(1f / 60f);
+                animArm = spun;
+                animLine = LastEnemyStall;
+                if (EnemyStallFires == before)
+                    fails.Add($"guardNeverFiredOnAStUCKANIM(after {spun} updates)");
+                // the diagnosis must NAME the queue, or it is not a diagnosis of THIS half
+                if (!animLine.Contains("head=StuckAnim"))
+                    fails.Add("animStallLineDoesNotNameTheQueueHead:" + Short(animLine));
+                // and it must recover: the queue is dropped and the turn ends
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int e2 = 0;
+                DebugEnemyAnimWedge = false;      // one wedge is enough; the recovery must finish the turn
+                while (g.Phase == Phase.EnemyTurn && e2++ < budget) g.Update(1f / 60f);
+                animEscape = e2;
+                if (g.Phase == Phase.EnemyTurn) fails.Add($"animWedgedTurnNeverEnded(after {e2})");
+                // ...and nobody is left standing between two tiles (the recovery drops the queue,
+                // and MoveStepAnim commits X/Y only on completion).
+                foreach (var u in g.Players)
+                    if (u.Alive && Vector2.Distance(u.Pos, Util.TileCenter(u.X, u.Y)) > 1.5f)
+                        fails.Add($"unitLeftMidTile:{u.Name}");
+                foreach (var e in g.Enemies)
+                    if (e.Alive && Vector2.Distance(e.Pos, Util.TileCenter(e.X, e.Y)) > 1.5f)
+                        fails.Add($"enemyLeftMidTile:{e.Name}");
+            }
+            DebugEnemyAnimWedge = false;
+        }
+
+        // ---- (C) the same wedge on the PRE-GUARD tree hangs ------------------------------------
+        {
+            Util.Reseed(4242);
+            EnemyStallGuardOn = false;
+            int firesBefore = EnemyStallFires;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase == Phase.EnemyTurn)
+            {
+                DebugEnemyWedge = true;
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int spun = 0;
+                while (g.Phase == Phase.EnemyTurn && spun++ < budget) g.Update(1f / 60f);
+                noGuardFrames = spun;
+                if (g.Phase != Phase.EnemyTurn)
+                    fails.Add("wedgeIsNotAWedge(the turn ended with the guard OFF, so (A)/(B) prove nothing)");
+                if (EnemyStallFires != firesBefore)
+                    fails.Add("guardFiredWhileDisabled");
+                DebugEnemyWedge = false;
+            }
+            else fails.Add("neverReachedAnEnemyTurn(legC)");
+            EnemyStallGuardOn = true;
+        }
+
+        // ---- (D) real missions, no wedge: the guard must stay silent ---------------------------
+        {
+            EnemyStallFires = 0;
+            Game.ActProbe = (u, plan, a, am, st) => { };
+            for (int rep = 0; rep < 4; rep++)
+            {
+                Util.Reseed(70000 + rep);
+                var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                g.StartMission(1);
+                Phase last = g.Phase;
+                int f = 0;
+                while (f++ < 30000 && g.Phase != Phase.Win && g.Phase != Phase.Lose)
+                {
+                    g.Update(1f / 60f);
+                    if (g.Phase == Phase.EnemyTurn && last != Phase.EnemyTurn) enemyTurnsSeen++;
+                    last = g.Phase;
+                }
+            }
+            Game.ActProbe = null;
+            if (EnemyStallFires > 0) fails.Add($"falsePositives={EnemyStallFires} in clean play");
+            if (enemyTurnsSeen < 40) fails.Add($"vacuous(onlySaw {enemyTurnsSeen} enemy turns)");
+        }
+
+        // ---- (E) the budget relationship --------------------------------------------------------
+        // (read through locals so the compiler evaluates the RELATIONSHIP rather than folding two
+        // consts into a constant-false branch it then warns is unreachable — which is exactly the
+        // shape of a check that cannot fail.)
+        long stallBound = EnemyStallFrames, frameCap = AutoFrameCap;
+        if (stallBound * 24 >= frameCap)
+            fails.Add($"stallBudgetExceedsFrameCap({stallBound}x24 >= {frameCap})");
+        if (stallBound <= 0) fails.Add("stallFramesNotPositive");
+
+        return fails.Count == 0
+            ? $"ENEMYSTALLTEST: PASS (BOTH halves of the deadlock: a wedged ANIMATION is detected in "
+              + $"{animArm} updates, named at the queue head, and drained in {animEscape} more with "
+              + $"no unit left between tiles - that is the half a guard inside UpdateEnemy is never "
+              + $"even called for; and a wedged STAGE MACHINE is detected in {armFrames} updates "
+              + $"(bound {EnemyStallFrames}) and named — \"{armLine.Substring(0, Math.Min(armLine.Length, 130))}\" — "
+              + $"the turn then ends in {escapeFrames} more; the SAME wedge with the guard off still "
+              + $"hangs after {noGuardFrames} updates; {enemyTurnsSeen} clean enemy turns fired it zero "
+              + $"times; {EnemyStallFrames} x 24 units < the {AutoFrameCap}-frame harness budget)"
+            : "ENEMYSTALLTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── C5 THE HARD EDGES — THE SCREEN AUDIT (FITTEST leg F) ──────────────────────────────────
+    /// Every screen the game can draw, drawn for real at every shipped text size, with the ink and
+    /// the control plates read back FROM THE DRAW CALLS (`Cfg.InkProbe` / `Hud.PlateProbe`).
+    ///
+    /// WHY A LIVE FRAME. W10's five legs measure layout arithmetic the test re-derives from the
+    /// same constants the renderer uses. That is fine for the five surfaces someone thought to
+    /// transcribe, and it is exactly the shape CROSSCUT's rule 5 warns about everywhere else: the
+    /// screen the test describes and the screen the game paints can differ, and nothing notices.
+    /// This leg cannot drift, because it IS the draw: it stages a screen, calls `Hud.Draw`, and
+    /// audits what came out.
+    ///
+    /// WHAT IT ASSERTS, per screen per scale:
+    ///   1. CONTROL PLATES CONTAIN THEIR LABELS. Every button/plate in the game reports (label,
+    ///      plate, painted box); the box must lie inside the plate. A label that has outgrown its
+    ///      chrome is unreadable — and a control the player cannot read is a control they will
+    ///      not press.
+    ///   2. NOTHING IS PAINTED OFF THE CANVAS. Any visible string whose box leaves 1280x800 has
+    ///      lost information the player was meant to have. Screens with a real scroll region
+    ///      (the CODEX) are exempt BY NAME, not by silence.
+    ///   3. THE SCREEN ACTUALLY DREW. A stager that throws, or paints fewer than three strings,
+    ///      is a failed audit rather than a quiet pass — the vacuity trap that lets a screen
+    ///      "pass" because it was never on screen.
+    /// Returns the number of screens audited so the PASS line can state its own coverage.
+    static int ScreenAudit(string S, List<string> fails, Action<string, bool, string> check)
+    {
+        var ink = new List<(string text, Rectangle box, float alpha)>();
+        var plates = new List<(string label, Rectangle plate, Rectangle box)>();
+        var seen = new Dictionary<string, string>();     // frame fingerprint -> the screen that drew it
+        var clips = new List<string>();                  // strings the renderer ellipsized away
+        var floors = new List<string>();                 // shrink-to-fit calls that hit their floor
+
+        int n = 0;
+        foreach (var sc in ScreenCases)
+        {
+            ink.Clear(); plates.Clear();
+            string tag = sc.Name + S;
+            float minSize = 99f; string minWhat = "-";
+            try
+            {
+                // DETERMINISM: several stagers roll (the shop slate, the event, the draft pool),
+                // and Util.Rng is clock-seeded by default — the first version of this leg reported
+                // a different worst-case string on consecutive runs, which is a flaky gate rather
+                // than a gate. One fixed seed per screen, so a FAIL reproduces verbatim.
+                Util.Reseed(FitScreenSeed);
+                var g = new Game { NoPersist = true };
+                sc.Stage(g);
+                // Let the game settle exactly as it does before a screenshot: several stagers
+                // (the hover tooltip's odds, the briefing card's timer) only produce their state
+                // inside Update, and a draw-only audit photographs the frame before them.
+                for (int f = 0; f < 3; f++) g.Update(1f / 60f);
+                Hud.AnimPin = 1f;              // audit the SETTLED frame, deterministically
+                Hud.TimePin = 1000.0; Renderer.TimePin = 1000.0;   // ...and at a FIXED clock
+                // ...and a FIXED POINTER. Thirty draw sites read the live cursor (hover fills,
+                // hover cards, and the threat card, which anchors itself at it), so without this
+                // the audited frame depended on where the mouse happened to be: a ~3% flake and a
+                // 16-check disagreement between machines on the same commit (review E2). Parked
+                // off-canvas so no control is hovered and every cursor-anchored panel clamps to the
+                // same place on every run and every machine.
+                Hud.MousePin = new System.Numerics.Vector2(-4000f, -4000f);
+                var fp = new System.Text.StringBuilder();
+                Cfg.InkProbe = (t, pos, box, size, alpha) =>
+                    {
+                        if (string.IsNullOrEmpty(t)) return;
+                        fp.Append(t).Append('|').Append((int)pos.X).Append(',').Append((int)pos.Y).Append(';');
+                    };
+                Raylib.BeginDrawing();
+                Raylib.ClearBackground(Pal.Bg);
+                // The BOARD pass counts toward the frame FINGERPRINT (so two screens that differ
+                // only on the board are not "the same screen") but not toward the geometry audit:
+                // it paints inside a Camera2D, so its ink is in world space, not screen space.
+                g.DrawBoardLayer();
+                Cfg.InkProbe = (t, pos, box, size, alpha) =>
+                    {
+                        if (string.IsNullOrEmpty(t)) return;
+                        fp.Append(t).Append('|').Append((int)pos.X).Append(',').Append((int)pos.Y).Append(';');
+                        ink.Add((t, new Rectangle(pos.X, pos.Y, box.X, box.Y), alpha));
+                        // CLAUDE.md's own rule: 12px is the small-text floor. The size recorded here
+                        // is the AUTHORED one, which is what that rule is written against.
+                        if (alpha >= 0.06f && size < minSize) { minSize = size; minWhat = Short(t); }
+                        if (FitDumpSmall && alpha >= 0.06f && size < 12f)
+                            Console.WriteLine($"FITSMALL {tag} {size:0.#}px rendered={Cfg.Scaled(size):0.#}px '{Short(t)}'");
+                    };
+                Hud.PlateProbe = (l, p, b) =>
+                    { plates.Add((l, p, b)); fp.Append('[').Append(l).Append((int)p.X).Append(',').Append((int)p.Y).Append(']'); };
+                Hud.ClipProbe = (t, sz, w) => clips.Add($"{tag}:'{Short(t)}'@{sz}px/{w}px");
+                Hud.FloorProbe = (t, sz, w) => floors.Add($"{tag}:'{Short(t)}'@{sz}px/{w}px");
+                g.DrawHudLayer();
+                Raylib.EndDrawing();
+                _fitPhase = g.Phase.ToString() + (g.Paused ? "+paused" : "");
+                _fitFrameFp = fp.Length.ToString() + ":" + fp.ToString().GetHashCode().ToString("x8");
+            }
+            catch (Exception ex) { fails.Add($"screenThrew:{tag}:{ex.GetType().Name}"); continue; }
+            finally
+            {
+                Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.ClipProbe = null; Hud.FloorProbe = null;
+                Hud.AnimPin = -1f; Hud.TimePin = -1.0; Renderer.TimePin = -1.0;
+                Hud.MousePin = new System.Numerics.Vector2(float.NaN, float.NaN);
+            }
+            n++;
+
+            // (1) every control plate contains its own label
+            foreach (var (label, plate, box) in plates)
+            {
+                if (plate.Width < 2 || plate.Height < 2) continue;          // a collapsed/hidden control
+                float overL = plate.X - box.X, overR = (box.X + box.Width) - (plate.X + plate.Width);
+                float overT = plate.Y - box.Y, overB = (box.Y + box.Height) - (plate.Y + plate.Height);
+                float worst = MathF.Max(MathF.Max(overL, overR), MathF.Max(overT, overB));
+                if (-worst < _fitPlateMargin) { _fitPlateMargin = -worst; _fitPlateTag = $"{tag}:{Short(label)}"; }
+                check("scr:" + sc.Name, worst <= PlateSlack,
+                      $"labelLeavesPlate:{tag}:'{Short(label)}'by{worst:0}px");
+            }
+
+            // (2) nothing visible is painted off the canvas
+            if (!sc.Scrolls)
+                foreach (var (text, box, alpha) in ink)
+                {
+                    if (alpha < 0.06f) continue;                            // an entrance fade paints nothing
+                    float edge = MathF.Min(MathF.Min(box.X, box.Y),
+                                           MathF.Min(Cfg.ScreenW - (box.X + box.Width), Cfg.ScreenH - (box.Y + box.Height)));
+                    if (edge < _fitEdgeMargin) { _fitEdgeMargin = edge; _fitEdgeTag = $"{tag}:{Short(text)}"; }
+                    check("scr:" + sc.Name,
+                          box.X >= -CanvasSlack && box.Y >= -CanvasSlack
+                          && box.X + box.Width <= Cfg.ScreenW + CanvasSlack
+                          && box.Y + box.Height <= Cfg.ScreenH + CanvasSlack,
+                          $"inkOffCanvas:{tag}:'{Short(text)}'@({box.X:0},{box.Y:0},{box.Width:0}x{box.Height:0})");
+                }
+
+            // (3) THE SMALL-TEXT FLOOR, as a REGRESSION BOUND rather than as the rule.
+            //     CLAUDE.md declares 12px the floor. The shipped UI does not meet it: this leg
+            //     measured 10px authored on the AUDIO CHECK screen and 11px on seventeen others at
+            //     100% (`SIGHTLINE_FITDUMP=small` lists every one). Asserting 12 here would fail a
+            //     tree nobody in this wave is authorised to re-lay-out, and asserting nothing would
+            //     let the next fitter step take it lower still. So the gate is the MEASURED worst,
+            //     which makes any further shrink a failure, and the breach itself is recorded as an
+            //     open finding rather than quietly normalised.
+            // C5 REVIEW FIX (B3): these are TWO minima and they do not live on the same screen.
+            // The first version tracked one pair under `minSize <= _fitMinSize`, so the LAST screen
+            // to tie the smallest AUTHORED size overwrote the rendered figure — and since the scale
+            // loop runs 0.90 -> 1.20, the PASS line reported the 120% tie (10px authored / 12px
+            // rendered) while the true smallest INK in the game is 9.0px, on AUDIO CHECK at 90%.
+            // The gate was never wrong (it is evaluated per screen per scale, below); the REPORT
+            // was, and the report is what the DEVLOG quoted as the measurement.
+            if (minSize < 99f && minSize < _fitMinSize)
+            { _fitMinSize = minSize; _fitMinAuthTag = $"{tag}:{minWhat}"; }
+            if (minSize < 99f && Cfg.Scaled(minSize) < _fitMinRendered)
+            { _fitMinRendered = Cfg.Scaled(minSize); _fitMinTag = $"{tag}:{minWhat}"; }
+            check("scr:" + sc.Name, minSize >= SmallTextAuthoredFloor,
+                  $"belowSmallTextFloor:{tag}:'{minWhat}'@{minSize:0.#}px");
+            check("scr:" + sc.Name, minSize >= 99f || Cfg.Scaled(minSize) >= SmallTextRenderedFloor - 0.01f,
+                  $"rendersBelowFloor:{tag}:'{minWhat}'@{Cfg.Scaled(minSize):0.#}px");
+
+            // (4) NOTHING WAS ELLIPSIZED. A geometry audit cannot see this: the box a clipped
+            //     string paints FITS — losing the tail is what made it fit. Clip is the renderer's
+            //     last-resort backstop, so a live screen reaching it means a column and its content
+            //     have drifted apart. This found the WAR ROOM ellipsizing an achievement
+            //     description at the 110% text size over a sub-pixel disagreement between the
+            //     wrapper and the clipper (fixed in Hud.Clip; this assertion is what caught it).
+            check("scr:" + sc.Name, clips.Count == 0,
+                  "textEllipsized:" + (clips.Count > 0 ? clips[0] : ""));
+            for (int ci = 1; ci < clips.Count; ci++)
+                check("scr:" + sc.Name, false, "textEllipsized:" + clips[ci]);
+
+            // (5) the screen actually drew, and drew ITS OWN screen. Two cases that paint an
+            //     identical frame mean one of them never staged — the vacuity trap that would
+            //     otherwise let this leg "cover" a screen it has never seen. (Found three:
+            //     WOUND / TRAITS / ENDLESSOFFER all photographed the main menu.)
+            check("scr:" + sc.Name, ink.Count >= 3, $"screenDrewNothing:{tag}(strings={ink.Count})");
+            bool twinned = seen.TryGetValue(_fitFrameFp, out string twin);
+            check("scr:" + sc.Name, !twinned, $"screenNotStaged:{tag}(identical frame to {twin})");
+            if (!twinned) seen[_fitFrameFp] = sc.Name;
+            if (FitDump && (clips.Count > 0 || floors.Count > 0))
+                Console.WriteLine($"FITDUMP {tag}: clipped={clips.Count} atFloor={floors.Count} "
+                    + string.Join(" ", clips.Concat(floors)));
+            if (FitDump)
+                Console.WriteLine($"FITDUMP {tag}: phase={_fitPhase} strings={ink.Count} plates={plates.Count} "
+                    + $"minSize={minSize:0.#}px('{minWhat}') "
+                    + $"tightestPlate={_fitPlateMargin:0.0}px@{_fitPlateTag} nearestEdge={_fitEdgeMargin:0.0}px@{_fitEdgeTag}");
+            _fitClips += clips.Count; _fitFloors += floors.Count;
+            clips.Clear(); floors.Clear();
+        }
+        return n;
+    }
+
+    // Diagnostics for the PASS line: the tightest label-in-plate margin and the closest any
+    // visible string came to the canvas edge, over every screen x every scale.
+    static int _fitClips, _fitFloors;
+    static float _fitMinSize = 99f, _fitMinRendered = 99f;
+    static string _fitMinTag = "-", _fitMinAuthTag = "-";
+    static string _fitFrameFp = "";
+    static float _fitPlateMargin = 9999f, _fitEdgeMargin = 9999f;
+    static string _fitPlateTag = "-", _fitEdgeTag = "-", _fitPhase = "-";
+    public static void FitAuditReset() { _fitPlateMargin = 9999f; _fitEdgeMargin = 9999f; _fitPlateTag = "-"; _fitEdgeTag = "-"; }
+
+    static string Short(string s) => s == null ? "" : (s.Length <= 22 ? s : s.Substring(0, 22) + "~");
+
+    /// Push a staged screen's squad to the longest strings the GAME can hand it: the widest
+    /// callsign+nickname shape the generator makes, the tag editor's own 14-character cap on every
+    /// soldier, and a rank/kill count at the top of their ranges. Nothing here is hypothetical —
+    /// each field is bounded by the code that produces it (Game.UpdateTagEditor caps the tag at 14;
+    /// Run.Ranks bounds the rank; the kill counter is a 3-digit field on the hall-of-fame row).
+    /// The longest identity the GENERATOR can actually deal, derived from its own pools rather
+    /// than invented: `Mission.Callsigns`' longest entry and `Nicknames`' longest entry. A stress
+    /// case built from unreachable content reports defects the player can never see — the first
+    /// version of this helper assigned "KESTREL \"MAVERICK\"" into `Unit.Name`, which no code path
+    /// produces, and duly "found" a 9px shop line that cannot occur.
+    internal static string FitWorstCallsign => Mission.LongestCallsign;
+    internal static string FitWorstNickname => Nicknames.Longest;
+
+    static void FitStressSquad(Game g)
+    {
+        var squad = g.RunState != null ? g.RunState.Squad : null;
+        if (squad != null)
+            foreach (var u in squad)
+            {
+                if (u == null || u.IsVip) continue;
+                u.Name = FitWorstCallsign; u.Nickname = FitWorstNickname;
+                u.CustomTag = "WMWMWMWMWMWMWM";      // 14 chars, the widest glyphs in the face
+                u.Rank = Run.Ranks.Length - 1;
+                u.Kills = 999;
+            }
+        foreach (var u in g.Players)
+        {
+            if (u == null || u.IsVip) continue;
+            u.Name = FitWorstCallsign; u.Nickname = FitWorstNickname;
+            u.CustomTag = "WMWMWMWMWMWMWM";
+            u.Rank = Run.Ranks.Length - 1;
+            u.Kills = 999;
+        }
+    }
+
+    /// Slack in px. A plate's label may kiss its border (rounded corners hide a pixel); ink may
+    /// touch the canvas edge. Anything past this is ink the player cannot read.
+    const float PlateSlack = 1.5f, CanvasSlack = 1.5f;
+    /// The measured worst authored/rendered type size in the shipped UI (see the note at the
+    /// assertion). Not the 12px rule — the bound that keeps the breach from getting worse.
+    /// THE BOUND, and it is set at the MEASURED WORST rather than one slack point below it.
+    /// C5 first set the authored bound to 9 — what the tightest shipped fitter declares as its own
+    /// minimum (`FitSize(effect, 12, 9, ...)` on the REQUISITION card) — while the worst size any
+    /// audited screen actually paints is 10px. That point of slack meant a 10 -> 9 regression on
+    /// the AUDIO CHECK screen would have passed in silence, which is the opposite of what a
+    /// regression bound is for (review B3). It is now 10 authored / 9.0 rendered: exactly what this
+    /// tree paints, so ANY further shrink fails. Neither number is the 12px rule — see the note at
+    /// the assertion and the open finding in DEVLOG.
+    const float SmallTextAuthoredFloor = 10f, SmallTextRenderedFloor = 9f;
+    /// The fixed seed every audited screen is staged under.
+    const int FitScreenSeed = 20260830;
+    static readonly bool FitDump = Environment.GetEnvironmentVariable("SIGHTLINE_FITDUMP") == "1";
+    /// SIGHTLINE_FITDUMP=small lists every string the game paints below the 12px small-text floor
+    /// CLAUDE.md declares, with its RENDERED size — the survey behind this wave's open finding.
+    static readonly bool FitDumpSmall = Environment.GetEnvironmentVariable("SIGHTLINE_FITDUMP") == "small";
+
+    /// The screens. Each entry stages a real `Game` and names itself; `Scrolls` marks a surface
+    /// with a genuine scroll region, where ink outside the canvas is the SCROLLBAR's job to
+    /// resolve rather than a defect. Adding a screen here is the whole cost of covering it.
+    struct ScreenCase
+    {
+        public string Name; public Action<Game> Stage; public bool Scrolls;
+        public ScreenCase(string name, Action<Game> stage, bool scrolls = false)
+        { Name = name; Stage = stage; Scrolls = scrolls; }
+    }
+
+    static readonly ScreenCase[] ScreenCases =
+    {
+        new ScreenCase("INTRO",        g => { }),
+        new ScreenCase("MISSION",      g => { g.StartMission(1); g.BriefLines = null; }),
+        new ScreenCase("PAUSE",        g => { g.StartMission(1); g.Paused = true; }),
+        new ScreenCase("TOOLTIP-AIM",  g => { g.StartMission(1); g.DebugTooltip(false); }),
+        new ScreenCase("TOOLTIP-HOVER",g => { g.StartMission(1); g.DebugTooltip(true); }),
+        new ScreenCase("THREATCARD",   g => { g.StartMission(1); g.DebugThreatShot(); }),
+        new ScreenCase("TUTORIAL",     g => { g.StartMission(1); g.ShowTutorialStep(0); }),
+        new ScreenCase("TRAINING",     g => g.BeginTraining()),
+        new ScreenCase("VERBS",        g => { g.StartMission(1); g.DebugVerbs(); }),
+        new ScreenCase("STATUS",       g => { g.StartMission(1); g.DebugStatus(); }),
+        new ScreenCase("TAGEDIT",      g => { g.StartMission(1); g.DebugTagEditor(); }),
+        new ScreenCase("INTENT",       g => { g.StartMission(1); g.DebugIntent(); }),
+        new ScreenCase("SHOP",         g => g.DebugShop()),
+        new ScreenCase("SHOP-PREP",    g => g.DebugPrep()),
+        new ScreenCase("ARMORY",       g => g.DebugArmory()),
+        new ScreenCase("CAMPAIGNMAP",  g => g.DebugCampaignMap()),
+        new ScreenCase("BENCH",        g => g.DebugBench()),
+        new ScreenCase("PERKCHOOSER",  g => g.DebugBarracksPerk()),
+        new ScreenCase("DEPLOYCARDS",  g => g.DebugDeployCards()),
+        new ScreenCase("BOONOFFER",    g => g.DebugBoon()),
+        new ScreenCase("EVENT",        g => g.DebugEvent()),
+        new ScreenCase("DRAFT",        g => g.BeginDraft()),
+        new ScreenCase("VETDRAFT",     g => g.DebugVetDraft()),
+        new ScreenCase("WIN",          g => g.DebugSummary(false)),
+        new ScreenCase("LOSE",         g => g.DebugSummary(true)),
+        new ScreenCase("KIA",          g => { g.StartMission(1); g.DebugKia(); }),
+        new ScreenCase("WARROOM",      g => g.DebugWarRoom()),
+        new ScreenCase("CODEX",        g => g.DebugCodex(), true),
+        new ScreenCase("AUDIOCHECK",   g => g.DebugAudition()),
+        new ScreenCase("SKIRMISHSETUP",g => g.DebugSkirmishSetup()),
+        new ScreenCase("ENDLESSOFFER", g => { g.BeginEndless(); g.DebugEndlessOffer(); }),
+        new ScreenCase("WOUND",        g => { g.StartMission(1); g.DebugWound(); }),
+        new ScreenCase("TRAITS",       g => { g.StartMission(1); g.DebugTraits(); }),
+        new ScreenCase("ROSTERFULL",   g => { Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", "6");
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", "8");
+                                              g.DebugCampaignMap();
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", null);
+                                              Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", null); }),
+        new ScreenCase("ENDLESSHUD",   g => { g.BeginEndless(); }),
+        new ScreenCase("BRIEF",        g => g.StartMission(1)),   // the briefing card is up for 11 s
+        // THE WORST-CASE CONTENT, which is where the last two waves' text defects actually lived:
+        // W10's ARMORY hook photographed the SECOND-SHORTEST blurb in the game for four waves.
+        // Default staging paints default-length strings; these three paint the longest strings a
+        // player can actually produce (a 14-char custom tag - the editor's own cap - on a
+        // full-length callsign+nickname, a full roster, and a padded debrief).
+        new ScreenCase("MISSION-WORST", g => { g.StartMission(1); FitStressSquad(g); }),
+        new ScreenCase("ROSTER-WORST",  g => { Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", "6");
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", "8");
+                                               g.DebugCampaignMap();
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_ROSTER", null);
+                                               Environment.SetEnvironmentVariable("SIGHTLINE_REPORT", null);
+                                               FitStressSquad(g); }),
+        new ScreenCase("WIN-WORST",     g => { g.DebugSummary(false); FitStressSquad(g); }),
+        new ScreenCase("SHOP-WORST",    g => { g.DebugShop(); FitStressSquad(g); }),
+    };
 
     // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
     /// The two ways OUT of a screen that the audit found missing, pinned together because they are
@@ -5569,6 +7440,12 @@ public partial class Game
     /// Runs the LIVE (non-NoPersist) path, so it stashes and restores save.json / meta.json.
     public string QuitSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70126);
         var fails = new List<string>();
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
         bool hadSave = false, hadMeta = false;
@@ -5744,6 +7621,12 @@ public partial class Game
     /// display.json / save.json / meta.json are stashed and restored around the body.
     public string BriefingSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70133);
         var fails = new List<string>();
         const float Dt = 1f / 60f;
 
@@ -5944,6 +7827,12 @@ public partial class Game
     /// itself — the draw, not a predicate about the draw.
     public string BackdropSelfTest()
     {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70140);
         var fails = new List<string>();
         var phases = (Phase[])Enum.GetValues(typeof(Phase));
         bool savedFx = Display.PostFX, savedEn = Display.Enabled;
@@ -6230,6 +8119,438 @@ public partial class Game
         return fails.Count == 0
             ? "OPENERTEST: PASS (cold-opener grace: full trim at m1, half at m2, none from m3; shipped default 1; floor 3 holds; deterministic; RECRUIT still one body under heat 0 at m1)"
             : "OPENERTEST: FAIL " + string.Join(", ", fails);
+    }
+
+    /// SIGHTLINE_MIDTOOTHTEST — PROGRAM CONTOUR C1 "THE FLAT MIDDLE". Pins the mid-ladder
+    /// tooth (`Heat.MidTooth`) and, more importantly, the three STRUCTURAL invariants the
+    /// wave's whole measurement rests on. Legs:
+    ///   (A) NO DEAD DECLARATION. A rung that declares `AiTier = t` must actually RAISE the
+    ///       cumulative tier, because `Heat.AiTier` aggregates with Math.Max. THIS IS THE
+    ///       DEFECT C1 FOUND: rung 6 declared tier 1 while rung 4 already published tier 1, so
+    ///       EXPOSED's advertised coordination tooth could never fire — for two whole programs,
+    ///       under a green HEATLADDERTEST that pinned only the CUMULATIVE vector. Run this leg
+    ///       with `SIGHTLINE_MIDTOOTH=0` and it FAILS; that is the proof it can fail.
+    ///   (B) NO SILENT RUNG. Every rung 1..8 must move the cumulative
+    ///       (enemy, stat, dmg, tier, flags) vector — a rung that changes nothing is a rung the
+    ///       player pays for and cannot name.
+    ///   (C) APEX NEUTRALITY. Every mode of the dial must leave the heat-8 cumulative vector
+    ///       IDENTICAL. That is what makes the C1 rounds comparable at all (the archived h8
+    ///       chunks are byte-identical control-vs-lever) and what stops a future edit from
+    ///       adding a SECOND DmgDelta and silently pushing the apex under its >=5 hard floor.
+    ///   (D) THE OFF-SWITCH IS A TRUE CONTROL. `MidTooth = 0` must reproduce the pre-C1 table
+    ///       EXACTLY — every rung's name, desc and all six fields — pinned against a literal
+    ///       transcription (the TRUE BAND precedent for `SIGHTLINE_CHOICEBAND=mult`).
+    ///   (E) THE SHIPPED SHAPE, per mode, as a golden string.
+    ///   (F) THE TOOTH REACHES THE BOARD. Not the data row: the whole
+    ///       SetupMission -> Build -> SpawnEnemies thread. At heat 6 mission 3 EVERY spawned
+    ///       hostile weapon carries +1 damage over its trimmed reference band; at heat 5, none;
+    ///       at heat 8, exactly one (never two). And the shipped mode did NOT move the
+    ///       coordination tier — Ai's tier is still 1 at heat 6 and 2 at heat 8.
+    public string MidToothSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        int shipped = Heat.MidTooth;
+
+        // The cumulative state of the ladder at one level, as a comparable tuple. The flag byte
+        // folds the four booleans in so leg (B) also sees a rung whose only contribution is a
+        // mutator (SHORT FUSE at heat 3 would otherwise read as "changes nothing but a body").
+        (int e, int st, int d, int t, int f) Vec(int lv)
+        {
+            int flags = (Heat.TighterContact(lv) ? 1 : 0) | (Heat.Exposed(lv) ? 2 : 0)
+                      | (Heat.HarshAttrition(lv) ? 4 : 0) | (Heat.NoReinforcements(lv) ? 8 : 0);
+            return (Heat.EnemyDelta(lv), Heat.StatDelta(lv), Heat.DmgDelta(lv), Heat.AiTier(lv), flags);
+        }
+
+        string Shape()
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int lv = 0; lv <= Heat.Max; lv++)
+            {
+                if (sb.Length > 0) sb.Append('|');
+                var v = Vec(lv);
+                sb.Append(lv).Append(':').Append(v.e).Append(',').Append(v.st).Append(',')
+                  .Append(v.d).Append(',').Append(v.t).Append(',').Append(v.f);
+            }
+            return sb.ToString();
+        }
+
+        try
+        {
+            // ---- (D) the off-switch, transcribed literally --------------------------------
+            // Written out field by field rather than derived: a control DERIVED from the thing
+            // it controls cannot detect a change to the thing it controls.
+            // ONE DELIBERATE DEVIATION, named here rather than hidden: rung 5's Desc reads
+            // "less healing", not the pre-C1 "less field healing". That row's copy was 42
+            // characters into a 38-character panel column and clipped on screen; the fix is
+            // copy-only, applies in EVERY mode (it is not part of the dial), and Desc is never
+            // read by any gameplay path — the R0diag CRN round (49,961 leaf fields across 32
+            // chunk pairs, zero differing) is the proof mode 0 is still a true control.
+            Heat.SetMidTooth(0);
+            string[] preC1 =
+            {
+                "REINFORCED|+1 enemy per mission|1,0,F,F,F,F,0,0",
+                "HARDENED|Enemies hit harder & tougher (+1 stat)|0,1,F,F,F,F,0,0",
+                "SHORT FUSE|+1 enemy; enemies spot you sooner|1,0,T,F,F,F,0,0",
+                "ELITE CADRE|Enemies coordinate their fire|0,0,F,F,F,F,1,0",
+                "LINGERING WOUNDS|+1 enemy; wounds linger, less healing|1,0,F,F,T,F,0,0",   // C1 copy-only: see the note above
+                "EXPOSED|No concealment opener; +1 stat|0,1,F,T,F,F,1,0",
+                "RELENTLESS|No replacement recruits; +1 stat|0,1,F,F,F,T,0,0",
+                "NO QUARTER|+1 enemy; deadliest force (+1 stat; +1 dmg from mission 3)|1,1,F,F,F,F,2,1",
+            };
+            if (Heat.Mods.Length != preC1.Length) fails.Add("modsLen=" + Heat.Mods.Length);
+            else for (int i = 0; i < preC1.Length; i++)
+            {
+                var m = Heat.Mods[i];
+                string got = m.Name + "|" + m.Desc + "|" + m.EnemyDelta + "," + m.StatDelta + ","
+                           + (m.TighterContact ? "T" : "F") + "," + (m.Exposed ? "T" : "F") + ","
+                           + (m.HarshAttrition ? "T" : "F") + "," + (m.NoReinforcements ? "T" : "F") + ","
+                           + m.AiTier + "," + m.DmgDelta;
+                if (got != preC1[i]) fails.Add("offSwitchRung" + (i + 1) + " (want '" + preC1[i] + "', got '" + got + "')");
+            }
+
+            // ---- (C) apex neutrality across EVERY mode of the dial ------------------------
+            Heat.SetMidTooth(0);
+            var apex = Vec(Heat.Max);
+            for (int mt = 0; mt <= 7; mt++)
+            {
+                Heat.SetMidTooth(mt);
+                if (Vec(Heat.Max) != apex) fails.Add("apexMoved(mode" + mt + ")=" + Vec(Heat.Max) + " vs " + apex);
+            }
+            // ...and RECRUIT is below the dial entirely. Asserted ONCE, not once per mode: the rung
+            // lives in `RecruitMod`, outside `Mods`, so the dial cannot reach it and eight identical
+            // passes were eight copies of one fact. It stays as a guard against a future edit that
+            // folds RecruitMod INTO the table.
+            if (Vec(-1) != (-1, -1, 0, 0, 0)) fails.Add("recruitMoved=" + Vec(-1));
+
+            // ---- (E) the per-mode rung shapes, pinned -------------------------------------
+            // level: enemy,stat,dmg,aiTier,flagbits (1=tighter 2=exposed 4=harsh 8=noReinf)
+            var shapeGolden = new (int mt, string want)[]
+            {
+                (0, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,2,0,1,7|7:3,3,0,1,15|8:4,4,1,2,15"),
+                (1, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,2,1,1,7|7:3,3,1,1,15|8:4,4,1,2,15"),
+                (2, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,2,0,2,7|7:3,3,0,2,15|8:4,4,1,2,15"),
+                (3, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,2,1,2,7|7:3,3,1,2,15|8:4,4,1,2,15"),
+                (4, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,0,1,7|7:3,3,0,1,15|8:4,4,1,2,15"),
+                (5, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,1,1,7|7:3,3,1,1,15|8:4,4,1,2,15"),
+                (6, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,0,2,7|7:3,3,0,2,15|8:4,4,1,2,15"),
+                (7, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,1,2,7|7:3,3,1,2,15|8:4,4,1,2,15"),
+            };
+            foreach (var (mt, want) in shapeGolden)
+            {
+                Heat.SetMidTooth(mt);
+                string got = Shape();
+                if (got != want) fails.Add("shape(mode" + mt + ") (golden '" + want + "', actual '" + got + "')");
+            }
+
+            // ---- (A) NO DEAD DECLARATION + (B) NO SILENT RUNG, on the SHIPPED table --------
+            // Both assertions live INSIDE the rung loop deliberately (contract rule 6): hoisted
+            // out, they would look at rung 1 and never at the rung that actually broke.
+            Heat.SetMidTooth(shipped);
+            for (int rung = 1; rung <= Heat.Mods.Length; rung++)
+            {
+                var m = Heat.Mods[rung - 1];
+                if (m.AiTier > 0 && m.AiTier <= Heat.AiTier(rung - 1))
+                    fails.Add("deadAiTier@rung" + rung + " (declares " + m.AiTier
+                              + ", cumulative below is already " + Heat.AiTier(rung - 1) + ")");
+                if (Vec(rung) == Vec(rung - 1))
+                    fails.Add("silentRung" + rung + " (" + m.Name + " changes nothing)");
+            }
+
+            // ---- (G) THE COPY FITS ON ONE LINE AT 100%, in modes 1-7 ----------------------
+            // NOT a correctness guard, and the banner no longer claims it is. Hud.DrawHeatSelector
+            // WRAPS each Desc to the measured column and grows the card, so ink stays inside the
+            // border at every `Cfg.UiScale` — that is what makes the panel correct. This leg is a
+            // copy-quality budget: at 100% a rung should READ as one line rather than wrapping.
+            // A character count cannot express a scale (at 120% the real limit is ~32), which is
+            // exactly why the structural fix had to exist and this check cannot replace it.
+            // Mode 0 is EXEMPT: it is a faithful transcription of the pre-C1 table, and its rung 8
+            // at 58 characters IS the defect C1 found.
+            for (int mt = 1; mt <= 7; mt++)
+            {
+                Heat.SetMidTooth(mt);
+                for (int rung = 1; rung <= Heat.Mods.Length; rung++)
+                {
+                    var m = Heat.Mods[rung - 1];
+                    if (m.Desc.Length > Heat.DescBudget)
+                        fails.Add("descOverflow(mode" + mt + ",rung" + rung + ")=" + m.Desc.Length
+                                  + ">" + Heat.DescBudget + " '" + m.Desc + "'");
+                }
+            }
+            // ---- the shipped default is the MEASURED one ----------------------------------
+            // Asserted BEHAVIOURALLY (the table the shipped constant builds), not as
+            // `ShippedMidTooth != 3` — that compare is const-folded away and cannot fail. Keyed on
+            // the MODE, not on a position in shapeGolden: an array index couples this to the order
+            // of the golden list and would silently start checking a different mode if it changed.
+            Heat.SetMidTooth(Heat.ShippedMidTooth);
+            var shippedGolden = System.Linq.Enumerable.FirstOrDefault(shapeGolden, gg => gg.mt == Heat.ShippedMidTooth);
+            if (shippedGolden.want == null)
+                fails.Add("shippedMode" + Heat.ShippedMidTooth + "HasNoGolden");
+            else if (Shape() != shippedGolden.want)
+                fails.Add("shippedDefaultShapeWrong (actual '" + Shape() + "')");
+
+            // ---- (F) the tooth REACHES THE BOARD ------------------------------------------
+            // Mission 3: past the m1-2 heat grace that zeroes heatDmg. Mirrors HEATLADDERTEST's
+            // DmgAtHeat, aimed at C1's NEW rung. The reference band takes X1's MakeHostile trim,
+            // DERIVED rather than re-hardcoded, so it stays true if that constant ever moves.
+            void DmgOnBoard(string tag, int heat, int expect)
+            {
+                Util.Reseed(4242);
+                _run = new Run(); _run.Start();
+                _run.HeatLevel = heat;
+                _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+                SetupMission(3);
+                // A `foreach` over an empty force asserts NOTHING and reports PASS — the fail-open
+                // shape this wave exists to hunt. Refuse the vacuous pass explicitly.
+                if (Enemies.Count == 0) { fails.Add(tag + ":noEnemiesSpawned"); return; }
+                foreach (var e in Enemies)
+                {
+                    var refW = Weapon.Make(e.Weapon.Kind);
+                    refW.TrimBaseDamage(Sightline.Mission.HostileDamageTrim);
+                    if (e.Weapon.DmgMax != refW.DmgMax + expect)
+                    { fails.Add(tag + ":" + e.Cls + "dmg=" + e.Weapon.DmgMax + "want=" + (refW.DmgMax + expect)); return; }
+                }
+            }
+            DmgOnBoard("exposedDmg", 6, 1);    // C1: the tooth lands at rung 6...
+            DmgOnBoard("heat5Dmg",   5, 0);    // ...one rung below is untouched...
+            DmgOnBoard("apexDmg",    8, 1);    // ...and the apex still carries exactly ONE, not two.
+
+            // The shipped mode (3) hands BOTH teeth down to rung 6: damage AND coordination tier 2.
+            // Heat 5 keeps neither, and the apex's cumulative tier is unchanged at 2 — which is the
+            // whole point of a Math.Max aggregation and is what leg (C) generalises.
+            if (Heat.DmgDelta(6) != 1 || Heat.AiTier(6) != 2)
+                fails.Add("shippedToothNotAtRung6 dmg=" + Heat.DmgDelta(6) + " tier=" + Heat.AiTier(6));
+            if (Heat.DmgDelta(5) != 0 || Heat.AiTier(5) != 1)
+                fails.Add("rung5Contaminated dmg=" + Heat.DmgDelta(5) + " tier=" + Heat.AiTier(5));
+            if (Heat.AiTier(8) != 2) fails.Add("apexTierNot2=" + Heat.AiTier(8));
+
+            // The dial CLAMPS rather than throwing or building a short table.
+            Heat.SetMidTooth(-5);
+            if (Heat.MidTooth != 0 || Heat.Mods.Length != 8) fails.Add("clampLow=" + Heat.MidTooth);
+            Heat.SetMidTooth(99);
+            if (Heat.MidTooth != 7 || Heat.Mods.Length != 8) fails.Add("clampHigh=" + Heat.MidTooth);
+        }
+        finally { Heat.SetMidTooth(shipped); }
+
+        return fails.Count == 0
+            ? "MIDTOOTHTEST: PASS (no dead AiTier declaration and no silent rung on the shipped table; "
+              + "apex vector identical across ALL 8 dial modes and RECRUIT untouched; MIDTOOTH=0 reproduces "
+              + "the pre-C1 table field-for-field; rung shapes pinned for all 8 modes; rungs 1-8 of modes 1-7 "
+              + "fit the one-line 38-char copy budget AT 100% TEXT SIZE (mode 0 exempt by design - its rung 8 "
+              + "IS the 58-char defect; the panel wraps and grows, so larger text scales are safe structurally, "
+              + "not by this count); the +1 damage AND tier 2 reach heat 6, neither reaches heat 5, and the apex "
+              + "carries exactly one damage point; dial clamps)"
+            : "MIDTOOTHTEST: FAIL " + string.Join(", ", fails);
+    }
+
+    /// C3 THE TWO GAMES (SIGHTLINE_CLASSTEST) — the wave's gate, in four legs.
+    ///
+    /// THE FINDING IT GUARDS. On mid-run campaign nodes, the two objectives that end only when
+    /// bodies fall (ELIMINATE, DECAPITATE) win 38.5% ±3.1 (n=247) against 81.5% ±1.1 (n=1243) for
+    /// the six that end on a task — a 43-point spread between objective CLASSES, larger than the
+    /// gap between two adjacent heat rungs. The wave shipped two things against it: the campaign
+    /// fork now SAYS which class a node is, and the anti-turtle clock stopped moving ELIMINATE's
+    /// finish line.
+    ///
+    /// WHY IT DRAWS. Legs B and C paint the REAL barracks/campaign-map frame and read the strings
+    /// and marks at the DRAW CALL (Cfg.CaptureText, Hud.CaptureClassMarks). This is deliberate and
+    /// it is the lesson W9 was sent back for: its first TRUTHTEST asserted the values the HUD was
+    /// SUPPOSED to read, so reverting the panel left the test green. Asserting Run.IsKillObjective
+    /// here would be the same mistake — leg A pins the predicate, and legs B/C pin that the fork
+    /// actually paints it. Ripping the class row out of the tooltip fails leg C even though the
+    /// predicate is untouched.
+    ///
+    /// LEG D is the balance lever and fails on the pre-C3 tree: with Game.ClockWavesOnEliminate
+    /// restored (SIGHTLINE_KILLTREADMILL=1) the clock spawns bodies into an ELIMINATE, which is
+    /// exactly what leg D forbids — and it checks the OFF path too, so a lever that did nothing
+    /// would fail just as loudly as one that did too much.
+    public string ClassSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        bool shippedClock = Game.ClockWavesOnEliminate;
+        var savedCap = Cfg.CaptureText;
+        var savedMarks = Hud.CaptureClassMarks;
+        try
+        {
+            // ═══ (A) THE MODEL — exactly two of the eight objectives are kill objectives ═══════
+            var all = (Objective[])Enum.GetValues(typeof(Objective));
+            // The count is pinned so that APPENDING a ninth objective (the enums are append-only)
+            // cannot silently inherit "not a kill objective" — someone has to come here and decide.
+            if (all.Length != 8) fails.Add("objectiveCount=" + all.Length);
+            foreach (var o in all)
+            {
+                bool want = o == Objective.Eliminate || o == Objective.Decapitate;
+                if (Run.IsKillObjective(o) != want) fails.Add($"model:{o}");
+                if (Run.IsKillObjective(o.ToString()) != want) fails.Add($"modelStr:{o}");
+            }
+            // an unparseable telemetry name must never be reclassified as a kill objective
+            if (Run.IsKillObjective("Skirmish")) fails.Add("modelBadName");
+
+            // ═══ (B)+(C) THE DRAW — what the FORK actually paints ════════════════════════════
+            // Both classes are staged deterministically rather than waiting for the map to deal
+            // one: the run is built normally, then every reachable node's card objective is
+            // overwritten, so the pass runs twice over the identical geometry with only the class
+            // changed. Anything that differs between the passes came from the class and nothing
+            // else.
+            void DrawPass(Objective forced, string tag)
+            {
+                // FIXED SEED: the map is dealt from the ambient RNG, so an unseeded run gave this
+                // test a different fork every invocation. A gate that samples the world is a gate
+                // that flakes — and this one did, on its second sweep.
+                Util.Reseed(20260830);
+                _run = new Run(); _run.Start();
+                DebugCampaignMap();                       // -> Phase.Barracks with a live fork
+                var choices = _run.NextNodes();
+                if (choices.Count == 0) { fails.Add(tag + ":noFork"); return; }
+                foreach (var n in choices) { n.Kind = NodeKind.Combat; n.Card.Objective = forced; }
+
+                // PARK THE CURSOR OFF THE MAP. The hover tooltip draws a class mark of its own, so
+                // a cursor left on a node by the PREVIOUS pass's tooltip step silently adds one to
+                // the census below. That is the exact flake this leg shipped with: the map layout
+                // is seed-dependent, so whether the stale cursor happened to land on a node varied
+                // run to run and the test failed roughly one sweep in three.
+                Raylib.SetMousePosition(2, 2);
+                var cap = new List<(string text, float size)>();
+                var marks = new List<(Objective obj, float x, float y)>();
+                Cfg.CaptureText = cap; Hud.CaptureClassMarks = marks;
+                Raylib.BeginDrawing(); DrawHudLayer(); Raylib.EndDrawing();
+                Cfg.CaptureText = null; Hud.CaptureClassMarks = null;
+
+                bool kill = Run.IsKillObjective(forced);
+                string mine = kill ? "PITCHED - it ends when the field is clear"
+                                   : "TASKED - it ends when the task is done";
+                string theirs = kill ? "TASKED - it ends when the task is done"
+                                     : "PITCHED - it ends when the field is clear";
+                bool Said(List<(string text, float size)> c, string s) => c.Any(t => t.text == s);
+
+                // (B1) the KEY names both marks. FUL-12's rule: a mark the map draws and the key
+                //      does not name is an unexplained glyph.
+                if (!Said(cap, "PITCHED - clear the field")) fails.Add(tag + ":noKeyPitched");
+                if (!Said(cap, "TASKED - the objective ends it")) fails.Add(tag + ":noKeyTasked");
+                // (B2) a class MARK was painted for every reachable node, and every mark drawn on
+                //      this frame carries an objective of the staged class. The key contributes one
+                //      mark of each class, so the count is choices + 2 and the class census is
+                //      choices+1 of the staged class and exactly 1 of the other.
+                int mine_ = marks.Count(m => Run.IsKillObjective(m.obj) == kill);
+                int other = marks.Count - mine_;
+                if (mine_ != choices.Count + 1) fails.Add($"{tag}:marks={mine_} want{choices.Count + 1}");
+                if (other != 1) fails.Add($"{tag}:otherMarks={other}");
+                // (B3) the objective name is still painted beside the mark (the mark ADDS to the
+                //      label, it does not replace it — a regression that swapped them would read
+                //      as an unlabelled fork).
+                string objName = forced == Objective.Eliminate ? "ELIMINATE" : "EXTRACT";
+                if (!Said(cap, objName)) fails.Add(tag + ":noObjLabel");
+                // (B3b) and with the cursor off the map NO tooltip was painted — which is what
+                //       makes the census above a statement about the LABELS and the key.
+                if (Said(cap, mine) || Said(cap, theirs)) fails.Add(tag + ":tooltipWithoutHover");
+                // (B4) every string THIS WAVE paints clears the 12px floor. Scoped deliberately:
+                //      a whole-frame sweep fails on text this wave did not write — the campaign
+                //      map's region-name strip is FitSize(11, 8) and paints at 8-11px, which is a
+                //      real pre-existing breach of CLAUDE.md's floor but is not this wave's to
+                //      move (see the DEVLOG's "what I did not fix"). An assertion that fails for
+                //      a reason unrelated to the change under test is not a gate, it is noise.
+                foreach (var t in cap)
+                    if ((t.text == mine || t.text == "PITCHED - clear the field"
+                         || t.text == "TASKED - the objective ends it" || t.text == objName)
+                        && t.size < 12f)
+                    { fails.Add($"{tag}:size{t.size}:{t.text}"); break; }
+
+                // (C) THE HOVER TOOLTIP. The map published NodeBtns as it drew; park the real
+                //     cursor on a real node and draw again, so the tooltip is reached through the
+                //     shipped hover predicate and not through a staging flag.
+                if (Hud.NodeBtns.Count == 0) { fails.Add(tag + ":noNodeBtns"); return; }
+                // THE HOVER HAS TO CONVERGE, NOT BE ASSUMED. DrawBarracks gives the card a 0.15 s
+                // slide-down entrance (`PanelAnim("barracks")`), so the whole map — and therefore
+                // every rect NodeBtns publishes — moves by up to 16 px between two consecutive
+                // draws taken inside that window. Parking the cursor on a rect read from the
+                // PREVIOUS draw therefore misses the node about half the time, and it missed 3 of
+                // 4 runs under `dotnet run -c Debug` (where the first draw is slow enough to land
+                // mid-entrance) while passing 8 of 8 on the Release binary. So: re-read the rect,
+                // re-park, re-draw, until the tooltip actually appears. The entrance ends, so this
+                // converges; and it is still the shipped hover predicate doing the deciding.
+                var cap2 = new List<(string text, float size)>();
+                for (int tries = 0; tries < 10; tries++)
+                {
+                    var r = Hud.NodeBtns[0].Rect;
+                    Raylib.SetMousePosition((int)(r.X + r.Width / 2), (int)(r.Y + r.Height / 2));
+                    cap2 = new List<(string text, float size)>();
+                    Cfg.CaptureText = cap2;
+                    Raylib.BeginDrawing(); DrawHudLayer(); Raylib.EndDrawing();
+                    Cfg.CaptureText = null;
+                    // "the tooltip drew at all" is the intel row, which predates this wave — so the
+                    // loop's exit condition can never be satisfied by the thing under test.
+                    if (cap2.Any(t => t.text.Contains("intel"))) break;
+                    if (Hud.NodeBtns.Count == 0) break;
+                }
+                if (!cap2.Any(t => t.text.Contains("intel"))) { fails.Add(tag + ":noTooltip"); return; }
+                if (!Said(cap2, mine)) fails.Add(tag + ":tooltipMissingClass");
+                if (Said(cap2, theirs)) fails.Add(tag + ":tooltipWrongClass");
+            }
+            DrawPass(Objective.Eliminate, "pitched");
+            DrawPass(Objective.Evac, "tasked");
+
+            // ═══ (D) THE LEVER — the clock's aim arm lives, its wave arm stops at ELIMINATE ═══
+            // Runs the REAL UpdatePressure at a turn count past rung 2 (grace 4, one rung per 2
+            // turns => turn 7 is rung 2, the first wave rung) and counts what landed on the board.
+            // Returns the rung TOO. An earlier revision asserted `Pressure` after the last call
+            // in the sequence, so it read whatever the FINAL staging left behind (Evac's 0) rather
+            // than Eliminate's — a correct assertion in the wrong scope, which is worth exactly as
+            // much as no assertion. Each arm now carries its own reading out.
+            (int added, int aim, int rung) ClockAt(Objective obj, bool restore)
+            {
+                Game.ClockWavesOnEliminate = restore;
+                Util.Reseed(20260830);
+                _run = new Run(); _run.Start();
+                _run.CurrentCard = new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None };
+                SetupMission(3);
+                int before = Enemies.Count;
+                _turnCount = 7;                       // rung 2 — the first reinforcement rung
+                UpdatePressure();
+                return (Enemies.Count - before, Combat.PressureAim, Pressure);
+            }
+            var elim = ClockAt(Objective.Eliminate, false);
+            var hack = ClockAt(Objective.Hack, false);
+            var decap = ClockAt(Objective.Decapitate, false);
+            var elimOld = ClockAt(Objective.Eliminate, true);
+            var evac = ClockAt(Objective.Evac, false);
+
+            // the shipped default is the lever ON
+            if (shippedClock) fails.Add("shippedClockWavesOnEliminate");
+            // (D1) ELIMINATE: no bodies, but the pressure ramp is untouched — the clock still bites.
+            if (elim.added != 0) fails.Add("elimAdded=" + elim.added);
+            if (elim.aim <= 0) fails.Add("elimAimArmDead=" + elim.aim);
+            if (elim.rung < 2) fails.Add("elimRung=" + elim.rung);
+            if (hack.rung != elim.rung) fails.Add($"rungDiffers {hack.rung}!={elim.rung}");
+            // (D2) HACK and DECAPITATE carry the SAME clock and are deliberately untouched. If
+            //      either of these ever reads 0 the lever has leaked past its one objective.
+            if (hack.added <= 0) fails.Add("hackAdded=" + hack.added);
+            if (decap.added <= 0) fails.Add("decapAdded=" + decap.added);
+            if (hack.aim != elim.aim) fails.Add($"aimArmDiffers {hack.aim}!={elim.aim}");
+            // (D3) the OFF path restores the pre-C3 clock exactly — a lever with no restore is a
+            //      deletion, and a lever whose two arms behave the same is not a lever at all.
+            if (elimOld.added <= 0) fails.Add("restoreAdded=" + elimOld.added);
+            if (elimOld.aim != elim.aim) fails.Add("restoreAimMoved");
+            // (D4) an objective the clock never ran on is still clock-free (PressureClockObjective
+            //      itself is not collateral damage).
+            if (evac.added != 0 || evac.aim != 0 || evac.rung != 0) fails.Add($"evacClock {evac.added}/{evac.aim}/{evac.rung}");
+        }
+        finally
+        {
+            Cfg.CaptureText = savedCap;
+            Hud.CaptureClassMarks = savedMarks;
+            Game.ClockWavesOnEliminate = shippedClock;
+        }
+
+        return fails.Count == 0
+            ? "CLASSTEST: PASS (model: exactly Eliminate+Decapitate of 8 objectives are PITCHED, both by "
+              + "enum and by telemetry name; DRAW-OBSERVED: the campaign fork paints a class mark per "
+              + "reachable node plus a two-entry key, keeps the objective label, stays >=12px, and its "
+              + "hover tooltip paints THIS node's class line and not the other one — both classes staged; "
+              + "LEVER: the anti-turtle clock adds no bodies to an ELIMINATE while its aim ramp still "
+              + "rises, Hack/Decapitate keep both arms unchanged, Evac has no clock at all, and "
+              + "SIGHTLINE_KILLTREADMILL=1 restores the pre-C3 waves)"
+            : "CLASSTEST: FAIL " + string.Join(", ", fails);
     }
 
     public string OnRampSelfTest()
@@ -7474,6 +9795,351 @@ public partial class Game
         sb.Append(fails.Count == 0
             ? "ROUTETEST: PASS ('first' is measurably skewed to branch 0; 'hash' deals within 8pts of uniform; both take zero Util.Rng draws)"
             : $"ROUTETEST: FAIL ({string.Join(",", fails.Take(8))})");
+        return sb.ToString();
+    }
+
+
+    // ── C2 THE OPPONENT DECLINES — SIGHTLINE_DECLINETEST ────────────────────────────────────
+    /// Pins the two halves of wave C2 on a CONSTRUCTED board, plus the reconstruction they both
+    /// rest on. Reads the AMBIENT Game.AiDecline for every shipped-behaviour leg, so running it
+    /// with SIGHTLINE_AIDECLINE=0 FAILS — which is the proof the test can fail at all.
+    ///
+    ///  (1) Combat.AsIfExposed is ground-truthed against a REAL ComputeOdds on a board whose
+    ///      cover has been physically removed — low, high and diagonal-partial. This is the
+    ///      reconstruction the decline gate's reference shot depends on; if it drifts from the
+    ///      cover model the gate silently starts pricing against a fiction.
+    ///  (2) Ai.ShotTileValue — the one scoring line the wave changed — on BOTH sides of the dial.
+    ///      The pre-C2 branch is the literal `100 + bestHit`; the shipped branch must put a 12%
+    ///      shot BELOW one level of high cover (the whole point) while leaving a strong shot
+    ///      dominant, and must be monotone in the hit chance.
+    ///  (3..6) The decline gate itself on a live Ai.Plan: it declines a bad shot and still spends
+    ///      the action; it does NOT decline the same shot when the target is exposed; a rusher
+    ///      never declines; and under two or more guns the freed action digs in rather than
+    ///      offering a lane.
+    /// No window needed; no persistence (NoPersist); no Util.Rng dependence in any assertion
+    /// (every margin is far outside Ai's 0-3 tie-break jitter, and the gate legs read plan flags).
+    public string DeclineSelfTest()
+    {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        // 22 of 37 did not, so each was an independent ~1-3% chance to fail a --full sweep on
+        // pod or roster placement alone. That was invisible while the sweep could not exit
+        // non-zero; the moment C3's exit landed, four different tests took a merge down in a
+        // row. A gate whose tests read the wall clock is a gate that fails randomly.
+        Util.Reseed(70147);
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        bool ambient = AiDecline;             // what the process was launched with — never forced
+
+        // ---- shared empty scene ------------------------------------------------------------
+        void Scene()
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            Vip = null; CaptiveLocked = false; EnemyFocus = null;
+            Objective = Objective.Eliminate; EvacZone.Clear();
+            Combat.MissionFaction = Faction.None; Combat.PrepFaction = Faction.None;
+            Ai.Tier = 0;
+        }
+        Unit MkP(string name, int x, int y, int hp = 8)
+        {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = hp, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y, string cls = "GRUNT")
+        {
+            var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y,
+                               Hp = 9, MaxHp = 9, Aim = 55, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ── (1) AsIfExposed vs a physically uncovered board ──────────────────────────────────
+        // The soldier stands at (12,5). A cover block west of it covers a dominantly-westward
+        // attack (Grid.GetCover's facing-side rule). We find an attacker tile that BOTH keeps
+        // line of sight AND reads the requested cover level, then compare AsIfExposed(covered)
+        // against ComputeOdds on the same board with the block deleted.
+        void CoverLeg(TileType kind, int wantLevel, bool wantPartial, string tag)
+        {
+            Scene();
+            var sol = MkP("SOL", 12, 5); Players.Add(sol);
+            Grid.Tiles[11, 5] = kind; Grid.SetCoverHp(11, 5);
+            Unit atk = null;
+            for (int y = 0; y < Grid.H && atk == null; y++)
+                for (int x = 2; x <= 8 && atk == null; x++)
+                {
+                    if (!Grid.HasLineOfSight(x, y, 12, 5)) continue;
+                    var c = Grid.GetCover(12, 5, x, y);
+                    if (c.Level != wantLevel || c.Partial != wantPartial) continue;
+                    atk = MkE("ATK", x, y);
+                }
+            if (atk == null) { fails.Add("scene:" + tag + ":noAttackerTile"); return; }
+            Enemies.Add(atk); Combat.AllUnits = new System.Collections.Generic.List<Unit> { sol, atk };
+
+            var covered = Combat.ComputeOdds(Grid, atk, sol);
+            if (covered.CoverLevel != wantLevel) fails.Add(tag + ":coverLevel=" + covered.CoverLevel);
+            int wantDef = (wantLevel == 2 ? 40 : wantLevel == 1 ? 20 : 0) / (wantPartial ? 2 : 1);
+            if (covered.CoverDef != wantDef) fails.Add($"{tag}:coverDef={covered.CoverDef} want {wantDef}");
+
+            Grid.Tiles[11, 5] = TileType.Floor;                 // physically remove the cover
+            var open = Combat.ComputeOdds(Grid, atk, sol);
+            if (open.CoverLevel != 0) fails.Add(tag + ":openStillCovered");
+            var recon = Combat.AsIfExposed(covered);
+            if (recon.HitChance != open.HitChance)
+                fails.Add($"{tag}:asIfExposedHit={recon.HitChance} truth={open.HitChance}");
+            if (recon.CritChance != open.CritChance)
+                fails.Add($"{tag}:asIfExposedCrit={recon.CritChance} truth={open.CritChance}");
+            // and the reconstruction must be a strict IMPROVEMENT for a real cover block, or the
+            // decline gate's ratio is a division by something meaningless.
+            if (wantDef > 0 && recon.HitChance <= covered.HitChance)
+                fails.Add(tag + ":asIfExposedNotBetter");
+        }
+        CoverLeg(TileType.LowCover, 1, false, "low");
+        CoverLeg(TileType.HighCover, 2, false, "high");
+        CoverLeg(TileType.HighCover, 2, true, "partialDiag");
+        // identity: an already-exposed shot must come back unchanged.
+        {
+            Scene();
+            var sol = MkP("SOL", 12, 5); Players.Add(sol);
+            var atk = MkE("ATK", 6, 5); Enemies.Add(atk);
+            Combat.AllUnits = new System.Collections.Generic.List<Unit> { sol, atk };
+            var o = Combat.ComputeOdds(Grid, atk, sol);
+            var r = Combat.AsIfExposed(o);
+            if (o.CoverLevel != 0) fails.Add("identity:sceneHadCover");
+            if (r.HitChance != o.HitChance || r.CritChance != o.CritChance) fails.Add("identity:mutatedExposedShot");
+        }
+
+        // ── (2) the scoring line, both sides of the dial ─────────────────────────────────────
+        // HIGH cover is worth 36 in the same scorer (cover.Level * 18). Pre-C2 a 12% shot was
+        // worth 100 + bestHit; post-C2 it must be worth LESS than that wall.
+        const float wall = 2 * 18f;
+        AiDecline = false;
+        float pre = Ai.ShotTileValue(40f, 12);
+        if (Math.Abs(pre - 140f) > 0.001f) fails.Add($"preC2TermMoved={pre}");
+        if (pre <= wall) fails.Add("preC2TermDidNotDominateCover");     // the defect, pinned
+        AiDecline = true;
+        float badShot = Ai.ShotTileValue(40f, 12);
+        float okShot  = Ai.ShotTileValue(60f, 55);
+        float goodShot = Ai.ShotTileValue(120f, 85);
+        if (badShot >= wall) fails.Add($"badShotStillBeatsHighCover={badShot}");
+        if (goodShot <= 100f) fails.Add($"goodShotNoLongerDominant={goodShot}");
+        if (!(badShot < okShot && okShot < goodShot)) fails.Add("shotTermNotMonotone");
+        AiDecline = ambient;                                            // restore: legs below read it
+
+        // ── (3..6) the gate on a live plan ───────────────────────────────────────────────────
+        // A lone GRUNT with a poor shot at a soldier behind HIGH cover, standing on its own
+        // LOW-cover tile so both alternatives (a lane and a dig-in) are genuinely available.
+        // Its aim is dropped so the covered shot is bad in RATIO terms, which is what the gate
+        // reads — an absolute hit percentage would not be a test of this wave's model.
+        string dbg = "", straddle = "(no straddle found)";
+        int gateGuns = 0;
+        // `wantCover` 0 = target exposed, 1 = LOW cover (a milder ratio, which is what the
+        // kill-box straddle needs), 2 = HIGH cover. `aim` and `targetHp` are parameterised so a
+        // leg can place the shot's ratio where it needs it instead of hoping.
+        EnemyPlan Gate(string cls, int wantCover, int extraSoldiers, int aim = 65, int targetHp = 8,
+                       bool disoriented = false)
+        {
+            Scene();
+            var sol = MkP("SOL", 12, 5, targetHp); Players.Add(sol);
+            if (wantCover > 0)
+            {
+                Grid.Tiles[11, 5] = wantCover == 2 ? TileType.HighCover : TileType.LowCover;
+                Grid.SetCoverHp(11, 5);
+            }
+            // Find a shooting tile that BOTH keeps line of sight to the soldier and reads the
+            // cover level this leg wants — searched rather than hand-picked, because a
+            // hand-picked tile is one Bresenham detail away from silently testing nothing (the
+            // first draft of this scene had exactly that: los=False, so there was no shot to
+            // decline and the "decline" legs were vacuously failing).
+            int ax = -1, ay = -1;
+            for (int y = 0; y < Grid.H && ax < 0; y++)
+                for (int x = 2; x <= 7 && ax < 0; x++)
+                {
+                    if (!Grid.HasLineOfSight(x, y, 12, 5)) continue;
+                    if (Grid.GetCover(12, 5, x, y).Level != wantCover) continue;
+                    ax = x; ay = y;
+                }
+            if (ax < 0) { dbg = "[scene: no shooting tile]"; return new EnemyPlan(); }
+
+            var e = MkE("E1", ax, ay, cls);
+            // DAZED is the only clean way to make `canWatch` false while `canDig` stays true: the
+            // decline gate and the no-shot fallback BOTH refuse a watch from a Disoriented unit,
+            // exactly as Game.ActAfterMove's own overwatch gate does. Without it every leg has
+            // canWatch == true, `Math.Max(watch, dig)` always resolves to the watch ratio, and
+            // DeclineDigRatio is unreachable at any value in [0, 0.45].
+            if (disoriented) e.AddStatus(StatusKind.Disoriented, 3);
+            e.Aim = aim;                                  // a real shooter, so a DECLINE is about
+            Enemies.Add(e);                               // the cover, not about a hopeless gun
+            // Ring it in LOW cover: impassable (Grid.IsFloor excludes any cover tile) so the unit
+            // is PINNED and the leg is about the ACTION, not about where it walks — and low cover
+            // does not block sight (Grid.BlocksSight is HighCover/smoke only), so the shot, the
+            // watch and the soldiers' own firing solutions all survive it. It also makes the
+            // dig-in alternative genuinely available, which is what the kill-box leg needs.
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = ax + dx, ny = ay + dy;
+                    if (!Grid.InBounds(nx, ny)) continue;
+                    Grid.Tiles[nx, ny] = TileType.LowCover; Grid.SetCoverHp(nx, ny);
+                }
+            // Extra guns for the kill-box leg: SNIPERS (range 20) parked with a clear line to the
+            // grunt's tile but BEYOND its own rifle range (15), so they count as guns trained on
+            // it without becoming better targets than the soldier the leg is actually about.
+            // Searched, for the same reason the shooting tile is.
+            int placed = 0;
+            for (int y = Grid.H - 1; y >= 0 && placed < extraSoldiers; y--)
+                for (int x = Grid.W - 1; x >= 8 && placed < extraSoldiers; x--)
+                {
+                    if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
+                    float d = Util.TileDist(x, y, ax, ay);
+                    if (d <= 16f || d > 20f) continue;                 // out of ITS reach, inside theirs
+                    if (!Grid.HasLineOfSight(x, y, ax, ay)) continue;  // must actually see the tile
+                    var s2 = MkP("S" + placed, x, y);
+                    s2.Weapon = Weapon.Make(WeaponKind.Sniper); s2.Ammo = s2.Weapon.Clip;
+                    Players.Add(s2); placed++;
+                }
+            if (placed < extraSoldiers) { dbg = "[scene: only " + placed + " extra guns placed]"; }
+            var all = new System.Collections.Generic.List<Unit>(Players);
+            all.AddRange(Enemies);
+            Combat.AllUnits = all;
+            _aiUnits = AliveEnemies().Where(u => u.Active).ToList();
+            PlanEnemySquad();
+            var pl = Ai.Plan(this, e);
+            gateGuns = 0;
+            foreach (var p in Players)
+                if (p.Ammo > 0 && Util.TileDist(p.X, p.Y, e.X, e.Y) <= p.Weapon.MaxRange
+                    && Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) gateGuns++;
+            var od = Combat.ComputeOdds(Grid, e, sol);
+            dbg = $"[from({e.X},{e.Y}) tgtCover={Grid.GetCover(12, 5, e.X, e.Y).Level} "
+                + $"hit={od.HitChance} openHit={Combat.AsIfExposed(od).HitChance} "
+                + $"selfCover={Grid.GetCover(e.X, e.Y, 12, 5).Level} guns={gateGuns} moved={pl.Path.Count}]";
+            return pl;
+        }
+
+        var declined = Gate("GRUNT", wantCover: 2, extraSoldiers: 0);
+        string dbgFirst = dbg;
+        if (declined.ShotHit < 0) fails.Add("gate:noShotOnTheTable");     // the scene must offer one
+        // ...and it must be a PLAUSIBLE bad shot, not a degenerate one. A 3%-clamped hopeless
+        // shot would make the decline trivial and the test meaningless.
+        else if (declined.ShotHit < 10 || declined.ShotHit > 45)
+            fails.Add("scene:shotOutOfBand=" + declined.ShotHit);
+        if (!declined.Declined) fails.Add($"gate:didNotDecline(hit={declined.ShotHit} exp={declined.ShotExp:0.00})");
+        if (declined.ShootTarget != null) fails.Add("gate:declinedButStillShoots");
+        bool spends = declined.Overwatch || declined.Hunker || declined.Reload
+                   || declined.Path.Count > 0 || declined.Grenade || declined.UseItem;
+        if (declined.Declined && !spends) fails.Add("gate:declineProducedADeadTurn");   // the W2 invariant
+
+        // the SAME shooter, same tile, target simply not in cover -> the shot is taken.
+        var kept = Gate("GRUNT", wantCover: 0, extraSoldiers: 0);
+        if (kept.Declined) fails.Add("gate:declinedAnExposedTarget");
+        if (kept.ShootTarget == null) fails.Add("gate:refusedAGoodShot");
+
+        // a rusher never declines: identity, not tactics (Ai.NeverDeclines).
+        var rush = Gate("BERSERKER", wantCover: 2, extraSoldiers: 0);
+        if (rush.Declined) fails.Add("gate:berserkerDeclined");
+        if (rush.ShootTarget == null) fails.Add("gate:berserkerHeldFire");
+
+        // under two or more guns the freed action buys SURVIVAL, not a lane.
+        var box = Gate("GRUNT", wantCover: 2, extraSoldiers: 2);
+        if (gateGuns < 2) fails.Add("scene:killBoxGuns=" + gateGuns);
+        if (!box.Declined) fails.Add("gate:killBoxDidNotDecline");
+        else
+        {
+            if (!box.DeclineDigIn) fails.Add("gate:killBoxDidNotDigIn");
+            if (!box.Hunker) fails.Add("gate:killBoxWatchedInsteadOfHunkering");
+        }
+
+        // ── (7) THE KILL BOX, tested as a STRADDLE — the leg the first draft was missing ─────
+        // The review found that `bar *= 1 + DeclineThreatScale * min(guns, cap)` could be DELETED
+        // and every kill-box assertion above still passed: they only exercise
+        // `DeclineDigIn = guns >= 2 && canDig`, never the bar scaling itself. "The guns on me" is
+        // the most-argued piece of model in this wave and it had zero coverage.
+        //
+        // A straddle fixes that. ONE scene, evaluated at ONE gun and at THREE, tuned so the shot's
+        // ratio falls BETWEEN the two bars (0.45x1.2 = 0.54 and 0.45x1.6 = 0.72). Then the extra
+        // guns are the ONLY thing that can flip the decision, which is exactly the claim.
+        //   scale -> 0.00 : both bars collapse to 0.45, the 3-gun leg SHOOTS   -> fails below
+        //   scale -> 2.00 : the 1-gun bar becomes 1.35, the 1-gun leg DECLINES -> fails below
+        //   cap   -> 0    : same collapse as scale 0                           -> fails below
+        // LOW cover, because a high-cover ratio (~0.36) sits under both bars and cannot straddle.
+        // The aim is SEARCHED, not hand-picked: the window is narrow and a hand-picked number is
+        // one damage-band change away from silently testing nothing.
+        {
+            int hitAim = -1; EnemyPlan one = null, three = null;
+            // (recorded in the verdict line so the archive shows the leg actually found a straddle)
+            for (int a = 90; a >= 40 && hitAim < 0; a--)
+            {
+                var p1 = Gate("GRUNT", wantCover: 1, extraSoldiers: 0, aim: a);
+                if (gateGuns != 1 || p1.ShotHit < 0 || p1.Declined) continue;   // must SHOOT at 1 gun
+                var p3 = Gate("GRUNT", wantCover: 1, extraSoldiers: 2, aim: a);
+                if (gateGuns < 3 || !p3.Declined) continue;                     // must DECLINE at 3
+                hitAim = a; one = p1; three = p3;
+            }
+            if (hitAim < 0)
+                fails.Add("scene:noThreatStraddle");     // loud: this leg would be testing nothing
+            else
+            {
+                if (one.ShootTarget == null) fails.Add("guns:oneGunHeldFire");
+                if (three.ShootTarget != null) fails.Add("guns:threeGunsStillShot");
+                if (!three.DeclineDigIn) fails.Add("guns:threeGunsDidNotDigIn");
+                straddle = "straddle: aim=" + hitAim + " 1gun=SHOOT(" + one.ShotHit + "%,exp="
+                         + one.ShotExp.ToString("0.00") + ") 3gun=DECLINE";
+            }
+        }
+
+        // ── (8) ShotSeat has a LOWER pin, not only an upper one ──────────────────────────────
+        // The review found `ShotSeat = 0` left the whole suite green — i.e. the "a line of fire
+        // has option value at all" concept that DESIGN §5.2 point 1 is entirely about could be
+        // deleted without a single failure. The upper pin (35 fails) already existed; this is the
+        // other side. A marginal shot must still be worth about two-thirds of a LOW cover level
+        // (18), which is false at seat 0, where a 12% shot is worth 4.8.
+        if (badShot < 12f) fails.Add("seat:marginalShotHasNoOptionValue=" + badShot.ToString("0.0"));
+
+        // ── (9) FinishPress actually fires, and is pinned from below ─────────────────────────
+        // The review found FinishPress could be set to 1.0 or 9.0 with the suite still green: no
+        // leg put a target in the finish band at all (Hp 8 > rifle DmgMax). The SAME scene that
+        // declines at full HP must NOT decline when the target is one shot from dead, because the
+        // 1.6x press lifts the shot back over the bar. At 1.0 it declines again -> fails below.
+        var finish = Gate("GRUNT", wantCover: 2, extraSoldiers: 0, targetHp: 2);
+        if (finish.ShotHit < 0) fails.Add("scene:finishNoShot");
+        else if (finish.Declined) fails.Add("finish:declinedAKillingBlow(exp=" + finish.ShotExp.ToString("0.00") + ")");
+
+        // ── (10) DeclineDigRatio is reachable at all — the last unpinned constant ────────────
+        // The review found DeclineDigRatio could be set to 0.00 OR 0.95 with the suite green,
+        // because `bar = Math.Max(canWatch ? watch : 0, canDig ? dig : 0)` and every leg above has
+        // canWatch == true, so the dig ratio is masked at any value below the watch ratio. A DAZED
+        // shooter cannot hold a lane (the gate and the fallback both refuse it), so the dig ratio
+        // becomes the only bar in play — and the freed action must buy cover, not a watch.
+        //   dig -> 0.00 : bar collapses to 0, the gate's `bar > 0f` guard blocks it, SHOOTS -> fails
+        var dazed = Gate("GRUNT", wantCover: 2, extraSoldiers: 0, disoriented: true);
+        if (dazed.ShotHit < 0) fails.Add("scene:dazedNoShot");
+        else
+        {
+            if (!dazed.Declined) fails.Add("dig:dazedDidNotDecline(exp=" + dazed.ShotExp.ToString("0.00") + ")");
+            if (dazed.Overwatch) fails.Add("dig:dazedHeldALaneItCannotHold");
+            if (dazed.Declined && !dazed.Hunker) fails.Add("dig:dazedDeclinedButDidNotDigIn");
+        }
+
+        // ── the pre-C2 contrast, forced (passes on BOTH settings by construction) ────────────
+        // Not the failing leg — the legs above are. This one exists to show the SAME scene is a
+        // shot for the pre-C2 opponent, i.e. that the scene is genuinely a decision and not a
+        // board where nobody would shoot anyway.
+        AiDecline = false;
+        var preC2 = Gate("GRUNT", wantCover: 2, extraSoldiers: 0);
+        if (preC2.ShootTarget == null) fails.Add("contrast:preC2AlsoDeclined");
+        if (preC2.Declined) fails.Add("contrast:preC2SetDeclinedFlag");
+        AiDecline = ambient;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"DECLINETEST: ambient SIGHTLINE_AIDECLINE={(ambient ? 1 : 0)}; "
+                    + $"gate scene {dbgFirst} shot hit={declined.ShotHit}% E[dmg]={declined.ShotExp:0.00} -> "
+                    + (declined.Declined ? (declined.Hunker ? "HUNKER" : declined.Overwatch ? "OVERWATCH" : "other") : "SHOOT"));
+        sb.AppendLine("DECLINETEST: " + straddle);
+        foreach (var f in fails.Take(10)) sb.AppendLine("  " + f);
+        sb.Append(fails.Count == 0
+            ? "DECLINETEST: PASS (AsIfExposed ground-truthed vs a physically uncovered board on low/high/partial + identity; the shot term is hit-WEIGHTED, bounded above AND below, and a 12% shot now scores under high cover; the gate declines a bad shot, still spends the action, keeps an exposed shot, presses a killing blow, exempts rushers, digs in when dazed, and a 3-gun kill box flips a shot the same unit takes at 1 gun)"
+            : "DECLINETEST: FAIL (" + string.Join(",", fails.Take(10)) + ")");
         return sb.ToString();
     }
 

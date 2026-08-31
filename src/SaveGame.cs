@@ -97,6 +97,83 @@ public static partial class SaveGame
     /// mirroring MetaPathPublic). Not used by gameplay code.
     public static string SavePathPublic => FilePath;
 
+    /// C6 SHIPS LIKE A PRODUCT — THE ONE WRITER for every file in the player-data directory.
+    ///
+    /// Serialise to a sibling `.tmp`, then rename over the target. `File.Move(overwrite: true)` is
+    /// rename(2) on the same volume, which is ATOMIC: a reader (or a crash, or a kill -9, or a
+    /// disk that fills mid-write) sees either the complete old file or the complete new one, never
+    /// a torn one. A bare `File.WriteAllText(target, ...)` truncates the target's own inode FIRST
+    /// and then streams into it, so the window between those two acts is a window in which the
+    /// player's file is destroyed and not yet replaced.
+    ///
+    /// save.json and meta.json have written this way since W5. **display.json did not** — it was a
+    /// single bare WriteAllText, and it is the most frequently written of the three (every volume
+    /// drag, every toggle, every tip dismissed). C6 routed all three through here so the property
+    /// docs/DISTRIBUTION.md §5 asserts for the whole directory is true of the whole directory.
+    /// SIGHTLINE_SHIPTEST proves it by mechanism, not by inspection: it holds an open handle on the
+    /// target across a save and asserts the handle still sees the OLD bytes (a rename swapped the
+    /// inode). A truncate-in-place writer fails that leg.
+    ///
+    /// Also sweeps a stale `.tmp` on failure: DISTRIBUTION.md says `*.json.tmp` "should never
+    /// persist", and before this an exception between the write and the rename left one forever.
+    /// C6 REVIEW FIX (T4) — THE SELF-TEST STASH, made survivable.
+    ///
+    /// SAVETEST's meta block held the player's profile in a LOCAL STRING while it deleted the real
+    /// file, so a kill -9 between the delete and the finally lost the profile outright. C6's own
+    /// hermeticity fix made that window WORSE, not better: before it, the file was left in place
+    /// and merely mutated; after it, the file was absent. Trading "polluted" for "gone" is not an
+    /// improvement, and doing it in the wave whose whole thesis is "the player's data survives a
+    /// crash" is worse than doing it anywhere else.
+    ///
+    /// So the stash is a REAL FILE, moved aside by rename rather than deleted, and moved back the
+    /// same way. A process killed mid-test leaves the profile at `<name>.selftest-stash`, whole and
+    /// recoverable by hand, instead of leaving nothing at all. Both directions are rename(2), so
+    /// neither the stash nor the restore can tear a file.
+    internal static string StashAside(string path)
+    {
+        string stash = path + ".selftest-stash";
+        try
+        {
+            if (!File.Exists(path)) { try { if (File.Exists(stash)) File.Delete(stash); } catch { } return null; }
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.Move(path, stash, overwrite: true);       // rename: the bytes are never in flight
+            return stash;
+        }
+        catch { return null; }
+    }
+
+    /// Undo StashAside. `text` is the belt-and-braces in-memory copy the caller already had: if the
+    /// stash file is gone (someone deleted it, or StashAside failed) we still put the bytes back —
+    /// through WriteAtomic, because a restore that truncates the target in place is the exact
+    /// pattern this wave exists to condemn.
+    internal static void UnstashAside(string path, string stash, string text)
+    {
+        try
+        {
+            if (stash != null && File.Exists(stash)) { File.Move(stash, path, overwrite: true); return; }
+            if (text != null) WriteAtomic(path, text);
+            else if (File.Exists(path)) File.Delete(path);
+        }
+        catch { }
+    }
+
+    internal static void WriteAtomic(string path, string text)
+    {
+        string tmp = path + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(tmp, text);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            // Never let a failed save take the game down — and never leave the corpse behind.
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+            throw;
+        }
+    }
+
     public static void Delete()
     {
         try { if (File.Exists(FilePath)) File.Delete(FilePath); } catch { /* best effort */ }
@@ -108,13 +185,9 @@ public static partial class SaveGame
         if (run == null) return;
         try
         {
-            // Atomic write: serialize to a sibling .tmp then rename over the target
-            // (File.Move w/ overwrite is rename(2) on the same volume), so a crash or
-            // torn write mid-save can never leave a half-written save.json behind.
-            Directory.CreateDirectory(Dir);
-            string tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(ToDto(run), SaveJson.Default.RunDto));
-            File.Move(tmp, FilePath, overwrite: true);
+            // Atomic write (WriteAtomic: .tmp then rename), so a crash or torn write mid-save
+            // can never leave a half-written save.json behind.
+            WriteAtomic(FilePath, JsonSerializer.Serialize(ToDto(run), SaveJson.Default.RunDto));
             InvalidateExistsCache();
         }
         catch { /* a failed save must never crash the game */ }
@@ -135,6 +208,16 @@ public static partial class SaveGame
             // Hud kept drawing CONTINUE off SaveGame.Exists, giving a button that did nothing,
             // forever, with no banner and no stash. Route it through the same recovery path as an
             // unparseable file: the squad is the one field a resumable run cannot do without.
+            // C5 REVIEW FIX (B2): PRUNE NULLS BEFORE THE USABILITY VERDICT, not after.
+            // D2's guard counts DTO ELEMENTS, not soldiers. C5's first pass fixed the crash by
+            // dropping nulls inside FromDto — which moved the drop to the WRONG SIDE of this
+            // check: `"Squad":[null]` passed it (Count == 1), FromDto returned a Run with an EMPTY
+            // squad, Load returned non-null so nothing was stashed, `SaveGame.Exists` stayed true,
+            // and the intro kept drawing a CONTINUE RUN button that ContinueRun then refused —
+            // verbatim the D2 defect this guard exists to prevent ("a button that did nothing,
+            // forever, with no banner and no stash"). Pruning here means the count below is a
+            // count of SOLDIERS, which is what the check always meant.
+            if (dto != null && dto.Squad != null) dto.Squad.RemoveAll(u => u == null);
             if (dto == null || dto.Squad == null || dto.Squad.Count == 0) { StashCorruptSave(); return null; }
             // R2 (LOW-2): SchemaVersion was WRITTEN and self-tested but never READ, so a file
             // stamped 999 loaded silently — the one thing the field exists to prevent. We cannot
@@ -269,13 +352,10 @@ public static partial class SaveGame
     {
         try
         {
-            // Atomic write (same pattern as Save): .tmp then rename, so the game's only
+            // Atomic write (same one writer as Save): .tmp then rename, so the game's only
             // permanent state can't be torn by a crash mid-write.
-            Directory.CreateDirectory(Dir);
             dto.SchemaVersion = CurrentSchema;
-            string tmp = MetaPath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(dto, SaveJson.Default.MetaDto));
-            File.Move(tmp, MetaPath, overwrite: true);
+            WriteAtomic(MetaPath, JsonSerializer.Serialize(dto, SaveJson.Default.MetaDto));
         }
         catch { /* a failed meta save must never crash the game */ }
     }
@@ -696,8 +776,17 @@ public static partial class SaveGame
         }
         // installed weapon mods are re-baked BEFORE ammo seeding inside FromUnitDto so an EXTENDED MAG
         // is reflected in the starting clip; all append-only fields default inert for old saves.
+        // C5 THE HARD EDGES — DEFECT: `FromUnitDto` returns null for a null element and its own
+        // comment says "callers skip nulls" — and this caller, the one that builds the RUN's
+        // roster, did not. A save.json whose Squad array holds a `null` (a truncated writer, a
+        // hand edit, a merge of two files) therefore resumed with a null IN the roster and threw a
+        // NullReferenceException as soon as anything walked it. The veteran-reserve caller does
+        // skip; this one now does too.
         foreach (var d in dto.Squad)
-            r.Squad.Add(FromUnitDto(d));
+        {
+            var u = FromUnitDto(d);
+            if (u != null) r.Squad.Add(u);
+        }
         var cd = dto.Card;
         r.CurrentCard = cd == null
             ? Run.StandardCard(Math.Max(1, dto.Mission))
@@ -874,8 +963,24 @@ public static partial class SaveGame
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
+            string metaStash = null;
             try
             {
+                // C6 FIX — START FROM A CLEAN META, exactly as MetaSelfTest already did.
+                // This block STASHED the player's meta.json but never CLEARED it, and then asserted
+                // `if (HasUnlock(1)) fails.Add("metaUnlockPhantom")` — a claim about the ABSENCE of
+                // an unlock, read off whatever profile happened to be on the machine. Ordinal 1 is
+                // StartBoon (STANDING ORDERS, 70 salvage, the second-cheapest unlock in the game),
+                // so ANY maintainer who has bought it fails SAVETEST — and SAVETEST is on the
+                // shipping gate: `scripts/publish.sh` runs it against the binary it just built and
+                // REFUSES THE PUBLISH on a FAIL. A correct build, unshippable, because of the
+                // publisher's own save file. Found by C6 the way a player would find it: with a
+                // pre-existing profile sitting in the config directory.
+                // C6 REVIEW FIX (T4): move it ASIDE rather than DELETE it. A kill -9 here used to
+                // leave the player with no meta.json at all, because the only copy was a local
+                // string; now it leaves meta.json.selftest-stash, whole. See StashAside.
+                metaStash = StashAside(MetaPath);
+
                 SaveMetaHeat(4);
                 if (LoadMetaHeat() != 4) fails.Add("metaHeat");
                 SaveMetaHeat(99);                       // clamped to the ladder ceiling on read/write
@@ -916,8 +1021,7 @@ public static partial class SaveGame
             }
             finally
             {
-                if (metaSaved != null) { try { File.WriteAllText(MetaPath, metaSaved); } catch { } }
-                else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
+                UnstashAside(MetaPath, metaStash, metaSaved);
             }
 
             // corrupt-file armor: garbage meta.json must never be silently wiped
@@ -941,7 +1045,10 @@ public static partial class SaveGame
         catch (Exception e) { return "SAVETEST: FAIL (exception " + e.Message + ")"; }
         finally
         {
-            if (saved != null) { try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, saved); } catch { } }
+            // C6 REVIEW FIX (T4): the restore goes through WriteAtomic like every other write in
+            // this file. A bare WriteAllText here truncates the player's save.json in place — the
+            // pattern this wave removed everywhere else.
+            if (saved != null) { try { WriteAtomic(FilePath, saved); } catch { } }
             else Delete();
         }
     }

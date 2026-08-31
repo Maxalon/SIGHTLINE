@@ -1984,7 +1984,8 @@ fixable, and what makes it worth a wave even though every rung is in band.
       worse than Decapitate's own mid-run cells. Pooled on mid-run node kinds, the two KILL objectives read
       **38.3% ±3.1 (n=248)** against the six with a non-combat win condition at **83.4% ±1.0
       (n=1259)** — **45.1 points**. At mission 5, Eliminate is **25.6% (n=43)** and Sabotage is
-      **96.8% (n=31)**. Six of eight objectives let a squad decline the encounter and still win.
+      **96.8% (n=31)**. Five of the eight objectives let a squad decline the encounter and still
+      win (C3 measured it; `Defend` is the sixth and it does not — see below).
       That is a design question (`docs/DESIGN.md` §A) and needs its own wave, not a tuning round.
       Two caveats travel with the number: it holds node kind and depth constant but NOT squad
       condition, and the autopilot's non-kill policies are written to skip the fight.
@@ -2084,16 +2085,71 @@ fixable, and what makes it worth a wave even though every rung is in band.
 Eight waves merged, each independently reviewed, each sent back at least once. The composed-tree
 ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
-### The three best-evidenced open findings, in priority order
+### The best-evidenced open findings, in priority order (C1 closed the first and opened three)
 
-- [ ] **THE FLAT MIDDLE — replicated on THREE disjoint trees, and it is the obvious next wave.**
-      `h4 → h6` is the smallest step on all three ladders (−3.8 / −2.5 / −3.8) and on the composed
-      tree `h2 → h4` joins it at −7.5, while the ends buy −23.8, −16.2 and −13.1. `Heat.Mods`
-      explains it exactly: **rung 8 is the only entry carrying either `DmgDelta` or `AiTier`**, so
-      the middle rungs add bodies and stats and only the apex changes KIND. The ladder's LEVEL is
-      fine — five of six rungs in band — its SHAPE is not, and the cause is a static table.
-      First candidate (the audit's `balance-3`): move `DmgDelta` to rung 6 and `AiTier 2` to rung 7.
-      **ONE lever, CRN-paired, against a fresh same-slot baseline on your own tree.**
+- [x] **THE FLAT MIDDLE — PARTLY closed by PROGRAM CONTOUR wave C1 (`docs/measurements/c1/`,
+      DEVLOG §C1 + §C1-R). One lever shipped; the finding was sharpened and PART OF IT RELOCATED
+      rather than removed.** Measuring all TEN rungs (n=320, n=640 at h6, base `17934ee`) showed
+      "`h4 → h6` is flat" is really **two rungs, one of them exactly zero**: rung 5 buys
+      **0.00 ±3.2**, rung 6 bought **2.34 ±2.7**, against six other rungs averaging 5.7. Mechanism:
+      **rung 6 declared `AiTier = 1`, which could never fire** — rung 4 already publishes tier 1 and
+      the aggregation is `Math.Max` — so EXPOSED's coordination tooth was dead for two programs.
+      Shipped `Heat.MidTooth` (default **3**): BOTH of NO QUARTER's qualitative teeth move down to
+      rung 6. **`h4 → h6` −2.3 ±2.7 → −7.0 ±2.7**; six rungs exactly unchanged (0/320 discordant
+      each); h6 in band at 13.9, 1.4 SE clear of the floor. `SIGHTLINE_MIDTOOTH=0` restores the
+      pre-C1 table; `SIGHTLINE_MIDTOOTHTEST` pins it.
+      **What is still open here:** rung 8 now buys 1.6 (was 4.1) and rung 5 still buys 0.3 —
+      **C1 fixed the second-flattest rung and left the flattest** — and NO lever beat the control on
+      dispersion (SD of the 8 steps 2.36 control / 2.44 mode 3 / 2.89 mode 1). The rung sums are
+      identical to the decimal in every mode, so this is an allocation problem, and the next two
+      items are why it cannot be solved inside `Heat.Mods`.
+
+- [ ] **THE LADDER'S TOP HALF HAS SUNK ONTO ITS BOTTOM — C1's closing finding, and now the
+      biggest open number.** Against band centres, **h0 is 10.6 points low and h4 is 9.1 low**,
+      while h6 and h8 are within 2. An apex-neutral `Heat.Mods` lever pins h4 (20.9) and h8 (8.1),
+      leaving **12.8 points of win-rate for four rungs — 3.2 each** — so no redistribution inside
+      the table can give rungs 5–8 the ~5.7 points per rung that rungs 1–4 buy. C1 could stop one
+      rung taking almost none of it, and did; it could not create room that is not there.
+      **This is a BASE-difficulty lever, not a heat-table lever.** Price it against the band
+      (RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10) and expect the whole ladder to move.
+      **On the SHIPPED tree h6 is also 6.1 under its centre** — C1's lever added a third rung to
+      this deficit list, so read it as h0 −10.6 / h4 −9.1 / h6 −6.1, not as the two-rung list C1's
+      first draft wrote here (which described the CONTROL and told the next wave the wrong thing).
+
+- [ ] **RUNG 5 (LINGERING WOUNDS) BUYS EXACTLY ZERO — 0.0 ±3.2 at n=320.** The deadest rung on
+      the ladder, and C1 left it alone (one lever per wave). Two unmeasured hypotheses to test
+      first: its `+1 enemy` is partly eaten by the **12-hostile spawn cap**
+      (`Mission.cs:653`, `Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12)`) on late missions,
+      and `HarshAttrition` compounds over a run length the autopilot rarely reaches (avgMis 3.66
+      at h5). **Instrument the delivered headcount per (heat, mission) before choosing a lever.**
+
+- [ ] **A "heat-N rung" IS NOT A FIXED RUNG, AND THE LEAK IS DIRECTIONAL — it biases the very
+      finding this program is chasing.** `Events.cs:460` (`EventOutcomeKind.AddHeat`) lets three
+      field-event choices raise a run's HeatLevel mid-campaign, +1 each, so every heat-N cell
+      contains some heat-N+1 missions. **Heat 8 is clamped and cannot leak, so every rung below it
+      is contaminated UPWARD**: the instrument systematically **compresses the top of the ladder it
+      is being used to diagnose**, which means some part of the flat middle/top may be the
+      INSTRUMENT, not the design. Quantified from C1's archive: h5 shows a 1.56% flip rate under a
+      lever that can only bite at heat ≥ 6, implying **≈10% of h5 campaigns reach heat ≥ 6** (h4
+      shows zero — from there the escalation must fire twice). C1's campaign-level inertness claims
+      survive it (six rungs at 0/320 are exact), but **every past "this rung is unaffected" claim on
+      this ladder has had this hole in it.** A clean fix exists and is cheap: a harness-only pin
+      that suppresses `AddHeat` for a measured batch, so a rung means the rung. Do that BEFORE the
+      base-difficulty round above, or that round re-inherits the bias.
+
+- [ ] **SKIRMISH AT HEAT 6–7 IS UNMEASURED AND C1 CHANGED IT.** `Game.cs` gates the m1–2 heat grace
+      on `Mode != GameMode.Skirmish` (W9's fix), so a heat-6 SKIRMISH now takes C1's +1 enemy damage
+      **from turn one**, where before only heat 8 did. `SIGHTLINE_BALANCE` measures campaigns only,
+      so no instrument in the repo has ever priced a skirmish. DAILY is safe (`DailyHeat` is `% 4u`,
+      capped at 3); ENDLESS is safe (`EndlessWaveScale` reads `StatDelta`, never `DmgDelta`).
+      **Two of four shipped modes have no measurement at all** — that is the wider item.
+
+- [ ] **THE BRACE COMEBACK ECONOMY, flagged by the code and not yet priced.** `Mission.cs:890-902`
+      warns that a wider AI finish band "leans AGAINST the BRACE comeback lever … the comeback
+      economy is the first re-tune if lead-swings collapse", and C1 moved exactly that widening down
+      two rungs. In C1's committed h6 sample pair lead-swings/match holds at 0.9, but average
+      max-swing goes 59.6 → 55.8 and greedy BRACE usage **146 → 96 (−34%)**. n=40 and not
+      conclusive. Re-measure at n≥320 before or alongside the next heat-table change.
 
 - [ ] **THE MID-RUN DECAPITATE — replicated three times, mechanism located, lever unspent.**
       44.7% ±3.9 (n=161) against the finale's 68.0% (n=472): **23.3 points harder than the
@@ -2102,10 +2158,73 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       `bump`; no mid-run Decapitate gets that, and an ELITE node adds +2 bodies and +1 stat.
       **The next lever belongs on the force de-stack, not on the target.**
 
-- [ ] **KILL OBJECTIVES ARE A DIFFERENT GAME FROM THE REST.** On mid-run node kinds, kill
-      objectives read **38.3% ±3.1 (n=248)** against **83.4% ±1.0 (n=1259)** for the six with a
-      non-combat win condition; at mission 5, Eliminate 25.6% and Sabotage 96.8%. That is a
-      45-point gap between objective *classes*, not between objectives.
+- [x] **KILL OBJECTIVES ARE A DIFFERENT GAME FROM THE REST.** Taken by **PROGRAM CONTOUR wave
+      C3 "THE TWO GAMES"** (branch `wave/two-games`, base `17934ee`; DEVLOG §C3, data
+      `docs/measurements/c3/`). Re-established on that tree at **38.5 ±3.1 (n=247)** vs
+      **81.5 ±1.1 (n=1243)** — a **43.0-point** gap. **Mechanism located and three rivals refuted
+      by measurement**: not force size (the four untrimmed non-kill objectives deploy 8.14–8.96
+      against the kill class's 8.34), not mission length (7.17 turns vs 6.73; Defend is the longest
+      objective in the game and wins 78%), not reinforcement VOLUME (Defend takes 6.48 added bodies
+      a mission and wins 78%; Eliminate takes 1.69 and wins 37%). What survives is the win
+      condition: **a WON non-kill mission kills 25.1% of the force it deployed against — Evac 3.3%
+      — so FIVE of the eight objectives are routinely won by declining the encounter.** (Not six:
+      `Defend` kills 4.28 bodies a mission, 92% of Eliminate's 4.65 and more than any other
+      non-kill objective — it does not decline its encounter, it outlasts a bigger one, and its low
+      clear% is a denominator artifact of continuous replenishment.) Shipped one
+      lever (the anti-turtle clock's reinforcement arm no longer fires on ELIMINATE, the one
+      objective where an added body is also win condition) and one information change (the campaign
+      fork now names the class: PITCHED / TASKED). Gap **43.0 → 36.5**; all six rungs in band;
+      CRN-paired 26 lever-only wins to 2 over 960 pairs, p<0.0001 — **but ~half of that is the
+      mission-1 change, and holding the opener fixed the honest figure is +1.39 (p=0.0024)**. See
+      the top item above: the opener overshot and needs backing out with a re-measured ladder.
+
+- [ ] **TOP ITEM — C3 OVERSHOT THE OPENER. RE-TUNE `Mission.OpenerTrim` AND RE-MEASURE THE LADDER.**
+      C3 removed the anti-turtle clock's reinforcement wave from ELIMINATE. Mission 1 is always an
+      Eliminate, **22 of the 24 baseline mission-1 losses in 960 campaigns were that wave**, and
+      combined with X2's `OpenerTrim` (one body off the opening force) the opener became a fixed
+      force that cannot grow against a full squad. Measured result: mission-1 losses per 160 went
+      RECRUIT 0→0, h0 7→**0**, h2 7→**0**, h4 5→**0**, h6 2→1, h8 3→1 — **640 consecutive campaigns
+      at RECRUIT/h0/h2/h4 with zero mission-1 losses.**
+      **The design position is that this is too far.** DESIGN §3.D's front-loaded-anxiety half was
+      already discharged by X2 (97.5% is not anxiety); its "too easy → boredom" half is the live
+      risk, and pillar 5 "stakes that bite" is on the far side of a 100%-over-640 opener. §3.G's
+      "low-stakes first mission" stopped justifying it when RESONANCE T1 moved onboarding into
+      `GameMode.Training`. And X2 itself cited RECRUIT's "100%, zero losses in 40" as the
+      **easiest-difficulty control** — every rung up to h4 now matches that control.
+      **`Mission.OpenerTrim` is an existing, measured dial** (shipped 1; `SIGHTLINE_OPENERTRIM=0`
+      is the pre-X2 opener), so this is ONE lever — but it is a lever **plus a re-measured ladder**,
+      because C3's stratified paired test shows h2's gain is 58% opener and h4's is **100%** opener:
+      backing the opener out will move both rungs down. Do not ship it without the round.
+
+- [ ] **Add a CAMPING POLICY to the flywheel.** The instrument has exactly two policies, `greedy`
+      and `sloppy`, and `sloppy` is an **error** model, not a **passivity** model — neither camps,
+      and `SmartStep` hunkers only as a terminal fallback. **No policy in the instrument can reveal
+      a turtle exploit**, so nothing this project has ever measured bears on turtling. That matters
+      now: C3 removed the reinforcement arm from the 41% slowest Eliminates — precisely the missions
+      where a player was already taking their time — leaving the aim arm alone as the
+      disincentive, at a measured mean high-water rung of 1.50 (below the rung 2 at which the wave
+      arm fired). **Until a camping policy exists, no wave can price that, C3's included.**
+
+- [ ] **OPEN, left by C3 — the class gap is 36.5 points, and the reward is still not priced.**
+      Two named follow-ons, in order:
+      1. **Price the PITCHED node.** `MissionNode.Intel` is depth- and kind-scaled and blind to the
+         objective class, so a node that is 36.5 points harder pays the same rate. `docs/DESIGN.md`
+         §3.A wants the fork to trade off; C3 made it legible and did not make it a bargain.
+      2. **DECAPITATE's half of the class is untouched.** C3 kept off it deliberately so the round
+         had a within-class control. The mechanism is still W8/L3's: `Mission.Build` de-stacks the
+         FINALE by 3-4 bodies and resets `bump`, and no mid-run Decapitate gets that.
+      Also unbuilt: a bot dial that forces engagement on non-kill objectives, which is the only way
+      to separate "the design lets you decline" from "`Game.SmartStep` chooses to".
+
+### Handed on from C2's review (not C2's code, recorded so it is not lost)
+
+- [ ] **`Hud.DrawThreatCard` ignores the TEXT SIZE setting entirely.** It calls
+      `Raylib.MeasureTextEx`/`DrawTextEx` directly (`Hud.cs:2317-2331`) instead of going through
+      `Cfg.Text`/`Cfg.Measure`, so the INCOMING FIRE card renders pixel-identically at 90/110/120%.
+      It does NOT overflow — measure and draw are consistently unscaled — it simply never scales,
+      stranding its body at the 12px floor while every other surface grows. **Pre-existing at
+      `17934ee`, not introduced by C2**; found independently by two reviewers on the same card.
+      Routed to the wave that owns the text-scale surface.
 
 ### The methodological rules this program had to learn the hard way
 
@@ -2129,17 +2248,190 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 6. **A correct assertion in the wrong scope is indistinguishable from no assertion.** W5 wrote the
    right guard for the longest string on the squad screen and placed it outside the scale loop.
 
+### Found by CONTOUR C3 while running its own gate — fixed, and worth knowing
+
+- [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
+      **20 of 960 in both C3 arms and 20 of 960 in the L3 archive** — identical, because it is a
+      property of the worlds, not of any lever. Every published ladder figure sits on top of it and
+      no wave has ever mentioned it. Somebody should find out what those campaigns are doing.
+- [x] **`scripts/qa-sweep.sh` had no `exit` statement.** It accumulated `_fail` / `_autofail` and
+      ended on an `echo`, so `SWEEP-EXIT` was 0 whatever happened. Every green-sweep claim dated
+      before C3 quotes the exit code of an echo. Wired, and `AIIDLETEST` — the one self-test line
+      not routed through `verdict` — was routed. **If you add a self-test line, route it through
+      `verdict` or the gate cannot see it.**
+- [x] **A PROOF COMMAND THAT COMPARES NOTHING MUST NOT PRINT A PASS.** C3 documented
+      `samearm.py D0 B1` as its instrument-identity proof and then deleted the D0 round as
+      redundant, so the command matched zero files and exited 0 over no data — the same defect C1
+      shipped in `inert_diff.py` this program, and exactly what CLAUDE.md's W1 contract exists to
+      prevent. `samearm.py` and `inert.py` now exit 2 on an empty comparison, and the claim was
+      replaced with a stronger one whose data is committed (`l3repro.py`: C3's baseline arm
+      reproduces the L3 archive on 59,010 aggregate fields and **960/960 campaigns**).
+      **Check every proof command in your own write-up still finds its data after you tidy up.**
+- [ ] **A DRAW-observing test has two failure modes this project had not written down**, and C3's
+      own gate hit both: state left on screen by the previous case (a parked cursor makes the next
+      case draw a tooltip), and a rect read from a PREVIOUS frame that has since moved
+      (`DrawBarracks`' 0.15 s slide-down entrance shifts the whole map up to 16 px, which made the
+      hover leg fail 3 runs in 4 under `dotnet run -c Debug` and 0 in 8 on the Release binary).
+      **Run a new draw test under BOTH the Release binary and the sweep's own
+      `dotnet run -c Debug`, several times each.**
+
 ### Standing gaps, honestly declared
+
+- [ ] **A FOUR-SLOT-SET RUNG IS NOT INTERCHANGEABLE WITH ANOTHER FOUR-SLOT-SET RUNG — measured.**
+      C2 found this while checking its own baseline: because `src/` is byte-identical between
+      `d814f0c` and `17934ee`, its BASE arm turned out to be **L3's b0-b30 replayed bit for bit**,
+      which makes L3's two halves directly comparable. At heat 2 they disagree —
+      **b0-b30 reads 21.2% and b40-b70 reads 41.2%** (17/80 vs 33/80), difference +20.0, SE 7.16,
+      **z = 2.79, p = 0.0052**, and 0.031 after Bonferroni x6. **L3's slot space is heterogeneous
+      at heat 2 beyond binomial noise**, so the ladder-of-record's h2 = 31.2% is an average over
+      two populations twenty points apart. CLAUDE.md's rule "a rung is four slot sets or it is not
+      a rung" is about SIZE; this is about WHICH FOUR. An UNPAIRED comparison across different slot
+      sets can therefore be badly misleading at h2 even at n=80 — a CRN-PAIRED one is immune,
+      because the effect hits both arms in the same worlds and cancels. **Prefer paired designs;
+      if you must compare unpaired rungs, use the same bases.** Raw data `docs/measurements/l3/`.
+- [ ] **A CRN round's resolving power comes from its DISCORDANT count, not its n, and nobody had
+      been reporting it.** C2's 80-pair rungs can only detect swings of 11-14 points (17-19 family
+      wise), and its heat-8 rung had **4 discordant pairs** — an exact two-sided minimum p of
+      0.125, so nothing was reachable there at any effect size. A "p = 1.000, no change" row at a
+      hard rung is an absence of evidence. **Report n_discordant and the MDE beside every paired
+      ladder**, or the flat rows will keep being read as neutrality. `docs/measurements/c2/paired.py`.
+
+- [ ] **THE ENEMY OVERWATCH HAS NO LANE SELECTION, and that is now the binding constraint.**
+      C2 measured a held enemy lane FIRING **24-27%** of the time (n=457/461 lanes in the
+      maximal-decline diagnostic, of which 442/455 are genuine overwatch; the shipped round's own
+      lane counts are mostly PIKEMAN BRACE and do NOT corroborate this). *Fired*, not *paid off* —
+      at the reaction's −10 aim a fired shot often misses, so true payoff is lower. An overwatch is
+      therefore worth at most ~0.20 of the shot it replaces. A decline rate large enough to be
+      *felt* also looked like a weaker opponent (51% declines, run completion 55% → 75%), but that
+      probe is suggestive only: p = 0.29 on 20 paired worlds, and confounded by an interim binary.
+      The cause is that an enemy overwatch is a 360 degree watch
+      held from wherever the unit is standing; only the PIKEMAN's BRACE ever picks a cone. **A
+      hostile that chose WHERE to watch would be worth several times this, and would justify a
+      much higher `Ai.DeclineWatchRatio`.** This is the next wave in this area, not another pass
+      at the gate.
+- [ ] **The enemy kill-zone wash is below perceptual threshold, and covers the whole board.**
+      `Renderer` washes every tile an enemy overwatch threatens at **7-12% alpha**, which C2's
+      code review measured as invisible on a warm biome even at 2.6x contrast — so the one visual
+      that is supposed to communicate "this ground is denied" communicates nothing. It is also
+      **the same finding as the lane-selection gap seen from the other end**: because a plain
+      enemy overwatch has no cone, the wash covers nearly the entire open board, and a signal that
+      marks everything marks nothing. Fixing lane selection would fix the wash's *information*;
+      the alpha needs raising regardless. (C2's `SIGHTLINE_DECLINESHOT` doc comment claimed the
+      wash "lights the ground it now denies"; that claim is withdrawn in the code.)
+- [ ] **The flywheel is structurally blind to enemy area denial.**
+      `Game.Autopilot.TileExposure` carries `+18` for an enemy BRACE lane (`InEnemyBraceLane`) and
+      **no term at all** for an ordinary enemy overwatch — its "exposed to this gun" `+6` is
+      identical whether the hostile is watching or not. So the bot walks into enemy kill-zones and
+      the denial half of a lane cannot be priced. Fixing it changes the INSTRUMENT and therefore
+      invalidates every CRN world in the repo, so it must be a wave of its own with an R0diag and
+      a fresh ladder, never smuggled into a gameplay wave.
 
 - [ ] **W10's text-scale gate covers five surfaces, not the game.** Every other screen is still
       asserted at 100% only. `FITTEST` is written so a sixth leg is an addition, not a rewrite.
 - [ ] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post.
       W3's premise (overwatch as a real enemy choice) is therefore unexercised.
+
+- [x] **CLOSED by C5 "THE HARD EDGES" — W10's text-scale gate now covers the game.** `FITTEST`
+      leg (F) stages **40 screens**, DRAWS each at all four shipped text sizes, and reads the
+      geometry back from the draw calls (`Cfg.InkProbe` / `Hud.PlateProbe` / `Hud.ClipProbe` /
+      `Hud.FloorProbe`) rather than re-deriving layouts in the test. Asserts plate containment, no
+      ink off canvas, **no ellipsis**, the type floor, and that each screen drew its own frame.
+      FITTEST also gained **THE SCOPE GUARD** (rule 6, made mechanical): it counts assertions per
+      leg per scale and fails by name on any leg that did not run at every scale — 13,898
+      assertions over 45 legs today.
+- [ ] **The enemy OVERWATCH branch is effectively dead — and C5 corrected the number while
+      building the test for it.** Measured on the composed tree over **8083 enemy acts**: overwatch
+      fires **8 times, 0.10%** — not zero, but once per thousand acts, which is a verb no player
+      will see. The CAUSE is still open and belongs to C2/W3. What C5 added is
+      `SIGHTLINE_AICOVTEST`, the enemy DECISION CENSUS: every branch of the enemy exec chain tags
+      itself, the gate is a RATE (once per 1000 acts, because a zero gate would not have caught
+      this), and the effectively-dead branches are a declared registry that fails by name when an
+      UNDECLARED branch goes quiet.
 - [ ] **W3 THE OPPONENT CHOOSES was never started.** `Ai.cs` still scores any shot at
       `100 + bestHit` against terrain terms bounded under ~64, so the opponent now always ACTS but
       still never DECLINES. That is the single biggest remaining gap in the fight.
+- [ ] **W6 (biome mechanical) was never started.** `grep -ci biome` still returns 0 in
+      `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
+      (**W7 ships-like-a-product is now DONE** — CONTOUR wave C6, section at the end of this file.)
+
+- [x] **The enemy OVERWATCH branch is effectively dead** — 0 of 1595 pre-W2 and 3 of 1589 post;
+      CONTOUR C2 re-measured it at **0 of 1076** contested acts on `17934ee` and it is no longer
+      zero. **But see the new open item below: the branch is alive and the LANE is still bad.**
+- [x] **W3 THE OPPONENT CHOOSES** — shipped as PROGRAM CONTOUR wave **C2 "THE OPPONENT DECLINES"**
+      (`SIGHTLINE_AIDECLINE`, default ON; DEVLOG §C2, raw data `docs/measurements/c2/`). The flat
+      `100 + bestHit` is gone: the tile term is now `ShotSeat(18) + bestHit * P(hit)` and a decline
+      gate prices the shot against the same shot with the defender's cover stripped
+      (`Combat.AsIfExposed`), with the bar rising with the guns already trained on the tile.
+      **Read the DEVLOG before quoting the wave**: the brief's "shoots at ANY hit chance" half was
+      NOT supported by measurement (0 of 649 pre-change shots were under 20%; 88% were at 60%+) —
+      the defect was entirely positional, and that is what moved.
 - [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
       still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
+- [x] **CLOSED by C5 — the enemy turn has a deadlock guard.** `Game.EnemyStallGuard` runs from
+      `Update` BEFORE the animation pump (a guard inside `UpdateEnemy` is structurally blind to an
+      animation that never completes, because `Update` returns before the phase switch while the
+      queue is non-empty). After 480 updates with nothing moving it prints the unit, class, stage,
+      planner branch, queue head, turn and mission, then forfeits the stalled unit so the turn
+      ends. It runs in REAL PLAY, not only in autoplay. `SIGHTLINE_ENEMYSTALLTEST` wedges a real
+      enemy turn to prove all of it, including the leg that makes the rest mean something: the same
+      wedge with the guard off still hangs.
+
+- [x] **BIOME MECHANICAL — done for THREE of eight** (PROGRAM CONTOUR **C4 "EIGHT BIOMES ARE
+      PAINT"**, base `17934ee`). `src/Terrain.cs` adds a per-tile GROUND layer stamped from
+      `(MapSeed, mission)` via `Util.Hash3` (zero `Util.Rng` draws; PAIRTEST byte-identical), and
+      three biomes now change the fight on three different axes: **VERDANT UNDERGROWTH** (low
+      cover from every angle, but only past 2 tiles — `Grid.GetCover`), **TUNDRA SLICK ICE** (half
+      a step to cross — `Grid.CostMap`), **MAGMA THERMAL VENTS** (opaque, dear to cross, and it
+      sets you alight — `Grid.HasLineOfSight` + `CostMap` + `OnUnitEnteredTile`). Symmetry is
+      structural: every rule lives in a function both sides already ask for the truth, so `Ai.cs`
+      cannot play the old game. `SIGHTLINE_BIOMETEST`; `SIGHTLINE_BIOMEMECH=0` restores the pre-C4
+      board exactly. Measured CRN-paired at n=160/rung/arm on h0/h2/h4: heat 0 reads 43.8 vs 47.5,
+      a −3.7 point estimate that crosses the band floor but is **not a measured breach**
+      (chunk-paired t = −1.07). DEVLOG §C4; raw round `docs/measurements/c4/`.
+- [ ] **The other FIVE biomes are still paint.** STEEL / ARID / ASH / VOID / NEON change nothing;
+      BIOMETEST asserts they stamp nothing, so giving one a mechanic means changing that assertion
+      deliberately. The obvious candidates follow the art: ASH = short sight lines in the ashfall,
+      ARID = dune ridges as soft high ground, NEON/VOID = the lattice as a conductive/teleport
+      grid. None designed, none measured.
+- [ ] **THE GROUND LAYER'S COST IS CONCENTRATED ON MISSION 1 — the only cell C4's round could
+      individually resolve, and a DESIGN.md §3.D violation.** Splitting the archived round by
+      campaign node kind (`aggregate_nodekind.py`): **`Start` A 91.7% vs B 96.0%, chunk-paired
+      −4.37, SE 0.97, t = −4.53** over 24 chunks (n=480/arm), against Combat +1.13 (t=+0.60),
+      Elite −3.98 (t=−1.16), Supply −0.27, Boss +4.10. `Start` is mission 1, exactly one per
+      campaign, so it carries no within-campaign clustering — which is why it resolves while the
+      pooled rung does not. `byObjective` agrees: **Eliminate −3.55 ± 1.12, t = −3.16** (m1's
+      objective in the baseline rotation). This is the front-loaded anxiety §3.D forbids and that
+      X2's `Mission.OpenerTrim` exists to prevent, and it points at a **cheaper, more targeted
+      lever than any of the three C4 named**: suppress or thin the ground layer on mission 1.
+      Unpriced.
+- [ ] **The C4 ladder is now STALE by construction.** Its review pass moved the layer off plateaus
+      (M1) and re-tuned density (VERDANT 12.1% → 17.7%, MAGMA mean 9.7 → 13.0), so the shipped
+      layer is not the measured one. Re-measure before quoting `docs/measurements/c4/` as the
+      price of what ships. Other unpriced levers: the tile budgets (44 / 34 / 24),
+      `FoliageMinDist`, `VentStepExtra`.
+- [ ] **"A symmetric rule is not a neutral rule" is a DIRECTION, not a result.** The three
+      mechanical boards moved −3.2 ± 2.1 in mission win rate against a flat +0.3 ± 1.7 paint
+      control, but chunk-clustered the difference-in-differences is **−3.19 ± 1.98, t = −1.61,
+      sign test 17/24** — not resolved at n=160. Per rung only MAGMA is consistently negative;
+      TUNDRA flips at h2 (+1.9) and VERDANT at h4 (+5.7). C4's hypothesised mechanism ("a longer
+      exchange favours the side with more bodies") is **refuted in C4's own archive**: per-biome
+      `avgTurns` reads MAGMA 6.36 / TUNDRA 6.18 / VERDANT 5.58 against paint biomes 5.36-6.47, so
+      the longest-fight biome in the batch has no mechanic at all.
+- [ ] **A quarter of MAGMA boards have no vent-free route.** Treating vents as walls, 47/200
+      (23.5%) of MAGMA boards leave an objective fixture or hostile unreachable without a crossing,
+      so "the gaps are the fords" is true on most boards and not on all. And a vent step costs 8
+      half-tiles — a full-mobility soldier's ENTIRE walk — so a WOUNDED soldier (budget 6) cannot
+      enter one at all; 15 tiles across 200 boards have every walkable neighbour a vent, where a
+      wounded soldier can never move again (it can still shoot, so no stall). Recorded, unrepaired.
+- [ ] **The Escort VIP leash treats vents as a score penalty, not as walls.** Fire gets a two-pass
+      leash (an `avoidFire` pass first); vents get penalties only, and a penalty is not a veto, so
+      the asset can be routed through a vent and seared. C4's archive shows no measurable harm
+      (Escort −0.74 ± 1.99) but the two hazards are not handled symmetrically.
+- [ ] **`Hud.DrawThreatCard` (`Hud.cs` ~2333-2347) draws with raw `Raylib.DrawTextEx` at fixed
+      12/14px**, bypassing `Cfg.Text` and therefore the TEXT SIZE setting — which CLAUDE.md
+      forbids explicitly. Pre-existing (W10's FITTEST does not cover this card), but C4 put its
+      longest, most rule-dense strings on it. A C5 surface.
+- [ ] **W7 (ships-like-a-product) was never started.**
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
       guard covers the player turn only.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.
@@ -2217,3 +2509,147 @@ commit it**, leaving their archived runners inoperable; C2 also lost `qa*.txt` a
 Those rules are indiscriminate because `.gitignore` reached `main` carrying unresolved merge
 conflict markers (lines 74/93/104) — a lead merge defect, fixed by C6. Narrow the rule and re-check
 every wave archive after that merge.
+
+## PROGRAM CONTOUR — wave C6 "SHIPS LIKE A PRODUCT" (CLOSED 2026-08-30, branch `wave/ships`)
+
+The "ships-like-a-product" item declared never-started above is **done**. Full write-up in
+`docs/DEVLOG.md` §C6; the shipping contract in `docs/DISTRIBUTION.md` was re-measured from scratch.
+
+- [x] **Publish for real, all five configurations.** `release` / `small` / `no-trim` / `plain` for
+      linux-x64 plus a `--rid win-x64` cross-publish; every one verified by three self-tests run
+      against the binary it just built. Matrix re-measured **interleaved** (DEVLOG §C6): the
+      default is **29.3 MB across 10 files** (MB = 10^6 bytes) and the fastest start of the four.
+- [x] **The `PublishTrimmed` hazard is a guard, not a comment.** `C6GuardTrimmedPersistence` in
+      `Sightline.csproj` makes removing either mitigation a **build error** (proven by running the
+      command that trips it); `SIGHTLINE_SHIPTEST`'s TRIMSAFE leg covers the half MSBuild cannot
+      see. **CLAUDE.md's "never publish with `-p:PublishTrimmed=true`" was stale and harmful** —
+      trimmed is the recommended default; what you must not do is publish without the script.
+- [x] **Walked the player's path** — published directory, outside the source tree, path with a
+      space in it, empty profile. Fonts resolve by absolute path from the install directory and a
+      full campaign wins. `SIGHTLINE_SHIPTEST` from that install PASSes and leaves the profile
+      directory empty.
+- [x] **Ship the root `LICENSE` in the distributable.** It had been decided and committed and
+      **never copied into any build output**.
+- [x] **All three player-data writers are atomic.** `display.json` was not; `save.json` and
+      `meta.json` were. One writer now (`SaveGame.WriteAtomic`), plus a **failure-path** `.tmp`
+      sweep that a measured full-disk run proved was needed. Scope stated in
+      `docs/DISTRIBUTION.md` §5: safe against process death and concurrent readers, **not** proven
+      against power loss (no `fsync`), and the probe that verifies the mechanism is Unix-only.
+- [x] **A version stamp a bug report can name** — `<Version>` in the `.csproj`, read off the
+      assembly, painted on the main menu and the pause card. Stamped **v1.0.0**.
+- [x] **A cold-first-run screenshot hook** (`SIGHTLINE_COLD=1`): the main menu and the WAR ROOM's
+      zero state, neither of which had ever been photographed (both hooks staged rich profiles).
+- [x] **`SIGHTLINE_SAVETEST` no longer fails on the publisher's own save file.** It asserted the
+      ABSENCE of `MetaUnlock` ordinal 1 against the real profile; anyone owning STANDING ORDERS
+      could not publish. **A latent block on the shipping gate.**
+- [x] **`.gitignore` no longer contains committed merge-conflict markers.** They were in `main`.
+
+### What C6 found and deliberately did NOT fix (each is a candidate wave)
+
+- [ ] **The cold WAR ROOM ellipsises 4 of 6 unlock descriptions.** With 0 owned the catalogue wants
+      508 px in a 446 px column, so `Hud.WarUnlockPlan` clips each compact row to one 12 px line.
+      W9 chose this deliberately over breaking the 12 px floor or dropping a card, and documented
+      it — but the cost lands on the **only player who ever sees all six unowned: the new one**,
+      who therefore cannot read what any unlock does. `METATEST` asserts the font size and the hit
+      rect, not readability. Now photographable via `SIGHTLINE_COLD=1`.
+- [ ] **The intro screen is not in `FITTEST`'s list and overflows at TEXT SIZE 120%.** The
+      DIFFICULTY panel's body line paints to x≈1266 against a panel edge at x≈1239 — outside its
+      own panel — and the `[K]`/`[U]` chips overlap their labels. The first screen in the game has
+      never been checked at any scale but 100%. This is the natural sixth leg for `FITTEST`.
+- [ ] **`display.json` load-back cannot be verified headlessly.** `Display.Init` calls `Load()`
+      after its `if (!enabled) return`, and every shot/autoplay path passes `false`. Deliberate
+      (headless byte-stability), and it means the settings round trip has no coverage past "the
+      file is written correctly". SHIPTEST's second-launch fork closes the equivalent gap for
+      `meta.json` only.
+- [ ] **No crash reporter and no log file.** An exception on a player's machine goes to a stdout
+      nobody reads. The version stamp lets them name a build; there is nothing to attach.
+- [ ] **No installer, icon, window-title art or `.desktop` file**; on Windows the binary is
+      unsigned and SmartScreen will warn. **Code signing costs money and is out of scope
+      permanently** under this project's rules — but say so out loud rather than leaving it as a
+      surprise.
+- [ ] **macOS was never even cross-published**, and the Windows build is unverified beyond its
+      file list (nothing here can run either).
+- [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns
+      and the `.bak` beside it is corruption evidence, not a restore.
+
+### Left open by C5 "THE HARD EDGES" (found, reproduced, deliberately not fixed)
+
+- [ ] **The 12px small-text floor is not met at the DEFAULT text size.** Measured at 100%: 10px on
+      the AUDIO CHECK screen and 11px on seventeen others (in-mission HUD, end cards, WAR ROOM,
+      EVENT card). Repro: `SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small` lists every string with its
+      authored and rendered size. Meeting the rule is a re-layout of half the chrome, so C5 shipped
+      a regression BOUND at the measured worst (9px, which is what the tightest shipped fitter
+      declares as its own minimum) and the survey. The next wave that wants the rule starts here.
+- [ ] **Six shrink-to-fit calls reach their floor at 120%** (three WAR ROOM achievement
+      descriptions, one shop body, one prep body). Nothing is lost yet; they are one authored
+      character from losing a word. Counted in FITTEST's PASS line on every run.
+- [ ] **ACCESSIBILITY: TEXT SIZE AND COLOURBLIND MODE CANNOT BE REACHED UNTIL YOU ARE IN A FIGHT.**
+      `Update`'s Escape handler is gated on `PlayerTurn || EnemyTurn`, and the pause card is the
+      SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN SHAKE, THREAT
+      PREVIEW, AUTO-CAM and FULLSCREEN. The INTRO — the first screen a player sees — carries ten
+      doors (CONTINUE / DEPLOY / TRAINING / LAST STAND / WAR ROOM / FIELD MANUAL / SKIRMISH / DAILY
+      / AUDIO CHECK / QUIT) and a difficulty dial, and **no settings entry at all**. It compounds
+      the 12px finding above exactly: the 120% text size that would lift every sub-12px string to
+      >=12px is behind the door that cannot be opened.
+      **BARRACKS is worse** — `case Phase.Barracks` has no Escape handler whatsoever: no pause card,
+      no route back to the intro, no field manual (`K` is `Phase.Intro`-gated). On the screen where
+      a player deliberates over perks, the shop and the node pick, the only exits are forward or the
+      window's close button. Not a soft-lock (forward always exists), and every overlay phase
+      (Draft, SkirmishSetup, WarRoom, Codex, AudioCheck, the end cards) does take Escape — walked
+      and confirmed. **VOLUME is the exception and an earlier draft of this item had it wrong:** the
+      four faders live on AUDIO CHECK, which the intro opens with `U`.
+      `QUITTEST` asserts the arm/confirm/checkpoint contract and **asserts nothing about
+      reachability from any phase** — that is the half that is broken.
+- [ ] **`terminal-reload` fired 0 times in 8083 enemy acts.** That is a BACKSTOP working as
+      designed (the planner's own reload branch gets there first), not a hole — recorded so the
+      next reader does not re-discover it as a defect.
+- [ ] **The sweep's AICOVTEST is a COARSE version of the gate.** It runs `=2` (48 campaigns,
+      ~2740 acts), where the one-per-1000 rate is a threshold of **2.74 events** — "does every
+      undeclared branch fire at least 3 times?" — and `item` (10), `sap` (13) and `brace` (13) sit
+      at 3.6-4.7x the bar. The headline "overwatch fires 8 times in 8083 acts" is the `=6` run;
+      **at the sweep's n, overwatch is 0**. A wave that suspects a verb has gone quiet should run
+      `SIGHTLINE_AICOVTEST=6` by hand rather than trust the sweep line.
+- [ ] **An OCCLUSION signal would let the text audit assert string-vs-string overprint.**
+      `Cfg.InkProbe` already fires in draw order, so z-order is available; what is missing is
+      whether an opaque fill landed between two strings. Acquiring it means funnelling **230** raw
+      `Raylib.DrawRectangle*` calls in `Hud.cs` and **87** in `Renderer.cs` through a `Cfg.Rect`
+      seam. Two overprint assertions exist today, both hand-scoped to one row each (FITTEST legs B
+      and C). Priced, declined by C5, and worth doing for whoever next owns the chrome.
+## PROGRAM CONTOUR — THE TWO ITEMS C3'S REVIEW PUT AT THE TOP OF THE NEXT WAVE
+
+- [ ] **RE-TUNE `Mission.OpenerTrim`, AND RE-MEASURE THE LADDER AFTER IT.** C3's review stratified
+      its paired test on whether the BASELINE survived mission 1 — same CRN worlds, lever the only
+      difference — and found the ladder gain and the "unintended" mission-1 cost are **one
+      transaction, not two**:
+      | | n | B1 | L1 | Δ | L-only : B-only |
+      |---|---|---|---|---|---|
+      | all pairs (shipped) | 960 | 33.44 | 35.94 | **+2.50** | 26 : 2 |
+      | **baseline survived m1** | 936 | 34.29 | 35.68 | **+1.39** | 15 : 2 |
+      | baseline lost m1 | 24 | 0.00 | 45.83 | +45.8 | 11 : 0 |
+      Per rung, holding the opener fixed: h0 **+4.58** (~39% opener), **h2 +1.31 (~58% opener)**,
+      **h4 +0.00 (100% opener)**. So "L3's heat-2 miss is closed" is majority opener, and h4's gain
+      is entirely opener. C3's genuine mid-run effect is **+1.39 pooled (p=0.0024)**.
+      **And mission 1 is not "nearly" unlosable — at the four heats a person plays it was NEVER
+      lost: 640 consecutive campaigns at RECRUIT/h0/h2/h4, zero mission-1 losses.** Structural, not
+      luck: 22 of the 24 baseline m1 losses were the reinforcement wave, and that mechanic is now
+      absent from the opener. **Backing the opener out will move h2 and h4 back down, so the ladder
+      must be re-measured with it** — a lever and its measurement, not a lever alone.
+      *Design position (lead):* the wave overshot. X2 already discharged DESIGN §3.D's
+      front-loaded-anxiety obligation, so 97.5% was not the problem; and §3.G's "scripted,
+      low-stakes first mission" defence stopped applying when RESONANCE T1 moved onboarding into a
+      dedicated `GameMode.Training` drill. An unlosable *campaign* opener now buys nothing §3.G
+      asks for and spends pillar 5 ("stakes that bite") to do it.
+
+- [ ] **ADD A CAMPING POLICY TO THE FLYWHEEL — the turtle risk is not unmeasured, it is
+      UNMEASURABLE.** Both harness policies are `greedy` (advance-and-engage) and `sloppy` (greedy
+      plus target/tile mis-picks — an *error* model, not a *passivity* model). Neither camps, and
+      `SmartStep` hunkers only as a terminal fallback. **No policy in the instrument could reveal a
+      turtle exploit**, so no future wave can price one either. This matters now because C3's lever
+      touches only the **41% slowest** Eliminates — precisely the missions where a player was
+      already camping — and what remains as a disincentive is the aim arm alone, whose measured
+      mean high-water rung is **1.50** (the old wave arm at rung ≥2 rarely fired anyway).
+      This is instrument work, so it must land BEFORE any wave that claims to have priced turtling.
+
+- [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
+      20/960 in both of C3's arms and in L3. It has never been mentioned by any wave. It is not a
+      C3 defect; it is a property of the instrument that every ladder in this repository inherits.

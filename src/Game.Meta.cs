@@ -172,8 +172,15 @@ public partial class Game
     // ---- harness: seed a demo WAR ROOM profile for the SIGHTLINE_WARROOM screenshot ----
     /// Populate the cached profile with representative demo data (salvage / stats / achievements /
     /// legends / a couple owned unlocks) and switch to the WAR ROOM. Screenshot-only; touches NO disk.
-    public void DebugWarRoom()
+    /// C6: `cold` renders the ZERO STATE — the WAR ROOM a player sees the first time they open it,
+    /// before a single run has finished. Nobody had ever looked at it: this hook has hard-coded a
+    /// rich demo profile since W3, so every WAR ROOM screenshot in the project's history is of a
+    /// twelve-run career, and the screen a NEW player actually meets (no salvage, no legends, eight
+    /// unearned achievements, every unlock unaffordable) had no photograph and no coverage.
+    /// SIGHTLINE_COLD=1 alongside SIGHTLINE_WARROOM=1 selects it.
+    public void DebugWarRoom(bool cold = false)
     {
+        if (cold) { WarRoom = new WarRoomProfile(); Phase = Phase.WarRoom; return; }
         WarRoom = new WarRoomProfile
         {
             Salvage = 155,

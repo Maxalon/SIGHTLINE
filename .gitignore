@@ -58,6 +58,26 @@ run_chunk.sh
 run_chunk0.sh
 battery.sh
 agg.py
+# CONTOUR C1: the four bare filenames above came from an earlier wave's scratch cleanup, and a
+# bare pattern matches at ANY DEPTH — so they silently swallow the ARCHIVED measurement runners
+# under docs/measurements/. L3's had to be `git add -f`d; C1's `git add -A` dropped run_chunk.sh
+# without a word, leaving both committed runners (which do `bash "$HERE/run_chunk.sh"`) inoperable.
+# An archived runner is the provenance of every number in this repo. Un-ignore them explicitly.
+!docs/measurements/**/run_chunk.sh
+!docs/measurements/**/run_chunk0.sh
+!docs/measurements/**/battery.sh
+!docs/measurements/**/agg.py
+
+# ...BUT a measurement ARCHIVE's runner is the opposite of scratch: it is the evidence that the
+# round is re-runnable, and every archive README in docs/measurements/ promises it is committed.
+# The bare `run_chunk.sh` pattern above silently swallowed it for THREE consecutive waves (C4's
+# review caught the third), each time refuting that promise after the fact. Un-ignore it where it
+# is an artifact, keep ignoring it where it is scratch.
+!docs/measurements/**/run_chunk.sh
+!docs/measurements/**/run_chunk0.sh
+!docs/measurements/**/table.py
+!docs/measurements/**/agg.py
+!docs/measurements/**/battery.sh
 
 # RESONANCE C1 (VOICE) verification artifacts — screenshots + measurement dumps, never committed
 c1_*.png
@@ -71,8 +91,13 @@ autoplay10.txt
 qasweep.txt
 sweep-balance.json
 
-<<<<<<< HEAD
-# W4 THE BOARD BECOMES A PLACE — the BOARDTEST pixel probe's frame + this wave's shell helpers
+# C6 SHIPS LIKE A PRODUCT — this block reached `main` as an UNRESOLVED MERGE CONFLICT: commit
+# 17934ee's .gitignore literally contained `<<<<<<< HEAD` / `=======` / `>>>>>>> wave/first-hour`
+# as committed lines. Git read them as three harmless patterns, so nothing ever failed and no
+# self-test could see it — but it is the first file a stranger opens after README, and the wave
+# whose job is "what does a stranger receive" is the right one to fix it. Both sides are kept.
+#
+# W4 THE BOARD BECOMES A PLACE — the BOARDTEST pixel probe's frame + that wave's shell helpers
 sightline_boardtest.png
 .w4*.sh
 bal/
@@ -90,7 +115,6 @@ balance.json
 .w9shot.sh
 .w9sweep.sh
 .w9rev.md
-=======
 # W5 THE FIRST HOUR scratch — per-agent wrappers, the branch-point tree/binary the inertness
 # batch was measured against, and its artifacts. None of it is ever committed.
 .w5*.sh
@@ -101,4 +125,7 @@ w5sweep.txt
 basetree/
 basebin/
 .xdg-*/
->>>>>>> wave/first-hour
+# C6 SHIPS LIKE A PRODUCT scratch — the isolation wrapper (it hard-codes a worktree path) and the
+# throwaway atomicity/full-disk probe project.
+.sl-env.sh
+.c6probe/

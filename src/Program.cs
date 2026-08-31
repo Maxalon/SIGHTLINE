@@ -7,6 +7,29 @@ public static class Program
 {
     public static void Main()
     {
+        // ══ C6: THE SECOND-LAUNCH CHILD. THIS BRANCH MUST STAY FIRST IN Main. ══════════════════
+        // SIGHTLINE_SHIPTEST forks this same binary with SIGHTLINE_SHIPCHILD=1 so that "quit the
+        // game, start it again, your progress is there" can be checked by TWO PROCESSES rather
+        // than asserted by one — no other hook in this project can check it, because the house
+        // rule (never touch the player's real profile) makes every hook stash-and-restore inside a
+        // single run.
+        //
+        // IT IS FIRST FOR A REASON, MEASURED THE HARD WAY: the first version of this branch sat
+        // below the SHIPTEST branch, and the child inherited SIGHTLINE_SHIPTEST=1 from its parent.
+        // The child therefore ran SHIPTEST, which forked a grandchild, which ran SHIPTEST... a
+        // fork bomb that reached 184 processes on a container shared with five other agents before
+        // it was killed. TWO independent guards now stop that, and both must stay:
+        //   (a) this branch is FIRST, so a process carrying SHIPCHILD can never reach SHIPTEST; and
+        //   (b) Ship.SecondLaunchProbe strips EVERY SIGHTLINE_* variable from the child's
+        //       environment before setting SHIPCHILD, so the child inherits no test mode at all.
+        // The child writes to the LIVE player-data directory on purpose; it is SHIPTEST's
+        // stash/restore that cleans up, so never set SIGHTLINE_SHIPCHILD by hand.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SHIPCHILD") == "1")
+        {
+            Ship.SecondLaunchChild();
+            return;
+        }
+
         // TRUE BAND (review fix): SIGHTLINE_CHOICEBAND selects the DECISION-DENSITY INSTRUMENT,
         // and a typo used to select the new rule silently — a batch a shell history calls "mult"
         // but that was measured on "add" is exactly the corruption this wave exists to prevent.
@@ -89,6 +112,14 @@ public static class Program
         //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
             Mission.OpenerTrim = xopen;
+        // C1 THE FLAT MIDDLE — SIGHTLINE_MIDTOOTH=<n> : Heat.MidTooth, which of NO QUARTER's two
+        // qualitative teeth ride EXPOSED (rung 6) instead. Bitfield: 1 = the +1 per-hit damage,
+        // 2 = coordination tier 2, 3 = both. **0 restores the pre-C1 table exactly** — that is
+        // the control the wave was measured against and the off-switch that keeps the lever
+        // falsifiable (docs/measurements/c1/, docs/DEVLOG.md §C1). Unset = the shipped 1.
+        // Parsed BEFORE any Run/Game exists, so no mission can be built off a half-applied table.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MIDTOOTH"), out int xmid) && xmid >= 0)
+            Sightline.Heat.SetMidTooth(xmid);
         // W8 THE HALF WALL — the DECAPITATE HVT statline buff (Game.DesignateHvt), pinnable so the
         // mid-run/finale asymmetry can be priced one lever at a time. Unset = the shipped defaults
         // 6 / 1 / 6, which are the pre-W8 arithmetic exactly, so an unpinned batch is unchanged.
@@ -102,6 +133,12 @@ public static class Program
             Combat.HvtHpBonusPerMission = xhvtd;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HVTAIM"), out int xhvta) && xhvta >= 0)
             Combat.HvtAimBonus = xhvta;
+        // C3 THE TWO GAMES — SIGHTLINE_KILLTREADMILL=1 restores the pre-C3 anti-turtle clock, in
+        // which the REINFORCEMENT arm also fired on ELIMINATE. It is the one objective whose win
+        // condition counts bodies, so there the wave moved the finish line instead of raising the
+        // price of reaching it. Default (unset) = suppressed on Eliminate only; Hack and
+        // Decapitate keep both arms. See Game.ClockWavesOnEliminate.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KILLTREADMILL") == "1") Game.ClockWavesOnEliminate = true;
         //   SIGHTLINE_HVTPOLICY=0 : an INSTRUMENT dial (autopilot only, no player-facing effect).
         //   Demotes the HVT from "every soldier charges it" to an ordinary target, so a Decapitate
         //   win rate can be split into what the MISSION costs and what the BOT's focus policy costs.
@@ -112,6 +149,18 @@ public static class Program
         // docs/DEVLOG.md §W2 for the shipped default. =0 restores the pre-W2 opponent exactly.
         string aiIdleEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIIDLEFIX");
         if (aiIdleEnv == "1") Game.AiIdleFix = true; else if (aiIdleEnv == "0") Game.AiIdleFix = false;
+        // C2 THE OPPONENT DECLINES — SIGHTLINE_AIDECLINE=0/1: the enemy's shot competes on its
+        // expected value instead of on a flat +100 that dominated every terrain term in the
+        // planner, and it may drop a bad shot for an overwatch lane or for cover. =0 restores the
+        // pre-C2 opponent exactly (constant term, no decline gate). See docs/measurements/c2/.
+        string aiDeclineEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIDECLINE");
+        if (aiDeclineEnv == "1") Game.AiDecline = true; else if (aiDeclineEnv == "0") Game.AiDecline = false;
+        // C4 "EIGHT BIOMES ARE PAINT" — SIGHTLINE_BIOMEMECH=0/1: the biome GROUND layer (VERDANT
+        // undergrowth / TUNDRA slick ice / MAGMA thermal vents). =0 restores the pre-C4 board
+        // EXACTLY (Terrain.Enabled gates the stamper AND every Grid predicate), which is both the
+        // A/B lever for the CRN round and the "watch your own test fail" proof for BIOMETEST.
+        string biomeMechEnv = Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEMECH");
+        if (biomeMechEnv == "1") Terrain.Enabled = true; else if (biomeMechEnv == "0") Terrain.Enabled = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -227,6 +276,32 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
         {
             Console.WriteLine(SaveGame.SelfTest());
+            return;
+        }
+
+        // C6 SHIPS LIKE A PRODUCT: SIGHTLINE_SHIPTEST=1 — the DISTRIBUTABLE's contract, not the
+        // game model's. The bundled-file manifest resolved STRICTLY next to the binary (the cwd
+        // fallback that hid RESONANCE F1's lost font is explicitly not allowed to carry it), the
+        // licence obligations present AND non-empty AND naming every redistributed component, the
+        // player-data directory rooted, a profile written and read back off disk, all three
+        // player-data writers proven atomic by an open-handle inode probe, every persisted DTO
+        // reachable from a source-generated JSON context, and the build stamped and painted.
+        // Runs against the PUBLISHED binary too (scripts/publish.sh invokes it there, which is the
+        // only place the manifest leg is testing the artifact a player receives).
+        // Tiny window: leg (4) builds a real Run, whose Unit ctors do tile math.
+        //
+        // DISPATCH-ORDER QUIRK, noted rather than "fixed" (C6 review): SIGHTLINE_BALANCE is handled
+        // EARLIER in this method, so `SIGHTLINE_SHIPTEST=1 SIGHTLINE_BALANCE=5` silently runs a
+        // balance batch and prints no SHIPTEST line at all. That is the house convention here —
+        // first matching branch wins, and every hook in this file behaves that way — so reordering
+        // for one test would be the surprise, not the fix. Set one mode at a time. (The one place
+        // this matters is a script that greps for a PASS line: a missing line is a mode collision,
+        // not a crash. qa-sweep.sh's `verdict` already treats a blank capture as a FAILURE.)
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SHIPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "shiptest");
+            Console.WriteLine(Ship.SelfTest());
+            Raylib.CloseWindow();
             return;
         }
 
@@ -347,9 +422,37 @@ public static class Program
         // reason CHROMETEST does — raylib's default face is narrower and every overflow vanishes.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FITTEST") == "1")
         {
-            Raylib.InitWindow(64, 64, "fittest");
+            // C5 THE HARD EDGES: leg (F) DRAWS every screen the game can put up, so this needs the
+            // FULL-SIZE window (the layouts are authored against Cfg.ScreenW/H) plus Display and
+            // Audio, exactly like BOARDTEST — the other self-test that runs the shipped draw path.
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fittest");
+            // C5: leg (F) DRAWS. Without a display that is a crash deep in raylib rather than an
+            // answer, so refuse the same way every other drawing self-test does (exit 2).
+            RequireWindow("FITTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
             LoadGameFonts();
+            Display.Init(false);          // post-FX OFF: this leg measures geometry, not bloom
+            Raylib.SetTargetFPS(0);
+            Audio.Init();                 // staging a screen can pop a cue; the device may be absent
             Console.WriteLine(Game.FitSelfTest());
+            Display.Shutdown();
+            Audio.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_CLASSTEST=1 : C3 THE TWO GAMES — the objective-CLASS gate. Model + DRAW +
+        // lever; see Game.ClassSelfTest. Needs the FULL-SIZE window and the real atlases: it
+        // paints the actual barracks/campaign-map frame and reads the strings and class marks at
+        // the draw call, and the map's layout is derived from Cfg.ScreenW/H.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CLASSTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "sightline-classtest");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            LoadGameFonts();
+            Console.WriteLine(new Game { NoPersist = true }.ClassSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -380,17 +483,25 @@ public static class Program
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "sightline-truthtest");
             Raylib.SetExitKey(KeyboardKey.Null);
             Cfg.Font = Raylib.GetFontDefault();
+            LoadGameFonts();      // C5: the perk-card leg reads PAINTED strings; the default face
+                                  // measures narrower and its own draw path must be the real one.
             string mathFails = Combat.TruthFails();
             string uiFails = new Game().TooltipTruthFails();
+            // C5: the PERK CHOOSER's fourteen "before > after" lines, measured against the shipped
+            // code path for each perk rather than re-derived from the constants they print.
+            string perkFails = new Game().PerkCardTruthFails();
             Raylib.CloseWindow();
-            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails }, x => !string.IsNullOrEmpty(x)));
+            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails, perkFails }, x => !string.IsNullOrEmpty(x)));
             Console.WriteLine(all.Length == 0
                 ? "TRUTHTEST: PASS (UI-OBSERVED: the tooltip's PAINTED DMG row equals the damage Resolve "
                   + "deals to that same defender on a plain foe AND a guarded HVT, moves when the defender "
                   + "does, and agrees with the GRAZE row beneath it; the PAINTED LOCK-ON badge appears iff "
                   + "the perk moved the hit% and shows that exact delta; no tooltip string is painted below "
                   + "12px. MATH: the raw band stays raw for ExpectedDamage/threat; armor moves the shown "
-                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs)"
+                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs. "
+                  + "PERK CARD (C5): every painted before>after line agrees with the shipped path that "
+                  + "grants it — ApplyPerk for the stat bumps, a real mission refill for BANDOLIER, "
+                  + "ComputeOdds for the aim/crit perks, HardenedReduce for the damage cuts)"
                 : "TRUTHTEST: FAIL (" + all + ")");
             return;
         }
@@ -535,6 +646,17 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "openertest");   // SetupMission uses tile math
             Console.WriteLine(new Game().OpenerSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_MIDTOOTHTEST=1 : CONTOUR C1 — the mid-ladder tooth (Heat.MidTooth): no DEAD
+        // AiTier declaration and no SILENT rung on the shipped table, the dial's apex neutrality
+        // across all eight modes, MIDTOOTH=0 as a field-for-field control, the per-mode rung
+        // shapes, and the +1 damage arriving on every heat-6 m3 hostile (none at heat 5).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MIDTOOTHTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "midtoothtest");   // SetupMission uses tile math
+            Console.WriteLine(new Game().MidToothSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -688,6 +810,17 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BIOMETEST=1 : C4 "EIGHT BIOMES ARE PAINT" — the biome GROUND layer. Pins the
+        // MECHANIC'S EFFECT (cover level, hit%, Dijkstra cost, line-of-sight verdict, HP, the AI's
+        // chosen destination) on constructed boards, not the presence of a field. Reads the ambient
+        // Terrain.Enabled on purpose, so SIGHTLINE_BIOMEMECH=0 makes it FAIL.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BIOMETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "biometest");   // Unit.SyncPos + Ai.Plan use tile->px math
+            Console.WriteLine(new Game().BiomeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_COVERTEST=1 : destructible-cover degrade chain (item 3.6). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COVERTEST") == "1")
         {
@@ -699,6 +832,18 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "aitest");   // Unit.SyncPos uses tile->px math; tiny window
             Console.WriteLine(new Game().AiSquadSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_DECLINETEST=1 : C2 THE OPPONENT DECLINES. Ground-truths Combat.AsIfExposed
+        // against a physically uncovered board, pins Ai.ShotTileValue on both sides of the
+        // SIGHTLINE_AIDECLINE dial (the pre-C2 branch is the literal `100 + bestHit` constant),
+        // and drives the decline gate on a live Ai.Plan. It reads the AMBIENT dial, so
+        // `SIGHTLINE_AIDECLINE=0 SIGHTLINE_DECLINETEST=1` FAILS — that is the proof it can.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DECLINETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "declinetest");   // Unit.SyncPos uses tile->px math
+            Console.WriteLine(new Game().DeclineSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -733,6 +878,64 @@ public static class Program
         // SIGHTLINE_STALLTEST=1 : W9 THE REPAIR — the autopilot's "never a RESULT: TIMEOUT" contract,
         // asserted instead of asserted-in-a-comment. Run-scoped turn counter, its force-lose arm, the
         // turn-cap-vs-frame-cap arithmetic, and the measured DEFEND/disoriented within-turn deadlock.
+        // SIGHTLINE_SAVEEDGETEST=1 : C5 THE HARD EDGES — the HOSTILE SAVE. W9 asked this of
+        // meta.json and found three killers; save.json had never been asked. Drives eight edited /
+        // truncated / older-build save shapes through the real resume path and then plays and
+        // draws them. Needs a window: it draws a frame per shape.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVEEDGETEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "saveedgetest");
+            RequireWindow("SAVEEDGETEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            LoadGameFonts();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.SaveEdgeSelfTest());
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_AICOVTEST=<N> : C5 THE HARD EDGES — the ENEMY DECISION CENSUS. Walks N
+        // campaigns per (heat x objective) cell and asserts every branch of the enemy exec chain
+        // is REACHED at least once; the known-dead OVERWATCH branch is waived by name and its
+        // count is printed on every run. SIGHTLINE_AICOVSTRICT=1 drops the waiver (and fails on
+        // this tree, which is the proof the gate can fail). Needs a window: it drives real play.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AICOVTEST"), out int covN) && covN > 0)
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "aicovtest");
+            RequireWindow("AICOVTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.AiCoverageSelfTest(covN));
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_ENEMYSTALLTEST=1 : C5 THE HARD EDGES — the ENEMY-turn deadlock guard. W9's
+        // idle guard covers the player turn; this one wedges a real enemy turn and asserts the
+        // guard names the stalled unit, ends the turn, stays silent in clean play, and that the
+        // SAME wedge with the guard off still hangs. Needs a window: it drives real missions.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ENEMYSTALLTEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "enemystalltest");
+            RequireWindow("ENEMYSTALLTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.EnemyStallSelfTest());
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_STALLTEST") == "1")
         {
             Raylib.SetTraceLogLevel(TraceLogLevel.Error);
@@ -840,6 +1043,22 @@ public static class Program
         if ((shot || autoplay) && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAP"), out int forcedMap))
             Mission.ForcedLayout = forcedMap;
         bool introShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTRO") == "1";
+        // C6 SHIPS LIKE A PRODUCT — SIGHTLINE_COLD=1: photograph the FIRST-EVER-LAUNCH state of a
+        // profile-driven screen instead of the staged demo one. Every screenshot hook in this
+        // project stages a rich profile (SIGHTLINE_INTRO fabricates a mid-campaign save so the
+        // CONTINUE button can be framed; DebugWarRoom hard-codes a twelve-run career), which means
+        // the two screens a NEW PLAYER actually meets first have never been photographed at all.
+        //
+        // REVIEW FIX (C6, sent back) — WHAT ACTUALLY PROTECTS THE PLAYER'S SAVE HERE, stated
+        // correctly. This comment used to read "shot-only and NoPersist-gated like the rest, so it
+        // can never touch a real profile". **That is false.** The cold intro path below calls
+        // SaveGame.Delete(), which has NO NoPersist guard (see SaveGame.Delete) and removes the
+        // real save.json. What makes it safe is the introStash capture-and-restore immediately
+        // below — FUL-2's fix, which already had to exist because the non-cold path CLOBBERS the
+        // same file the same way by writing a staged mission-3 run over it. Net risk is unchanged
+        // by this flag; the stated reason was simply wrong, on a line that deletes a save, which is
+        // exactly the comment somebody trusts later instead of reading the code.
+        bool coldShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_COLD") == "1";
         // FUL-2: the staged CONTINUE save silently CLOBBERED a real campaign save when the intro
         // shot ran on a machine with one. Stash the player's save.json bytes and restore-or-delete
         // after the shot loop (the METATEST preserve/restore pattern).
@@ -849,7 +1068,11 @@ public static class Program
             introStash = System.IO.File.Exists(SaveGame.SavePathPublic)
                 ? System.IO.File.ReadAllText(SaveGame.SavePathPublic) : null;
             introStaged = true;
-            var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r);
+            // C6: cold = the FIRST launch. Remove the save entirely (the stash above already holds
+            // the player's bytes, and the same restore path below puts them back), so CONTINUE RUN
+            // renders in its real never-played state instead of the fabricated mission-3 one.
+            if (coldShot) SaveGame.Delete();
+            else { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
         }
         // PROGRAM HORIZON W2: LAST STAND harness entry. SIGHTLINE_ENDLESS=1 boots straight into the
         // endless horde mode (BeginEndless) instead of a campaign mission. AutoPlay/SmartPlay/NoPersist
@@ -921,6 +1144,9 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_MARKERS") == "1") game.DebugMarkers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
+        // C4: the biome GROUND layer. Pair with SIGHTLINE_FORCEBIOME=2|3|7 (TUNDRA/VERDANT/MAGMA)
+        // and SIGHTLINE_SHOT=760; add SIGHTLINE_CB=1 for the colorblind pass.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BIOMESHOT") == "1") game.DebugBiomeShot();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_THREATSHOT") == "1") game.DebugThreatShot();      // RESONANCE T2: incoming-fire pips + tinted path + card (pair with SIGHTLINE_CB=1)
@@ -928,6 +1154,7 @@ public static class Program
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DECLINESHOT") == "1") game.DebugDeclineShot();   // C2: the opponent declines (pair with SIGHTLINE_SHOT=760 and flip SIGHTLINE_AIDECLINE for the contrast)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();
@@ -962,7 +1189,9 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VETDRAFT") == "1") game.DebugVetDraft();   // draft w/ recalled veterans
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
+        // W3 cross-run meta screen. C6: + SIGHTLINE_COLD=1 renders the ZERO state instead of the
+        // staged twelve-run demo career — the screen a first-time player actually opens.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom(coldShot);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_AUDITION") == "1") game.DebugAudition();  // A3 AUDIO CHECK screen (+ SIGHTLINE_AUDITIONFIRE=1 lights the just-played rows)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
@@ -994,6 +1223,7 @@ public static class Program
             Display.ChromaIntensity = 0.6f;
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
+        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAPHOVER"), out int mapHover);   // C3: hover map choice k
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
         // RESONANCE C1: SIGHTLINE_SHOTONBARK=1 — do not shoot a fixed frame; wait until a soldier
         // BARK has actually landed in the combat log during live play, then shoot 40 frames later
@@ -1039,6 +1269,16 @@ public static class Program
             // hover-driven, so the harness has to hold the cursor on the tile every frame.
             if (shot && game.DebugMousePark.HasValue)
                 Raylib.SetMousePosition((int)game.DebugMousePark.Value.X, (int)game.DebugMousePark.Value.Y);
+            // C3: SIGHTLINE_MAPHOVER=<k> parks the cursor on the k-th REACHABLE campaign-map node
+            // (1-based), so the node hover tooltip — where the objective CLASS is spelled out —
+            // can be photographed. The rects come from Hud.NodeBtns, which the map publishes as it
+            // DRAWS, so this necessarily lags one frame; a shot at frame 90 has ~89 to settle.
+            // Pair with SIGHTLINE_CAMPAIGN=1 + SIGHTLINE_SHOT. Shot-only, so nothing measured moves.
+            if (shot && mapHover > 0 && Hud.NodeBtns.Count >= mapHover)
+            {
+                var hr = Hud.NodeBtns[mapHover - 1].Rect;
+                Raylib.SetMousePosition((int)(hr.X + hr.Width / 2), (int)(hr.Y + hr.Height / 2));
+            }
             if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
                                                                // delta from the Xvfb pointer clears it otherwise)
             game.Update(dt);
