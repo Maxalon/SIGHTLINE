@@ -1778,6 +1778,23 @@ public partial class Game
             }
             else { AimMode = true; AimTarget = foe; }
         }
+
+        // LEAD FIX (C4 merge), the actual root cause. Everything that distinguished HOVER from AIM
+        // lived inside `if (foe != null)` above — and `foe` is `Enemies.FirstOrDefault(e => e.Alive)`,
+        // so on any staging where no hostile is alive the two screens were byte-identical BY
+        // CONSTRUCTION, and the audit's frame fingerprint correctly reported a collision. That is
+        // the intermittent `screenNotStaged:TOOLTIP-HOVER(identical frame to TOOLTIP-AIM)`,
+        // measured at ~3% over 32 runs by one reviewer and 1-in-4 here in Debug. Pinning the
+        // pointer inside the foe branch alone did NOT fix it, because that branch is exactly the
+        // one that does not run. So the hover state is now established unconditionally, falling
+        // back to the soldier when there is no hostile to hover.
+        if (hover)
+        {
+            AimMode = false; KbCursor = true;
+            var at = Enemies.FirstOrDefault(e => e.Alive) ?? s;
+            CurX = at.X; CurY = at.Y;
+            Hud.MousePin = Util.TileCenter(at.X, at.Y);
+        }
     }
 
     /// Harness hook (screenshot only): drop a soldier to show the KIA stamp + red
