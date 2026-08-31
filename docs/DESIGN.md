@@ -461,7 +461,7 @@ assumes — the system is built, measured, and largely fails to reach play.
 | Decision quality per turn | **Measured (W2+)** | No longer a hypothesis: the flywheel instruments meaningful-choices/turn and lead-swings/match, and UNDERTOW/APEX moved both. The live question is the **~0 policy gap** (sloppy play is fully viable) — accept-vs-sharpen is parked at FUL-13. |
 | Output-randomness feel | **Addressed** | Graze band, streak-breaker (S4-C), always-on combat log ("did the dice cheat me?"), banded odds colors. The rage surface is mitigated, not gone — %-to-hit stays genre-true. |
 | **Death stakes** | **Addressed (FUL-7), measured** | The moment of death is now a 3-turn BLEED-OUT with real counterplay — STABILIZE freezes the clock, the corpsman's PATCH revives, DRAG/EXTRACT carry the body, a won field recovers the survivor gravely wounded (Wound 3 + the near-death scar track), and only telegraphed AoE/fire can finish a downed soldier. Measured (paired h0; review-fixed build, same-slot re-measure): soldier true-KIA **-40%** (125→75 on slots 0-9), 186 downs staged at a **33% save-rate** (the honest ledger — a body finished by AoE/fire while down is a death, not a save), STABILIZE a live first-class verb (~60 uses/chunk). What remains thin is the REVIVE half: the corpsman reaches only ~38% of missions (backfill-only roster), so revives are rare (7 measured) — the FUL-13 founding-squad question, recorded not quota-chased. |
-| **Engagement mass** | **Thin — and C3 measured the size of it** | The comeback economy (BRACE, morale/rout, the verb boons) is tuned for battles that mostly don't happen: 2-enemy pods executed serially in 3-4-turn missions. The balance bot has used BRACE **zero** times in ~500 measured missions, and the FUL-1 PROCS column now shows which held boons never fire. One real multi-pod battle per mission was the fix (FUL-6). **C3 put a number on the residue and it is worse than "thin": on a WON non-kill mid-run mission the squad kills 25.1% of the force it deployed against, and on a won EXTRACT 3.3% — 0.27 bodies of 8.14.** Six of the eight objectives deploy a full hostile force that is, in play, scenery. That is the same finding one layer up: it is not that the battles are small, it is that on most objectives the battle is optional. See §5.2. |
+| **Engagement mass** | **Thin — and C3 measured the size of it** | The comeback economy (BRACE, morale/rout, the verb boons) is tuned for battles that mostly don't happen: 2-enemy pods executed serially in 3-4-turn missions. The balance bot has used BRACE **zero** times in ~500 measured missions, and the FUL-1 PROCS column now shows which held boons never fire. One real multi-pod battle per mission was the fix (FUL-6). **C3 put a number on the residue and it is worse than "thin": on a WON non-kill mid-run mission the squad kills 25.1% of the force it deployed against, and on a won EXTRACT 3.3% — 0.27 bodies of 8.14.** Five of the eight objectives deploy a full hostile force that is, in play, scenery (`Defend` is the exception and kills 4.28 a mission — more than any other non-kill objective). **The counter-example is worth keeping in view: mid-run `Eliminate` is the densest fight on the roster — second-longest, most bodies killed per mission of anything in the game, second most lethal to the squad.** That is the same finding one layer up: it is not that the battles are small, it is that on most objectives the battle is optional. See §5.2. |
 | Screen usage / UI framing | **Addressed (4.1)** | Full-bleed board with translucent floating panels; W11 de-occluded the HUD and FUL-3 fixed the chip reflow. |
 | Onboarding | **Addressed (RESONANCE T1)** — was an over-claim | The W11 grade ("Addressed") was wrong and is recorded here as the mis-grade it was: what shipped was a 5-card callout strip on mission 1 that taught **3 of ~14 verbs** while the bar showed twelve (FUL-12 dimmed the other eleven — dimming is not staging), plus a six-bullet rules wall on the intro, i.e. the exact artefact §3.G says not to ship. T1 replaced it with the shape §3.G actually asks for: a scripted, non-persistent, restartable **TRAINING OP** (8 well-ordered problems on an authored arena — move, cover, flank, fire, overwatch, grenade, ability, clear), **staged verbs** (drill + mission 1 only, with a permanent SHOW ALL escape), and **10 just-in-time field tips** (one per untaught verb, once per profile, fired the first time its precondition is true in play). The intro is one line. The FIELD MANUAL stays the reference it always was. Hook: `SIGHTLINE_TUTTEST`. |
 | Accessibility | **Improving** | Colorblind palette + brightness/gamma shipped (Display settings). No text-scale pass yet (3.13). |
@@ -697,8 +697,11 @@ campaign nodes, measured over 960 campaigns (base `17934ee`, `docs/measurements/
 **43 points — larger than any step on the heat ladder.** And the reason is not force
 size, mission length or reinforcement volume (all three refuted by measurement; DEVLOG
 §C3 §2). It is the win condition: **a WON non-kill mission kills 25.1% of the force it
-deployed against, and a won EXTRACT kills 3.3%.** Six of eight objectives are routinely
-won by walking past an intact enemy force.
+deployed against, and a won EXTRACT kills 3.3%.** **Five** of the eight objectives are
+routinely won by walking past an intact enemy force. (Not six: `Defend` kills 4.28 bodies
+a mission — 92% of Eliminate's 4.65, more than any other non-kill objective. It does not
+decline its encounter, it **outlasts a bigger one**; its low clear% is a denominator
+artifact of continuous replenishment, 5.59 deployed + 6.47 added.)
 
 **The options considered:**
 
@@ -742,16 +745,33 @@ keep both arms, because their win conditions do not count bodies. That closed 6.
 
 **What this decision costs, stated plainly.**
 
+- **The mechanical half OVERSHOT on mission 1, and this section is where that is admitted rather
+  than filed under "unintended".** Mission 1 is always an `Eliminate`, and 22 of the 24 mission-1
+  losses in 960 baseline campaigns were the reinforcement wave, so removing it left an opener that
+  is a **fixed force which cannot grow against a full squad** — 0 losses in 640 campaigns at
+  RECRUIT through heat 4. §3.D's front-loaded-anxiety clause was already discharged by X2; its
+  "too easy → boredom" clause is now the live one, and **pillar 5 is on the far side of it.** The
+  §3.G justification ("a scripted, low-stakes first mission") stopped applying when RESONANCE T1
+  moved onboarding into `GameMode.Training`: an unlosable *campaign* opener buys nothing §3.G asks
+  for and only spends stakes. `Mission.OpenerTrim` is the dial that fixes it, and doing so will
+  move heat 2 and heat 4 back down — it is a lever plus a re-measured ladder, and it is ROADMAP's
+  top item.
+
 - **The gap is still 36.5 points.** This section records a *position*, not a repair. A
   fork between a 45%-node and an 82%-node is only defensible once it is legible AND
   priced, and **the pricing is not built**: `MissionNode.Intel` is depth- and kind-scaled
   and blind to the class, so a PITCHED node pays a TASKED node's rate. Until that lands,
   the map tells the player which game they are choosing and still offers no reason to
   choose the hard one. **That is the open half of this decision.**
-- **The anti-turtle clock is weaker on ELIMINATE and turtling was not measured.** The aim
-  ramp remains and the argument is structural (a slow Eliminate already punishes itself,
-  because the force stays on the board), but it is an argument.
-  `SIGHTLINE_KILLTREADMILL=1` reverses it.
+- **The anti-turtle clock is weaker on ELIMINATE, and turtling is not merely unmeasured — it is
+  UNMEASURABLE with the current instrument.** The flywheel's two policies are `greedy` and
+  `sloppy`; `sloppy` is an *error* model, not a *passivity* model, and neither camps, so **no
+  policy in the harness could reveal a turtle exploit.** The change also touches only the 41%
+  slowest Eliminates — precisely the missions where a player was already taking their time —
+  leaving the aim ramp alone as the disincentive at a measured mean high-water rung of 1.50. The
+  argument for it is structural (a slow Eliminate already punishes itself, because the force stays
+  on the board) and it is an argument. `SIGHTLINE_KILLTREADMILL=1` reverses it, and a **camping
+  policy in the flywheel** is a prerequisite for anyone pricing it.
 - **"You may decline the fight" is now printed on the map.** If a later wave decides the
   encounter should not be declinable, this line becomes a promise the game stops keeping,
   and it has to come off the tooltip in the same wave.

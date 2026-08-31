@@ -28,14 +28,24 @@ so B1 *is* D0. Every "diagnosis" figure in DEVLOG §C3 is reproduced by `enc.py 
 BIN=runbin/C3lever EXTRA=SIGHTLINE_KILLTREADMILL=1 bash docs/measurements/c3/run_round.sh B1 10
 BIN=runbin/C3lever                                 bash docs/measurements/c3/run_round.sh L1 10
 
-# the readouts
-python3 docs/measurements/c3/agg.py    B1 L1   # ladder + both cross-tabs + the class split
-python3 docs/measurements/c3/enc.py    B1 L1   # the ENCOUNTER COMPLETION decomposition
-python3 docs/measurements/c3/paired.py B1 L1   # the CRN-paired (McNemar) comparison
-python3 docs/measurements/c3/top.py    B1 L1   # decision-density / swing side effects
-python3 docs/measurements/c3/inert.py          # instrument inertness (R0 vs R0diag)
-python3 docs/measurements/c3/samearm.py D0 B1  # (needs the trimmed D0 round back)
+# the readouts — every one of these runs off data committed in this directory
+python3 docs/measurements/c3/agg.py     B1 L1   # ladder + both cross-tabs + the class split
+python3 docs/measurements/c3/enc.py     B1 L1   # the ENCOUNTER COMPLETION decomposition
+python3 docs/measurements/c3/paired.py  B1 L1   # CRN-paired (McNemar) + STRATIFIED on the opener
+python3 docs/measurements/c3/cluster.py B1 L1   # per-rung slot-set SE + the jackknife
+python3 docs/measurements/c3/top.py     B1 L1   # decision-density / swing side effects
+python3 docs/measurements/c3/inert.py           # instrument inertness (R0 vs R0diag)
+python3 docs/measurements/c3/l3repro.py         # B1 IS the L3 tree (48 chunks + 960 campaigns)
 ```
+
+**`agg.py` and `run_chunk.sh` are FORCE-ADDED.** The repo's `.gitignore` carries bare-name rules
+`agg.py` and `run_chunk.sh`, which match at any depth, so `git add -A` silently skipped both — the
+round was documented in terms of two files that were not in the commit. (`docs/measurements/l3/`
+has the same situation for its runner.) If you add an analysis script here, check
+`git check-ignore -v` before believing `git status`.
+
+**Every proof script exits non-zero on an empty comparison.** `samearm.py`, `inert.py` and
+`l3repro.py` exit 2 rather than printing a pass over zero chunk pairs. See the note under proof 2.
 
 ## The two proofs that had to come first
 
@@ -44,8 +54,15 @@ python3 docs/measurements/c3/samearm.py D0 B1  # (needs the trimmed D0 round bac
 (dropping only `harness`, which records nproc/loadavg/elapsed and is designed to vary, `instrument`,
 and the new block itself): **8 paired chunks, 9,848 aggregate fields, zero moved.**
 
-**2. The lever's OFF path is the old tree.** `samearm.py D0 B1`: **67,956 fields, zero moved.** So
-`L1 − B1` prices the lever and nothing else.
+**2. The lever's OFF path IS the ladder of record's tree.** `l3repro.py` compares B1 against the
+COMMITTED L3 archive: **48 chunk pairs, 59,010 pre-existing aggregate fields (1,075–1,335 per
+chunk), zero differences**, and **960 of 960 campaigns identical on both outcome and
+missions-cleared.** So `L1 − B1` prices the lever and nothing else.
+
+> This replaces the proof this README first cited. `samearm.py D0 B1` ran against a round `trim.sh`
+> had deleted, so it matched zero files and **printed a pass over no data** — the exact failure
+> CLAUDE.md's W1 contract exists to prevent. `samearm.py` and `inert.py` now **exit 2 on an empty
+> comparison**, and the proof above rests on data that is in the repository.
 
 ## The result
 
@@ -60,8 +77,33 @@ and the new block itself): **8 paired chunks, 9,848 aggregate fields, zero moved
 | heat 6 | 20.0 | **20.0** | 0.0 | 20 ±8 | in — on target |
 | heat 8 | 6.9 | **7.5** | +0.6 | 10 ±5 | in |
 
-**Six of six in band and monotone at every step.** The one miss on the L3 ladder of record — heat 2,
-0.8 under its floor — is closed.
+**All six rungs in band.** Three caveats, all of which the review supplied and all of which belong
+with the table:
+
+1. **Monotonicity is pre-existing** — the BASELINE arm is already monotone.
+2. **±SE above is binomial and too small.** A rung is 8 clusters of 20 campaigns and the clusters
+   disagree; the **cluster SE (SD of the eight slot-set means / √8) exceeds the binomial at five of
+   six rungs** — L1 ratios 1.40 / 1.15 / 1.34 / 0.75 / 1.20 / 1.11. Heat 2's slot sets read
+   **45, 25, 20, 10, 50, 40, 45, 40** (cluster SE **5.04** vs binomial 3.75); it clears its floor by
+   2.38 points = **0.47 cluster SE**, jackknife worst case **32.14 against a floor of 32**, paired
+   p = 0.0625. **In band, not robust.**
+3. **Roughly half the gain is the mission-1 change** — see the stratified table below.
+
+### The gain, stratified on the opener (`paired.py --strata`)
+
+Mission 1 is always an `Eliminate`, so it is the largest population the lever touches. Stratifying
+on whether the **baseline** survived it is a legitimate CRN conditional (identical worlds, lever is
+the only difference, stratum defined on a pre-lever fact):
+
+| stratum | pairs | B1 | L1 | Δ | L-only : B-only | p |
+|---|---|---|---|---|---|---|
+| all pairs (headline) | 960 | 33.44 | 35.94 | **+2.50** | 26 : 2 | 3×10⁻⁶ |
+| **baseline SURVIVED m1** | 936 | 34.29 | 35.68 | **+1.39** | 15 : 2 | **0.0024** |
+| baseline LOST m1 | 24 | 0.00 | 45.83 | +45.83 | 11 : 0 | 0.00098 |
+
+Per rung, opener held fixed: RECRUIT +1.88 (0% opener), h0 **+4.58** (39%), h2 **+1.31**, p=0.50
+(58%), h4 **+0.00** (**100%**), h6 0.00, h8 +0.64. Mission-1 losses per 160 went
+0/7/7/5/2/3 → **0/0/0/0/1/1**.
 
 ### The paired test (`paired.py`, the statistic CRN exists to buy)
 
@@ -110,7 +152,14 @@ The residual 5 are Hack and Decapitate, which deliberately keep the arm. The `WA
 missions get played at all. (`enc.py` holds that still and reads Defend's `+rf` at 6.48 → 6.47 per
 mission across the two arms.)
 
-**HACK is the control on the clock** — same clock, different win condition — and its row is
+**DECAPITATE is the working control** — a kill objective the lever does not touch, carrying the
+clock at `prs` 0.79 and reinforced on 20.4% of its mid-run missions, so it has something to lose —
+and it moves 39.8 → 41.7 inside its own ±4.6, with its BOSS cell flat at 68.0 → 67.8.
+**HACK is NOT a working control** — `PressureGrace` is 4 turns against a 3.67-turn mean mission, so
+the clock never engages (`prs` 0.16, reinforced 2.0%) and its identity across the arms is close to
+vacuous. It shows the change is scoped to the objective it names, nothing more.
+
+**Old text, retained so the correction is visible: "HACK is the control on the clock"** — same clock, different win condition — and its row is
 identical to the last digit across the two arms (n=102, 81.4%, 3.67t, +rf 0.04, prs 0.16).
 **DECAPITATE is the control on the class** — a kill objective the lever deliberately does not
 touch — and moves 39.8 → 41.7 inside its own ±4.6.

@@ -44,4 +44,12 @@ for fa in sorted(glob.glob(os.path.join(DIR, A + "-h*-b*.json"))):
         for k in diffs[:8]:
             print(f"    {k}: {ka.get(k,'<absent>')!r} -> {kb.get(k,'<absent>')!r}")
 print(f"{pairs} chunk pairs, {fields} aggregate fields diffed, {bad} with a difference")
+# A PROOF THAT COMPARED NOTHING MUST NOT PRINT A PASS. Review finding F6: `trim.sh` deleted the D0
+# round, so the command this wave documented — `samearm.py D0 B1` — matched zero files, reported
+# "0 chunk pairs ... 0 with a difference" and exited 0. That is the exact failure class CLAUDE.md's
+# W1 measurement contract exists to eliminate (a missing file must mean "no data", never "fine"),
+# and it is the second time this program has shipped it. Exit 2 on an empty comparison.
+if pairs == 0:
+    print("!! NOTHING COMPARED — no chunk pairs matched those tags. This is not a pass.")
+    sys.exit(2)
 sys.exit(1 if bad else 0)

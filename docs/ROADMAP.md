@@ -1984,7 +1984,8 @@ fixable, and what makes it worth a wave even though every rung is in band.
       worse than Decapitate's own mid-run cells. Pooled on mid-run node kinds, the two KILL objectives read
       **38.3% ±3.1 (n=248)** against the six with a non-combat win condition at **83.4% ±1.0
       (n=1259)** — **45.1 points**. At mission 5, Eliminate is **25.6% (n=43)** and Sabotage is
-      **96.8% (n=31)**. Six of eight objectives let a squad decline the encounter and still win.
+      **96.8% (n=31)**. Five of the eight objectives let a squad decline the encounter and still
+      win (C3 measured it; `Defend` is the sixth and it does not — see below).
       That is a design question (`docs/DESIGN.md` §A) and needs its own wave, not a tuning round.
       Two caveats travel with the number: it holds node kind and depth constant but NOT squad
       condition, and the autopilot's non-kill policies are written to skip the fight.
@@ -2111,11 +2112,43 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       objective in the game and wins 78%), not reinforcement VOLUME (Defend takes 6.48 added bodies
       a mission and wins 78%; Eliminate takes 1.69 and wins 37%). What survives is the win
       condition: **a WON non-kill mission kills 25.1% of the force it deployed against — Evac 3.3%
-      — so six of eight objectives are routinely won by declining the encounter.** Shipped one
+      — so FIVE of the eight objectives are routinely won by declining the encounter.** (Not six:
+      `Defend` kills 4.28 bodies a mission, 92% of Eliminate's 4.65 and more than any other
+      non-kill objective — it does not decline its encounter, it outlasts a bigger one, and its low
+      clear% is a denominator artifact of continuous replenishment.) Shipped one
       lever (the anti-turtle clock's reinforcement arm no longer fires on ELIMINATE, the one
       objective where an added body is also win condition) and one information change (the campaign
-      fork now names the class: PITCHED / TASKED). Gap **43.0 → 36.5**; ladder **six of six rungs
-      in band** for the first time; CRN-paired 26 lever-only wins to 2 over 960 pairs, p<0.0001.
+      fork now names the class: PITCHED / TASKED). Gap **43.0 → 36.5**; all six rungs in band;
+      CRN-paired 26 lever-only wins to 2 over 960 pairs, p<0.0001 — **but ~half of that is the
+      mission-1 change, and holding the opener fixed the honest figure is +1.39 (p=0.0024)**. See
+      the top item above: the opener overshot and needs backing out with a re-measured ladder.
+
+- [ ] **TOP ITEM — C3 OVERSHOT THE OPENER. RE-TUNE `Mission.OpenerTrim` AND RE-MEASURE THE LADDER.**
+      C3 removed the anti-turtle clock's reinforcement wave from ELIMINATE. Mission 1 is always an
+      Eliminate, **22 of the 24 baseline mission-1 losses in 960 campaigns were that wave**, and
+      combined with X2's `OpenerTrim` (one body off the opening force) the opener became a fixed
+      force that cannot grow against a full squad. Measured result: mission-1 losses per 160 went
+      RECRUIT 0→0, h0 7→**0**, h2 7→**0**, h4 5→**0**, h6 2→1, h8 3→1 — **640 consecutive campaigns
+      at RECRUIT/h0/h2/h4 with zero mission-1 losses.**
+      **The design position is that this is too far.** DESIGN §3.D's front-loaded-anxiety half was
+      already discharged by X2 (97.5% is not anxiety); its "too easy → boredom" half is the live
+      risk, and pillar 5 "stakes that bite" is on the far side of a 100%-over-640 opener. §3.G's
+      "low-stakes first mission" stopped justifying it when RESONANCE T1 moved onboarding into
+      `GameMode.Training`. And X2 itself cited RECRUIT's "100%, zero losses in 40" as the
+      **easiest-difficulty control** — every rung up to h4 now matches that control.
+      **`Mission.OpenerTrim` is an existing, measured dial** (shipped 1; `SIGHTLINE_OPENERTRIM=0`
+      is the pre-X2 opener), so this is ONE lever — but it is a lever **plus a re-measured ladder**,
+      because C3's stratified paired test shows h2's gain is 58% opener and h4's is **100%** opener:
+      backing the opener out will move both rungs down. Do not ship it without the round.
+
+- [ ] **Add a CAMPING POLICY to the flywheel.** The instrument has exactly two policies, `greedy`
+      and `sloppy`, and `sloppy` is an **error** model, not a **passivity** model — neither camps,
+      and `SmartStep` hunkers only as a terminal fallback. **No policy in the instrument can reveal
+      a turtle exploit**, so nothing this project has ever measured bears on turtling. That matters
+      now: C3 removed the reinforcement arm from the 41% slowest Eliminates — precisely the missions
+      where a player was already taking their time — leaving the aim arm alone as the
+      disincentive, at a measured mean high-water rung of 1.50 (below the rung 2 at which the wave
+      arm fired). **Until a camping policy exists, no wave can price that, C3's included.**
 
 - [ ] **OPEN, left by C3 — the class gap is 36.5 points, and the reward is still not priced.**
       Two named follow-ons, in order:
@@ -2152,11 +2185,23 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
 ### Found by CONTOUR C3 while running its own gate — fixed, and worth knowing
 
+- [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
+      **20 of 960 in both C3 arms and 20 of 960 in the L3 archive** — identical, because it is a
+      property of the worlds, not of any lever. Every published ladder figure sits on top of it and
+      no wave has ever mentioned it. Somebody should find out what those campaigns are doing.
 - [x] **`scripts/qa-sweep.sh` had no `exit` statement.** It accumulated `_fail` / `_autofail` and
       ended on an `echo`, so `SWEEP-EXIT` was 0 whatever happened. Every green-sweep claim dated
       before C3 quotes the exit code of an echo. Wired, and `AIIDLETEST` — the one self-test line
       not routed through `verdict` — was routed. **If you add a self-test line, route it through
       `verdict` or the gate cannot see it.**
+- [x] **A PROOF COMMAND THAT COMPARES NOTHING MUST NOT PRINT A PASS.** C3 documented
+      `samearm.py D0 B1` as its instrument-identity proof and then deleted the D0 round as
+      redundant, so the command matched zero files and exited 0 over no data — the same defect C1
+      shipped in `inert_diff.py` this program, and exactly what CLAUDE.md's W1 contract exists to
+      prevent. `samearm.py` and `inert.py` now exit 2 on an empty comparison, and the claim was
+      replaced with a stronger one whose data is committed (`l3repro.py`: C3's baseline arm
+      reproduces the L3 archive on 59,010 aggregate fields and **960/960 campaigns**).
+      **Check every proof command in your own write-up still finds its data after you tidy up.**
 - [ ] **A DRAW-observing test has two failure modes this project had not written down**, and C3's
       own gate hit both: state left on screen by the previous case (a parked cursor makes the next
       case draw a tooltip), and a rect read from a PREVIOUS frame that has since moved
@@ -2179,3 +2224,44 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
       guard covers the player turn only.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.
+
+---
+
+## PROGRAM CONTOUR — THE TWO ITEMS C3'S REVIEW PUT AT THE TOP OF THE NEXT WAVE
+
+- [ ] **RE-TUNE `Mission.OpenerTrim`, AND RE-MEASURE THE LADDER AFTER IT.** C3's review stratified
+      its paired test on whether the BASELINE survived mission 1 — same CRN worlds, lever the only
+      difference — and found the ladder gain and the "unintended" mission-1 cost are **one
+      transaction, not two**:
+      | | n | B1 | L1 | Δ | L-only : B-only |
+      |---|---|---|---|---|---|
+      | all pairs (shipped) | 960 | 33.44 | 35.94 | **+2.50** | 26 : 2 |
+      | **baseline survived m1** | 936 | 34.29 | 35.68 | **+1.39** | 15 : 2 |
+      | baseline lost m1 | 24 | 0.00 | 45.83 | +45.8 | 11 : 0 |
+      Per rung, holding the opener fixed: h0 **+4.58** (~39% opener), **h2 +1.31 (~58% opener)**,
+      **h4 +0.00 (100% opener)**. So "L3's heat-2 miss is closed" is majority opener, and h4's gain
+      is entirely opener. C3's genuine mid-run effect is **+1.39 pooled (p=0.0024)**.
+      **And mission 1 is not "nearly" unlosable — at the four heats a person plays it was NEVER
+      lost: 640 consecutive campaigns at RECRUIT/h0/h2/h4, zero mission-1 losses.** Structural, not
+      luck: 22 of the 24 baseline m1 losses were the reinforcement wave, and that mechanic is now
+      absent from the opener. **Backing the opener out will move h2 and h4 back down, so the ladder
+      must be re-measured with it** — a lever and its measurement, not a lever alone.
+      *Design position (lead):* the wave overshot. X2 already discharged DESIGN §3.D's
+      front-loaded-anxiety obligation, so 97.5% was not the problem; and §3.G's "scripted,
+      low-stakes first mission" defence stopped applying when RESONANCE T1 moved onboarding into a
+      dedicated `GameMode.Training` drill. An unlosable *campaign* opener now buys nothing §3.G
+      asks for and spends pillar 5 ("stakes that bite") to do it.
+
+- [ ] **ADD A CAMPING POLICY TO THE FLYWHEEL — the turtle risk is not unmeasured, it is
+      UNMEASURABLE.** Both harness policies are `greedy` (advance-and-engage) and `sloppy` (greedy
+      plus target/tile mis-picks — an *error* model, not a *passivity* model). Neither camps, and
+      `SmartStep` hunkers only as a terminal fallback. **No policy in the instrument could reveal a
+      turtle exploit**, so no future wave can price one either. This matters now because C3's lever
+      touches only the **41% slowest** Eliminates — precisely the missions where a player was
+      already camping — and what remains as a disincentive is the aim arm alone, whose measured
+      mean high-water rung is **1.50** (the old wave arm at rung ≥2 rarely fired anyway).
+      This is instrument work, so it must land BEFORE any wave that claims to have priced turtling.
+
+- [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
+      20/960 in both of C3's arms and in L3. It has never been mentioned by any wave. It is not a
+      C3 defect; it is a property of the instrument that every ladder in this repository inherits.

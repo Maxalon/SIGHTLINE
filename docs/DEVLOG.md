@@ -9052,8 +9052,20 @@ win rate.** Volume is not it.
 
 **(d) WHAT SURVIVES: the win condition's dependence on beating the force.** A WON non-kill mission
 kills **25.1%** of the force it deployed against — `Evac` **3.3%** (0.27 bodies of 8.14),
-`Rescue` 12.2%, `Escort` 14.0%, `Hack` 14.5%. **Six of eight objectives are routinely won by
-declining three quarters of the encounter.** The two kill objectives cannot decline any of it.
+`Rescue` 12.2%, `Escort` 13.3%, `Hack` 14.5%, `Sabotage` 25.8%. **FIVE of the eight objectives are
+routinely won by declining three quarters of the encounter.** The two kill objectives cannot
+decline any of it.
+
+**FIVE, NOT SIX — `DEFEND` DOES NOT DECLINE ANYTHING, AND THE REVIEW WAS RIGHT TO CATCH IT.**
+Defend's won-mission clear% is 40.2 and its raw body count is **4.28 kills per mission — 92% of
+Eliminate's 4.65, and more than any other non-kill objective in the game.** Its low percentage is a
+DENOMINATOR artifact: it fields 5.59 at deploy and is then replenished with 6.47 more, so its
+denominator is 12.04, the largest on the board. Defend does not walk past its encounter, it
+**outlasts a bigger one**. And Defend is 34% of the whole non-kill cell (425 of 1243), so the
+pooled `NONKILL` clear% of 25.1 is itself dragged UP by the one objective that fights hardest.
+Strip Defend out and the remaining five read 0.32–1.41 kills a mission against deploy forces of
+5.7–8.5. The finding survives — it is just five objectives, and the honest version is stronger
+about which five.
 
 That is not a difficulty bug inside an objective. It is two different games sharing a UI, and the
 only thing separating them is whether the mission can end while the enemy is still standing.
@@ -9114,24 +9126,52 @@ control on the clock. If either had moved, something other than the lever moved 
 
 Two rounds on ONE binary — `B1` = `SIGHTLINE_KILLTREADMILL=1`, `L1` = defaults — 6 rungs × 8
 disjoint CRN slot sets × greedy+sloppy = **960 campaigns per arm on identical worlds**, 96 chunks,
-all `OK ... runs=20`. `samearm.py D0 B1` first proved the lever's OFF path is byte-identical to the
-pre-lever tree: **67,956 aggregate fields, zero moved**, so `L1 − B1` prices the lever and nothing
-else.
+all `OK ... runs=20`.
 
-| rung | B1 | L1 | Δ | band | verdict |
-|---|---|---|---|---|---|
-| RECRUIT | 71.2 | **73.1** | +1.9 | 75±8 | in |
-| heat 0 | 47.5 | **55.0** | **+7.5** | 55±8 | in — on target |
-| heat 2 | 31.2 | **34.4** | +3.2 | 40±8 | **in** (B1 was 0.8 under the floor) |
-| heat 4 | 23.8 | **25.6** | +1.8 | 30±8 | in |
-| heat 6 | 20.0 | **20.0** | 0.0 | 20±8 | in — on target |
-| heat 8 | 6.9 | **7.5** | +0.6 | 10±5 | in |
+**THE LEVER'S OFF PATH IS THE LADDER OF RECORD'S OWN TREE**, and the proof is now against COMMITTED
+data. `l3repro.py` compares B1 to the **L3 archive** (`docs/measurements/l3/`, the tree the ladder
+of record was measured on, and the same eight slot sets) at two levels: **48 chunk pairs, 59,010
+pre-existing aggregate fields (1,075–1,335 per chunk), zero differences**, and — the level that
+actually matters — **960 of 960 campaigns identical on BOTH outcome and missions-cleared.** So B1
+is not merely "a baseline I ran"; it is L3, reproduced campaign-for-campaign, and `L1 − B1` prices
+the lever and nothing else.
 
-**Six of six in band, monotone at every step.** The one miss on the L3 ladder of record is closed.
+*This replaces the proof an earlier draft cited.* That draft pointed at `samearm.py D0 B1` (67,956
+fields) — but `trim.sh` had deleted the D0 round as redundant, so **the documented command matched
+zero files and printed a pass over no data**. That is precisely the failure CLAUDE.md's W1 contract
+exists to eliminate, and the second time this program has shipped it. Both `samearm.py` and
+`inert.py` now **exit 2 on an empty comparison**, and the claim above rests on data that is in the
+repository.
 
-**±3.5–3.9 per rung is the WRONG error bar for a CRN round** and this project has quoted it before.
-B1 and L1 played the same 960 worlds, so the statistic is the paired one (`paired.py`, a McNemar
-table built from each chunk's own PER-SLOT RECORDS block):
+| rung | B1 | L1 | Δ | ±cluster SE (L1) | band | verdict |
+|---|---|---|---|---|---|---|
+| RECRUIT | 71.2 | **73.1** | +1.9 | 4.90 | 75±8 | in |
+| heat 0 | 47.5 | **55.0** | **+7.5** | 4.53 | 55±8 | in — on target |
+| heat 2 | 31.2 | **34.4** | +3.2 | 5.04 | 40±8 | in, **but see below** |
+| heat 4 | 23.8 | **25.6** | +1.8 | 2.58 | 30±8 | in |
+| heat 6 | 20.0 | **20.0** | 0.0 | 3.78 | 20±8 | in — on target |
+| heat 8 | 6.9 | **7.5** | +0.6 | 2.31 | 10±5 | in |
+
+**All six rungs are inside their bands.** Two qualifications, both of which the review supplied and
+both of which belong next to the table rather than in a footnote:
+
+- **"Monotone at every step" is not something this lever achieved.** The BASELINE arm is already
+  monotone (71.2 > 47.5 > 31.2 > 23.8 > 20.0 > 6.9). It is a pre-existing property of the tree.
+- **±3.5–3.9 understates a rung's sampling error, and the eight slot sets are not exchangeable
+  draws.** A rung is 8 clusters of 20 campaigns, and the clusters disagree: L1's heat-2 slot sets
+  read **45, 25, 20, 10, 50, 40, 45, 40**. The cluster SE (SD of the eight slot-set means / √8) is
+  **5.04** against a binomial 3.75 — and **the cluster SE exceeds the binomial at five of six
+  rungs** (ratios 1.40 / 1.15 / 1.34 / 0.75 / 1.20 / 1.11), so the binomial figure is 11–40% too
+  small everywhere but heat 4. The same is true of B1 (ratios 1.08–1.48, heat 4 again the
+  exception), i.e. this is a property of the slot sets, not of the lever.
+  **So heat 2 is not robust.** It clears its floor by 2.38 points = **0.47 cluster SE**; the
+  jackknife worst case (drop the strongest slot set) is **32.14 against a floor of 32**; its paired
+  p is 0.0625. The honest sentence, and the one that replaces "L3's one miss is closed": **heat 2
+  moved from 0.8 below the floor to 2.4 above it, which is inside the rung's own slot-set noise.**
+
+**±SE of any kind is the WRONG error bar for the DIFFERENCE between two CRN arms.** B1 and L1
+played the same 960 worlds, so the statistic is the paired one (`paired.py`, a McNemar table built
+from each chunk's own PER-SLOT RECORDS block):
 
 | rung | pairs | lever-only wins | baseline-only wins | p (2-sided) | Δ missions cleared |
 |---|---|---|---|---|---|
@@ -9142,6 +9182,41 @@ table built from each chunk's own PER-SLOT RECORDS block):
 | heat 6 | 160 | 0 | 0 | 1.000 | +0.09 |
 | heat 8 | 160 | 1 | 0 | 1.000 | +0.08 |
 | **ALL** | **960** | **26** | **2** | **<0.0001** | **+0.19** |
+
+### THE LADDER GAIN AND THE MISSION-1 CHANGE ARE ONE TRANSACTION, NOT TWO
+
+**This is the review's F1 and it is the most important correction in this write-up.** An earlier
+draft of this section claimed the ladder result here and booked the mission-1 change fifty lines
+later as an unintended cost, as though they were separate ledger entries. They are the same entry:
+mission 1 is always an `Eliminate`, so it is the largest population the lever touches, and **roughly
+half the headline ladder gain is the opener.**
+
+Stratifying the paired test on whether the **baseline** survived mission 1 is a legitimate CRN
+conditional — the two arms play identical worlds and the lever is the only difference, so the
+stratum is defined on a pre-lever fact:
+
+| stratum | pairs | B1 | L1 | Δ | L-only : B-only | p |
+|---|---|---|---|---|---|---|
+| all pairs (the headline) | 960 | 33.44 | 35.94 | **+2.50** | 26 : 2 | 3×10⁻⁶ |
+| **baseline SURVIVED m1** | 936 | 34.29 | 35.68 | **+1.39** | 15 : 2 | **0.0024** |
+| baseline LOST m1 | 24 | 0.00 | 45.83 | +45.83 | 11 : 0 | 0.00098 |
+
+**Eleven of the 24 extra run wins come from 2.5% of campaigns** — the ones the opener was killing.
+Per rung, holding the opener fixed:
+
+| rung | Δ all pairs | Δ opener held fixed | opener's share |
+|---|---|---|---|
+| RECRUIT | +1.88 | +1.88 | 0% |
+| heat 0 | +7.50 | **+4.58** (p=0.039) | 39% |
+| heat 2 | +3.12 | **+1.31** (p=0.50) | 58% |
+| heat 4 | +1.88 | **+0.00** | **100%** |
+| heat 6 | 0.00 | 0.00 | — |
+| heat 8 | +0.62 | +0.64 | 0% |
+
+So: **heat 2's move above its floor is majority opener, and heat 4's gain is entirely opener.**
+The claim this wave is entitled to make is the +1.39 pooled, p=0.0024, concentrated at heat 0 and
+RECRUIT — a real, significant mid-run effect, measured the right way. It is not "the ladder went up
+7.5 points at heat 0 and, separately, the opener got easier".
 
 ### The post-lever cross-tab
 
@@ -9155,10 +9230,21 @@ table built from each chunk's own PER-SLOT RECORDS block):
 30.3 → 32.4 (n≈33), Supply 73.2 → 82.8, Start 97.5 → 99.8.
 `byObjectiveByMission`, `Eliminate`: m2 63.3 → 76.7, m3 40.9 → 54.5, m4 55.1 → 64.7, m5 23.8 → 29.5.
 
-**Both controls held.** `Hack` is identical to the last digit across the arms (n=102, 81.4%, 3.67t,
-+rf 0.04, prs 0.16, WON clear% 14.5). `Decapitate` moves 39.8 → 41.7 inside its own ±4.6, and its
-BOSS cell — n≈472/509, the largest cell in the game — is flat at 68.0 → 67.8. The other five
-non-kill rows move by −0.2 to +0.6.
+**The control held — but only one of the two I claimed is a control.**
+
+**`Decapitate` is the real one** and it does its job: it carries the clock at `prs` 0.79 and takes
+a wave on 20.4% of its mid-run missions, so the arm this lever removes is genuinely live on it, and
+it still moves only 39.8 → 41.7, inside its own ±4.6. Its BOSS cell — n≈472/509, the largest cell
+in the game — is flat at 68.0 → 67.8. That is a control with something to lose.
+
+**`Hack` is not, and I should not have called it one.** `PressureGrace` is 4 turns and Hack's mean
+mid-run mission is **3.67 turns**, so the clock essentially never engages on it: `prs` 0.16,
+reinforced on **2.0%** of missions. "Identical to the last digit across the arms" is therefore very
+nearly a tautology — the lever removes an arm Hack had all but never fired. Restated as what it
+actually is: **evidence that the change is scoped to the objective it names, not evidence that the
+clock's second arm is harmless where it fires.** Only Decapitate carries the latter.
+
+The other five non-kill rows move by −0.2 to +0.6.
 
 **An independent cross-check, from a channel that is not the Stats block.** `SpawnReinforcements`
 echoes every wave to the console under AutoPlay. On the same 20 campaigns at `h0-b0`, the baseline
@@ -9173,6 +9259,21 @@ and its reinforced share 41.0% → 0.0%, while its mean anti-turtle rung is 1.55
 arm is alive and the clock still bites. Turns barely move (8.53 → 8.63): the squad is not finishing
 *faster*, it is finishing *at all*.
 
+**One number in an earlier draft of this paragraph was read the wrong way round, and the review
+caught it.** `Eliminate`'s mid-run `clear%` goes 48.8 → 59.5, and I wrote that as "more of the
+force gets killed". It is not: **the numerator is flat (4.62 → 4.65 bodies killed per mission) and
+the DENOMINATOR shrank** (7.78 + 1.69 = 9.47 → 7.82 + 0.00 = 7.82). The squad kills the same number
+of hostiles; there are simply fewer of them to kill. That is the same denominator artifact that
+makes `Defend` look like it declines its encounter, one row up — and it is a good reason to read
+`clear%` and the raw `killed` column together, always.
+
+**A finding in the lever's favour that this wave did not claim and the review supplied.** The worry
+that removing the wave would make mid-run `Eliminate` a shorter, thinner fight is refuted by the
+data: it got **longer** (8.53 → 8.63 turns) at a flat body count, and against the full mid-run field
+it is the **second-longest objective, kills more bodies per mission than anything else in the
+game** (4.65 vs Defend's 4.28 and everything else under 1.5), and is the **second most lethal to
+the squad**. Whatever else is wrong with the kill class, "boring" is not it.
+
 ### The within-run curve
 
 | mission | 1 | 2 | 3 | 4 | 5 | 6 |
@@ -9183,15 +9284,42 @@ arm is alive and the clock still bites. Turns barely move (8.53 → 8.63): the s
 
 Still the monotone ramp §3.D asks for (the m3/m4 tie is inside its own error, as it was before).
 
-**But mission 1 is now 99.8%, and that is a stakes cost this wave paid without meaning to.**
-Mission 1 is always an `Eliminate` on a Start node, so it is the single largest population the
-lever touches: **mission-1 losses fell from 24 in 960 campaigns to 2.** The anti-turtle clock's
-waves were ending 22 of every 960 openers. X2's whole charter was to stop mission 1 ending a
-quarter of all runs (§3.D forbids front-loaded anxiety), so the direction is right — but "the
-opener is now essentially unlosable" is a different thing from "the opener is fair", and pillar 5
-(stakes that bite) is on the other side of it. Recorded, not repaired: repairing it would be a
-second lever in a one-lever round. If a later wave wants the opener to bite again, the place to do
-it is `Mission.OpenerTrim`, not the clock.
+### MISSION 1: I OVERSHOT, AND THE DESIGN DEFENCE I FIRST REACHED FOR IS NOT AVAILABLE
+
+An earlier draft called this "nearly unlosable" and filed it under costs. Both halves were wrong.
+
+**It was not "nearly" — at the difficulties people play, it was never lost.** Mission-1 losses per
+160 campaigns, baseline → lever:
+
+| | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
+|---|---|---|---|---|---|---|
+| B1 | 0 | 7 | 7 | 5 | 2 | 3 |
+| **L1** | **0** | **0** | **0** | **0** | 1 | 1 |
+
+**640 consecutive campaigns at RECRUIT / h0 / h2 / h4 with zero mission-1 losses.** And it is
+structural rather than lucky: **22 of the 24 baseline mission-1 losses were the reinforcement
+wave** (the two arms play identical worlds, so the 24 → 2 difference IS the wave). After X2's
+`OpenerTrim` takes a body off the opening force and this wave takes the wave off it, the opener is
+a **fixed force that cannot grow against a full squad** — its entire failure mode was one mechanic
+and that mechanic is now absent from it.
+
+**The §3.D / §3.G defence does not hold, and I am recording that rather than arguing it.**
+
+- §3.D forbids front-loading anxiety — but **X2 already discharged that**, and 97.5% is not
+  front-loaded anxiety by any reading. §3.D's *other* half ("too easy → boredom") is the live risk
+  now, and **pillar 5, "stakes that bite", is on the far side of a 100.0%-over-640 opener.**
+- §3.G's "scripted, low-stakes first mission" was a real justification while onboarding lived in
+  mission 1. **RESONANCE T1 moved it into a dedicated `GameMode.Training` drill.** An unlosable
+  *campaign* opener therefore buys nothing §3.G asks for and only spends pillar 5.
+- And the control X2 itself cited: it justified `OpenerTrim` by pointing at RECRUIT's "100%, zero
+  losses in 40" as the **easiest-difficulty control**. Every rung up to heat 4 now matches that
+  control.
+
+**The fix is the next wave's, and it is named, not vague.** `Mission.OpenerTrim` is an existing,
+measured dial (shipped at 1; `SIGHTLINE_OPENERTRIM=0` is the pre-X2 opener). Backing some of it
+out is one lever — which is why it is not in this round — and it **will move heat 2 and heat 4
+down**, because the table above shows those rungs' gains are 58% and 100% opener. So it is a lever
+*plus a re-measured ladder*, not a tweak. It is the top item in ROADMAP.
 
 ### The side effects, checked and recorded straight (`top.py`, 960 vs 960)
 
@@ -9381,6 +9509,14 @@ While wiring it, one more hole: **`AIIDLETEST` was the only self-test line not r
 
 ## 8. WHAT I DID NOT DO, AND WHAT IT COST
 
+- **I OVERSHOT ON MISSION 1, and the first draft of this write-up disguised it by splitting one
+  transaction into two.** The full accounting is in §4 (the stratified paired table) and §4's
+  mission-1 subsection; the short version is that ~half the headline ladder gain is the opener, the
+  opener is now unlosable at every rung up to heat 4 (0 losses in 640 campaigns), and the design
+  defence I first reached for (§3.G's low-stakes first mission) stopped being available when
+  RESONANCE T1 moved onboarding into its own drill mode. **The claim this wave is entitled to is
+  the opener-held-fixed +1.39 (p=0.0024), not the +2.50 headline.** Backing the opener out is the
+  next wave's top item and it needs a re-measured ladder, because heat 2 and heat 4 will move down.
 - **The gap is 36.5 points, not zero, and this wave does not claim to have closed it.** It moved
   43.0 → 36.5 — **6.5 points of a 43-point structural difference**, or 15%. The lever addresses
   ELIMINATE's half of the kill class and nothing else.
@@ -9399,12 +9535,24 @@ While wiring it, one more hole: **`AIIDLETEST` was the only self-test line not r
   the design and of `Game.SmartStep`. A `SIGHTLINE_*POLICY`-style dial that forces the bot to
   engage on non-kill objectives (the shape W8 used for `SIGHTLINE_HVTPOLICY`) would split them.
   Not built.
-- **The anti-turtle clock is now weaker on ELIMINATE and I have not measured turtling.** The aim
-  ramp remains (up to +12/+16, telegraphed) and the flywheel's bot advances, so the batch cannot
-  see camping either way. The design argument is in §4 and it is an argument, not a measurement:
-  *this is the objective where a slow fight already punishes itself, because the force stays on the
-  board.* If a human player finds camping newly viable on Eliminate, `SIGHTLINE_KILLTREADMILL=1`
-  is the switch back and the honest reading is that this wave was wrong.
+- **A 2.1% harness-forced-loss floor that nobody has ever mentioned.** `instrumentHealth.
+  stalemateLosses` reads **20 of 960 in BOTH arms and 20 of 960 in the L3 archive** — identical,
+  because it is a property of the worlds and not of any lever. Every ladder figure this project has
+  published sits on top of it. Not this wave's to fix; nobody owns it, and it should be somebody's.
+- **The anti-turtle clock is now weaker on ELIMINATE, and turtling is not merely unmeasured — it
+  is UNMEASURABLE with this harness.** That is a stronger and more uncomfortable statement than the
+  draft's "I did not measure it", and it is the correct one. The flywheel has exactly two policies,
+  `greedy` and `sloppy`, and `sloppy` is an **error** model, not a **passivity** model: neither
+  camps, and `SmartStep` hunkers only as a terminal fallback. **No policy in the instrument could
+  reveal a turtle exploit**, so no number in this write-up — or in any previous one — bears on it.
+  Three things make that worse rather than better here: the lever touches only the **41% slowest**
+  Eliminates (the other 59% were never reinforced at all), i.e. **precisely the missions where a
+  player was already taking their time**; what remains as a disincentive is the aim arm alone,
+  whose measured mean high-water rung is **1.50**, below the rung 2 at which the wave arm fired;
+  and the design argument in §4 is an argument (*a slow Eliminate already punishes itself, because
+  the force stays on the board*), not a measurement. `SIGHTLINE_KILLTREADMILL=1` is the switch back.
+  **A camping policy in the flywheel is a prerequisite for anyone pricing this, and it is now its
+  own ROADMAP item rather than a line in mine.**
 - **A pre-existing 12px-floor breach, found and left.** `Hud.DrawCampaignMap`'s region-name strip is
   `FitSize(rn, 11, 8, ...)` and paints at 8–11px; CLAUDE.md's floor is 12. It is not alone —
   the WAR ROOM footer's stat labels are `FitSize(11, 8)` and the requisition slate's effect line
@@ -9412,10 +9560,15 @@ While wiring it, one more hole: **`AIIDLETEST` was the only self-test line not r
   enforces where it looks.
   Recorded here as the breach it is; out of this wave's charter to move, because raising those
   strips to 12px risks overflowing the columns they were fitted to.
-- **`heat 6` moved by exactly nothing** (0 lever-only wins, 0 baseline-only, over 160 pairs). I do
-  not know why and did not chase it. The plausible reading is that at h6 the runs that reach a
-  mid-run Eliminate are already lost, so the missions this lever touches are not the ones deciding
-  the campaign — but that is a hypothesis, not a measurement.
+- **`heat 6` moved by exactly nothing at the RUN level — and my first explanation for it was
+  wrong.** I wrote "at h6 the runs that reach a mid-run Eliminate are already lost". The archive
+  refutes that outright: **h6 has the LARGEST mission-level gain of any rung — mid-run `Eliminate`
+  19.0 → 36.4, +17.3 (n=21/22).** The missions are won; they just do not convert. The real reason is
+  small numbers: **only 6 of 160 h6 campaigns differ between the arms at all**, none of the six
+  crossed the win line, and at h6's ~20% base rate zero conversions out of six touched campaigns is
+  the *expected* outcome. The discordance sequence across the rungs is 5 / 14 / 5 / 3 / **0** / 1,
+  and P(0 | Poisson mean 2.0) = 0.135. **Unremarkable, not mysterious** — and it is a good example
+  of why a run-completion ladder is a blunt instrument for a per-mission lever.
 - **I did not put mission 1's stakes back.** The opener went 97.5% → 99.8% (24 losses in 960 → 2)
   because it is always an `Eliminate` and therefore the largest population the lever touches. See
   the within-run curve above. One lever per round is the rule that kept this measurable, so the

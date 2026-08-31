@@ -52,4 +52,9 @@ for f in sorted(glob.glob(os.path.join(DIR, "R0diag-*.json"))):
     else:
         print(f"OK   {tag}: {len(keys)} fields compared, 0 moved")
 print(f"\n{pairs} paired chunks, {fields} aggregate fields diffed, {bad} chunk(s) with a difference")
+# Same guard as samearm.py, same reason (review finding F6): an inertness proof that found no
+# chunks to compare has proved nothing, and must not exit 0 saying so.
+if pairs == 0:
+    print("!! NOTHING COMPARED — no R0diag/R0 pairs found. This is not a pass.")
+    sys.exit(2)
 sys.exit(1 if bad else 0)
