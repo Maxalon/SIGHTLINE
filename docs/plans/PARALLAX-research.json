@@ -1,0 +1,1135 @@
+[
+ {
+  "lens": "player-feel",
+  "summary": "The second-to-second layer is genuinely deep \u2014 a graded hit-stop/bloom/shake ladder per outcome, a 3-beat shot (reticle snap \u2192 tracer \u2192 settle), per-tile footfalls, pose deformation (recoil/flinch/lean), enemy intent telegraphs, and a 13-cue procedural sound set \u2014 and DESIGN \u00a74 grades it \"Strong\". Reading the code against that grade, the gaps are concentrated in four places: (1) motion \u2014 every multi-tile walk eases in-and-out at every tile so units caterpillar instead of glide, and VAULT slides straight through the cover it claims to leap; (2) beats that are claimed but not built \u2014 the \"slow-mo kill-cam\" is a hard 0.4 s freeze during which its own zoom-punch decays to nothing, and `ShotAnim.Reaction` is never read by any presentation code so an overwatch trigger plays as an ordinary shot with the same cue as setting overwatch; (3) audio coverage \u2014 no explosion cue exists (grenade/barrel/siege play \"crit\"+\"death\"; heal/hack/beacon/stabilize play \"reload\"; smoke/shove play \"hunker\"); (4) readability collisions \u2014 same-frame floating texts overprint (BRACE damage + STAGGERED 4 px apart; a KIA fires three strings inside 24 px), and the first enemy's intent telegraph each turn runs under the ENEMY TURN banner's centre band. Every item below is verifiable headlessly with an existing hook (LONGMOVE per-frame Pos dump, SHOTSEQ filmstrip, AUDIOTEST/AUDIOGATE, FITTEST) or a small new PASS/FAIL leg routed through qa-sweep's verdict; nothing needs a display beyond the screenshot harness.",
+  "findings": [
+   {
+    "title": "Multi-tile movement eases in-and-out at EVERY tile \u2014 units caterpillar instead of glide",
+    "kind": "defect",
+    "evidence": "src/Anim.cs:40 `_dur = diag ? 0.155f : 0.12f` (one tile per anim) and src/Anim.cs:61 `Unit.Pos = Vector2.Lerp(_from, _to, Util.EaseInOutQuad(k))`. Paths are enqueued as N independent MoveStepAnims at src/Game.cs:5561 (IssueMove), :7345/:7403 (enemy moves), :4461 (pod scatter), :6671 (VIP leash), src/Game.Harness.cs:8859. WalkLean is re-kicked to 1 at every OnStart (Anim.cs:43) and decays at 7.5/s (Game.cs:3890). DEVLOG \u00a7W5-B's LONGMOVE filmstrip only counted 'backwards steps', never velocity continuity.",
+    "problem": "EaseInOutQuad velocity is 0 at both ends and 2x the mean at mid-tile; at 0.12 s/tile (~7 frames at 60 fps) a six-tile walk is six accelerate/brake cycles with a lean re-kick each time. The most frequent action in the game reads as a pulsing stutter rather than a stride, on both teams (the enemy turn is mostly movement). Pillar 2 'feels good' \u2014 tweened motion is named as its first example.",
+    "proposal": "Give MoveStepAnim a segment flag (First / Mid / Last / Single) set by the six enqueue sites (a tiny helper `EnqueuePath(unit, path, team)` in Game.cs replaces the foreach loops). Update(): Single \u2192 EaseInOutQuad (today), First \u2192 EaseInQuad, Mid \u2192 linear, Last \u2192 EaseOutQuad; set WalkLean only on First. Leave `_dur` and the `k >= 1` commit + `OnUnitEnteredTile` call untouched so overwatch timing, the STACKTEST probe and PAIRTEST are unaffected (Unit.Pos is presentation).",
+    "acceptance": "`SIGHTLINE_LONGMOVE=1 SIGHTLINE_SHOT=<n>` already dumps the unit's tweened Pos every frame (Program.cs:1138-1139, Game.Harness.cs:8839): compute per-frame speed and assert min mid-path speed \u2265 60% of max and zero frames under 40% of mean (today it hits ~0 at every tile boundary). Add that as a PASS/FAIL line routed through qa-sweep's `verdict`. `SIGHTLINE_PAIRTEST=1` byte-identical; `SIGHTLINE_SHOTSEQ=48 SIGHTLINE_AUTOPLAY=1` filmstrip for eyes.",
+    "impact": 4,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "feels good",
+     "looks good"
+    ]
+   },
+   {
+    "title": "The 'slow-mo kill-cam' is a hard 0.4 s freeze \u2014 and its own zoom-punch decays to ~1% while frozen",
+    "kind": "defect",
+    "evidence": "src/Game.cs:3957 `if (HitStop > 0) { HitStop -= dt * AnimSpeed; return; }` returns BEFORE `Fx.Update(t)` (~3973) and the anim pump (~4010). KillUnit's mission-ending arm src/Game.cs:3227-3233 adds `AddHitStop(0.4f)` + `AddZoomPunch(0.13f)`, but `_camPulse *= MathF.Exp(-dt * 11f)` at src/Game.cs:3938 runs above the return, so after 0.4 s the pulse is exp(-4.4) \u2248 1.2%. The shatter FX spawned at 3197-3200 sit at frame 0 for 0.4 s then play at full speed. docs/FEATURES.md:416 and docs/ROADMAP.md 3.11 both describe this as 'lingers in slow-mo'.",
+    "problem": "The single most important beat in a mission (last hostile / squad wipe / VIP lost) is a still image: tracer, shockwave, sparks and camera all stop dead, then everything snaps to full speed. The zoom that was meant to punch the moment spends itself invisibly inside the freeze. Doc over-claim of the exact kind CLAUDE.md warns about (juice graded on something nobody watched).",
+    "proposal": "Add `Game.TimeScale` (default 1). Keep `HitStop` binary for the \u22640.1 s hit/crit/kill freezes. For `IsMissionEndingKill` set `_killCam = 0.45f` and while it runs: skip the early return, multiply `t` by 0.25 for `Fx.Update`, the anim pump dt, and `DecayUnitFx`; hold `_camPulse` (no decay) until `_killCam` expires, then let it relax. Under `AutoPlay` keep TimeScale 1 so frame counts don't move. Fix the two doc lines to say what ships.",
+    "acceptance": "New headless leg (e.g. in DEATHTEST or a `SIGHTLINE_FEELTEST`): stage a last-hostile kill, step `Update(1/60)` for 30 frames and assert (a) a tracked particle's Pos changes every frame (today: zero delta for 24 frames), (b) mean per-frame displacement \u2248 0.25x the post-window rate, (c) `_camPulse` \u2265 50% of its peak at frame 24. Route through verdict. Autoplay x3 frame counts unchanged. `SIGHTLINE_SHOTSEQ` filmstrip of the final blow for eyes.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 5,
+    "pillars": [
+     "feels good",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "Overwatch REACTION shots have no distinct beat \u2014 same cue as SETTING overwatch, same wind-up as a normal shot, `ShotAnim.Reaction` unread by presentation",
+    "kind": "defect",
+    "evidence": "src/Game.cs:3044-3050 (OnUnitEnteredTile): `PopText(\"OVERWATCH\")` 18px + `Audio.Play(\"over\")` then `_anims.Insert(.., new ShotAnim(w, mover, res, reaction: true))`. The identical `\"over\"` cue is played by DoOverwatch (Game.cs:5642), FOCUS/BRACE (5689/5710/5747), CONTACT! (4472), a 'charge whine stand-in' (7033) and two more enemy verbs (7133/7154). src/Anim.cs:174 `public bool Reaction` \u2014 the only consumer in the repo is Game.cs:3138 (RECLAIMER boon); Renderer.cs/Hud.cs contain zero references. ShotAnim wind-up is the flat `WindUp = 0.10f` (Anim.cs:~181) regardless.",
+    "problem": "The genre's signature 'gotcha' \u2014 a body steps into a held lane \u2014 is indistinguishable from an ordinary shot at a moving target, and 'I armed overwatch' and 'my overwatch just fired' are the same sound. DESIGN \u00a73.B asks that failure be legible and telegraphed; the player's OWN soldier walking into an enemy lane gets the same non-event, which is exactly the moment stakes should bite.",
+    "proposal": "In `ShotAnim.OnStart` when `Reaction` (and not `_windless`): WindUp 0.10 \u2192 0.26 s, `g.AddHitStop(0.06f)`, a larger team-tinted `ReticleSnap` (r0 40 \u2192 r1 16) plus an `Fx.Flash` on the MOVER, and set the mover's `FlinchAnim` to 0.4 (a caught-in-the-open freeze). Register a `react` cue in `Audio.BuildRecipes` (a sharp descending two-note snap next to `\"over\"` at Audio.cs:282) and play it at Game.cs:3045 instead of `\"over\"`. Keep `_windless` collapsing all of it under AutoPlay so balance/smoke frame counts are unchanged.",
+    "acceptance": "Headless leg (STAGGERTEST/OWTEST style): construct a reaction ShotAnim with `g.AutoPlay=false`, call OnStart, assert `FireAt` \u2248 0.30 vs 0.14 for a normal shot and that `g.HitStop > 0` immediately after OnStart. `SIGHTLINE_AUDIOTEST=1` / `SIGHTLINE_AUDIOGATE=1` PASS with `react` added to gameIds (Audio.cs:955), SfxCueIds (Audio.cs:994) and CatOf (Audio.Analysis.cs:420-428). Autoplay x3 frame= values identical to pre-change.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 5,
+    "pillars": [
+     "feels good",
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "No explosion cue exists \u2014 grenade/barrel/siege play 'crit'+'death'; heal/hack/beacon/stabilize play 'reload'; smoke/shove play 'hunker'",
+    "kind": "defect",
+    "evidence": "The whole gameplay cue set is 13 ids (src/Audio.cs:193-304 BuildRecipes; gameIds Audio.cs:955-956; SfxCueIds Audio.cs:994-1000) and none is a detonation. GrenadeAnim.Explode src/Anim.cs:529-530 `Audio.Play(\"crit\")`+`Audio.Play(\"death\")`; DetonateBarrel src/Game.cs:3739 and DetonateSiege :3694 the same pair; FlashAnim Anim.cs:767 and IncendiaryAnim :799 `\"crit\"`; SmokeAnim :747 and ShoveAnim :111 `\"hunker\"`; HealAnim :861, DoStabilize Game.cs:3431, DoHack :5781/:5792, DoBeacon :5842/:5874 and the ability sites :6129-6219 all `\"reload\"`; IssueDrag :5479 `\"move\"`. A2 (DEVLOG \u00a7A2) gave the five weapons voices but left every non-weapon verb on a borrowed UI cue.",
+    "problem": "The largest single event in the game (frag/barrel: shake 12-14, the biggest bloom spike, a 0.07 hit-stop) is voiced as 'a crit landed and a soldier collapsed'; a corpsman's heal sounds like a magazine change; a flashbang and an incendiary are both 'crit'. Audio is the channel that lets a player follow the enemy turn without watching every tile, and right now five different verbs share one sound.",
+    "proposal": "Register four procedural cues in `BuildRecipes`: `boom` (sub sine 48\u219228 Hz + a 1.2 kHz\u2192180 Hz noise wash, ~0.6 s, ~-4 dBFS peak, no detune), `flash` (3 kHz ping + short white burst, 0.2 s), `heal` (rising sine triad, 0.3 s, 'ui' category), `smoke` (soft band-limited hiss, 0.4 s). Route the sites above (grenade/barrel/siege \u2192 boom; flashbang \u2192 flash; incendiary \u2192 boom at -6 dB; smoke \u2192 smoke; heal/stabilize \u2192 heal). Add the ids to gameIds, SfxCueIds, CatOf (Audio.Analysis.cs:420-428), and a `boom+death+st_kill` row to `Stacks` (Audio.Analysis.cs:245-253) so the limiter budget covers the new worst case. The file-first loader then also honours `assets/sfx/boom.ogg` if the owner ever drops one in.",
+    "acceptance": "`SIGHTLINE_AUDIOTEST=1` and `SIGHTLINE_AUDIOGATE=1` print PASS with the new ids (the gate's stack headroom check must still clear -1 dBFS with the boom row). `SIGHTLINE_AUDIODUMP=1` writes boom/flash/heal/smoke .wav for the human to audition; add their one-line descriptions at Audio.cs:1385-1396 so AUDIO CHECK lists them. `grep -n 'Audio.Play(\"crit\")' src/Anim.cs src/Game.cs` shows no detonation site left.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 5,
+    "pillars": [
+     "feels good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "Floating combat text overprints itself: same-frame pops at one anchor rise in lockstep for their whole 1.1 s life",
+    "kind": "defect",
+    "evidence": "src/Fx.cs PopText (~380-410): `Rise` is a constant 46 px/s, `Drift` is 0 for any size \u2264 26 (`weight = (size-26)/10`), and for larger sizes the direction is a hash of (text, x, y) \u2014 identical strings at one anchor get identical trajectories. Concrete same-frame collisions: BRACE hit \u2192 damage number at D.Pos-26 (src/Anim.cs:337) and 'STAGGERED' at D.Pos-30 (Anim.cs:365), 4 px apart; any kill \u2192 the number at -26 (337) + KillUnit's 'KIA'/'DOWN' at -10 (src/Game.cs:3204, 22 px) + the 30 px `KIA  NAME` stamp at -34 (Game.cs:3216) \u2014 three strings inside 24 px; two overwatch hits for equal damage \u2192 two identical '3's with the same hash \u2192 same drift; grenade \u2192 per-unit number at -26 plus the KIA trio on a kill.",
+    "problem": "The exact moments the text is supposed to explain (a stagger, a kill, a multi-reaction) are the ones where it becomes an unreadable glyph pile. DESIGN \u00a73.C: 'juice must serve clarity, not bury it'.",
+    "proposal": "In `Fx.PopText` and `Fx.Stamp`, before adding: count live `Texts` whose Pos is within 22 px of `at` (n) and offset the new one by n\u00d716 px upward, alternating \u00b118 px laterally for odd n; salt the drift hash with a per-call counter so two identical numbers diverge. Optionally colour the damage number by VICTIM team (today `numCol` at Anim.cs:~335 is the same off-white whether it is your soldier or theirs) \u2014 one job per accent, DESIGN \u00a73.H.",
+    "acceptance": "New headless leg (`SIGHTLINE_FEELTEST` or an FX leg in an existing test): spawn PopText('3') twice at one point plus Stamp at -34, step one frame, assert every pairwise distance \u2265 14 px (today: 0 px for the twin '3's, 4 px for STAGGERED). Route through verdict. `SIGHTLINE_KIA=1` screenshot and a BRACE-hit `SIGHTLINE_SHOTSEQ` frame for eyes.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "reads clearly",
+     "feels good"
+    ]
+   },
+   {
+    "title": "VAULT animates as a straight 0.12 s slide THROUGH the cover it is supposed to leap",
+    "kind": "defect",
+    "evidence": "src/Game.cs:5538 `Enqueue(new MoveStepAnim(u, tx, ty), Team.Player)` \u2014 a single step for a 2-tile straight hop over a cover tile. MoveStepAnim derives `_dur` from `diag` only (src/Anim.cs:40: 0.12 s for a straight 2-tile hop, i.e. 2x walking speed) and lerps a straight line with no Y component (Anim.cs:61), so the figure's centre passes through the cover volume's rect. GrenadeAnim already has the arc math (`ArcAt`, Anim.cs:~625). No DEVLOG mention of a vault arc.",
+    "problem": "A verb named VAULT, popped as 'VAULT' (Game.cs:5536), reads as a teleport-slide through a wall. It also spends only one footfall cue for a 2-tile move. Pillar 2 and pillar 4: the motion contradicts the rule the player was just told.",
+    "proposal": "Add `public float Hop` (arc height px, default 0) and an optional `DurOverride` to MoveStepAnim; IssueVault sets Hop=26, dur 0.24 s. In Update add `-MathF.Sin(k*PI)*Hop` to `Unit.Pos.Y`, raise `WalkLean` to 1.4 for the crouch, and call `g.Fx.Dust` at landing (k\u22651). Leave the commit/`OnUnitEnteredTile` path untouched.",
+    "acceptance": "A `SIGHTLINE_VAULTTEST` leg (or a FIELDTEST extension): stage a vault, step the anim at 1/60, assert peak Y lift \u2265 20 px mid-flight and final `Unit.Pos == TileCenter(tx,ty)`; PAIRTEST byte-identical; `SIGHTLINE_SHOTSEQ` filmstrip of a vault for eyes.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "feels good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "The first enemy's INTENT telegraph every turn plays underneath the ENEMY TURN banner's centre band",
+    "kind": "defect",
+    "evidence": "src/Game.cs:6426-6427 (EndPlayerTurn): `ShowBanner(\"ENEMY TURN\", true)` \u2014 BannerMax 1.2 s at Game.cs:2849 \u2014 then `Enqueue(new WaitAnim(0.5f))`. UpdateEnemy's PickNext then holds `TelegraphBeat = 0.5f` (Game.cs:234, enqueued at 6962) with `IntentUnit` set, so the telegraph runs t\u22480.5-1.0 s. `BannerTimer` decrements every frame independent of the anim queue (Game.cs:~3990, above the pump). Hud.DrawBanner (src/Hud.cs:2465-2490) paints a full-width 92 px band at `ScreenH/2-46` at alpha 0.72 in the HUD layer (over the board), full until t=0.7 and fading to 1.2. DEVLOG \u00a7FUL-4 review noted the same collision as a harness nuisance ('the banner lives ~72 frames, so SHOT=90 photographs an empty telegraph') without seeing the player-facing overlap.",
+    "problem": "The 'it's about to hit you' warning (Renderer.cs:1940-1947: 'deliberately bold') for the first hostile each turn is drawn with its path/target's middle rows behind a dark scrim. The one telegraph the player is guaranteed to need \u2014 the opener of every enemy turn \u2014 is the one they can least see.",
+    "proposal": "Cheapest: make the opening WaitAnim equal to the banner's visible life (`BannerMax`, or shorten both ENEMY/PLAYER TURN banners to 0.8 s and wait 0.8). Alternative that preserves pacing: in PickNext, if `BannerTimer > 0.3f` enqueue a `WaitAnim(BannerTimer - 0.3f)` before the telegraph beat. Either is a two-line change in Game.cs.",
+    "acceptance": "Headless assertion (STALLTEST-style leg): with `AutoPlay=false, NoPersist=true`, call EndPlayerTurn and step Update(1/60) until `IntentUnit != null`; assert `BannerTimer <= 0.3f` (today it reads ~0.7). `SIGHTLINE_INTENT=1` screenshot at the telegraph frame shows no band over the drawn path.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "Grenade/item targeting previews the footprint but not the consequence \u2014 no per-unit damage/kill forecast, no friendly-fire warning, no cover-crack preview",
+    "kind": "improvement",
+    "evidence": "src/Renderer.cs:4101-4137 DrawGrenade: range ring + 3x3 tile tint + arc + two circles; DrawItem :4158-4185 the same. The resolution in GrenadeAnim.Explode (src/Anim.cs:~545-600) deals 3-5 to BOTH teams, ignores cover, cracks cover via `Grid.DamageCover`, wakes pods and sets Burning \u2014 none of it shown before the click. Hud.cs references GrenadeMode only at :1427 (button) and :2383 (threat-card suppression); there is no grenade card, while the SHOT path gets the full odds tooltip (Hud.DrawTooltip 2091-2311). ROADMAP.md:33 records 'hits BOTH teams (friendly fire)' as a rule.",
+    "problem": "The shot verb honours the perfect-information contract; the blast verbs do not. A player learns friendly fire and pod-waking by doing them \u2014 output feedback for what should be input information (DESIGN \u00a73.B, \u00a73.E 'make affordances obvious').",
+    "proposal": "In DrawGrenade (and DrawItem for flash/incendiary): for each alive unit in the footprint draw a team-tinted ring and a small label \u2014 '3-5' (through `Combat.HardenedReduce` and the fragile floor) or 'KILL' when `Hp <= minDmg`; if any soldier/VIP is inside, tint the footprint Pal.Foe and caption the reticle 'FRIENDLY FIRE'; dash-outline cover tiles that will crack; add a '+WAKES POD' caption when a dormant enemy is in the radius. All draw-only, reading the same constants Explode uses.",
+    "acceptance": "`SIGHTLINE_GRENSHOT=1` screenshot hook staging a footprint containing one soldier, one enemy and one low-cover tile; a FITTEST-style `Cfg.InkProbe` assertion that the 'FRIENDLY FIRE' string is present when a soldier is in the footprint and absent otherwise, and that every label lands inside the board rect. CB pass with `SIGHTLINE_CB=1`.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "well-designed loop"
+    ]
+   },
+   {
+    "title": "A bare left-click on any targetable enemy FIRES immediately (no arm step), unlike every other targeted verb",
+    "kind": "improvement",
+    "evidence": "src/Game.cs:4975-4977 (BoardAct, outside AimMode): `hovered.Team == Team.Enemy && Selected.CanAct && CanTarget(...) \u2192 IssueShoot(hovered)`. IssueShoot (Game.cs:5568-5606) spends ammo, an action, sets FiredThisTurn and calls BreakConcealment at :5573. Grenade/item/shove/drag/vault/mark/grapple/pin all require a Toggle \u2192 click pair (BoardAct :4919-4973). The hover tooltip shows odds first (Hud.DrawTooltip), which mitigates. grep of DEVLOG/DESIGN for click-to-fire/misclick rationale: none.",
+    "problem": "The one irreversible, concealment-breaking verb is the only one with zero friction; a click intended to inspect a foe (or that lands on a foe standing on the tile you meant to walk to) opens the fight. XCOM-style convention is select-target \u2192 confirm. This trades a real misclick cost for snappiness the arm step barely dents.",
+    "proposal": "Route the :4975 branch to `EnterAim(false); AimTarget = hovered;` so the first click locks the target (DrawAim's spinning reticle + odds confirm it) and the second fires; keep key `1` and the keyboard Space path as they are. Optionally a Display 'ONE-CLICK FIRE' toggle on the pause card for veterans. This is a judgement call \u2014 record it as an owner decision if not shipped.",
+    "acceptance": "TRUTHTEST/SNAPTEST-style headless leg: with AimMode=false, simulate BoardAct on an enemy tile, assert Ammo and ActionsLeft unchanged, `AimMode == true`, `AimTarget == enemy`; a second BoardAct fires (ammo-1). Autoplay unaffected (SmartStep/AutoStep never route through BoardAct); autoplay x3 identical.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 3,
+    "pillars": [
+     "feels good",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "A MISS gives the target no reaction and does not tell the player the odds it beat",
+    "kind": "improvement",
+    "evidence": "src/Anim.cs:371-383: on a miss the tracer endpoint scatters \u00b122 px, 5 grey sparks + 4 ricochet sparks fire, and 'MISS' pops at 24 px in Pal.TxtDim; `D.Flash`, `D.FlinchAnim`, `D.Recoil` are untouched (the hit branch sets all three at :255-262 / :293-296). The rolled % goes only to the combat log (`Stats.Log` at :401), whose panel is off-board and hidden until the first entry (Hud.cs:1181-1188). DESIGN \u00a73.B: 'Don't let a single 85% roll silently decide \u2026 with no feedback explaining the odds'.",
+    "problem": "A round passes a figure's ear and the figure stands like a statue; the player who missed a 90% has to look away from the board to learn it was a 90%. The output-randomness rage surface is exactly where a cheap, honest beat pays most.",
+    "proposal": "On a miss: set `D.FlinchAnim = 0.35f` with the lateral-only shudder (the pose already exists in DrawUnit, Renderer.cs:~3425), a 1.5 px `D.Recoil` away from the tracer, and pop `MISS 87%` (append `Res.Odds.HitChance`, % in Pal.Accent when \u2265 70 so a 'robbed' roll reads as such); a short `Fx.ImpactStreak` at the scattered endpoint. Keep the enemy-miss pop plain 'MISS' if the % is judged too noisy on the enemy turn.",
+    "acceptance": "TRUTHTEST leg: resolve a forced miss, assert the newest FloatText contains `Res.Odds.HitChance` and `D.FlinchAnim > 0` one frame later. `SIGHTLINE_UNITFX=1` screenshot for the duck pose.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "feels good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "On-board OVERWATCH badge is 10 px text ('OW'/'BRC') under the 12 px floor; HUNKER is an unlabelled 6 px diamond",
+    "kind": "improvement",
+    "evidence": "src/Renderer.cs:3984-3993: `Cfg.Text(u.OwBrace ? \"BRC\" : \"OW\", \u2026, 10, \u2026)` inside a 6 px disc; `Raylib.DrawPoly(new Vector2(p.X, p.Y - 35), 4, 6f, 45f, Pal.Good)` for hunker. CLAUDE.md: '12px is the small-text floor'; the C5 survey (ROADMAP 'Left open by C5') measured chrome at 10-11 px but board glyphs were not in it. The action bar already has shape-redundant icons for both verbs (Hud.DrawActionIcon, Hud.cs:1671+: two concentric arcs / chevron-in-shield).",
+    "problem": "The two most common held stances read as a 10 px abbreviation and a green dot \u2014 the focused cone (DrawFocusCones) and enemy lanes (DrawOverwatchThreat) are drawn, but a plain wide watch on your own soldier, the thing you set most turns, is the least legible state on the token. Hue-only for hunker fails the CB rule in DESIGN \u00a73.H.",
+    "proposal": "Factor DrawActionIcon into a shared `Glyphs.Draw(id, cx, cy, c, scale)` helper (Util.cs or a new Glyphs.cs) and stamp the 14 px overwatch/hunker glyphs above the token, tinted Pal.Accent / Pal.Good, with a slow pulsing ring while a watch is armed; BRACE = the same glyph in Pal.Good plus a short bar under it. Keep 'BRC' text only in the tooltip.",
+    "acceptance": "`SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small` lists no 10 px board string; `SIGHTLINE_FOCUSOW=1` and a plain-overwatch/hunker screenshot; `SIGHTLINE_CB=1` pass shows the two states differ by shape, not only hue.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "looks good"
+    ]
+   },
+   {
+    "title": "No headless probe exists for motion continuity or beat timing \u2014 every feel fix is verified by eye",
+    "kind": "instrument",
+    "evidence": "The closest instruments are the LONGMOVE per-frame Pos dump (src/Program.cs:1138-1139, src/Game.Harness.cs:8839-8861; DEVLOG \u00a7W5-B counted only 'backwards steps') and the SHOTSEQ PNG filmstrip (Program.cs:1315-1323). `Fx.AmbientSelfTest` (Fx.cs:~830) proves the pattern of a window-free FX self-test already works. No test reads ShotAnim.FireAt/Total, MoveStepAnim velocity, FloatText separation, or particle displacement during HitStop.",
+    "problem": "Pillar 2 is the only pillar with no PASS/FAIL line in qa-sweep; the W9 rule ('every fix ships a test proven to FAIL pre-fix') cannot be applied to findings 1-7 without one. CLAUDE.md warns that self-test lines not routed through `verdict` are invisible to the gate.",
+    "proposal": "Add `SIGHTLINE_FEELTEST=1` in Game.Harness.cs: (a) stage a 6-tile walk and report min/mean/max per-frame speed + frames under 40% of mean; (b) a normal vs reaction ShotAnim, reporting FireAt/Total; (c) a vault, reporting peak Y lift; (d) two PopTexts + a Stamp at one anchor, reporting min pairwise separation after one frame; (e) a mission-ending kill window, reporting per-frame particle displacement and `_camPulse` at frame 24. One `FEELTEST: PASS/FAIL` line, thresholds as constants beside the anims, wired into scripts/qa-sweep.sh via `verdict` and covered by its COVERAGE GUARD.",
+    "acceptance": "On today's tree the hook prints FAIL for legs (a), (c), (d), (e) and PASS after the fixes above \u2014 the proven-to-fail-pre-fix contract. `bash scripts/qa-sweep.sh --full` footer shows the new hook counted and SWEEP-EXIT=0 only when it passes.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 5,
+    "pillars": [
+     "feels good",
+     "reads clearly"
+    ]
+   }
+  ]
+ },
+ {
+  "lens": "loop-design",
+  "summary": "The minute-to-minute and run-to-run loops are unusually complete on paper (branching map with kind/faction/objective/class, 17 field events, 16 boons, 5 contracts, a priced veteran reserve, 6 meta unlocks, a 9-rung heat ladder) and unusually well instrumented, but several of the fork's decisions are not decisions when read against DESIGN.md \u00a73.A. The SUPPLY node strictly dominates the modal COMBAT node on every visible axis (fewer bodies, lower stats, more intel, a full heal that also silently cancels the wound gauge) and the ELITE premium is +4 intel over SUPPLY for +3 bodies; the PITCHED/TASKED class is now legible but still unpriced (C3's declared open half); an EVENT node's hover tooltip names an objective it does not have and calls a non-fight \"Standard force +0 intel\"; and the biome that C4 made mechanical is knowable at the barracks for every column yet appears on no pre-deployment surface. On the run-to-run side, each field event is a ~1-in-9-run sight with the DEVLOG's own recommended fix (profile-side dedupe) unbuilt, the five run contracts have never been priced although the harness plumbing to do so exists, and the WAR ROOM's 330 salvage of unlocks is exhausted after roughly five wins while the heat cap climbs one rung per win at cap. Two small mechanism defects also surfaced: a mid-run AddHeat event silently switches the adaptive assist off for the rest of the run, and heat's intel kicker is paid in full on missions 1-2 where its numeric teeth are graced to zero.",
+  "findings": [
+   {
+    "title": "SUPPLY strictly dominates COMBAT on the campaign fork, and its full heal silently cancels the wound gauge",
+    "kind": "defect",
+    "evidence": "src/Run.cs:905-916 CardForNode: Supply = EnemyDelta -1 / StatDelta -1 / Reward Heal; Combat = 0/0/none; Elite = +2/+1/BonusPerk. src/Run.cs:952-962 NodeIntel: Supply = base+10, Elite = base+14, Combat = base \u2014 so Supply out-pays Combat and Elite pays only +4 over Supply for +3 bodies and +2 stat. src/Game.cs:2565 applies the Heal reward (u.Hp = MaxHp) BEFORE src/Game.cs:2572 DebriefSurvivors, and src/Run.cs:1486 gauges the fresh wound from u.Hp (`sev = u.Hp <= MaxHp/4 ? 2 : ...`), so no soldier who finished a Supply clear on their feet can ever be wounded by it \u2014 a second, undocumented subsidy. Generator: src/Run.cs:744-745 stamps supplies = max(1, mids/4) (2-3 per map among 8-12 mids), so a Supply is a sibling choice in most columns. Measured: DEVLOG \u00a7W1 byNodeKind Supply 94.4% vs Combat 89.2%; DEVLOG \u00a7C3 (line ~8211) Decapitate on Supply 67.3% vs Combat 32.9% (\"one body and one stat point ... 34 points apart\"); DEVLOG \u00a7C4 addendum (line ~11474) Supply 89.2 / Combat 78.2 / Elite 72.3 at n\u2248240-490/arm. The code comment at Run.cs:800-804 calls the route \"a real trade-off\" (Supply = economy stop, Elite = risk for reward) but never prices Supply against Combat. DESIGN.md \u00a73.A: an option strictly better is \"an obvious choice ... a non-decision wearing a decision's costume\". The flywheel cannot see it: Game.Autopilot.cs:2258 PickAutoNode `first` walks nn[0] (ROUTETEST: Supply picked 15.6%, Elite 11.7%).",
+    "problem": "Whenever a SUPPLY and a COMBAT node are both reachable, the player-facing information (Light resistance, +more intel, Full squad heal) says take Supply, and the hidden wound-gauge cancellation makes it even better than it reads. The fork's headline trade-off collapses to objective/faction only; ELITE's risk premium is a random-recipient perk plus 4 intel. The batch never samples the human-optimal route, so no ladder number reflects it.",
+    "proposal": "Price safety. In Run.NodeIntel make Supply pay LESS than Combat (e.g. Supply = base \u2212 4: the heal IS the reward; Combat = base + 6: a faction fight pays; Elite unchanged at base + 14), and either move the Supply/RECON Heal reward in Game.EnterBarracks to AFTER DebriefSurvivors (so the wound gauge still bites and the heal restores HP) or state the wound immunity on the node hover. Update the hover line at Hud.cs:5197 and the deploy card at Hud.cs:5655 so the payout ordering is visible. Ship with SIGHTLINE_ROUTE=hash for the measurement round so Supply is actually sampled (~17% of picks).",
+    "acceptance": "(1) A ROUTETEST leg asserting NodeIntel ordering Elite > Combat > Supply at equal depth for every seed, and a Run-level leg (TRAITTEST style): a soldier at Hp=1 who clears a Supply node ends the debrief with Wound > 0. (2) CRN-paired SIGHTLINE_BALANCE round (2 slot bases \u00d7 greedy/sloppy, h0 + h4, SIGHTLINE_ROUTE=hash on both arms, base commit stated) archived under docs/measurements/<wave>/ reporting byNodeKind and intel/run; expect the Supply cell to fall toward Combat and intel/run to hold within \u00b110. (3) SIGHTLINE_MISSION=2 barracks screenshot with Hud.MousePin over a Supply node showing the lower payout.",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite",
+     "reads clearly"
+    ],
+    "impact": 4,
+    "cost": "M",
+    "confidence": 4
+   },
+   {
+    "title": "Price the PITCHED node \u2014 the class is legible but MissionNode.Intel is still blind to it (C3's declared open half)",
+    "kind": "improvement",
+    "evidence": "src/Run.cs:952-962 NodeIntel switches on node.Kind only; Run.IsKillObjective (src/Run.cs, C3) is the single source of truth for the class and is never consulted by NodeIntel. docs/DESIGN.md \u00a75.2: \"the pricing is NOT built ... a PITCHED node pays a TASKED node's rate ... the map tells the player which game they are choosing and still offers no reason to choose the hard one.\" docs/ROADMAP.md 'OPEN, left by C3' item 1 'Price the PITCHED node'. Measured gap on the current tree: DEVLOG \u00a7C3 post-lever cross-tab KILL 45.3 \u00b13.1 vs NON-KILL 81.8 \u00b11.1 on mid-run nodes (36.5 points). The hover already prints `+{hovered.Intel} intel` beside the class line (src/Hud.cs:5197, class row at 5185-5190), so the surface exists.",
+    "problem": "The fork now says PITCHED vs TASKED and then pays both the same, so a rational player always takes the 82% node over the 45% node; the two-class design DESIGN \u00a75.2 chose (option 3: legible AND priced) is half-shipped and the kill class is content nobody has a reason to pick.",
+    "proposal": "Add a class premium in Run.NodeIntel for Combat/Elite nodes whose Card.Objective is a kill objective (start at a flat +8 \u2248 one requisition row; or +2 per hostile body the node will field, computable at map time from EnemyBaseCount + mission + card.EnemyDelta + Heat.EnemyDelta) and print it as `+26 intel (+8 PITCHED)` on the hover (Hud.cs:5197) and the deploy card (Hud.cs:5655). Keep Start/Boss/Event at their current values. A second, complementary lever for a later wave \u2014 a per-body kill bounty on every objective, so declining the encounter on a TASKED node becomes a priced choice \u2014 should be measured separately, not bundled.",
+    "acceptance": "SIGHTLINE_CLASSTEST gains a leg: for every seed, any Combat/Elite node with IsKillObjective pays strictly more than a same-kind, same-column TASKED sibling; Event still pays 0; Start/Boss unchanged; PAIRTEST byte-identical (NodeIntel is deterministic, no draws). One CRN-paired balance round at h0/h4 reporting intel/run and byObjectiveByNodeKind, base commit stated (win-rate should barely move; report it either way). Screenshot of the barracks map hover on a PITCHED node.",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite",
+     "reads clearly"
+    ],
+    "impact": 4,
+    "cost": "S",
+    "confidence": 5
+   },
+   {
+    "title": "The campaign-map hover for an EVENT node reads 'EVENT - ELIMINATE / Standard force +0 intel'",
+    "kind": "defect",
+    "evidence": "src/Run.cs CardForNode, case NodeKind.Event returns the sentinel `new MissionCard { Objective = Objective.Eliminate, ModName = \"EVENT\", ... }` (comment: 'a non-null Card keeps any generic node.Card read null-safe'). src/Hud.cs:5191 `l1 = $\"{c.ModName}  -  {ObjName(c.Objective)}\"` has no Event guard, and Hud.cs:5572 ObjName defaults to \"ELIMINATE\"; src/Hud.cs:5196 `force = c.EnemyDelta > 0 ? ... : \"Standard force\"` has no Event guard; l2 appends `+{hovered.Intel} intel` which is 0 for events (src/Run.cs:959). Only the class row `lc` is guarded (Hud.cs:5185). The inline label is correct (\"EVENT\", Hud.cs:5157) and the enemy hint says \"UNKNOWN SIGNAL\", so the one surface a player reads to compare the fork contradicts itself.",
+    "problem": "An EVENT is the only zero-risk column on the map and it forgoes a fight's clear intel (10+4n + survivors + Heat.IntelBonus \u2014 up to +56/mission at h8), the +12 secondary, kills/promotions and bond progress; the tooltip instead tells the player it is an Eliminate fight against a standard force that pays nothing. A new player either avoids events as worthless fights or takes them expecting one; either way the real trade-off (safety vs income) is never shown.",
+    "proposal": "Special-case NodeKind.Event in the hover: l1 = \"EVENT  -  UNKNOWN SIGNAL\", l2 = \"No fight - no clear intel (a fight here pays ~+N)\" where N is the same-column sibling's NodeIntel, l3 = \"A situation and 2-3 choices; rewards come from the choice\". Factor the hover strings into a pure `Hud.NodeHoverLines(Run, MissionNode)` so they can be asserted headlessly.",
+    "acceptance": "A ROUTETEST or EVENTTEST leg: for every Event node on 50 seeds, NodeHoverLines contains neither an objective name nor the word 'force' and does contain 'EVENT'; FITTEST leg with Hud.MousePin over an Event node at all four text sizes (no ellipsis, inside plate). Screenshot: SIGHTLINE_MISSION=2 barracks with the pointer pinned on an event node.",
+    "pillars": [
+     "reads clearly",
+     "well-designed loop"
+    ],
+    "impact": 3,
+    "cost": "S",
+    "confidence": 5
+   },
+   {
+    "title": "Region names are decoration, but since C4 the biome they name is mechanical \u2014 put the ground rule on the fork",
+    "kind": "improvement",
+    "evidence": "docs/ROADMAP.md 'Region names are decoration. Nothing keys off them'. src/Voice.cs:90-94 RegionName picks from Regions[bi] with bi = the biome index, and src/Util.cs:324 Biome.IndexFor(missionNum, runSeed) is a pure function knowable at the barracks for every column (Game.cs:1908 BiomeIndex uses the same call). src/Terrain.cs:103 Terrain.Rule(biomeIndex) already holds the one-sentence rule. C4's five legibility surfaces (DEVLOG ~11278-11295: board, banner, briefing card appended in Game.BeginBriefing, shot tooltip, hover card + codex) are all at or after deployment; src/Hud.cs:5082-5088 draws only the region name in the map header. The cost is real and pre-deployment decisions could react: ROADMAP 'A quarter of MAGMA boards have no vent-free route' and 'a WOUNDED soldier (budget 6) cannot enter one at all'; C4 addendum: the ground layer's cost is concentrated on mission 1 (Start \u22124.37, t = \u22124.53).",
+    "problem": "The bench toggle, the requisition slate (FIELD MEDKIT / STIMS), the boon pick (PYROMANIACS) and counter-prep are all made at the barracks blind to the one board fact that C4 made mechanical \u2014 which soldier not to field on MAGMA, whether a wounded soldier will be stranded, whether ice will make the approach fast. The region name is the natural carrier and currently carries nothing.",
+    "proposal": "In Hud.DrawCampaignMap header print `KESSEL FLATS \u00b7 MAGMA` (Biome.All[bi].Name) per column; in the node hover add a short-form Terrain.Rule line for that column when the biome is mechanical (\"VENTS: block sight, burn, cost a full step\"); optionally tint the header with the C4 material rim colour. Add the same short line to the deploy card. Zero Util.Rng draws (all Hash3-derived).",
+    "acceptance": "Barracks screenshot on a seed whose next column is VERDANT/TUNDRA/MAGMA showing the header and hover line; FITTEST leg asserting the widened header fits at 120% text size with no ellipsis; VOICETEST and PAIRTEST unchanged/byte-identical (rendering only). A ROUTETEST leg that the header biome for column c equals Biome.IndexFor(c+1, seed) for 100 seeds.",
+    "pillars": [
+     "reads clearly",
+     "well-designed loop"
+    ],
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4
+   },
+   {
+    "title": "Field events are a ~1-in-9-run sight each; the DEVLOG's recommended cross-run dedupe is unbuilt",
+    "kind": "improvement",
+    "evidence": "src/Events.cs:95 EventCatalog.All has 17 entries; src/Run.cs:755 stamps events = Clamp(mids/4, 1, 2) per map; src/Events.cs:295 IndexForNode dedupes only within a run (pure function of MapSeed + map). DEVLOG \u00a7FUL-13 '\"?\"-NODE EXPOSURE LEVER': 'informant and reservecall fielded ZERO times in 200 campaigns ... each event is a ~1-in-9-run sight ... The honest exposure levers are floor-2 stamping (reshapes in-flight saves) or a cross-run catalog dedupe (profile-side, no skew)'. docs/ROADMAP.md OPEN 'Event exposure' carries the same two options. Meta persistence is whole-DTO append-only (src/Meta.cs header, SaveGame).",
+    "problem": "Run-to-run variety (DESIGN \u00a73.F) is supposed to come from combinations, and the event deck is the loop's only narrative beat; at 1-2 draws per run from 17 a returning player sees the same handful (ABANDONED CACHE, WOUNDED MEDIC) and never meets the FUL-10 forks. The two levers were measured and parked; nobody built the one with no save skew.",
+    "proposal": "Add `EventSalt` (int) to RunDto (append-only) and a `SeenEvents` ring (last ~12 ids) to meta.json. In Run.Start (interactive path only; NoPersist \u2192 salt 0 = today's selection, byte-identical) try salts 0..N and keep the first whose IndexForNode assignment for this map contains no seen id (fallback: fewest). Mix the salt into Events.Hash so IndexForNode stays a pure function of persisted run state (reload-stable). Append resolved ids to SeenEvents in ResolveEvent under !NoPersist.",
+    "acceptance": "EVENTTEST legs: salt 0 reproduces today's indices on three seeds; with a 6-id seen set the chosen salt yields only unseen events whenever the catalog allows; save round-trip preserves EventSalt. PAIRTEST byte-identical. A headless METATEST-style simulation of 20 consecutive runs from one profile prints distinct-events \u2265 min(17, draws) versus ~10 expected without dedupe.",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite"
+    ],
+    "impact": 3,
+    "cost": "M",
+    "confidence": 4
+   },
+   {
+    "title": "Five run CONTRACTS have zero balance data; the harness plumbing to price them exists and is unused",
+    "kind": "instrument",
+    "evidence": "src/Run.cs Contract enum: IronVeterans (no backfill \u2014 removes the AttritionFloor valve's normal path, Run.cs ~1560), HighStakes (+50% intel, no 55% field heal), Spearhead, MercenaryClause, LivingLegends (a KIA erases reserve records). src/Game.cs:1748-1750: `_run.Contract = NoPersist && ForcedContract != None ? ForcedContract : DraftContract` \u2014 SIGHTLINE_CONTRACT is honoured under the balance batch; src/Stats.cs:512 RecordContract and :1194/:1667 `winRateByContract` already exist. The only measurement on record is DEVLOG line ~1947: 'SIGHTLINE_CONTRACT=mrc|lgd autoplay x3 each: clean RESULT' \u2014 a smoke test, not a price. The draft card shows Desc/Flavor only (ContractDef, Run.cs); no difficulty or reward tag.",
+    "problem": "A contract is the largest run-defining choice after heat, taken at the draft with no information beyond its own text. A contract that is a trap (IRON VETERANS at h6+ with RELENTLESS already off backfill; HIGH STAKES when 'unspent holds flat 14-19 at every rung' per the intel table) or a freebie (SPEARHEAD's turn-1 action surge on a 97.5% opener) would be invisible, and the draft cannot say 'this is harder' because nobody knows.",
+    "proposal": "A measurement wave, no gameplay change: for each of the 5 contracts, SIGHTLINE_CONTRACT=<c> SIGHTLINE_BALANCE=20 \u00d7 2 slot bases (0/10) \u00d7 greedy+sloppy at h0 and h4, CRN-paired against a STANDARD control on the same slots (\u2248480 campaigns \u2248 5 min under xvfb at ~5 s/10). Publish win%, intel/run, avg missions, soldier KIA per run per contract under docs/measurements/<wave>/ with a README stating the base commit. Any contract >8 points off STANDARD gets a follow-up tune item; add a one-word measured tag (EASIER / HARDER / SIDEGRADE) to the draft card copy.",
+    "acceptance": "docs/measurements/<wave>/ containing 12+ chunk JSONs with runs=20 asserted and exit codes checked per the X2 contract; a table in DEVLOG with n and cluster SE per cell; run_chunk.sh reused. If the tag ships, a DRAFTTEST leg asserting each contract's tag string is present and fits the card at 120%.",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite"
+    ],
+    "impact": 3,
+    "cost": "M",
+    "confidence": 5
+   },
+   {
+    "title": "The WAR ROOM exhausts after ~5 wins while the heat cap climbs one rung per win at cap \u2014 the meta's second axis goes dark long before the first is climbed",
+    "kind": "improvement",
+    "evidence": "src/Meta.cs:60-69 unlock costs 40+70+90+50+35+45 = 330 salvage total, six unlocks. src/Game.cs:2770 salvage = (25+6m)(10+heat)/10 \u2192 61 for an h0 full clear, loss consolation 4(m\u22121)+2h \u2264 ~20; MetaProg.AchievementSalvage 20 \u00d7 9 achievements (Meta.cs:88,97-109). Remaining sinks: recall 10+8\u00d7rank (18-34, \u22643 per draft), draft re-roll 10, scar rehab 30, slate re-roll 5 (Meta.cs:76-83). src/Hud.cs:3697-3712: the NEXT UNLOCK card simply disappears when nothing is unowned (no 'all owned' state). src/Game.cs:2665-2673 UnlockHeatOnWin: +1 rung only when HeatLevel >= UnlockedHeat; with the C1 per-rung bot win rates (h0 44.4 / h1 37.5 / h2 32.5 / h3 27.5 / h4 20.9 / h5 20.6 / h6 13.9 / h7 9.7) the expected run count to open h8 is \u224839 \u2014 a bot figure, but the shape is what matters. DESIGN \u00a73.F: 'a player on run 100 should have MORE OPTIONS'.",
+    "problem": "A player who wins four or five times owns every unlock; from then on twenty-plus runs of climbing bank salvage with nothing to buy except veteran recalls, and the WAR ROOM screen offers no next thing. The run-to-run loop's 'my squad, my options' progression flattens exactly when the difficulty curve gets steep.",
+    "proposal": "Two or three HORIZONTAL unlocks built from content already in the tree and under-exposed, plus an explicit end state: (a) FIELD NETWORK \u2014 new runs on this profile stamp events at floor 2 (Clamp(mids/4, 2, 3)) via a persisted RunDto bool read in Run.Start before GenerateMap (in-flight saves keep their shape, which answers the DEVLOG's save-skew objection); (b) DEEP RESERVE \u2014 the draft shows 8 candidates instead of 6 (Run.DraftPoolSize parameterised); (c) an 'ALL UNLOCKS OWNED - salvage funds recalls and rehab' line in the WAR ROOM column so the plateau is stated. MetaUnlock is a persisted append-only enum: append at the END and re-pin SAVETEST.",
+    "acceptance": "METATEST legs per unlock under a stubbed profile (event count \u22652 on 20 seeds with FIELD NETWORK; pool size 8 with DEEP RESERVE; harness/NoPersist paths byte-identical \u2014 PAIRTEST); SAVETEST 'actual' hash pasted for the enum append; SIGHTLINE_COLD=1 and an all-owned WAR ROOM screenshot; FITTEST leg on the WAR ROOM at 120%.",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite"
+    ],
+    "impact": 3,
+    "cost": "M",
+    "confidence": 3
+   },
+   {
+    "title": "A mid-run AddHeat event silently switches the adaptive assist OFF for the rest of the run (and can advance the heat cap from a run started below it)",
+    "kind": "defect",
+    "evidence": "src/Run.cs:1146 `AssistLevel => HeatLevel > 0 ? 0 : Math.Min(AssistMax, LossStreak)` is derived from the LIVE HeatLevel; src/Game.cs:2095 re-reads `_run.AssistStatRelief` every SetupMission. src/Events.cs:458 AddHeat mutates run.HeatLevel; three catalog arms carry it (relic 'Claim it', informant 'Turn them in', reservecall 'Keep the roster', Events.cs ~195-270) with previews that say only '+1 Heat (tougher rest of run)'. The R2 review note at Run.cs:1130-1145 says the assist 'responds to a LOSS STREAK, not to a difficulty rung' and its target is 'the player on the on-ramp'. Second edge: src/Game.cs:2666 unlocks on `HeatLevel >= UnlockedHeat`, so a run started at h1 under a cap of 3 that takes two AddHeat arms finishes at h3 and raises the cap to 4.",
+    "problem": "The player the assist exists for (on a loss streak at h0) reads '+1 Heat' and actually pays +1 rung PLUS up to \u22125 force-wide stat relief from the next mission on \u2014 a hidden swing that can be six stat points, larger than any single heat rung. The preview under-states the cost precisely for the least-resilient player.",
+    "proposal": "Freeze the assist at run start: add `AssistTier` (int, append-only RunDto field) set in Game.StartMission from LossStreak and the STARTING heat, and make AssistStatRelief read it instead of the live HeatLevel; keep AssistPreview on the intro unchanged. Alternatively (S, copy-only) append '(ends your assist)' to the three previews when AssistLevel > 0 via a small Hud check. Decide separately whether UnlockHeatOnWin should compare the STARTING heat (record `StartHeat` on the run) \u2014 DESIGN says winning AT the cap unlocks; an event-raised finish is arguably earned.",
+    "acceptance": "EVENTTEST/METATEST leg: a run with LossStreak=3 at heat 0 takes AddHeat, then SetupMission's statDelta still carries \u22123 relief (currently it carries 0 \u2014 the leg must FAIL pre-fix). SAVETEST round-trips the new field; PAIRTEST byte-identical (flywheel LossStreak is 0). Screenshot of the CURSED RELIC card under SIGHTLINE_LOSSSTREAK-style staging if the copy route is taken.",
+    "pillars": [
+     "stakes that bite",
+     "reads clearly",
+     "well-designed loop"
+    ],
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4
+   },
+   {
+    "title": "Heat's intel kicker is paid in full on missions 1-2 where heat's numeric teeth are graced to zero \u2014 the apex's economy is front-loaded and undocumented",
+    "kind": "doc",
+    "evidence": "src/Game.cs:2090-2091 (campaign): `if (n <= 1) { heatEnemy = 0; heatStat = 0; heatDmg = 0; } else if (n == 2) { ... /= 2 }`. src/Game.cs:2632 `heatBonus = Heat.IntelBonus(_run.HeatLevel)` with no mission term; src/Run.cs:570-575 IntelBonus(8) = 8\u00d73 + 64/2 = 56. So an h8 campaign banks +56 at m1 and +56 at m2 (\u2248112 intel, two full requisition slates at the shop costs in Game.cs:401-408) against a force carrying none of the ladder's bodies/stats/damage. DEVLOG \u00a7FUL-13 intel table: h8 earned 197.6/run with heat-bonus 112.0 \u2014 i.e. the average h8 run's ENTIRE heat income is m1-2's, because the wall ends most h8 runs at m3-4. Nothing in DESIGN.md or the heat selector copy (Hud.cs:1124, 6159 'Pays +N intel per mission') says the carrot arrives two missions before the stick.",
+    "problem": "The heat ladder's stated contract is 'harder fight, bigger payout'; in practice at h6-h8 the payout is mostly collected during the grace and the fight arrives after the shop has been visited twice. It is not a lever to pull now \u2014 h6/h8 already sit under their band floors (L4) and cutting early intel makes them harder \u2014 but the next base-difficulty round will misread any intel-side effect unless the split is visible.",
+    "proposal": "Instrument, then state: extend Stats.RecordIntel's heat-bonus share with a per-mission breakdown (heatBonusByMission) in the balance JSON, and add one sentence to DESIGN.md \u00a73.D / the heat selector tooltip ('teeth from mission 3; pays from mission 1'). Record a candidate lever for the base-difficulty round \u2014 IntelBonus(level, mission) following the same 0 / half / full ramp \u2014 explicitly NOT to be shipped while h6-h8 are under floor.",
+    "acceptance": "A BALANCE=10 chunk whose JSON carries heatBonusByMission summing to the existing heat-bonus field (inert_diff.sh shows only the new key); the DESIGN/tooltip sentence present; FITTEST leg on the heat selector at 120% unchanged.",
+    "pillars": [
+     "stakes that bite",
+     "reads clearly"
+    ],
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4
+   },
+   {
+    "title": "ELITE's 'Bonus perk' reward (and ADV. TRAINING / event training) lands on a RANDOM eligible survivor \u2014 the player takes the +2-body fight and does not choose who benefits",
+    "kind": "improvement",
+    "evidence": "src/Run.cs TryQueueBonusPerk (between GenerateOffers ~985 and PickPerkPair): `var eligible = Squad.FindAll(u => CountAvail(u) >= 2); var u = eligible[Util.RandInt(0, eligible.Count - 1)];` \u2014 Run.AddBonusPerk (Elite card, Game.cs:2596), the ADV. TRAINING shop item (Game.cs:419 'Grant a soldier a bonus perk choice') and Events GrantBonusPerk (Events.cs ~430) all route through it. The Elite price is real: DEVLOG \u00a7C3 cross-tab Eliminate on Elite 32.4% vs Combat 53.3%; C4 addendum Elite 72.3% vs Combat 78.2% (n\u2248240). The recipient can be a benched rookie or a soldier about to be released by THE RESERVE CALLS.",
+    "problem": "The run's most expensive fork reward is untargeted, so it cannot be part of a squad-building plan (the perk lines in Run.ClassLine exist precisely so a soldier 'grows into its archetype'); a 16-intel ADV. TRAINING buy likewise cannot be aimed at the veteran it is bought for. A reward the player cannot direct is weaker than its price suggests.",
+    "proposal": "Cheapest: make the recipient deterministic and legible \u2014 the deployed survivor with the most kills THIS mission for the Elite card (say so in the Report line: 'VEGA earns the ELITE bonus perk'), and the highest-rank deployed soldier for ADV. TRAINING; both with a stable tiebreak (DeployPreference). Better (M): queue the offer with Unit = null and let DrawPerkChooser show a one-row soldier picker before the A/B pick.",
+    "acceptance": "A Run-level self-test leg (TRAITTEST/CONTRACTTEST pattern): a squad with known kills clears an Elite card \u2192 PendingPerks[0].Unit is the top-kills survivor on three seeds; the Report line names them. Autoplay \u00d73 clean (the bot resolves the same offer). Screenshot of the debrief line. Note this changes an RNG draw order (one fewer Util.RandInt per bonus perk) \u2014 run PAIRTEST and record that CRN worlds shift, as W9 did.",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite"
+    ],
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4
+   }
+  ]
+ },
+ {
+  "lens": "product-ship",
+  "summary": "The distributable is in unusually good shape for a solo-dev game: CONTOUR C6 gave it a version stamp read off the assembly (Ship.cs:30-45), an enforced 8-file bundled manifest (Ship.cs:73-82), atomic player-data writes, a publish script that re-proves the binary it built (scripts/publish.sh), and a licence position that is decided, committed and shipped (LICENSE, DISTRIBUTION.md:208). What is NOT in shape is the seam between that artifact and a stranger: the primary DEPLOY SQUAD door is the only intro button drawn with a null key hint even though Enter triggers it (Hud.cs:2601-2615 vs Game.cs:8248-8262); the cold main menu's only resting sentence advertises LAST STAND and the difficulty card reads \"0 / MAX UNLOCKED: 0\" (Hud.cs:2689, 6114-6126); an unhandled exception or a missing libraylib.so exits with nothing a player can attach (Program.cs:1263 has no catch; ROADMAP.md:2564); the Windows build is a console-subsystem exe (Sightline.csproj:4); README's controls and class tables disagree with the derived key set on six rows; and the release story stops at `<Version>1.0.0` \u2014 no tag, no changelog, no versioned or checksummed archive, and a first-launch window that never checks it fits the monitor (Display.cs:733-750). Every item below is S or M and has a headless or screenshot gate; none touches gameplay code, so PAIRTEST byte-identity is the regression check for all of them.",
+  "findings": [
+   {
+    "title": "DEPLOY SQUAD is the only intro door with no key hint, yet Enter already triggers it",
+    "kind": "defect",
+    "evidence": "src/Hud.cs:2601-2615 draws the primary button twice as `DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn)` (keyHint = null) while every other door passes one: CONTINUE \"C\" (2608), TRAINING OP \"N\" (2627-2628), LAST STAND \"L\" (2633), WAR ROOM \"W\" (2643), FIELD MANUAL \"K\", SKIRMISH \"S\" (2648), DAILY \"Y\" (2650), AUDIO CHECK \"U\" (2656), QUIT \"Q\". Meanwhile src/Game.cs:8248-8262 in HandleOverlayClick: `bool enter = Raylib.IsKeyPressed(KeyboardKey.Enter); if (!click && !enter) return; ... BeginDraft()` \u2014 so Enter on the intro opens the DRAFT. The lead photographed the missing chip on the SIGHTLINE_COLD=1 intro.",
+    "problem": "A first-time player sees nine doors labelled with keys and the one they are supposed to take labelled with none, so the primary verb reads as mouse-only; at the same time an UNLABELLED Enter starts a campaign, so a player who taps Enter to dismiss the screen is dropped into the squad draft. Both halves are the opposite of 'reads clearly' on the first screen in the game.",
+    "proposal": "Pass \"ENTER\" as the keyHint in both DrawOverlayButton calls for DEPLOY SQUAD (check the chip geometry in DrawOverlayButton at Hud.cs:6206 handles a 5-character hint at UiScale 1.2 \u2014 DEVLOG:9209-9213 already records the [K]/[U] chips colliding at 120%). While there, route a `Hud.IntroNullHintDraws` counter through whichever intro-drawing self-test exists (CHROMETEST/COLD path) so a future button cannot ship hint-less.",
+    "acceptance": "`SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1 SIGHTLINE_SHOT=90` screenshot shows an [ENTER] chip on DEPLOY SQUAD; with a save present both [C] CONTINUE RUN and [ENTER] DEPLOY SQUAD chips are visible and do not overlap at SIGHTLINE_UISCALE=3; the self-test asserts `IntroNullHintDraws == 0` and PAIRTEST stays byte-identical.",
+    "impact": 4,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "No crash log: an unhandled exception (or a missing libraylib.so) exits with nothing a player can attach",
+    "kind": "instrument",
+    "evidence": "The live loop `while (!Raylib.WindowShouldClose())` at src/Program.cs:1263 sits in Main with no try/catch \u2014 the only catch sites in Program.cs are the FUL-2 save-restore at 1345-1350 and CONTRASTTEST at 2306/2314. The first native call `Raylib.SetConfigFlags` at Program.cs:1018 throws DllNotFoundException if libraylib.so is absent, which is exactly the 'I copied only the executable' case README.md:122-124 warns about in prose only. ROADMAP.md:2564-2565 lists 'No crash reporter and no log file ... there is nothing to attach' as open; DISTRIBUTION.md:253-261's player-data table has no log entry.",
+    "problem": "A player who double-clicks the binary and hits an exception sees the window vanish; on a desktop launch there is no terminal, so the stack trace goes nowhere. The C6 version stamp exists so a bug report can name a build, but the report has no payload \u2014 team-facing triage is guesswork, and 'the game does nothing when I open it' (libraylib.so missing) is indistinguishable from any other failure.",
+    "proposal": "Wrap the live path (from before InitWindow through the loop) in try/catch; on exception write `crash-<Ship.Version>-<utc>.txt` into `SaveGame.ConfigDir` via `SaveGame.WriteAtomic` (needs no raylib) containing Ship.VersionLabel, RID/OS, Environment.Version, the exception + stack, and Phase/mission/turn if a Game exists; keep the last 5; print the path to stderr and rethrow so the exit code stays non-zero. Add `SIGHTLINE_CRASHTEST=1`: a `Game.DebugThrowAtFrame` that throws inside Update at frame 30, run under the SHIPTEST stash/restore pattern, asserting the file landed and contains the version string; route through qa-sweep's `verdict`. Document the path in DISTRIBUTION.md \u00a75 and README's bug-report sentence (README.md:100). Pairs with the WinExe finding: once the Windows console is gone, this file is the ONLY evidence a Windows player has.",
+    "acceptance": "`SIGHTLINE_CRASHTEST=1` prints PASS in `bash scripts/qa-sweep.sh --full` and the COVERAGE GUARD lists it; hand-check: delete libraylib.so from a `scripts/publish.sh` output, run `./Sightline`, and `$XDG_CONFIG_HOME/Sightline/crash-1.0.0-*.txt` names DllNotFoundException; normal autoplay x3 unchanged.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "The Windows distributable is a console-subsystem exe: a black cmd window opens beside the game",
+    "kind": "defect",
+    "evidence": "Sightline.csproj:4 `<OutputType>Exe</OutputType>` with no `WinExe` and no `ApplicationIcon`; DISTRIBUTION.md:111-114 records the win-x64 cross-publish as 'unverified beyond it produces the right files'. On Windows a .NET `Exe` OutputType links the CONSOLE subsystem, so a double-click launches Sightline.exe plus a console window that lives for the session. No dist/ exists in this container to read the PE header from, so this is inferred from the csproj, not measured.",
+    "problem": "The one platform where a stranger is most likely to double-click a zip is the one where the product opens with a terminal behind it \u2014 it reads as a debug build. It also means a crash flashes a stack trace in a window that closes with the process, which is worse than nothing for a report.",
+    "proposal": "Set `<OutputType>WinExe</OutputType>` (on Linux/macOS WinExe is identical to Exe, so nothing here changes) or condition it on `$(RuntimeIdentifier.StartsWith('win'))`. Note in DISTRIBUTION.md \u00a72 that self-test stdout on Windows still lands in a file when redirected (`SIGHTLINE_SAVETEST=1 .\\Sightline.exe > out.txt`). Add to scripts/publish.sh, for win RIDs, a PE-subsystem check readable from Linux (python: `e_lfanew = u32 @0x3C; Subsystem = u16 @ e_lfanew+4+20+68`, expect 2 = GUI) so the leg is verified here without a Windows box.",
+    "acceptance": "`bash scripts/publish.sh --rid win-x64` prints `SUBSYSTEM: GUI (2)` for Sightline.exe; `bash scripts/publish.sh` (linux-x64) still reports SAVETEST/METATEST/SHIPTEST PASS from the same csproj; Release build 0/0.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "looks good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "README controls and class tables disagree with the derived key set on six rows",
+    "kind": "doc",
+    "evidence": "Derived with `grep -ohE 'KeyboardKey\\.[A-Z][a-zA-Z0-9]*' src/*.cs | sort -u`. In-mission verbs at src/Game.cs:4858-4883 include H HACK, X EXTRACT, E STABILIZE, G BEACON, V SHOW ALL VERBS, P restart drill \u2014 none are in README.md:73-96. README.md:84 '6 / FLASH \u2014 Flashbang' but Six is `ToggleItem()` (Game.cs:4868), the class utility item from `ItemKind { Smoke, Flash, Barricade, Incendiary }` (src/Unit.cs:17). README.md:94 lists U as global; U is bound only in the intro handler (Game.cs:8200). README.md:71 says the FIELD MANUAL opens 'at any time with K'; K is bound only on the intro (Game.cs:8163) and as BACK inside the codex (Game.Codex.cs:56) \u2014 ROADMAP.md:2596 confirms 'no field manual (K is Phase.Intro-gated)' from BARRACKS. README.md:57-62 lists four classes; CORPSMAN (SMG, HEAL) exists (Unit.cs:9,14,76). README.md:151-164 lists 11 of ~22 source files. None of the intro keys (N/L/W/S/Y/U/C/Q, arrows for heat) appear anywhere. The in-game VERBS & KEYS tab is already generated from `Hud.VerbTable` (src/Codex.cs:253-268) so a single source exists.",
+    "problem": "README is the first thing a stranger reads and the first thing the human checks against the game; a table that is wrong on four rows and missing six keys teaches distrust of everything else in it, and the 'at any time' claim sends a player hunting for a key that does nothing in a mission.",
+    "proposal": "Add a hand-run `SIGHTLINE_KEYTABLE=1` hook that prints the README markdown from `Hud.VerbTable` + the codex's non-verb entries (selection/camera/global/intro), paste it into README, and say in README that the table is generated. Fix the class table (5 classes, Corpsman = SMG/HEAL), reword the K claim to 'from the main menu', rename row 6 to UTILITY ITEM (class-dependent), and refresh the project-layout block from CLAUDE.md's file map.",
+    "acceptance": "`SIGHTLINE_KEYTABLE=1 ./Sightline | diff - <(sed -n '/^| Input/,/^$/p' README.md)` is empty; every letter in README's table is in the derived grep set and every player-facing bound letter is in the table; no code behaviour change (PAIRTEST identical).",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "The cold main menu's only resting sentence advertises LAST STAND; nothing says 'start with TRAINING OP'",
+    "kind": "improvement",
+    "evidence": "src/Hud.cs:2686-2691: the shared caption slot at rest is `bestWave > 0 ? \"LAST STAND BEST: n\" : \"ENDLESS HORDE SURVIVAL\"` \u2014 on a fresh profile that is the sentence under the buttons for the whole first minute. TRAINING OP takes a green plate when `!Display.TrainingSeen` (Hud.cs:2627) but its explanation ('a short live-fire drill; nothing is saved') is hover-only (Hud.cs:2682). DEVLOG.md:9031-9035 records that this screen had never been photographed before C6; ROADMAP.md:2584-2593 records the intro has ten doors and no settings entry.",
+    "problem": "The first 60 seconds are a choice between eleven doors, and the one always-visible line of guidance names the endless horde mode \u2014 the danger mode \u2014 to the one player who has not learned a verb yet. The on-ramp T1 built (TRAINING OP, RECRUIT) is present but silent.",
+    "proposal": "When `!Display.TrainingSeen && !SaveGame.Exists` (the cold state), the resting caption becomes a Pal.Good line such as 'NEW HERE? TRAINING OP [N] TEACHES THE VERBS IN A FEW MINUTES - NOTHING IS SAVED'; once TrainingSeen or bestWave > 0 the existing LAST STAND line returns. Zero layout change, one string.",
+    "acceptance": "`SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1 SIGHTLINE_SHOT=90` shows the nudge; the non-COLD INTRO shot is pixel-unchanged in the caption slot; the intro-drawing self-test asserts the string under TrainingSeen=false and its absence under TrainingSeen=true; Cfg.Measure at UiScale 1.2 fits the 1280 width.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "well-designed loop"
+    ]
+   },
+   {
+    "title": "'MAX UNLOCKED: 0' and a bare '0' as the difficulty readout on a fresh profile",
+    "kind": "improvement",
+    "evidence": "src/Hud.cs:6114-6126: the DIFFICULTY card paints the rung as `level.ToString()` at 40px unless it is RECRUIT (which is deliberately a WORD, per the comment at 6108-6111), then `Cfg.Text($\"MAX UNLOCKED: {unlocked}\", ...)` at 6126. On a fresh profile `UnlockedHeat = SaveGame.LoadMetaHeat()` (src/Game.cs:1892) is 0. The unlock rule is 'clear a run AT the cap to raise it by one' (`UnlockHeatOnWin`, Game.cs:2664-2675) and the panel's own comment knows it ('the cap rises when you WIN at it', Hud.cs:6047-6050) \u2014 but the screen never states it. The lead photographed 'MAX UNLOCKED: 0' on the cold intro.",
+    "problem": "The difficulty card is the only decision surface on the first screen. '0' is not a name for the designed fight, and 'MAX UNLOCKED: 0' reads as 'you have nothing' rather than 'win once and heat 1 opens' \u2014 the stake that would make a first campaign matter is hidden behind a zero.",
+    "proposal": "Paint rung 0 as the word STANDARD on the same 26px word path RECRUIT uses (its body copy already calls it 'standard difficulty - the designed fight', DEVLOG.md:9210), and replace the MAX UNLOCKED line with the rule: when `level == unlocked` and `unlocked < Heat.Max`, 'WIN AT THIS HEAT TO UNLOCK HEAT {unlocked+1}' (cold profile: 'WIN A CAMPAIGN TO UNLOCK HEAT 1'); otherwise keep 'MAX UNLOCKED: n'. Since this panel is the one DEVLOG:9209-9213 says overflows at 120%, add the intro as FITTEST's sixth leg in the same wave (ROADMAP.md:2556-2559).",
+    "acceptance": "COLD intro shot shows STANDARD + the unlock rule; a `SIGHTLINE_HEAT`-staged intro at unlocked=3/level=3 shows 'WIN AT THIS HEAT TO UNLOCK HEAT 4'; FITTEST gains an intro leg that passes at UiScale idx 0-3; HEATLADDERTEST/MIDTOOTHTEST unchanged (display only).",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "First-launch window is a fixed 1280x800 that is never checked against the monitor; on a 1366x768 laptop the action bar is off-screen",
+    "kind": "improvement",
+    "evidence": "src/Display.cs:255-256 `Sizes` starts at (1280,800); `Display.Init` (409-463) ends `Load(); Apply();` \u2014 with no display.json `Load()` (817-848) returns early so SizeIdx=0/Fullscreen=false, and `Apply()` (733-750) calls `SetWindowSize(1280,800)` then centres with `GetMonitorWidth/Height` without ever comparing them to the window. The window is `ResizableWindow` (Display.cs:415) with no `SetWindowMinSize`. F11 does work from any phase (src/Game.cs:3928, inside Update) but is only advertised in README; ROADMAP.md:2584-2593 (C5, open) records that the pause card is the sole home of FULLSCREEN/WINDOW and is unreachable from the intro.",
+    "problem": "On the most common laptop panel (1366x768) the 800px-tall window plus title bar exceeds the screen: the bottom action bar \u2014 where every verb button lives \u2014 is cut off, and the only remedies (F11, or Esc in a mission) are undiscoverable from the first screen. The human's machine will not show this; a stranger's laptop will.",
+    "proposal": "In `Display.Apply()` on first launch (no display.json), if `GetMonitorHeight(mon) < h + 64` or `GetMonitorWidth(mon) < w`, choose Fullscreen=true (Apply already has the monitor-resolution path) and persist it, printing one `DISPLAY:` line naming the decision; and add a small '[F11] FULLSCREEN' hint to the intro footer beside the version stamp (Hud.cs:2701-2703) so the toggle is discoverable without a mission. Gate on the decision, not on X11 geometry: under Xvfb there is no window manager, so `ToggleFullscreen` may not resize.",
+    "acceptance": "`SIGHTLINE_POSTFX=1 SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1 SIGHTLINE_SHOT=90` (POSTFX forces Display.Init(true) in shot mode, Program.cs:1013/1028) under `xvfb-run -s \"-screen 0 1366x768x24\"` prints `DISPLAY: monitor 1366x768 cannot hold 1280x800 -> fullscreen` and the throwaway `.xdg/Sightline/display.json` reads `\"Fullscreen\":true`; the same run under the house 1280x800 screen prints nothing and leaves Fullscreen=false; the intro shot shows the F11 hint.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 3,
+    "pillars": [
+     "looks good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "No release story: v1.0.0 is stamped but there is no tag, changelog, versioned archive, checksum, or version in the window title",
+    "kind": "improvement",
+    "evidence": "`git tag -l` is empty. Sightline.csproj:15-16 `<Version>1.0.0</Version>` ('bump it by hand when you cut a build'). scripts/publish.sh sets `OUT=\"${OUT:-dist/$RID-$MODE}\"` and ends at `ls -1 \"$OUT\"` + `>> done. Ship the whole '$OUT' directory.` \u2014 no tar/zip, no SHA256SUMS, no version in the name. `ls docs` shows no CHANGELOG. src/Program.cs:1019 titles the window 'SIGHTLINE \u2014 Tactical Squad Combat' with no version; README.md:100 tells players to quote the pause-card version, which exists only inside a mission. DISTRIBUTION.md \u00a72 has no macOS row although the NuGet carries `runtimes/osx-arm64` and `osx-x64` (ROADMAP.md:2569 'macOS was never even cross-published').",
+    "problem": "Two builds handed out a week apart are both 'dist/linux-x64-release' and both say v1.0.0, so a bug report cannot be matched to a commit and a recipient cannot verify a download; 'ship the whole directory' with no archive step is how a stranger ends up with only the executable (the missing-libraylib case). Team-facing mostly, but it is the last mile of C6's 'ships like a product'.",
+    "proposal": "One wave: (a) a `SIGHTLINE_VERSION=1` hook (after the SHIPCHILD branch, before InitWindow) that prints `Ship.VersionLabel` and exits, so publish.sh names the output `sightline-<version>-<rid>` from the binary itself (single source), then writes `.tar.gz` (zip for win RIDs) plus `SHA256SUMS`; (b) `docs/CHANGELOG.md` with a v1.0.0 entry that points at DEVLOG sections rather than re-narrating them, and a CLAUDE.md rule: bump `<Version>`, CHANGELOG and `git tag v<version>` in one commit; (c) window title `SIGHTLINE v{Ship.Version}`; (d) run `--rid osx-arm64`/`osx-x64` once and add the rows to the \u00a72 matrix with 'unverified beyond file list' as the Windows row already says.",
+    "acceptance": "`bash scripts/publish.sh` yields `dist/sightline-1.0.0-linux-x64.tar.gz` and `sha256sum -c SHA256SUMS` passes inside the extracted dir; `SIGHTLINE_VERSION=1 ./Sightline` prints `SIGHTLINE v1.0.0` and exits 0 window-free; `git tag` shows v1.0.0 on the merge commit; osx rows exist in DISTRIBUTION.md \u00a72 with file counts.",
+    "impact": 2,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "Root LICENSE: ROADMAP still says OPEN though it was decided and shipped; keep all-rights-reserved but the text grants a build recipient no right to play, and \u00a74's table omits Chakra Petch",
+    "kind": "doc",
+    "evidence": "docs/ROADMAP.md:1361-1364 lists 'Root LICENSE \u2014 OPEN OWNER DECISION' unchecked, while DISTRIBUTION.md:208 says 'DECIDED (CROSSCUT) SHIPPED (C6)', ROADMAP.md:2531-2532 ticks 'Ship the root LICENSE', and LICENSE is in `Ship.RequiredFiles` (src/Ship.cs:73-82). LICENSE:8-10 says distributing a build 'is not restricted by this notice; recipients of such a build receive no rights to the source' \u2014 but nowhere grants a recipient the right to install or play the build, which is the one question a recipient of a zip has; DISTRIBUTION.md:223 nevertheless claims it is 'unambiguous to a recipient of a build'. LICENSE:2 names the holder as 'the SIGHTLINE project owner' \u2014 no name or handle to ask for permission. DISTRIBUTION.md:195-201's component table has four rows and omits Chakra Petch, which THIRD-PARTY-NOTICES.txt F2 and `Ship.NoticeComponents` (Ship.cs:96) both carry.",
+    "problem": "A stale OPEN item invites a future session to re-litigate a closed decision, and the shipped text leaves a player technically unlicensed to run what they were handed \u2014 the exact ambiguity the decision claimed to remove. Team-facing, but it is in the build every recipient gets.",
+    "proposal": "Recommendation: KEEP all-rights-reserved for the source (LICENSE:24-31's one-way-reversibility argument is right and selling the game has not been ruled out). Add one paragraph granting recipients of a compiled build a personal, non-exclusive, non-transferable licence to install and play it, with redistribution of the build requiring permission. Replace 'the SIGHTLINE project owner' with the owner's name or GitHub handle. Tick ROADMAP.md:1361 with a pointer to DISTRIBUTION \u00a74, add the Chakra Petch row to the \u00a74 table, and extend SHIPTEST leg (2) with one string ('granted') so the grant cannot be lost.",
+    "acceptance": "`SIGHTLINE_SHIPTEST=1` still PASSes from a `scripts/publish.sh` output and FAILs if the grant paragraph is removed from the published LICENSE; ROADMAP has no unchecked LICENSE item; \u00a74 table lists five components matching `Ship.NoticeComponents`.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "display.json settings never round-trip in any self-test; SHIPTEST's second-launch child already has the seam to prove it",
+    "kind": "instrument",
+    "evidence": "ROADMAP.md:2560-2563 (C6, open): 'display.json load-back cannot be verified headlessly' because `Display.Init` calls `Load()` after `if (!enabled) return` (src/Display.cs:411-412, 462) and every shot/autoplay path passes false. But `Display.LoadForTest()` / `SaveForTest()` are public and independent of `Enabled` (Display.cs:810-811), and `Ship.SecondLaunchChild` (Program.cs:26-30, Ship.cs SHIPTEST leg 3b) already forks a second process that banks a meta sentinel the parent reads back. Display.Load clamps every index (Display.cs:826-845) and stashes a corrupt file as evidence (812-814), so the only unproven half is the cross-process read-back.",
+    "problem": "The most frequently written player-data file (every fader drag, every tip dismissed) is the one whose load path has zero coverage; a regression like the pre-C6 non-atomic write would again be invisible until a player's brightness, colourblind mode or text size silently reset \u2014 the accessibility settings C5 flagged as hardest to reach.",
+    "proposal": "Extend SHIPTEST leg (3b): the child sets a distinctive combination (BrightIdx=4, UiScaleIdx=3, Colorblind=true, VolMaster=0.33) through `SaveForTest()`; the parent calls `LoadForTest()` after the child exits and asserts every field, then restores via the existing stash. No Display.Enabled needed, so it runs window-free in the sweep and in publish.sh against the published binary.",
+    "acceptance": "`SIGHTLINE_SHIPTEST=1` prints a `display:roundtrip` sub-leg in its PASS line; temporarily breaking `Display.Load`'s BrightIdx assignment makes it read `FAIL (display:brightIdx)`; `bash scripts/publish.sh` still PASSes all three legs.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "feels good"
+    ]
+   },
+   {
+    "title": "No window icon anywhere; a procedural one costs no committed binary",
+    "kind": "improvement",
+    "evidence": "`grep -rn 'SetWindowIcon|ApplicationIcon' src Sightline.csproj` returns nothing; ROADMAP.md:2566-2568 lists 'No installer, icon, window-title art or .desktop file' as open (and correctly rules code signing out permanently). raylib exposes `SetWindowIcon(Image)`; the project already bakes textures in-engine (`GenImageWhiteNoise` in Display.cs:449, `GenImage*` per CLAUDE.md), so a 64x64 icon drawn with `GenImageColor` + `ImageDraw*` in `Pal` colours is consistent with the asset policy.",
+    "problem": "The taskbar, alt-tab and Explorer entries show a generic executable glyph next to a game whose whole identity is a strict geometric aesthetic \u2014 the product surface a stranger sees before the first frame does not match the first frame.",
+    "proposal": "`Renderer.MakeIcon()` draws the game's diamond/reticle motif (the same end-cap diamond used on the intro pitch line, Hud.cs:2592-2593) at 64x64 and `SetWindowIcon` is called right after InitWindow in the live path only (Program.cs:1019-1020). Optional second half: a hand-run `SIGHTLINE_ICON=1` hook exports it via `ExportImage` to `docs/icon.png` and a small committed `.ico` for `<ApplicationIcon>` so the Windows exe carries it too (a few KB, allowed under 'commit small files only').",
+    "acceptance": "`SIGHTLINE_ICON=1` writes docs/icon.png which reads as the motif when inspected; the live path calls SetWindowIcon exactly once (assert via a counter in a window-free test) and the harness paths never do; taskbar appearance confirmed by the human on their machine \u2014 the only honest gate for the icon itself.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "looks good"
+    ]
+   }
+  ]
+ },
+ {
+  "lens": "code-health",
+  "summary": "The tree is in good shape where it counts (Release builds 0/0, the sweep is a real gate since C3, PAIRTEST pins CRN identity), but the continuity layer around it has drifted in exactly the way the repo's own history warns about: hand-maintained registries and counts. CLAUDE.md still says Game.cs is 4707 lines when it is 8317 \u2014 larger than the 7648 it was split from \u2014 its file map omits eight files including Mission.cs, it carries two duplicated paragraphs one of which still publishes the refuted free-key list, and both copies tell a fresh session to grep Program.cs for the dial set when 37 of 226 dials are read only elsewhere. The sweep launches TUTTEST and THREATTEST twice, its COVERAGE GUARD counts hook names that appear in comment lines (so a commented-out test still reads as run) and cannot see the PASS/FAIL PROBE hook, and it pays a `dotnet run` launch 79 times where publish.sh already runs the binary directly. Three invariants CLAUDE.md states in prose (no direct DrawTextEx, no raw GetTime outside Now(), render purity) have no static backstop even though FXSTREAM shows the pattern costs three lines. The mechanical extractions (Game.cs banner blocks, the 10k-line harness, Program.Main's 1386 lines) all have the same cheap verification path the project already trusts: build 0/0, sweep green with an unchanged footer, PAIRTEST byte-identity.",
+  "findings": [
+   {
+    "title": "CLAUDE.md contradicts the tree at the points a fresh session reads first (file map, duplicated paragraphs, stale free-key list, wrong dial-registry grep)",
+    "kind": "defect",
+    "evidence": "CLAUDE.md:288 says `Game.cs ... (4707 lines)`; `wc -l` gives 8317, and ROADMAP:639 / FEATURES:458 record the 7648->4707 split it is quoting. The Architecture file map omits eight files in src/: Mission.cs (1923 lines \u2014 the file CLAUDE.md's own 'THE EXCHANGE' paragraph names via `Mission.MakeHostile`), Voice.cs (1006), Audio.Analysis.cs (634), Game.Modes.cs (656), Game.Meta.cs (625), Game.Endless.cs (544), Game.Audition.cs (317), Hud.Audition.cs (296). Two paragraphs are duplicated: '**Self-tests & measurement**' at lines 184 and 229, '**Free keys**' at 213 and 218 \u2014 and the 213 copy still publishes `I J N O P Q U V Z` as free while the binary binds N (Game.cs:8191), P (4881), U (8200, Game.Audition.cs:176), V (4882), Q (5072, 8207); its 'Bound today' list also omits F11 (Game.cs:3928) and Minus/Equal (Game.Modes.cs:89-91). Both copies (lines 188, 251) say 'grep Program.cs for the authoritative set' of hooks, but 37 of the 226 distinct `SIGHTLINE_*` dials are read only outside Program.cs (e.g. SIGHTLINE_TIP/BRACETIP Game.cs:1053-1054, FORCEBIOME Util.cs:329, MOVESTYLE Renderer.cs:1359, OLDFIT Hud.cs:4081, HUDINFX Display.cs:550). The wall-clock paragraph says '57 ... 46 in Renderer.cs ... 11 in Hud.cs' and three sentences later 'the 12 wall-clock reads in Hud.cs'; counted today with comments stripped and the declaration excluded it is 46 + 12 = 58, which is what Display.cs:20 already says.",
+    "problem": "CLAUDE.md is the bootstrap contract for every autonomous session, and it explicitly warns that its free-key list was wrong four times and its test count six times \u2014 yet the wrong list is still in the file above the correction, and the 'authoritative set' instruction would send a session to the wrong file. A session that trusts the file map cannot find Mission.cs, and the 4707 figure hides that the split's benefit has been entirely eroded. This is team-facing velocity: every session pays for re-deriving what the doc claims to give.",
+    "proposal": "One wave, docs only. (1) Replace every literal count in CLAUDE.md with a DERIVE block of four commands: file sizes (`wc -l src/*.cs | sort -n`), bindings (`grep -ohE 'KeyboardKey\\.[A-Z][a-z0-9]*' src/*.cs | sort -u`), dials (`grep -ohE 'GetEnvironmentVariable\\(\"SIGHTLINE_[A-Z0-9_]+\"' src/*.cs | sort -u`), self-tests (the sweep's own footer). (2) Delete the 213-217 free-keys paragraph and the 184-188 self-tests paragraph (keep the corrected copies). (3) Regenerate the file map from `ls src` with one-line purposes for the eight missing files, no line counts. (4) Fix '57/11' to match the counted 46+12=58 or, better, replace it with the grep. Also delete the in-code duplicate registry comment at Game.cs:3922-3926 in favour of pointing at the grep.",
+    "acceptance": "`for f in src/*.cs; do grep -q \"$(basename $f)\" CLAUDE.md || echo MISSING $f; done` prints nothing; `grep -c '^\\*\\*Free keys' CLAUDE.md` and `grep -c '^\\*\\*Self-tests' CLAUDE.md` both print 1; `grep -nE '\\([0-9]{4} lines\\)' CLAUDE.md` prints nothing; the string 'I J N O P Q U V Z' no longer appears anywhere in the repo; no source change, so build and sweep are trivially unchanged.",
+    "impact": 4,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "Game.cs has regrown past its pre-split size (8317 lines vs the 7648 it was split from); five banner-delimited subsystems can be moved to partials mechanically",
+    "kind": "improvement",
+    "evidence": "`wc -l src/Game.cs` = 8317; git history 7484 (2026-08-28) -> 7960 (08-30) -> 8317 (08-31). ROADMAP:639 records the earlier split as 'Game.cs 7648->4707 ... Behaviour-neutral (proven IL-identical per method)'. Game is already `partial` across 8 files (Game.cs:49, Game.Autopilot/Harness/Endless/Meta/Modes/Codex/Audition). Cohesive banner-delimited blocks today: briefing-first + TRAINING OP + VERB STAGING + FIELD TIPS (Game.cs:658-1250, ~590 lines); requisition offer/shop (331-470 plus 'barracks requisition shop' 7511-7858, ~500); squad coordination + enemy deadlock guard + enemy turn + W2/C2 (6674-7410, ~735, containing the 401-line `UpdateEnemy` at 6908); field events (7858-8062); draft + EnterBarracks + perk choice + tag editor (1451-1686, 2515-2677, 7410-7511). Game.Harness.cs is now the largest file at 10146 lines / 116 methods.",
+    "problem": "Agents Read and Grep Game.cs and Game.Harness.cs in nearly every session; an 8k and a 10k line file burn context and make the 'skim src/Game.cs' instruction in every research brief unrealistic. The previous split bought ~3000 lines and was consumed in four days of programs without anyone noticing because the doc still says 4707.",
+    "proposal": "Move the blocks above verbatim into Game.Teach.cs, Game.Shop.cs, Game.Enemy.cs, Game.Events.cs, Game.Barracks.cs (no signature, body, or ordering changes inside a method; keep `using`s and the class header identical). Split Game.Harness.cs by domain the same way (Harness.Combat / Harness.Screens / Harness.Ai or by wave). Update the CLAUDE.md file map in the same commit. Do NOT touch the repeated staging boilerplate (63 `Util.Reseed`, 70 `NoPersist = true`, 51 `StartMission` in the harness) \u2014 collapsing it into a helper risks RNG draw order, which is a different wave with a PAIRTEST cost.",
+    "acceptance": "Release build 0 warn / 0 err; `bash scripts/qa-sweep.sh --full` green with the SAME footer (72 exist / 72 ran) and PAIRTEST PASS (byte-identical CRN legs prove nothing behavioural moved); `git diff --color-moved=dimmed-zebra` shows only moved blocks; no file in src/ exceeds ~6000 lines and Game.cs is at or under ~5000; the CLAUDE.md file map lists every new file.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "The sweep's COVERAGE GUARD counts hook names in comment lines and cannot see the PASS/FAIL PROBE hook, so a commented-out or removed test can still read as run",
+    "kind": "defect",
+    "evidence": "scripts/qa-sweep.sh:212-216 computes `_missing` as `comm -23 <(names in src/) <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' scripts/qa-sweep.sh)` over the WHOLE script including comments; lines 13, 16 and 114 already name AUDIOGATE, FUL11PROBE and EXPOSURETEST inside comments. Line 259's `_ran` has the same blind spot. The name pattern `(TEST|GATE)` cannot match `SIGHTLINE_FUL11PROBE`, which prints `FUL11PROBE PASS|FAIL` (line 120) \u2014 so line 16 carries a hand-typed '+1 for FUL11PROBE' exception, the exact class of drift the file's own header says has failed six times. Verified offline: today `have=72 ran=72` with an empty gap, so the defect is latent, not firing.",
+    "problem": "The guard is the mechanism the repo relies on to make 'every self-test runs' machine-checked instead of hand-counted. Commenting out any invocation line (the normal way an agent disables a slow test while iterating) leaves the name in the file, so the guard reports no gap and the footer still counts it. Removing the FUL11PROBE line would never be noticed at all.",
+    "proposal": "Strip comment lines before both greps (`grep -vE '^\\s*#' \"$_SELF\" | grep -ohE ...`), and count only invocation lines (anchor on `verdict \"\\$\\(SIGHTLINE_`) so a name in prose cannot satisfy the guard. Widen the name class to `(TEST|GATE|PROBE)` in the src/ grep, the guard grep, and `_have`/`_ran`, and delete the '+1' note. Three-line change in the FXSTREAM style already in the file.",
+    "acceptance": "(a) Comment out the STACKTEST line, run the sweep: it prints `COVERAGE GAP ... SIGHTLINE_STACKTEST` and exits 1. (b) Comment out the FUL11PROBE line: same, naming FUL11PROBE. (c) Restore both: exit 0 and the footer's two derived counts are equal (73/73 once PROBE is counted, or whatever the derivation prints \u2014 do not hand-type it).",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "qa-sweep.sh launches TUTTEST and THREATTEST twice, and its header describes an invocation shape the script no longer uses",
+    "kind": "defect",
+    "evidence": "scripts/qa-sweep.sh:133 and :135 both run `SIGHTLINE_TUTTEST=1`; :134 and :147 both run `SIGHTLINE_THREATTEST=1` (`grep -oE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)=' scripts/qa-sweep.sh | sort | uniq -d` names exactly those two). Lines 3-5 say 'piping an xvfb-run child through $(...) silently drops its stdout, so every test is a direct CMD | grep statement below' \u2014 every invocation is now `verdict \"$(... run | grep ...)\"`, i.e. inside `$(...)`, and the sweep is green (Phase 0 baseline), so the header's premise is stale.",
+    "problem": "Four redundant `xvfb-run dotnet run` launches on every pre-merge sweep (1-2 s each by CLAUDE.md's timing table), and a header that tells the next maintainer the opposite of what the file does \u2014 the same drift class the file spends 40 lines of comments apologising for.",
+    "proposal": "Delete lines 135 and 147; rewrite lines 3-5 to describe the `verdict \"$(...)\"` routing that actually exists. Optionally add `uniq -d` to the footer so a future duplicate is reported.",
+    "acceptance": "`grep -oE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)=' scripts/qa-sweep.sh | sort | uniq -d` prints nothing; `bash scripts/qa-sweep.sh --full` green with the same derived footer counts; wall time drops by roughly four launches (measure, do not assert).",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "The sweep pays a `dotnet run -c Debug` launch 79 times where publish.sh already runs the built binary directly",
+    "kind": "improvement",
+    "evidence": "scripts/qa-sweep.sh:37 defines `run() { xvfb-run ... dotnet run -c Debug; }` and 76 verdict lines plus 3 autoplays call it. CLAUDE.md's reference-timing table: 'one self-test, Release binary directly: 0.1-0.4 s' vs 'one self-test via xvfb-run dotnet run -c Debug: 1-2 s'. scripts/publish.sh:94-104 already runs `xvfb-run ... env \"SIGHTLINE_$t=1\" ./Sightline` against a built directory. No `#if DEBUG`, `[Conditional(\"DEBUG\")]` or `DefineConstants` exists in src/ or Sightline.csproj, so the tests do not depend on configuration semantics. Note the sweep builds Release at line 45 and then every `dotnet run -c Debug` re-validates the Debug build.",
+    "problem": "The pre-merge gate is run several times per wave by several agents on a shared four-core container; ~1 s of msbuild validation per launch is pure overhead the project has already measured and already avoids in publish.sh.",
+    "proposal": "Add `dotnet build -c Debug` once after the Release build, then define `run() { xvfb-run -a -s \"-screen 0 1280x800x24\" bin/Debug/net8.0/Sightline 2>/dev/null; }`. Keep cwd at the repo root so `Cfg.AssetPath`'s cwd fallback behaves exactly as today (SHIPTEST resolves strictly against AppContext.BaseDirectory either way, so its verdict is unchanged). Keep Debug rather than switching to Release so the sweep exercises the same configuration it always has.",
+    "acceptance": "On one commit, `time bash scripts/qa-sweep.sh --full` before and after (twice each \u2014 the container is shared): identical PASS/FAIL lines, identical footer, exit 0 both times, and a recorded wall-time delta in DEVLOG. If the delta is under ~30 s the change is not worth its risk; revert and record that.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 3,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "Three invariants CLAUDE.md states in prose (no direct DrawTextEx, no raw GetTime outside Now(), render purity in Renderer/Hud) have no static backstop, although FXSTREAM shows one costs three lines",
+    "kind": "instrument",
+    "evidence": "qa-sweep.sh:187-193 is the FXSTREAM pattern (comment-stripped grep of Fx.cs routed into `_fail`) and it covers only Fx.cs. CLAUDE.md rule: 'Text goes through Cfg.Text / Cfg.Measure, never Raylib.DrawTextEx directly' \u2014 the only legitimate sites are Util.cs:107 and :118, and Hud.cs:573-576 records that C5 found two violations by eye. CLAUDE.md rule: Renderer's reads 'all go through Renderer.Now()' \u2014 the only legitimate `Raylib.GetTime()` calls are the two `Now()` bodies at Renderer.cs:21 and Hud.cs:169 (comment-stripped grep finds no others today). Render purity: a comment-stripped grep for `Util.Rng`/`Util.Rand*` in Renderer.cs, Hud.cs, Fx.cs, Display.cs returns 0 hits today (Anim.cs's one hit at :571 is a gameplay damage roll, not presentation, and is correct). RNGFRAMETEST phase 2 covers purity dynamically but only for constructing a Unit and drawing 30 frames.",
+    "problem": "Each rule has already been broken once by hand (C5's two DrawTextEx sites; W1's Fx and Unit draws) and was only caught by a reviewer reading code. A violation of (b) silently makes BOARDTEST/FITTEST flaky; a violation of (a) makes text ignore the shipped TEXT SIZE setting and the FIT audit; a violation of (c) re-couples presentation to the CRN stream and invalidates every archived measurement \u2014 the highest-cost regression this project has.",
+    "proposal": "Three FXSTREAM-style blocks in qa-sweep.sh, comments stripped first, each routed into `_fail` with the offending file:line printed: (a) `Raylib\\.DrawTextEx|Raylib\\.DrawText\\(` in src/*.cs excluding Util.cs; (b) `Raylib\\.GetTime\\(\\)` in src/*.cs excluding the two `Now()` definition lines; (c) `Util\\.(RandF|RandInt|RandRange|Roll|Choice)\\(|Util\\.Rng\\b` in Renderer.cs, Hud.cs, Display.cs (Fx.cs already covered). Name them TEXTPATH / CLOCKPIN / RENDERPURE so the footer stays derived.",
+    "acceptance": "Insert one `Raylib.DrawTextEx(...)` call in Hud.cs: the sweep prints the file:line and exits 1; revert: exit 0. Repeat with one `Raylib.GetTime()` in Renderer.cs and one `Util.RandF()` in Hud.cs. Zero hits on the clean tree so the sweep stays green.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "looks good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "README's Controls table omits four in-mission verbs and four main-menu keys that the binary binds, and labels slot 6 differently from the action bar",
+    "kind": "defect",
+    "evidence": "README.md:75-96 lists 1-9, F/B, R, T, Tab, Enter, Esc, C, M/U, K/Q, F11/F2. The action bar's VerbTable at Hud.cs:1380-1396 also carries HACK/PLANT `H`, BEACON `G`, EXTRACT `X`, STABILIZE `E`, bound at Game.cs:4874-4877, none of which is in the README table. The main menu binds L (LAST STAND, Game.cs:8145), Y (DAILY, 8181), N (TRAINING, 8191), U (AUDIO CHECK, 8200) \u2014 README lists only U and Q. README's row `6 / FLASH | Flashbang` vs VerbTable's `(\"item\", \"UTILITY ITEM\", \"6\")`.",
+    "problem": "README is the one player-facing reference for controls; it currently under-documents the objective verbs a player needs on six of eight objectives (hack/plant, beacon, extract, stabilize). Low severity because README:69 says every verb is also a labelled button, but a reference table that is wrong is worse than none for the reads-clearly pillar.",
+    "proposal": "Regenerate the in-mission rows from Hud.cs's VerbTable (it is the single source of the bar's labels and keys) and add one row for the main-menu letters. Consider a comment in Hud.cs above VerbTable pointing at the README table so the next verb lands in both.",
+    "acceptance": "Every `(id, label, key)` triple in Hud.cs:1380-1396 has a README row with the same key and label; the README row for 6 reads UTILITY ITEM (or the VerbTable label is changed, one or the other); a screenshot of the action bar (`SIGHTLINE_SHOT=760`) matches the table by eye. Docs only, no build impact.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "226 env-var dials with no registry or keep/retire policy; a dozen are permanent dead branches whose only consumer is a test's falsifiability leg",
+    "kind": "improvement",
+    "evidence": "`grep -ohE 'GetEnvironmentVariable(\"SIGHTLINE_[A-Z0-9_]+\"' src/*.cs | sort -u | wc -l` = 226; 37 are read only outside Program.cs. The only written inventory is DEVLOG:6671 'A/B dials' covering four. Three distinct classes exist with no marking: (1) measurement pins that MUST stay and are asserted by a test (SIGHTLINE_MIDTOOTH, BIOMEMECH, AIDECLINE, KILLTREADMILL, OPENERTRIM, CHOICEBAND Game.Autopilot.cs:365, FXRNG Util.cs:400); (2) falsifiability switches for shipped repairs, each a live `if (Old...)` branch in production code \u2014 OLDFIT Hud.cs:4081, OLDCHROME Hud.cs:4074 (and Hud.cs:1475 still inserts a different verb order under it), AUDBACKDROP Hud.Audition.cs:30, BRIEFFIRST Game.cs:685, HUDINFX Display.cs:550, MOVESTYLE Renderer.cs:1359, TOKENSTYLE Renderer.cs:137, AIIDLEFIX Game.cs:7259, ESCORTFIX Game.Autopilot.cs:840; (3) priced-and-unspent knobs (AIMTRIM/TOUGH/TRIM/ENEMYBASE, Program.cs:99-110).",
+    "problem": "Nobody can tell which dials are load-bearing for a measurement, which are frozen A/B branches that ship in the binary, and which are free to delete. Class-2 dials are the hazard: each keeps the pre-fix code path compiled and reachable, and the only thing asserting it still works is a test leg that says 'FAILs with the dial set' \u2014 so retiring one requires deleting code in two files, which nobody has a list for.",
+    "proposal": "A DEVLOG table (not CLAUDE.md) generated from the grep, one row per dial: file:line, class (pin / falsifiability / knob / harness-staging), owning test, and KEEP or RETIRE-AFTER-<program>. Replace CLAUDE.md's two 'grep Program.cs' sentences with the src-wide grep. Retire nothing in this wave; the table is the deliverable. A follow-up wave can then delete class-2 branches whose wave is more than two programs old, one per commit, each verified by the owning test still passing and PAIRTEST.",
+    "acceptance": "The table's row count equals the grep's count on the commit it was written against (state the commit); every class-1 dial names the test that pins it; CLAUDE.md contains the src-wide grep and no longer says Program.cs is authoritative. No source change.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "The grenade damage band is a bare `RandInt(3, 5)` inside an animation class while its sibling blasts are named constants; the hit clamp 3..95 is a literal at 15 sites",
+    "kind": "improvement",
+    "evidence": "Anim.cs:571 `int dmg = Util.RandInt(3, 5);` resolves grenade damage inside the blast anim. The two sibling blasts are named: Game.cs:3623 `BarrelDmg = 6` used at 3773 as `BarrelDmg + Util.RandInt(0, 2)`, and `SiegeDmg + Util.RandInt(0, 2)` at 3708. `Mission.HostileDamageTrim` (CLAUDE.md 'THE EXCHANGE') adjusts weapon bands only, so grenades are the one damage source with no named dial. The hit clamp `3, 95` appears 13 times in Combat.cs (production at :389 and :517, the rest in `Combat.SelfTest`) and twice in Game.Harness.cs.",
+    "problem": "A balance round that wants to price grenades has to find a literal in Anim.cs; a change to the hit floor/ceiling has to be made in 15 places or the self-test silently re-derives the old value and passes for the wrong reason.",
+    "proposal": "`public const int GrenadeDmg = 3;` next to `GrenadeRange` (Game.cs:125) and write Anim.cs:571 as `Game.GrenadeDmg + Util.RandInt(0, 2)` to match the barrel/siege shape (same distribution: 3..5). `Combat.HitFloor = 3` / `Combat.HitCeil = 95` used at :389 and :517 and in every test site. Values unchanged.",
+    "acceptance": "Build 0/0; COMBATTEST, TRUTHTEST, HAZARDTEST, GRAPPLETEST PASS; PAIRTEST PASS (byte-identical outcomes prove the distribution and draw order did not move); `grep -cE '\\b3, 95\\b' src/Combat.cs src/Game.Harness.cs` prints 0; `grep -n 'RandInt(3, 5)' src/Anim.cs` prints nothing.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "well-designed loop"
+    ]
+   },
+   {
+    "title": "Program.Main is one 1386-line method holding 195 env reads, 64 shot-staging lines and ~70 inline self-test dispatch blocks",
+    "kind": "improvement",
+    "evidence": "Program.cs:8 `public static void Main()` closes at :1358 (next declaration at :1393). `grep -c 'GetEnvironmentVariable(\"SIGHTLINE_' src/Program.cs` = 195; `grep -cE '^\\s*if \\(shot' src/Program.cs` = 64 (the block at :1150-1200 is representative). Each self-test is an inline `if (env == \"1\") { Console.WriteLine(X.SelfTest()); return; }` (e.g. :464-468). `public static class Program` (:6) is not partial, though every other big class in the project is.",
+    "problem": "The harness surface \u2014 the thing CLAUDE.md tells sessions to grep for \u2014 is buried inside the window-loop method, so reading 'how does SIGHTLINE_FOO stage' means reading a 1.4k-line method; and every new hook grows Main further. This is the same shape as Game.cs before its split.",
+    "proposal": "Make Program `partial`; move the shot-staging block verbatim into `Program.Harness.cs` as `static void StageShot(Game game, bool shot, bool autoplay, bool coldShot)` and the self-test chain into `static bool TryRunSelfTest()` returning true when one ran. Keep every `SIGHTLINE_*` string literal byte-identical so the sweep's grep-derived counts and the coverage guard see the same set. Do not introduce a table/registry \u2014 that would be a new hand-maintained list.",
+    "acceptance": "Build 0/0; `qa-sweep.sh --full` green with the SAME derived footer (72 exist / 72 ran) \u2014 this is the proof no hook was lost; PAIRTEST PASS; `SIGHTLINE_SHOT=760` screenshot before/after visually identical; Main under ~300 lines.",
+    "impact": 2,
+    "cost": "M",
+    "confidence": 3,
+    "pillars": [
+     "reads clearly"
+    ]
+   }
+  ]
+ },
+ {
+  "lens": "balance-instrument",
+  "summary": "The instrument is in far better shape than its own docs admit: chunks now run in ~3 s (every L4 report.txt prints \"batch wall-time: 2.6-3.7s\" for 20 campaigns), so the 8-slot-set / n=160 convention that makes every rung resolve only 13-14 points is a historical artefact of the old 10-minute shell ceiling, not a cost constraint \u2014 a 16-slot-set rung is ~50 s and a full 2^3 factorial at h6 is ~6 min. Two contaminations the docs describe qualitatively are quantifiable from the archived L4 JSONs without running anything: the Events.cs AddHeat leak raised heat in 12-17 of 160 campaigns per rung (7.5-10.6%), putting 3.6-5.6% of missions at heat+1 on every rung below 8 (0% at h8, exactly the directional compression CLAUDE.md warns about), and it is the bot's VALUE-BEST arm on FACTION INFORMANT (+2.0 vs +0.4 vs 0 in Game.cs EventOutcomeValue), not the 30% exploration; the STALEMATE floor is 16/960 (1.7%, not the documented 2.1%) and is concentrated at RECRUIT (7/160 = 4.4% of the rung, 15.6% of its losses; ex-stalemate RECRUIT reads 75.2 vs 71.9) with zero at h6/h8 \u2014 so the top-of-ladder collapse is real game, not harness. Three instrument defects block the open balance items: RunRec.Heat is the pinned heat and never the played heat (the leak is invisible at run level though the per-mission byHeat table has carried heat-7 rows in every h6 chunk all along); the STALEMATE cause string conflates the per-mission 50-turn arm and the run-scoped 150-turn arm; and pairedPolicy.slots is empty for any single-policy batch, so a camping-policy batch would leave no per-slot rows for CRN pairing. The measurement-first order is: land the heat pin + per-run rows + stalemate split (all CRN-inert except the pin, which is itself measurable as an exact identity on ~90% of L4's campaigns), re-baseline as L5 at 16 slot sets, run the h6 factorial to resolve the +5.8 interaction, sweep Heat.MidTooth modes 1/2 (never run on the composed tree), re-measure the ladder, then add the camping policy on the final tree.",
+  "findings": [
+   {
+    "title": "Pin Events.cs AddHeat for measured batches and make the leak a reported number \u2014 it is the bot's preferred arm, not exploration",
+    "kind": "instrument",
+    "evidence": "src/Events.cs:458-462 (`run.HeatLevel = Heat.Clamp(run.HeatLevel + ...)`, no RNG draw) reached from three arms: relic:0 (Events.cs:176), informant:1 (Events.cs:233), reservecall:1 (Events.cs:269). src/Game.cs:7971 prices AddHeat at -4 while Intel is 0.3/pt, so on FACTION INFORMANT 'Turn them in' scores +2.0 against 'Buy the dossier' +0.4 and 'Let them go' 0 \u2014 it is the 70% VALUE-BEST arm in Game.AutoEventChoice (Game.cs:7910-7930). Quantified from the archived L4 chunk JSONs: heat-raising arm picks per 160-campaign rung = RECRUIT 16, h0 17, h2 16, h4 13, h6 12, h8 14 (informant:1 = 66 of 88 below h8), and byHeat mission rows at a heat other than the pin = 4.2% / 4.9% / 5.6% / 4.6% / 3.6% / 0.0% for RECRUIT..h8 (e.g. L4-h6-b0.json byHeat carries `{'heat': 7, 'n': 4}`). src/Stats.cs:419-429 stamps RunRec.Heat once at BeginRun (Game.cs:1770) and never updates it, so byHeatRun cannot see any of this. At RECRUIT the leak lands on heat 0 and flips FOUR valves at once: the -1 body/-1 stat RecruitMod (Run.cs Active()), DownedTimerTurnsNow +2 (Game.cs:3310-3311), the m1 checkpoint ckMin (Game.cs:4177), and UpdatePressure's heatBump (Game.cs:6345).",
+    "problem": "Every rung below 8 is contaminated UPWARD by 7-11% of its campaigns while h8 is clamped, so the instrument compresses exactly the top-of-ladder region L4 says collapsed (h6 10.6 vs floor 12), and RECRUIT \u2014 the on-ramp a first-time player meets \u2014 is measured with ~10% of its campaigns silently converted into heat 0. Nobody can tell from a chunk JSON how much of a rung was played at the rung.",
+    "proposal": "Add a static `EventCatalog.HeatPinned` (default false) that makes the AddHeat case return 'Heat pinned (harness)' without mutating HeatLevel; BalanceBatch (Program.cs:1415) sets it true unless `SIGHTLINE_HEATPIN=0`. Because AddHeat draws no RNG, the pinned batch replays L4's exact worlds and differs only on the ~10% of campaigns that leaked \u2014 so the pin is CRN-verifiable as an identity on the other 90%. Add `RunRec.HeatEnd` (set in EndRun from `_run.HeatLevel`) and a `heatLeak { campaignsRaised, missionsAbovePin, pinned }` block to BuildSummary so a chunk states its own contamination. Keep EVENTTEST (Events.cs:689-694) untouched \u2014 it runs with the pin off.",
+    "acceptance": "(1) `SIGHTLINE_EVENTTEST` still PASS; PAIRTEST PASS. (2) Re-run L4's 48 chunks from the same `runbin/L4`-equivalent binary with the pin ON (~2.5 min): every campaign whose eventChoicePicks contain no heat-raising arm is bit-identical to L4 (0 discordant pairs on those slots), and `heatLeak.missionsAbovePin` reads 0 on every chunk vs 12-32 with `SIGHTLINE_HEATPIN=0`. (3) Publish the pinned-vs-leaky delta per rung as the first row of the L5 README.",
+    "impact": 4,
+    "cost": "S",
+    "pillars": [
+     "stakes that bite",
+     "well-designed loop"
+    ],
+    "confidence": 5
+   },
+   {
+    "title": "n is cheap now: chunks take ~3 s, so 16 slot sets per rung and a factorial at h6 replace the unresolved +5.8 interaction with a measured one",
+    "kind": "instrument",
+    "evidence": "Every docs/measurements/l4/*.report.txt ends `batch wall-time: 2.6-3.7s (20 matches across 10 campaigns x 2 policy)`; CLAUDE.md's timing table agrees (~5 s per SIGHTLINE_BALANCE=10 under xvfb since W1). docs/measurements/c1/README.md:66 explains the N<=10-per-chunk rule (disjoint slot bases) but nothing limits chunks per rung; L4 used 8 bases (run_ladder.sh) purely because L3 did. docs/measurements/l4/README.md: 'at n=160 with 8 clusters a rung resolves roughly 13-14 points' and the interaction term is 'chunk-paired t(7)=+2.05, p~0.08 ... it needs more slot sets, not more prose'. attribute.sh only ran one-lever-OFF arms; no two-way cell was ever measured.",
+    "problem": "The ladder of record cannot distinguish a rung 1 point below its floor from one 10 points below, and the most interesting claim in L4 (levers do not compose) is unresolved \u2014 both for want of ~10 minutes of compute that the project still budgets as if it were the pre-W1 300-500 s per chunk.",
+    "proposal": "Standardise a rung at 16 disjoint slot bases (SIGHTLINE_BALANCE_BASE 0,10,...,150 with N=10 -> n=320/rung, ~50 s) via a `docs/measurements/l5/run_ladder.sh` that loops c1/run_chunk.sh; extend c3/cluster.py to 16 bases. Then a 2^3 factorial at h6 over MIDTOOTH{0,3} x AIDECLINE{0,1} x BIOMEMECH{0,1} (KILLTREADMILL measured 0.0 at h6 in L4 and can be dropped): 8 arms x 16 chunks x ~3 s ~ 6.5 min, driven through run_chunk.sh's EXTRA=. Analyse chunk-paired (per slot-set win-rate differences, paired t on 16 clusters) and report main effects + the three two-way terms with cluster SE.",
+    "acceptance": "A `docs/measurements/l5/factorial.md` table with 8 cells, each `runs=320` asserted (all three layers of the W1 contract via run_chunk.sh), and the MIDTOOTH x AIDECLINE interaction reported as an estimate with a chunk-paired t on 16 clusters. 'Resolved' = either |t| >= 2.3 or a CI that excludes the +5.8 claim; ROADMAP's 'RESOLVE THE INTERACTION TERM, or stop citing it' item ticked either way.",
+    "impact": 3,
+    "cost": "S",
+    "pillars": [
+     "stakes that bite",
+     "well-designed loop"
+    ],
+    "confidence": 5
+   },
+   {
+    "title": "The STALEMATE floor is 1.7% not 2.1%, is concentrated at RECRUIT (4.4% of the rung, 15.6% of its losses), and the cause string cannot say which cap fired",
+    "kind": "defect",
+    "evidence": "Summed from the L4 chunk JSONs' instrumentHealth: stalemateLosses = RECRUIT 7, h0 3, h2 3, h4 3, h6 0, h8 0 = 16/960. Ex-stalemate ladder: 75.2 / 54.1 / 33.8 / 22.3 / 10.6 / 4.4 \u2014 RECRUIT moves 3.3 points, the top rungs move zero. Four of the seven RECRUIT stalemates sit in one chunk (L4-hR-b60: lossCauses {'STALEMATE': 4, 'RUN OVER': 4}) whose Escort row reads 14 missions at 78.6% and 20.6 avg turns; pooled RECRUIT Escort is 13.1 turns vs 7.1-8.3 at h0-h6. The guard at src/Game.Autopilot.cs:1929-1934 fires on `_turnCount > AutoMaxTurns (50, Game.cs:4275) || RunTurns > AutoMaxRunTurns (150, Game.cs:4293)` and logs both as `LoseRun(\"STALEMATE\", ...)`; Stats.RunRec (src/Stats.cs:130-160) carries no RunTurns, no mission number and no objective at loss, so the archive cannot separate the two arms. docs/ROADMAP.md:2653 and DEVLOG:11165 quote '20 of 960' and CLAUDE.md quotes '2.1%'.",
+    "problem": "The rung a first-time player is steered onto (Game.cs:1895 opens FirstTimeProfile on RECRUIT) is the one the harness misreads most, and the fix cannot be aimed because two different caps share one cause string. The documented figure is also stale.",
+    "proposal": "Split the cause into `STALEMATE-MISSION` and `STALEMATE-RUN` at the guard, stamp `RunTurns`, `_run.Mission` and `Objective` onto RunRec in Stats.EndRun (Game.LoseRun already passes the title), and add them to `instrumentHealth`. Then reproduce: the b60 chunk covers slots 60-69, so `SIGHTLINE_AUTOPLAY=1 SIGHTLINE_HEAT=-1` with Util.Reseed(50000+slot) for slots 60-69 (or a one-off `SIGHTLINE_BALANCE=10 SIGHTLINE_BALANCE_HEAT=-1 SIGHTLINE_BALANCE_BASE=60`) isolates the stalling campaigns; the Escort turn counts point at the leash/zone livelock family SmartEscort already documents (Game.Autopilot.cs:852, 927, 2028). Fix the bot's finishing line, not the cap.",
+    "acceptance": "`instrumentHealth` names the arm; RECRUIT stalemateLosses <= 1/160 on the same 8 slot sets; every other rung reproduces L4 with 0 discordant pairs (an autopilot fix must be inert where it did not fire); CLAUDE.md/ROADMAP figure corrected to the measured value with the per-rung concentration stated.",
+    "impact": 3,
+    "cost": "M",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite"
+    ],
+    "confidence": 4
+   },
+   {
+    "title": "Single-policy batches leave no per-slot rows in the archive \u2014 the camping policy (and any SLOPPY=1 batch) cannot be CRN-paired offline until BuildSummary exports per-run rows",
+    "kind": "defect",
+    "evidence": "src/Stats.cs:599-608 PairList keeps a (slot, heat) only when it has exactly one 'greedy' and one 'sloppy' leg; src/Stats.cs:1765-1784 BuildPaired emits `pairedPolicy.slots` from that list and nothing else per campaign. docs/measurements/c1/ladder.py load() reads ONLY `pairedPolicy.slots[].greedyWin/sloppyWin`. Program.cs:1492-1495: `SIGHTLINE_BALANCE_SLOPPY=1` produces a sloppy-only batch, i.e. an empty slots list and no per-campaign outcome anywhere in the JSON. RunRec already holds Slot, Policy, Heat, Win, MissionsCleared, LossCause (Stats.cs:130-165) \u2014 the data exists in memory and is discarded at export.",
+    "problem": "The ROADMAP's camping policy is 'instrument work that must land BEFORE any wave that claims to have priced turtling', but a third policy cannot be a third leg of the pair (PairList would still pair greedy/sloppy and drop it), so it must run as its own batch \u2014 and today such a batch writes no per-slot outcome, so it cannot be paired against the greedy batch that replayed the same worlds.",
+    "proposal": "Add a `campaigns[]` array to BuildSummary with one row per RunRec: slot, policy, heat, heatEnd, win, missionsCleared, lossCause, runTurns. Teach ladder.py a `--rows` mode that pairs two prefixes by (slot, heat) from that array. Zero gameplay effect (export only).",
+    "acceptance": "c1/inert_diff.py on a before/after chunk shows no change on any existing key (the harness{} block excluded); `SIGHTLINE_BALANCE=10 SIGHTLINE_BALANCE_SLOPPY=1` yields 10 rows; ladder.py --rows reproduces L4's paired table exactly from a greedy+sloppy chunk.",
+    "impact": 3,
+    "cost": "S",
+    "pillars": [
+     "well-designed loop"
+    ],
+    "confidence": 5
+   },
+   {
+    "title": "Camping policy for the flywheel: a concrete third policy, and the order swap in SmartCombatStep that makes turtling measurable",
+    "kind": "instrument",
+    "evidence": "src/Game.Autopilot.cs:1149-1154: SmartCombatStep calls `SmartApproach(u)` (advance pull toward the nearest foe, Game.Autopilot.cs:1678-1683) BEFORE `HoldOverwatch(u)`, and the comment at :1139-1141 records 'the R1 reading proved HoldOverwatch below is unreachable in open combat'. `Slip()` (Game.cs:4233-4238) is hard-gated on SmartSloppy, so sloppy is an error model only. The anti-turtle clock reads `_turnCount` (Game.cs:599-604, grace 4, rung per 2 turns, max 4) and Stats.RecordPressure keeps a per-mission high-water mark (Stats.cs:217-220, exported as `avgPressure` at :1739); ROADMAP:2643-2650 states the measured mean high-water rung is 1.50 and the reinforcement arm now never fires on Eliminate (Game.cs:573-577 ClockMayReinforce). SIGHTLINE_HVTPOLICY (Program.cs:142-145) is the existing precedent for an autopilot-only policy dial.",
+    "problem": "C3 weakened the clock on the 41% slowest Eliminates and nothing in the instrument can price the result: both policies advance, so the aim arm's bite at rungs 2-4 has never been exercised by a bot that camps. Until it is, no wave can claim the clock works (DESIGN.md \u00a73.A's charter).",
+    "proposal": "Add Game.SmartCamp (Stats.Policy 'camp', chosen by `SIGHTLINE_BALANCE_POLICY=camp`, same seeding as greedy so it replays greedy's worlds until the first different action). Under camp, on PressureClockObjective() missions while `Pressure < PressureMax`: run HoldOverwatch before any approach, and replace SmartApproach with SmartReposition (Game.Autopilot.cs:1687, no advance pull); once rung == PressureMax or no enemy is Active within reach for 2 turns, fall back to greedy routing so the match still resolves (AutoStallCheck's 50-turn arm stays as the backstop). Run camp as its own batch at 6 rungs x 16 slot sets (~5 min) after finding 4's per-run rows exist.",
+    "acceptance": "avgPressure on Eliminate/Hack/Decapitate >= 3.0 under camp vs ~1.5 greedy (the policy demonstrably reaches the rungs); camp-vs-greedy CRN-paired win rate per rung with discordant counts; stalemateLosses under camp not above greedy's. The design question it answers: if camp >= greedy on Eliminate at any rung, turtling is an exploit and the aim arm is not biting \u2014 a ROADMAP item either closed or converted into a measured lever.",
+    "impact": 4,
+    "cost": "M",
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite"
+    ],
+    "confidence": 4
+   },
+   {
+    "title": "Heat.MidTooth back-off: modes 1 and 2 have never been run on the composed tree, and only h6/h7 can move \u2014 a 4-arm round is ~3 minutes",
+    "kind": "improvement",
+    "evidence": "src/Run.cs:374-382 `Heat.MidTooth` is a bitfield (1 = +1 dmg to rung 6, 2 = coordination tier 2 to rung 6, shipped 3); Program.cs:115-122 parses SIGHTLINE_MIDTOOTH. docs/measurements/l4/attribute.sh measured only `SIGHTLINE_MIDTOOTH=0` (+6.2 at h6, 10.6 -> 16.9). CLAUDE.md records C1's pooled estimate that coordination tier 2 is +1.09 +-0.63 (indistinguishable from zero, wrong-signed) while the +1 damage is the bite. Run.cs:408-425 Rung6/Rung7/Rung8 show that at heat 8 DmgDelta sums to 1 and AiTier maxes to 2 in every mode, and heats <= 5 never touch rung 6 \u2014 so h4 and h8 are bit-identical across modes by construction; only h6 and h7 can differ.",
+    "problem": "The ROADMAP's top balance item ('the dial to reach for first is Heat.MidTooth') has a partial-back-off candidate (mode 2: hand down coordination, keep the +1 dmg at the apex) that C1's own numbers predict recovers most of the +6.2 while preserving the no-dead-row invariant \u2014 and it is unmeasured.",
+    "proposal": "After findings 1 and 4 land: 4 arms (MIDTOOTH 0/1/2/3) at h6 and h7, 16 slot sets each, via `EXTRA=\"SIGHTLINE_MIDTOOTH=<m>\" bash docs/measurements/c1/run_chunk.sh L5mt<m>-h6-b<B> 6 <B> 10` (BIN=runbin/L5, OUT=docs/measurements/l5), plus one h4 and one h8 chunk per mode as the apex-neutrality assertion. Then the full 6-rung ladder on the chosen mode (96 chunks, ~5 min). One lever, then re-measure, as the L4 README demands.",
+    "acceptance": "h4/h8 arms: 0 discordant pairs vs mode 3 (bit-identical). h6 point estimate >= 12 (floor) by >= 1 cluster-SE on the chosen mode and h7 monotone between h6 and h8. MIDTOOTHTEST still PASS (no dead row, no silent rung) for the shipped mode. Full ladder re-measured with the heat pin ON and published as L5 with base commit and n.",
+    "impact": 4,
+    "cost": "M",
+    "pillars": [
+     "stakes that bite",
+     "well-designed loop"
+    ],
+    "confidence": 3
+   },
+   {
+    "title": "'Re-tune Mission.OpenerTrim' is mis-specified: the unlosable opener came from the reinforcement arm, and OpenerTrim=0 would push h0 ~15-20 points under band",
+    "kind": "improvement",
+    "evidence": "src/Mission.cs:609 `OpenerTrim = 1`, applied at :678-679 (m1 -1 body, m2 -1 body). CLAUDE.md \u00a7X2: OpenerTrim moved heat 0 from 35.0% to 57.5%; L4's h0 is 53.1 (band 47-63) WITH the trim. docs/DESIGN.md:816-818 and ROADMAP:2618-2640: '22 of the 24 mission-1 losses in 960 baseline campaigns were the reinforcement wave', i.e. the mechanic C3 removed via Game.ClockWavesOnEliminate (Game.cs:568, SIGHTLINE_KILLTREADMILL=1 restores) \u2014 not the trim. L4 attribution: KILLTREADMILL=1 moves h6 by exactly 0.0. C3's stratified table: h4's whole gain was opener; RECRUIT..h4 had 0 m1 losses in 640 campaigns.",
+    "problem": "The ROADMAP item names the wrong dial. Backing OpenerTrim out restores X2's U-shaped curve (m1 75% at h0, the front-loaded anxiety DESIGN \u00a73.D forbids) and drops h0 out of band; restoring the reinforcement arm restores a camping punishment that killed 4-rookie squads for being slow. Neither is 'stakes' \u2014 and no m1 target has ever been written down.",
+    "proposal": "First declare the m1 target as a band (e.g. m1 loss 3-8% at h0, 8-15% at h4, 0-3% at RECRUIT) in DESIGN.md. Then a 2x2 (OPENERTRIM {0,1} x KILLTREADMILL {0,1}) at h0/h2/h4, 16 slot sets, reading `byMission[mission=1]` and `byNodeKind Start` (Stats exports both) \u2014 and only then choose, possibly a third option (OpenerTrim=1 on m1 only, 0 on m2) that neither existing dial expresses.",
+    "acceptance": "m1 win rate inside the declared band at RECRUIT/h0/h2/h4 AND all six rungs still inside their bands on the same L5-shape round; the ROADMAP item rewritten to name the lever actually chosen and its measured m1 effect.",
+    "impact": 3,
+    "cost": "M",
+    "pillars": [
+     "stakes that bite",
+     "well-designed loop"
+    ],
+    "confidence": 4
+   },
+   {
+    "title": "The bot's tie-break jitter draws from the shared world RNG, so CRN pairs diverge through draw COUNTS, not through actions",
+    "kind": "instrument",
+    "evidence": "src/Game.Autopilot.cs:1670 `score += Util.RandRange(0f, 2f); // tie-break jitter` inside ScoreDestTile, called once per candidate tile per MoveToBestTile sweep (Game.Autopilot.cs:1703-1723). Util.Rng is the gameplay stream the batch reseeds per slot (Program.cs RunOne: `Util.Reseed(50000 + slot)`); the sloppy perturbations deliberately use a separate `_sloppyRng` (Game.cs:4229-4238) precisely to avoid correlating slips with the game's dice. W1 severed presentation from this stream for the same reason (CLAUDE.md \u00a7W1).",
+    "problem": "Any instrument or policy change that alters how many tiles get scored (a camping policy, a reposition-vs-approach swap, even a candidate-loop refactor) re-deals every subsequent combat roll in the world, so a 'gameplay-inert' change can show discordant pairs and a paired policy contrast carries world noise it need not carry. It also makes the camping batch of finding 5 diverge from greedy at the first move rather than at the first different decision.",
+    "proposal": "Route the bot's jitter through a dedicated `_botRng` seeded per slot alongside SeedSloppy (e.g. 2000 + slot), used only by autopilot scoring. This is a deliberate W1-class break (every archived CRN world re-rolls) and must NOT ship alone \u2014 fold it into the L5 re-baseline so the break is paid once, and record it in the L5 README the way W1 was recorded.",
+    "acceptance": "PAIRTEST PASS; an A/A batch is identical; a policy-flip probe (greedy vs camp on one slot) logs the first divergent turn and it coincides with the first differing action, not turn 1. L5 README states the break and that L4 is incomparable to L5.",
+    "impact": 2,
+    "cost": "S",
+    "pillars": [
+     "well-designed loop"
+    ],
+    "confidence": 4
+   },
+   {
+    "title": "The measurement-first order of operations and the exact L5 protocol (what 'done' means against the band)",
+    "kind": "doc",
+    "evidence": "CLAUDE.md balance contract rules 1-5 (rm -f target, exit code 2, runs assertion, Release binary from runbin/<tag>, base commit stated); docs/measurements/c1/run_chunk.sh carries all three layers and accepts EXTRA=; l4/run_ladder.sh and l4/attribute.sh are the templates. Band of record: RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10, +-8 (h8 +-5, floor >= 5). L4 README: 'every in band verdict is a point estimate, not a robustness claim'.",
+    "problem": "Three instrument items and three balance items are open and each ROADMAP entry says 'before the other', but no single place gives the sequence, the commands, the n, or a stopping rule \u2014 so the next session risks spending a lever round on a leaky rung again.",
+    "proposal": "Sequence: (A) land findings 1, 3, 4 (heat pin + heatLeak, stalemate split + RunTurns, campaigns[] rows) and, if accepted, finding 8, in one instrument PR; prove inertness with c1/inert_diff.py on paired chunks. (B) Publish `runbin/L5` from that commit; `docs/measurements/l5/run_ladder.sh` = 6 rungs x 16 bases (0..150 step 10) x N=10 = 96 chunks, ~5 min, all `runs=20` asserted; also the same 48 L4 chunks with SIGHTLINE_HEATPIN=0 as the bridge row. (C) h6 factorial (finding 2). (D) MidTooth mode sweep and ladder (finding 6). (E) OpenerTrim 2x2 (finding 7). (F) camping batch on the final tree (finding 5). Every chunk: `mkdir -p .xdg; export XDG_CONFIG_HOME=$PWD/.xdg/<tag>; rm -f <out>.json; EXTRA=... SIGHTLINE_BALANCE=10 SIGHTLINE_BALANCE_HEAT=<h> SIGHTLINE_BALANCE_BASE=<b> SIGHTLINE_BALANCE_JSON=<out>.json xvfb-run -a -s \"-screen 0 1280x800x24\" runbin/L5/Sightline; test $? -ne 2; assert runs==20`.",
+    "acceptance": "'Done' for the ladder = all six rung point estimates inside the band AND each floor cleared by >= 1 cluster-SE (16 clusters), monotone at every step, heatLeak.missionsAbovePin = 0 on every chunk, stalemate share reported per rung and <= 1% below h6, base commit and n stated in docs/measurements/l5/README.md, CLAUDE.md's ladder-of-record block replaced by L5 with L4 kept as provenance.",
+    "impact": 4,
+    "cost": "S",
+    "pillars": [
+     "stakes that bite",
+     "well-designed loop",
+     "reads clearly"
+    ],
+    "confidence": 5
+   },
+   {
+    "title": "Analysis tooling is scattered across wave directories and each script reads a different JSON slice \u2014 consolidate before L5",
+    "kind": "improvement",
+    "evidence": "docs/measurements/c1/ladder.py (paired win tables, reads pairedPolicy.slots only), docs/measurements/c3/cluster.py (cluster SE, hard-codes BASES = 8 values and RUNGS), docs/measurements/c4/paired_t.py and aggregate_nodekind.py (chunk-paired t, node-kind cells), docs/measurements/c1/inert_diff.py (inertness). l4/README.md's cluster-SE column was produced by c3/cluster.py pointed at a different directory; none of them reads instrumentHealth or the ex-stalemate rate (`runWinRateExStalemate`, Stats.cs:1357, is written to every chunk and quoted by no script).",
+    "problem": "Each wave re-derives its statistics by copying a script and editing constants; the 16-base rung of finding 2 breaks cluster.py's hard-coded BASES, and the honest ladder (in- and ex-stalemate, pinned-heat share, cluster SE) has never been printed by one command.",
+    "proposal": "A single `docs/measurements/tools/ladder.py <dir> <prefix> [--vs <prefix>] [--bases auto]` that derives bases from the files present, prints per rung: win%, ex-stalemate win%, binomial and cluster SE, band verdict with floor margin in cluster-SE units, heatLeak share, avgPressure; and, with --vs, the chunk-paired difference and discordant counts (from campaigns[] rows once finding 4 lands). Keep the old scripts in place for provenance.",
+    "acceptance": "One command reproduces the L4 README table (win%, both SEs, verdicts) to the decimal from the archived L4 JSONs, and the same command produces the L5 table; the L5 README quotes only numbers that script printed.",
+    "impact": 2,
+    "cost": "S",
+    "pillars": [
+     "reads clearly",
+     "well-designed loop"
+    ],
+    "confidence": 4
+   }
+  ]
+ },
+ {
+  "lens": "audio-visual",
+  "summary": "The audio layer is now well-instrumented (A1's device-free AUDIOGATE/AUDIODUMP, A2's mastering + voice pool + limiter, A3's AUDIO CHECK screen) but the CUE VOCABULARY underneath it never grew: 23 recipes exist, and in a fight roughly 30 distinct events are funnelled onto five UI cues \u2014 `over` fires for 14 different things (overwatch, brace, focus, MARK, SUPPRESS, MOMENTUM, CONTACT!, ARTILLERY INCOMING, enemy overwatch/brace), `reload` for 15 (stabilize, hack, charge set, beacon, patch/revive, four abilities, enemy reload, medic heal), and `turn` for every one of 27 banners. Because those cues are categorised \"ui\" they ride the UI fader, so a player who turns UI down silences pod wakes and enemy telegraphs. Music is a two-bed crossfade with a four-valued intensity that goes to full combat on every enemy turn even when no hostile is awake (a 0.5 s WaitAnim + banner guarantees a pump per turn), and all eight biomes share one bed. The campaign end fires a legacy jingle and a stinger simultaneously (the loss pair is two saw descents a semitone apart), and the gate's stack list does not contain the explosion stack, a barrel chain, or that double fanfare. Visually the board is strong (V1-V3, W4, W7), but the unit STANCE layer still predates the glyph-chip idiom: OW/BRC/R&G/BLZ/AIM/SUPP/ROUT/WVR are 10-11 px hue-only words, the enemy HUNKER diamond is painted in Pal.Good, and three roles (objective gold, suspicious amber, VIP gold) sit within CIE76 \u0394E 9-12 of each other while the selection ring, muzzle flash and OW badge all borrow objective gold. Post-FX residuals in ROADMAP (vignette/CA on the chrome, the inert POSTFX demo hook) are real and have a cheaper fix than the recorded third pass.",
+  "findings": [
+   {
+    "title": "One 'over' cue carries 14 meanings, 'reload' 15, 'turn' every banner - and enemy telegraphs ride the UI fader",
+    "kind": "defect",
+    "evidence": "Recipe intent: src/Audio.cs:281-285 (`over` = \"OVERWATCH set: a tense rising two-note\"), :203 (`reload` = mag out/in), :296 (`turn` = \"the round changes hands\"), and the audition caption src/Audio.cs:1388 (`over => \"overwatch set, two notes\"`). Call sites for `over`: src/Game.cs:3045 (overwatch fires), :3515 and :3552 (MOMENTUM +1 ACTION), :4472 (CONTACT! pod wake), :5327 (MARK), :5642/:5689/:5710/:5747 (overwatch/focus/brace/focus), :6101 (SUPPRESS pin), :6171 (SUPPRESS ability), :7033 (ARTILLERY INCOMING - comment literally says \"a charge 'whine' stand-in\"), :7133 (enemy BRACED), :7154 (enemy OVERWATCH). `reload`: :3431 STABILIZE, :5781 CHARGE SET, :5792 HACK, :5842 custodian re-arm, :5874 BEACON, :5948 reload, :6129/:6144/:6151/:6158 RUN&GUN/SLIPSTREAM/BLITZ/STEADY, :6201/:6219 PATCH/REVIVE, :7173/:7221 enemy reload, src/Anim.cs:861 enemy medic heal. `turn`: src/Game.cs:2849 inside ShowBanner (27 call sites incl. \"VIP DOWN\", \"AMBUSH!\", \"POD ROUTED\", \"CAPTIVE FREED\", \"ENEMY TURN\", \"PLAYER TURN\"), :6321 reinforcements, :6351 pressure, :7655/:7696 shop proceed. `select`: :4377 CONTACT? sting, :5935 EXTRACTED, ~40 menu confirms. `hunker`: src/Anim.cs:111 SHOVE, :747 SMOKE, src/Game.cs:5255 BARRICADE. Explosions have no voice: src/Anim.cs:529-530 grenade = `crit`+`death`, src/Game.cs:3693 siege and :3738 barrel = `crit`+`death`, src/Anim.cs:767 FLASH = `crit`, :799 INCENDIARY = `crit`. `hit` is the WAR ROOM purchase confirm (src/Game.Meta.cs:88,139,156,169) and `miss` the refusal buzzer; `kill` stinger is the endless WAVE arrival (src/Game.Endless.cs:102). Bus routing: src/Audio.cs:70-74 `IsUiCue = CatOf(id)==\"ui\"`, src/Audio.Analysis.cs:419-428 puts `over`/`turn`/`reload`/`hunker`/`select` in \"ui\", so Display.VolUi=0 mutes CONTACT!, AMBUSH!, ARTILLERY INCOMING and every enemy overwatch/brace/reload telegraph. Barrel shot fire (src/Anim.cs:473) is the only PlayWeapon with no pan.",
+    "problem": "Player-facing: the ear cannot tell a pod waking from a soldier setting overwatch, an ability from a reload, a grenade from a crit, or the enemy's telegraph from the player's own verb - the same rising two-note plays for 'I am ready' and 'they are coming'. The banner cue is so overloaded (VIP DOWN and PLAYER TURN share it) that it carries no information. Turning the UI fader down to quiet menu ticks silently removes combat-critical alerts. Team-facing: the AUDIO CHECK screen's captions describe recipes, not jobs, so the owner auditioning `over` cannot know it is also MARK/SUPPRESS/CONTACT - the instrument built to make audio fileable cannot see this class of bug.",
+    "proposal": "Add ~7 recipes with one `Reg` line each in BuildRecipes (src/Audio.cs:181): `alert` (contact/ambush - short minor-2nd stab + noise hit, 'impact' bus), `alarm` (reinforcements/pressure/artillery - descending two-note, impact bus), `boom` (explosion - 40 Hz sub thump + 300 Hz wash + 0.4 s debris tail; replaces crit+death at Anim.cs:529, Game.cs:3693/:3738), `ability` (bright engage chirp for R&G/BLITZ/STEADY/SLIPSTREAM/MARK/SUPPRESS), `tick` (objective progress - data blip for HACK/CHARGE SET/BEACON/INTEL), `mend` (STABILIZE/PATCH/REVIVE/medic heal - soft warm two-note), `ui_ok`/`ui_no` (shop confirm/refusal, replacing `hit`/`miss`). Give ShowBanner a `cue` parameter (default `turn`) and pass `alert`/`alarm` from the danger banners; give the ENEMY TURN banner a descending variant (`turn_enemy`). Register each in SfxCueIds, AuditionGroups, CueRole, CatOf (alert/alarm/boom = impact bus, never ui), DefaultPitchVar. Move enemy `over`/`hunker`/`reload` call sites onto the SFX bus by routing them through a `Audio.PlayFoe(id)` that uses VolSfx. Pan the barrel shot. Update assets/sfx/CREDITS.txt drop-in list.",
+    "acceptance": "(1) `SIGHTLINE_AUDIOGATE=1` prints PASS with 30-31 cues, all inside their category bands, all four+ stacks under -1 dBFS (stacks extended per finding 3). (2) `SIGHTLINE_AUDITIONTEST=1` PASS (every new id listed, captioned, fits at 120%). (3) `grep -c 'Audio.Play(\"over\")' src/Game.cs` drops from 14 to <= 7 (only true overwatch/brace/focus sites) and `Audio.Play(\"reload\")` from 14 to <= 3; `grep -c 'Audio.Play(\"crit\"); Audio.Play(\"death\")'` = 0. (4) A new `SIGHTLINE_CUETEST=1` leg: a table `Audio.CueFor(GameEvent)` is injective over {Contact, Ambush, Reinforce, Explosion, Ability, Objective, Mend, Overwatch, Turn, EnemyTurn} and none of the enemy-telegraph events resolves to a \"ui\"-bus cue. (5) AUDIO CHECK screenshot (`SIGHTLINE_AUDITION=1 SIGHTLINE_SHOT=90`) shows the new rows; `SIGHTLINE_AUTOPLAY=1` x3 clean.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 5,
+    "pillars": [
+     "feels good",
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "Music pumps to full combat on every enemy turn of a quiet board, and intensity is blind to danger",
+    "kind": "defect",
+    "evidence": "src/Game.cs:3869-3878 `MusicIntensity()`: `case Phase.EnemyTurn: return 1f;` unconditionally, while PlayerTurn is gated on `Enemies.Any(e => e.Alive && e.Active)` (0.5 / 0.15) and everything else is 0. src/Game.cs:6407 sets EnemyTurn, :6426-6427 `ShowBanner(\"ENEMY TURN\")` + `Enqueue(new WaitAnim(0.5f))` - so an enemy turn with zero active hostiles still lasts >= 0.5 s at intensity 1. src/Audio.cs:449-456 crossfade `k = dt*2.2`, targets `ambT = 0.5-0.22*I`, `combT = 0.62*I`: after 0.5 s the combat bed has climbed 1-e^-1.1 = 67% of the way to 0.62 (~0.41) and the ambient has dipped 0.50->~0.35, then both slew back over the player turn. With all pods dormant (the normal opening of every mission; pods spawn dormant per docs/ROADMAP.md:41-46) this repeats every turn. No term anywhere reads squad HP, hostiles-with-LoF, last-soldier-standing or heat; the only inputs are Phase and 'any active enemy'. Music is a menu/fight invariant otherwise: intro/barracks/win/lose all read 0 (src/Game.cs:3877).",
+    "problem": "Player-facing: a rhythmic swell-and-fade of the combat bed on every turn of a board where nothing is awake - the music announces a fight that is not happening, then retracts. Once contact is made the bed cannot tell a 4v1 clean-up from a last soldier at 2 HP, so the layer that should carry 'stakes that bite' is flat exactly when the stakes rise. Team-facing: nothing measures the crossfade; the AUDIO CHECK screen sweeps it by hand only.",
+    "proposal": "(a) Gate EnemyTurn on the same `Enemies.Any(e => e.Alive && e.Active)` predicate (return 0.15 when nothing is awake). (b) Make the intensity continuous: base 0.5 in contact, +0.25 when any soldier is <= 1/3 HP or downed, +0.25 when the squad is outnumbered by active hostiles, 1.0 on the last soldier standing or enemy turn in contact; clamp 0..1 (`Game.MusicIntensity` is presentation-only and read once per frame at src/Game.cs:3930, so this touches no sim state). (c) Slow the release: asymmetric `k` (dt*2.2 up, dt*0.8 down) so the bed does not drop the moment a turn ends. (d) `SIGHTLINE_MUSICTEST=1`: build a Game headless (the STALLTEST pattern), stage a board with only dormant pods, step Phase PlayerTurn->EnemyTurn->PlayerTurn while sampling `MusicIntensity()`; assert max <= 0.15; activate a pod and assert monotone rise to >= 0.5; down a soldier and assert >= 0.75; assert Audio.MusicLevels time-to-90% within [0.3, 2.0] s in both directions using a scripted dt loop over `UpdateMusic` (device-free: the lerp math runs before the Raylib calls, so guard those on `_music`).",
+    "acceptance": "`SIGHTLINE_MUSICTEST=1` prints PASS with the four assertions above, and prints FAIL when `MusicIntensity`'s EnemyTurn arm is reverted (prove the test fails pre-fix, per W9 house rule). `bash scripts/qa-sweep.sh --full` green with the new hook in its COVERAGE GUARD. Autoplay x3 clean. A SIGHTLINE_BALANCE=10 paired batch is inert (MusicIntensity is never read by sim code - verify with `inert_diff.sh`).",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "feels good",
+     "stakes that bite",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "Campaign win/lose fire a legacy jingle and a stinger at the same instant (the loss pair clashes by a semitone); the gate's stack list misses the real worst cases",
+    "kind": "defect",
+    "evidence": "src/Game.cs:2609 `Phase = Phase.Win; Audio.Play(\"win\"); Audio.PlayStinger(\"victory\");` and :2738-2741 `Audio.Play(\"lose\"); ... Audio.PlayStinger(... ? \"squadwipe\" : \"lose\")`. Recipes: src/Audio.cs:302 `win` = Arp {523,659,784,1046} step 0.11 s, Tri, vol 0.30, and :323-324 `st_victory` = Arp {523,659,784,1046,1318} step 0.11 s, Tri, vol 0.28 - the same four notes at the same step, phase-coincident (a +6 dB chorus with comb interference, not two layers). :304 `lose` = Arp {392,330,262,196} Saw vs :336 `st_lose` = Arp {440,349,277,220} Saw: G4/A4, E4/F4 (semitone), C4/C#4 (semitone), G3/A3 - two saw descents a semitone apart, simultaneously. src/Audio.cs:1379-1402 captions already call `win`/`lose` \"legacy\". Stinger duck (:390-400) applies only to PlayStinger, so the barracks `win` at src/Game.cs:2658 plays over the full bed. Gate stacks src/Audio.Analysis.cs:245-253 are four rows; not measured: the explosion stack `crit+death` (src/Anim.cs:529-530), a chained-barrel detonation (src/Game.cs:3738 fires `crit`+`death` per barrel, synchronously, plus `death` per body from KillUnit :3210 and a `st_kill` per player-credited body :3790 - a 3-barrel, 3-body chain is >= 12 coincident cues), `win+st_victory`, `lose+st_lose`, `lose+st_squadwipe`. The limiter (src/Audio.cs:803-835) makes this safe but AUDIOGATE's 'stack clipping == 0' claim is being made on a list that omits the loudest stacks in the game.",
+    "problem": "Player-facing: the two ceremonial moments of a run - the finale and the wipe - are the only places the mix is deliberately doubled, and the loss is accidentally dissonant in a way no recipe designed. Team-facing: the budget's headroom contract is asserted over four stacks while the game's actual worst alignment (a barrel chain) is unmeasured, so the 'nothing leaves over -1 dBFS' story rests on the limiter rather than the budget.",
+    "proposal": "Delete `Audio.Play(\"win\")` at src/Game.cs:2609 and `Audio.Play(\"lose\")` at :2738 (the stingers own those beats); route the barracks mission-complete at :2658 through `PlayStinger(\"victory\")` or a new lighter `st_clear` so it ducks the bed. Retire `win`/`lose` recipes from SfxCueIds and AuditionGroups (append-only is not a constraint here - cue ids are strings, not persisted ordinals). Add stacks to `Stacks`: (\"grenade crit+death\"), (\"3-barrel chain\", 3x(crit+death)+3x death+3x st_kill at 0 s), (\"victory: st_victory alone\"), (\"wipe: st_squadwipe+death x2\"). Print the pre-limiter peak per stack so the owner can see which rows the limiter is actually catching.",
+    "acceptance": "`SIGHTLINE_AUDIOGATE=1` PASS with >= 8 stacks; the new barrel-chain row's peak is printed and either <= -1 dBFS or explicitly listed as limiter-bound (the gate must not claim headroom it does not have). `grep -n 'Audio.Play(\"win\")\\|Audio.Play(\"lose\")' src/*.cs` returns nothing. `SIGHTLINE_AUDITIONTEST=1` PASS (new stack names fit AudStackW=300 at 120%). `SIGHTLINE_AUDIODUMP=1` no longer emits win.wav/lose.wav.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "feels good",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "Unit STANCE states are hue-only 10-11 px words (OW/BRC/R&G/BLZ/AIM/SUPP/ROUT/WVR) and the enemy HUNKER diamond wears the friendly Good colour",
+    "kind": "defect",
+    "evidence": "src/Renderer.cs:3984-3990 overwatch = a 6 px disc + `Cfg.Text(\"OW\"/\"BRC\", ..., 10, ...)`; :3992-3993 `if (u.Hunkered) DrawPoly(..., Pal.Good)` with no team check, while enemies hunker at src/Game.cs:7177, :7182, :7228; :4006-4008 `R&G`/`BLZ` (Pal.Accent) / `AIM` (Pal.Good) at 11 px text only; :4009-4010 `SUPP` 11 px Pal.Foe; :4013-4014 `ROUT` 11 px Pal.Good on an ENEMY; :4020-4023 `WVR` 11 px Pal.Suspect (this one does ship a crack glyph). Three friendly defensive states - hunker diamond, BRC badge, AIM tag - are all Pal.Good with no distinguishing shape beyond a 6 px poly; SUPP (:4010) and PINNED (:4345) are two different mechanics rendered as two red 11 px words. Contrast the newer idiom: src/Renderer.cs:3271-3366 `DrawUnitStatusChips` draws BRN/BLD/STN/DAZ/DRY/DOWN as 13 px pills with a per-state glyph in a late opaque pass. docs/DESIGN.md \u00a73.H: \"Rule for any new coded state: ship its glyph in the same pass, and verify it in both palettes\". docs/ROADMAP.md:2577 (C5) already records the 12 px floor breach (10 px on AUDIO CHECK, 11 px on seventeen surfaces) as open; this finding is the shape-redundancy half, which is not recorded.",
+    "problem": "Player-facing: at a squint the actionable difference between 'this enemy is suppressed' and 'this enemy is routed' is one red word vs one green word at 11 px, and a hunkered hostile carries the same green diamond the player's own hunker does - the 'good for me' hue on a state that is bad for me. In the colorblind palette Good becomes teal and Foe orange, and the 11 px words are the only channel. Team-facing: two on-unit vocabularies coexist (raw text tags vs glyph chips), so every new stance re-decides which one to use.",
+    "proposal": "Fold the stance tags into the chip idiom: extend `DrawUnitStatusChips` (or a sibling `DrawStanceChips` drawn in the same late pass, above the body at p.Y-46) with one 13 px pill per stance carrying a primitive glyph: eye = overwatch, eye+bar = brace, cone wedge = focus, shield = hunker, forward chevrons = R&G/BLITZ, crosshair = AIM, downward bars = SUPP/PINNED, broken arrow = ROUT. Colour = the unit's TEAM role (Friend/Foe) for stances, Good only for buffs the player applied to the player. Delete the 10/11 px text tags at :3984-4014. Stage it with `SIGHTLINE_STANCESHOT=1`: one soldier per stance and one hostile per enemy stance, both palettes (`SIGHTLINE_CB=1`).",
+    "acceptance": "`SIGHTLINE_STANCESHOT=1 SIGHTLINE_SHOT=760` and the `SIGHTLINE_CB=1` pair, sent to chat; every stance is nameable from the glyph with the word covered. `SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small` lists zero Renderer.cs strings under 12 px at 100% (C5's survey is the before-number: 18 sites). A STATUSTEST leg asserts no stance chip is drawn in Pal.Good on a Team.Enemy unit. BOARDTEST unchanged (chips sit above the value rungs it pins).",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "looks good"
+    ]
+   },
+   {
+    "title": "Three roles share one gold (dE 9-12): objective, suspicious-tier enemy and VIP; selection/muzzle/OW badge borrow objective gold; MAGMA embers sit on the colorblind foe hue",
+    "kind": "defect",
+    "evidence": "src/Util.cs:183 Pal.Suspect (245,184,64), :185 Pal.Accent (251,191,36), :204 Pal.VipGold (245,200,70): CIE76 dE Accent-Suspect 11.5, Accent-VipGold 11.4, Suspect-VipGold 9.1 (hue 40-45 deg, luma 188-200 - computed from the constants). src/Util.cs:192 FoeCb (238,138,40) vs :310 MAGMA AmbCol (255,156,74): dE 9.6 - the ember field is the enemy colour in the colorblind palette; docs/ROADMAP.md:1235 records V2 fixing the MAGMA VEINS for CB, not the ambient particles (src/Fx.cs:706-713 draws them at up to 0.40 alpha). Objective gold is also the SELECTION ring (src/Renderer.cs:3506-3520, four Accent rings/ticks), the muzzle flash of every shot (src/Anim.cs:237, :472), the OW badge (src/Renderer.cs:3988), R&G/BLZ tags (:4006-4007), and ability/hack/momentum pops (src/Game.cs:3515, :5792, :6129...). Usage counts: Pal.Accent 119 sites in Hud.cs, 23 Game.cs, 21 Anim.cs, 20 Renderer.cs; src/Util.cs:230-233 itself says Accent \"already carries 18 separate jobs in Renderer.cs alone\" (W4 moved only the dash region off it). docs/DESIGN.md \u00a73.H table: Objective = \"a single distinct goal hue (gold), used only for goals\"; Friendly = \"brightest when active/selected\". LAST STAND on Pal.Foe (src/Hud.cs:2633) is already recorded open at docs/ROADMAP.md:1521.",
+    "problem": "Player-facing: a suspicious '!' pod, the objective terminal, the VIP diamond and the selected soldier's ring are one colour at a squint; the DESIGN acceptance check ('squint: find the selected unit, the nearest threat, the objective') is answered by the same hue three times. In colorblind MAGMA the rising ember field reads as enemy-coloured motion. Team-facing: no test measures role separability, so the next colour job added to Accent goes unnoticed exactly as the last 18 did.",
+    "proposal": "(1) `SIGHTLINE_PALETTETEST=1`: for both palettes, compute CIE76 dE between every pair of role tokens {Friend, Foe, Good, Accent, Suspect, VipGold, Elite, Txt} plus each biome's AmbCol vs Foe, and assert a floor (>= 20 between roles that must read apart; >= 15 AmbCol vs Foe); print the worst three pairs. It fails today on four pairs, which is the point. (2) Give SELECTION its own token `Pal.Select` (a hot pale cyan-white, e.g. (200,240,255), same luma as Accent so W4's dormant-vs-selected value measurement is unchanged) and use it for the ring/ticks; keep muzzle flash white-warm (Fx already uses (255,244,210) for the bloom dots). (3) Move Suspect toward true amber-orange (e.g. (240,160,48)) so it sits between grey and red on the alert ordinal and >= 20 dE from Accent; move VipGold toward cream (e.g. (250,225,150)) with the diamond/'VIP' tag carrying the role. (4) MAGMA AmbCol in CB: swap to a pale ember (255,200,140) when Pal.Colorblind. Re-shoot the SIGHTLINE_ALERT, DOWNSHOT and BIOMESHOT frames in both palettes.",
+    "acceptance": "`SIGHTLINE_PALETTETEST=1` PASS in both palettes (and FAIL on the pre-change constants). `SIGHTLINE_BOARDTEST=1` still PASS with `SIGHTLINE_CB=1` (value rungs untouched). Screenshots: `SIGHTLINE_ALERT=1 SIGHTLINE_SHOT=760` (+CB) showing '?' / '!' / live tiers and an objective marker on one frame, shared in chat; a MAGMA `SIGHTLINE_FORCEBIOME=7 SIGHTLINE_CB=1 SIGHTLINE_BIOMESHOT=1` frame. CONTRASTTEST and CHROMETEST unchanged.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "looks good"
+    ]
+   },
+   {
+    "title": "Eight biomes are paint in audio: one ambient bed for every room and every menu",
+    "kind": "improvement",
+    "evidence": "src/Audio.cs:605-638 `AmbientFloats` and :640-668 `CombatFloats` are the only beds; src/Audio.cs:419-434 loads exactly two streams; src/Game.cs:3869-3878 `MusicIntensity` has no biome term and returns 0 for intro/barracks, so the main menu and a pre-contact TUNDRA opening play the identical bed at nearly identical levels (ambT 0.50 vs 0.467, combT 0 vs 0.09 at src/Audio.cs:450-451). src/Util.cs:280-311 gives each biome a visual signature (Ambient kind, AmbCol, count, speed) and docs/DEVLOG.md:478 lists only visual per-biome atmosphere; C4 made three biomes mechanical (src/Terrain.cs). A2's own verdict (docs/DEVLOG.md:3449-3506): \"The beds still lean 'room tone with a chord in it'\". The synthesis primitives already exist for a loop-seamless band-limited layer with zero Util.Rng draws: `NoiseBed` (src/Audio.cs:537-564, private seeded Random) and `Pulse` (:573-603).",
+    "problem": "Player-facing: a run visits six distinct biomes with distinct floors, features and particles, and the ear hears the same 16 s A-minor pad in all of them and on the campaign map. The 'place' identity the visual program spent three waves on (V3 'biomes as places') has no audio half, and MAGMA vents that now burn (C4) make no sound.",
+    "proposal": "A third, low-level Music stream `_air` (volume ~0.18 * (1 - 0.4*intensity)), one 4 s loop per biome built by `Audio.BuildAir(int biome)` from NoiseBed/Pulse/Sine with per-biome bands: TUNDRA wind (200-900 Hz, slow gust LFO), MAGMA sub rumble (40-120 Hz) + sparse crackle pulses, NEON 60 Hz hum + faint 8 kHz whine, VERDANT 3-6 kHz chirp shimmer, VOID near-silence + one 2 kHz ping/loop, ARID swept 1-3 kHz gust, STEEL 120 Hz drone, ASH low hiss. 4 s x ~40 partials is ~7M sine evaluations per biome (A2 measured ~134M for a 16 s bed), so build all eight at Init or lazily in `SetupMission` via `Audio.SetBiome(int)`; cache like `_bedCache`. File-first like the beds (`assets/music/air_<biome>.ogg`). Add a biome cycle button to AUDIO CHECK's music panel.",
+    "acceptance": "`SIGHTLINE_AUDIOGATE=1` PASS with 8 new 'air:<biome>' rows under the peak, tail, periodicity and loop-seam checks (periodicity is the real guarantee - src/Audio.Analysis.cs:389-393). `SIGHTLINE_AUDIODUMP=1` writes music_air_<biome>.wav x8. `SIGHTLINE_AUDIOTEST` validates the eight buffers finite/in-range. `SIGHTLINE_PAIRTEST=1` byte-identical (zero shared-RNG draws). `SIGHTLINE_AUDITIONTEST` PASS with the new control. Init time measured and printed in DEVLOG (<= +0.5 s in Release).",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 3,
+    "pillars": [
+     "looks good",
+     "feels good"
+    ]
+   },
+   {
+    "title": "Vignette, scanline and grain still land on the chrome; a board-rect mask closes most of the recorded residual without the third pass, and the POSTFX demo hook is a no-op",
+    "kind": "improvement",
+    "evidence": "src/Display.cs:175-194: `vig = 1 - v1*0.13 - v2*0.10` with `edge` computed over the whole frame (line 112), `scan` (line 189) and grain (lines 192-194) applied unconditionally after the chrome has been painted into the same target (src/Display.cs:552-575: the W5 split moves the HUD out of the BLOOM SOURCE only). Chromatic aberration is `caStr = uChroma*0.0085*edge*edge` (line 118), maximal at the frame corners where the top/bottom bars live; uChroma = 0.55*bloom (src/Game.cs:3955) so it is transient, but the vignette (~13-23% darkening) and scan (2.8% ripple at a 3 px period over 12-13 px text) are permanent. docs/ROADMAP.md:1528-1535 records the residual and prices the fix as a third full-screen RT + blit. Stale hook: src/Program.cs:1218-1224 sets `Display.BloomIntensity = 0.85f; ChromaIntensity = 0.6f`, overwritten every frame by src/Game.cs:3955 `Display.SetPostFxParams(_postFxBloom, ...)` - recorded at docs/ROADMAP.md:1536-1541; src/Display.cs:23-24 and Program.cs:1028 still describe the demo as working. Also stale: src/Game.cs:3946-3950 says tint components are \"22..108 raw\" but W6 tints span 34..158 (src/Util.cs:288-310).",
+    "problem": "Player-facing: the top bar's objective text and the bottom bar's action buttons - the two densest text regions - are the darkest part of the frame at every brightness setting, and small chrome text carries a scanline ripple the board was designed for. Team-facing: `SIGHTLINE_POSTFX=1` photographs the resting state while claiming to show the effect, so nobody has a screenshot of the bloom spike, and CONTRASTTEST's numbers (measured through that hook) are silently 'resting' numbers.",
+    "proposal": "(a) One new uniform `uBoardRect` (Cfg.OriginX/Y, BoardW/H in UV); compute `edge` from board-rect-normalised coordinates and multiply the vignette, scan, grain and CA terms by `inBoard = smoothstep` of the rect with a ~24 px feather, set to full-frame (current behaviour) on overlay screens by passing the whole frame as the rect from `Hud.BackdropPhase`. Brightness/gamma/grade stay on the chrome (the W5 accessibility reason for keeping it in the composite is preserved). No extra RT, no extra blit. (b) Make the demo honest: a `Game.DemoPostFx` flag set by the hook that pins `_postFxBloom = 0.85f` in Update. (c) Fix the two stale comments.",
+    "acceptance": "A new `SIGHTLINE_POSTFXTEST=1` leg (or a CONTRASTTEST extension: same boot path, Hud.TimePin/MousePin/AnimPin set): sample the top-left objective label and bottom-right action-button glyph luminance with PostFX on vs off; assert on/off >= 0.97 (today ~0.80-0.86 at the corners); assert a board-corner floor patch is still darkened >= 10%. `SIGHTLINE_POSTFX=1 SIGHTLINE_SHOT=760` now shows a visible spike (share before/after in chat). CONTRASTTEST PASS; SIGHTLINE_SHOT without POSTFX byte-unchanged (Display disabled headless).",
+    "impact": 2,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "looks good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "The audio budget is unweighted RMS; K-weighting (BS.1770) is ~40 lines and would re-rank the mix the gate is protecting",
+    "kind": "instrument",
+    "evidence": "src/Audio.Analysis.cs:48-74 `Measure` computes plain RMS over the buffer; the category bands at :409-417 (crit -23..-17, weapon -27..-20, ui -31..-23, move -34..-28) and the `crit - hit >= 4 dB` check (:500-504) are all in that unit. The sub-heavy cues carry most of their energy where the ear is least sensitive: `crit` has a 70->46 Hz sine at 0.46 (src/Audio.cs:270), `w_lmg` a 90->48 Hz square at 0.32 (:257), `st_squadwipe` a 98->49 Hz sine at 0.42 (:345), while `w_sniper` (:237-244) and `miss` (:278-279) live at 1-4 kHz where equal-loudness sensitivity is 15-20 dB higher. docs/DEVLOG.md:2675 (A1) and :3503 (A2) both record 'no perceptual weighting' as left open; nothing since touched it.",
+    "problem": "Team-facing: the gate's 'crit reads heavier than hit' and the ordered category ladder (crit > weapon ~ stinger > impact > ui > move) are asserted on a scale that over-counts sub-bass, so a cue can pass its band while sounding thin and the heaviest-sounding cue may not be the one the budget says. On-device tuning (the standing 'needs the human' item) will be argued against numbers that do not track loudness.",
+    "proposal": "Add `KWeight(float[] in)` to Audio.Analysis: the BS.1770 pre-filter pair (high-shelf ~+4 dB above ~1.5 kHz, then a 38 Hz 2nd-order HPF) as two RBJ biquads (the `Bp` helper at src/Audio.cs:1170-1188 is the template), then RMS -> `LkDb`. Print an `LK` column in DumpReport beside `rms`; compute the crit-hit separation and the RMS spread in both units and print both; keep the gate on unweighted bands for one wave (so no existing number moves) but add an INFO line ranking cues by LK so the owner's first on-device pass has a perceptual ordering to argue with. Show LK on the AUDIO CHECK row (there is a free column: the >1 kHz value is unbanded by design, src/Hud.Audition.cs:15-18).",
+    "acceptance": "`SIGHTLINE_AUDIODUMP=1` prints an LK column for all cues and both beds; an impulse-response self-check inside AUDIOGATE asserts the K filter's gain at 100 Hz, 1 kHz and 4 kHz within 0.5 dB of the BS.1770 reference (-0.7 / 0.0 / +3.7 dB approx). AUDIOGATE PASS unchanged otherwise. AUDITIONTEST PASS with the new column fitting at 120%.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 3,
+    "pillars": [
+     "feels good"
+    ]
+   }
+  ]
+ },
+ {
+  "lens": "content-breadth",
+  "summary": "SIGHTLINE's content inventory is wide on paper (22 hostile archetypes, 35 authored arenas, 8 biomes with 3 mechanical, 8 objectives, 4 deployment shapes, 3 factions with mid-boss and finale kits, 17 field events, 16 boons, 5 contracts, 23 perks) and the FUL-9 no-repeat arena deck, hashed objective plan and W4 shapes already deal it well inside the campaign. Where variety runs out first is not the pool sizes but the DEAL: the biome sequence is a fixed 8-cycle with a run offset (only 8 of 56 biome adjacencies ever occur, 1-3 mechanical rooms per run in fixed slots), the climax skeleton is identical every run (mid-boss on m3/m5 by mission number, the map's ELITE node is just +2 bodies), and two of the four modes never see the roster at all: SKIRMISH and DAILY build with n=1, so SelectArchetype hands them SCOUT/GRUNT only, with no faction, no pods of 3 and no kit. Inside the bestiary, 12 of 22 hostiles carry the same SMG and four pairs are stat twins whose only difference is one Ai.Plan weight, while the four most distinctive contest archetypes (BOMBARD/WARBRINGER/PIKEMAN/CUSTODIAN) are 0.8-2.1% of spawns and CUSTODIAN is a dead mechanic on six of eight objectives. The five paint biomes are honestly declared and BIOMETEST-asserted; the cheapest symmetric additions are a VOID rift (a new impassable-but-transparent geometry class) and ARID soft sand (a CostMap-only inverse of ice). Arena exposure numbers in the L4 archive are quantized by 80 CRN seeds and must not be read as generator bias; EXPOSURETEST is the right instrument, and the report has no per-run content-exposure block at all.",
+  "findings": [
+   {
+    "title": "SKIRMISH and DAILY field only SCOUT/GRUNT \u2014 20 of 22 archetypes, all three factions, pods-of-3 and every mid-boss kit are unreachable in two of four modes",
+    "kind": "defect",
+    "evidence": "src/Game.Modes.cs:143 (BeginSkirmish) and the BeginDaily body (src/Game.Modes.cs ~185) both call SetupMission(1); src/Game.cs:2108 passes that n straight to Mission.Build; src/Mission.cs:968-973 SelectArchetype: `if (n <= 1) return SCOUT or GRUNT`; src/Game.cs:1962 `Combat.BeginMission(..., _run.CurrentNode?.Faction ?? Faction.None, ...)` and src/Run.cs GenerateMap stamps factions only on Combat/Elite nodes (the Start node a fresh Run sits on is Faction.None), so FactionRoster (src/Mission.cs:1079) never runs; the mid-boss gate is `n == 3 || n == 5` (src/Mission.cs ~820) and podsOf3 is `n >= 3`. W9 exempted only the numeric heat grace (`Mode != GameMode.Skirmish`); MODETEST's PASS string (src/Game.Modes.cs:653) asserts the force 'answers the heat dial', not what the force is. The skirmish card exposes only objective + heat (src/Game.Modes.cs:39-40). L4's default-cascade spawn tally is 44% SCOUT+GRUNT (4128 of 9388) for the same reason on campaign m1/Supply nodes.",
+    "problem": "A heat-8 skirmish is a dozen SCOUT/GRUNTs with bigger numbers, and the DAILY is the same two bodies every day at heat 0-3. The player who has finished a few campaigns and turns to the practice/score modes finds the bestiary, the faction rules, the SHIELD/PIKEMAN/BOMBARD puzzles and the boss kits all missing exactly where a veteran would go to replay them. FEATURES.md sells DAILY as 'a deterministic date-seeded challenge'; it is the opener, forever.",
+    "proposal": "Thread a ROSTER DEPTH separate from the stat bump: add `int rosterTier` to Mission.Build/SpawnEnemies (default = n, so campaign is byte-identical) and pass `Mode == Skirmish ? Math.Clamp(3 + heat / 3, 3, 5) : n` from SetupMission; use rosterTier for SelectArchetype's tier, podsOf3 and the mid-boss slot (mid-boss when heat >= 4), keep `bump` on n so the W9 heat arithmetic is untouched. Stamp a faction: DAILY derives it from the seed exactly like DailyArena/DailyObjective (src/Game.Modes.cs:218-223); SKIRMISH gains a FACTION dial (ANY/SYNDICATE/LEGION/WARDENS) on the setup card, plumbed through _run.CurrentNode.Faction or a Mission-side override so Combat.BeginMission sees it. Endless already uses MakeEndlessHostile and is unaffected.",
+    "acceptance": "New MODETEST legs: (1) 50 heat-0 skirmish builds contain >=1 unit whose Cls is not SCOUT/GRUNT and, at heat>=4, exactly one Cls==ELITE; (2) a fixed SIGHTLINE_DAILY stamp fields a non-None Combat.MissionFaction and a byte-identical composition on two processes; (3) the campaign leg reproduces today's m1 force (PAIRTEST byte-identical, SIGHTLINE_BALANCE=10 inert_diff empty). Screenshot: the skirmish setup card with the FACTION row (FITTEST leg at 4 scales) and a SIGHTLINE_SHOT=760 daily board showing specialists. Autoplay x3 in skirmish mode: no TIMEOUT.",
+    "impact": 5,
+    "cost": "M",
+    "confidence": 5,
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "The named mid-boss is keyed on MISSION NUMBER (3, 5), not on the ELITE node \u2014 the map's ELITE label is '+2 bodies', and a SUPPLY rest stop on column 3 or 5 fields a plain elite",
+    "kind": "defect",
+    "evidence": "src/Mission.cs ~820: `bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5)`; src/Run.cs CardForNode: Elite = EnemyDelta 2 / StatDelta 1 / BonusPerk, Supply = EnemyDelta -1 / StatDelta -1 / 'Full squad heal'; src/Run.cs GenerateMap leaves Supply nodes Faction.None, so MakeMidBoss (src/Mission.cs:1354) falls to the unarmed `Mk(n == 3 ? \"BREAKER\" : \"WARDEN\")` on them; src/Mission.cs grenade branch `e.Grenades = midBoss ? 2 : 1` gives that Supply elite two frags. Supplies are sprinkled over mid columns 1-4 (missions 2-5), so a mission-3/5 Supply node is routine.",
+    "problem": "Every run has the same climax skeleton \u2014 m3 mid-boss, m5 mid-boss, m6 finale \u2014 regardless of route, so the branching map buys no variety in WHEN the set-pieces come; the node the map calls ELITE is not where the elite is (an m2/m4 ELITE is a bigger grunt pile), and the node advertised as 'lighter force + full heal' can be an 18-HP LMG elite with 2 grenades. The Slay-the-Spire elite-as-optional-risk structure the node kinds imitate is not actually wired.",
+    "proposal": "Key the named elite on `NodeKind.Elite` (pass a `bool eliteNode` into Build/SpawnEnemies from _run.CurrentNode.Kind; the faction kit comes from the node's stamped faction, which Elite nodes already have) and never on Supply; pay for the elite body by dropping the Elite card's EnemyDelta 2 -> 1. Optionally keep m5 as a floor so every route meets at least one. Update Run.EnemyHint so the ELITE node's hint names the kit (BREAKER/BULWARK/WARDEN). Draw order changes (the ELITE branch skips the Util.Roll(22) grenade roll), so this is a world-changing lever: CRN-paired round, one lever, byNodeKind cross-tab.",
+    "acceptance": "A new self-test leg (in AITEST or a small ELITETEST): stage an Elite node at m2 and m4 -> exactly one Cls==ELITE named for the node faction; a Supply node at m3 and m5 -> zero ELITE; the Boss node unchanged; Faction.None Elite node still fields a plain elite. SIGHTLINE_MISSION=2 screenshot on an Elite node showing the champion ring. 40-campaign CRN-paired batch on 4 slot sets with byNodeKind Elite/Supply win rates reported against the base commit.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "well-designed loop",
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "The biome deal is a fixed 8-cycle with a run offset \u2014 only 8 of 56 biome adjacencies ever occur, TUNDRA is always followed by VERDANT, and a run's mechanical-biome count is decided by which of 8 offsets it drew",
+    "kind": "improvement",
+    "evidence": "src/Util.cs Biome.IndexFor: `((uint)runSeed + (uint)(missionNum - 1)) % All.Length` over the fixed table STEEL, ARID, TUNDRA, VERDANT, ASH, VOID, NEON, MAGMA (src/Util.cs:280-300); src/Voice.cs:56 documents it as '(seed + m - 1) % 8'. Derived: a 6-mission run is one of exactly 8 sequences; mechanical rooms (indices 2, 3, 7 per src/Terrain.cs:53-55) per run by offset = {2,2,3,2,1,2,3,3}; MAGMA is always the mission after NEON and always followed by STEEL. The arena theme hint (src/Mission.cs:213-230, one arena per biome at 25%) and Voice region names ride the same index. DESIGN.md \u00a73.F: 'runs feel different because of combinations (objectives x biomes x enemy mixes x builds)'.",
+    "problem": "By the eighth run a player has seen every possible biome sequence; the ground layer C4 built lands in predictable slots (an ASH-start run gets one mechanical mission, a TUNDRA-start run gets three, and they are always the same three in the same order). The biome axis, which is the most visible per-mission identity in the game, is the least varied deal in it.",
+    "proposal": "Replace the offset with a per-run hashed 6-of-8 permutation using the same Hash3 Fisher-Yates DeckPick already uses (src/Mission.cs:1758-1770), preserving the 'six distinct biomes per run' invariant Voice relies on, with an optional guarantee of 1-3 mechanical rooms per run. This re-keys Terrain.Stamp and the arena hint, so it re-rolls every CRN world exactly as W1 did: ship it as its own wave with an R0diag and a re-measured ladder, never inside a balance wave. SaveGame.MapFingerprint pins GenerateMap, which does not read IndexFor, so SAVETEST should be unchanged \u2014 verify.",
+    "acceptance": "New BIOMETEST/EXPOSURETEST leg over 4000 seeds: every ordered biome pair (a -> b, a != b) appears at least once (today exactly 8 pairs ever occur), each biome's per-mission frequency within +/-10% of uniform, every run still has 6 distinct biomes (VOICETEST's existing check stays green), mechanical-room count per run in the declared band. SAVETEST green with no mapShape line; PAIRTEST byte-identical on the new tree; a fresh same-slot baseline before any number is quoted.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "well-designed loop",
+     "looks good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "VOID is the cheapest of the five paint biomes to make mechanical, because a RIFT (impassable, transparent, no cover) is a geometry class the game does not have at all",
+    "kind": "improvement",
+    "evidence": "src/Terrain.cs:22-25 GroundKind has three mechanical kinds; src/Terrain.cs:36-40 and src/Game.Harness.cs:3901 (`paintBiomeStamped`) assert STEEL/ARID/ASH/VOID/NEON stamp nothing; ROADMAP 'The other FIVE biomes are still paint' names candidates and says 'none designed, none measured'. Every non-walkable tile today is also cover and a sight object: src/Grid.cs:225 `IsCover = Tiles != Floor`, `IsFloor = Floor && !Barrel`, BlocksSight = HighCover || IsVapor (src/Grid.cs:228-236); there is no 'shoot across, cannot walk across' primitive. V3 SURFACES already draws a VOID 'lattice trunk' feature (DEVLOG:4353), so the art vocabulary exists. ROADMAP records that 23.5% of MAGMA boards have no vent-free route, i.e. Terrain.Stamp has no reachability check because vents are walkable \u2014 a true wall needs one.",
+    "problem": "Five rooms tell the player 'this floor is ordinary' (Codex PLAIN GROUND row, src/Codex.cs ~150). Undergrowth, ice and vents are cover/movement/sight rules; a rift is the fourth axis \u2014 ROUTE LENGTH without a wall \u2014 which produces long-range duels across a gap and flank routes the AI must walk around, and it is symmetric for free because the AI's reachable set is CostMap.",
+    "proposal": "Add GroundKind.Rift for VOID (Terrain.BiomeVoid = 5): `Grid.IsFloor` excludes it (so CostMap, the move overlay, the VIP leash and every reachability probe exclude it together), `GetCover` unchanged (a rift is not a Tiles cover so it grants nothing and never reads as flanked-adjacent), `BlocksSight` unchanged (sight crosses). Stamp 1-2 snaking 1-wide lines with fords by reusing StampFissure's walker and gap rule, then a flood check inside Terrain.Stamp that removes rift tiles until every unit and reserved fixture is reachable. Let VAULT (src/Game DoVault, adjacent-cover leap) also leap a 1-wide rift. Tag 'RIFT', rule 'nothing crosses it, everything shoots across it - VAULT a narrow one'; Codex FIELD CRAFT row in the Terrain.Enabled block; threat card unchanged.",
+    "acceptance": "BIOMETEST: flip VOID's paint assertion deliberately and add legs: (a) CostMap from any tile never reaches a rift for either team; (b) HasLineOfSight across a rift == true; (c) GetCover on/adjacent to a rift adds no level and no Flanked; (d) 200 stamped VOID boards, every unit/fixture reachable treating rifts as walls; (e) SIGHTLINE_BIOMEMECH=0 restores the pre-change board; density pin printed. PAIRTEST byte-identical (Hash3 only, zero Util.Rng draws). Screenshot SIGHTLINE_FORCEBIOME=5 SIGHTLINE_SHOT=760. 40-campaign CRN-paired round with the VOID byBiome row against the paint control, base commit stated.",
+    "impact": 4,
+    "cost": "M",
+    "confidence": 4,
+    "pillars": [
+     "well-designed loop",
+     "looks good",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "MAGMA is the outlier biome by 8-12 mission-win points and BURN is the #1 killer of soldiers, yet the campaign map never names a biome or its ground rule \u2014 the largest unlabelled difficulty axis in the deal",
+    "kind": "defect",
+    "evidence": "L4 archive aggregated over the 48 ladder chunks (docs/measurements/l4/L4-h*-b*.json, byBiome, mission-level, n~420 per biome): MAGMA 72.4% win / 6.42 avg turns vs STEEL 84.5 / VERDANT 84.8 / NEON 81.9 / ASH 81.8 / TUNDRA 81.2 / VOID 80.4 / ARID 79.9. soldierDeathsByEnemy summed: BURN 460 > ELITE 405 > GRUNT 329 (VENT direct 4, BARREL 7). C4's paired round (docs/measurements/c4/, DEVLOG \u00a7C4) found only MAGMA negative at every rung and 'not resolved at n=160'. The map draws only Voice.RegionName per column (src/Hud.cs:5082); BiomeMechTag/Rule surface only on the mission banner (src/Game.cs:2258) and the briefing card (src/Game.cs:1125), i.e. after the route is chosen. ROADMAP lists VentBurnTurns/VentStepExtra/tile budgets as unpriced levers.",
+    "problem": "A route through the MAGMA column is a bigger swing than the PITCHED/TASKED class C3 labelled at 36.5 points on mid-run nodes only at the run level; at mission level the biome gap is comparable to a heat step, and the player cannot read it on the fork. The BURN aggregate also hides which source is doing the killing (vent, barrel, grenade fire, incendiary), so the top killer is undiagnosable.",
+    "proposal": "(a) Add the biome name and Terrain.Tag to each campaign-map column header ('CINDER REACH \u00b7 MAGMA \u00b7 VENTS') beside the region name, colour-redundant like the class mark; (b) split Stats' BURN attribution by ignition source (vent / barrel / grenade / incendiary / enemy fire) \u2014 report-only, inert; (c) price one vent lever CRN-paired (VentBurnTurns 2 -> 1, or exempt the first step onto a ford) against the same slot sets.",
+    "acceptance": "FITTEST leg for the map header at all four text scales (no overprint with the node labels \u2014 src/Hud.cs 'campaign-map labels can't overprint' contract); SIGHTLINE_MAPCOL screenshot; inert_diff on the BURN split (zero non-harness fields move); a 40-campaign paired round per slot set with the byBiome MAGMA row and the vent-burn split quoted with base commit and n.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 3,
+    "pillars": [
+     "reads clearly",
+     "stakes that bite",
+     "well-designed loop"
+    ]
+   },
+   {
+    "title": "The four most distinctive 'contest' archetypes are the rarest bodies in the game (BOMBARD 0.8%, WARBRINGER 1.6%, PIKEMAN 1.8%, CUSTODIAN 2.1%), and CUSTODIAN is a dead mechanic on six of eight objectives",
+    "kind": "improvement",
+    "evidence": "L4 spawn tally (enemyComposition summed over 48 chunks, 30,408 spawns): BOMBARD 231, WARBRINGER 481, PIKEMAN 543, CUSTODIAN 624 vs SCOUT 3586 / GRUNT 3415. Cascade windows 3%/2%/3%/2% at src/Mission.cs:1048-1062; one-per-mission caps siegeSpawned/bannerSpawned (src/Mission.cs ~712-716); Wardens BOMBARD only m3+ (src/Mission.cs:1142). CUSTODIAN's verb is re-locking a terminal or re-arming a blown charge (Ai.cs:299 -> Game.DoRelock); src/Mission.cs MakeFinaleRetinue comment: 'a keeper has no terminal/charge to re-lock \u2014 a dead mechanic on the one map it would ship on'. SpawnEnemies receives `sabotage` and `defend` flags but not whether the objective has a terminal (src/Mission.cs:637-640), so it cannot gate the keeper. L4 lethality: CUSTODIAN 43 soldier kills over 624 spawns.",
+    "problem": "The verbs that make a fight read differently \u2014 position (artillery), morale (banner), movement (lane), progress (keeper) \u2014 together appear in roughly one mission in three, and CUSTODIAN's 624 spawns are mostly a 5-HP SMG grunt with a padlock silhouette. A 10-run player may never have watched a banner hold a wavering pod.",
+    "proposal": "(1) Gate CUSTODIAN at spawn on a progress objective: pass `bool progressObj = terminal.HasValue || sabotageObj` into SpawnEnemies and, when false, resolve its r-window to PIKEMAN (Wardens) / WARBRINGER (Legion) / SCREENER (Syndicate) instead \u2014 same `r`, zero extra draws. (2) Relax the WARBRINGER cap to one per POD on m4+ (BannerRange is Chebyshev 4 on an 18x11 board; two auras cannot blanket it). (3) Add 'ANCHORED' / 'ARTILLERY' words to Run.EnemyHint (src/Run.cs:1845) so the fork tells you a banner or artillery node lies ahead.",
+    "acceptance": "A spawn-census self-test leg (extend AICOVTEST or CLASSTEST): 500 Hack/Sabotage builds per faction field CUSTODIAN within its window, 500 Eliminate/Evac/Defend builds field zero; PAIRTEST byte-identical if the re-route consumes the same r (assert on a pinned slot); a 40-campaign paired batch showing the ENEMY COMPOSITION rows moving as declared and byObjective unchanged where CUSTODIAN was inert. CODEXTEST green; FITTEST on the hint string.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "well-designed loop",
+     "reads clearly",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "Twelve of 22 hostiles carry the same SMG and four archetype pairs are stat twins differing by one Ai.Plan weight \u2014 HUNTER/STRIKER, SCOUT/HOUND, GRUNT/LANCER, SPOTTER/SCREENER",
+    "kind": "improvement",
+    "evidence": "Stat lines src/Mission.cs:996-1065: HUNTER (Smg, 5 HP, 60 aim, mob 9) vs STRIKER (Smg, 4, 60, 9) \u2014 the only differences are `owEnd 9 vs 26` (src/Ai.cs:856) and never-retreat (src/Ai.cs:469-472); SCOUT (Smg,4,58,8) vs HOUND (Smg,3,56,9) \u2014 HOUND's isolation targeting (src/Ai.cs:223); GRUNT (Rifle,5,60,6) vs LANCER (Rifle,7,58,5) \u2014 adjacency bonus (src/Ai.cs:832); SPOTTER (Smg,5,48,6) vs SCREENER (Smg,5,46,6). Weapon census of the 22: SMG 12 / Rifle 4 / LMG 3 / Shotgun 2 / Sniper 1. L4 soldier kills per spawn: STRIKER 0.093 vs HUNTER 0.107; HOUND 0.091 vs SCOUT 0.054; LANCER 0.134 vs GRUNT 0.096 \u2014 twins in outcome as well as statline. The threat card (Hud.DrawThreatCard) prices expected damage from the weapon band, so twins forecast identically.",
+    "problem": "The bestiary reads as ~14 threats, not 22; a twin's only differentiator is an AI tendency the player sees after it fires, and nothing in Combat.ComputeOdds, the tooltip or the incoming-fire card distinguishes a JACKAL from a WRAITH standing on the same tile.",
+    "proposal": "Give each junior twin ONE rules-axis hook that ComputeOdds/ShotAnim can badge and the Codex can name, rather than another AI weight: HUNTER \u2014 flank shots carry +crit (a Cls-keyed AddCrit like Trait.Killer, badge 'JACKAL'), HOUND \u2014 a hit applies Bleed (mirror the Boon.Venom path on the hostile side), LANCER \u2014 +1 Armor while adjacent to another LANCER (the phalanx made mechanical; Unit.Armor exists), SPOTTER left as is (its paint is already a rule). Update the four bestiary blurbs so the manual names the rule.",
+    "acceptance": "COMBATTEST legs: HUNTER crit delta only on a flanked target; LANCER armor only with an adjacent LANCER; HOUND applies Bleed on hit and not on graze; TRUTHTEST parity for each new badge (W9's 'a badge that lies' gate); CODEXTEST green; AICOVTEST decision mix unchanged. A 40-campaign paired batch showing per-spawn lethality of the twins diverging in soldierDeathsByEnemy with base commit and n.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 3,
+    "pillars": [
+     "reads clearly",
+     "well-designed loop",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "The arena deck is objective- and shape-blind, and two authored pairs are ~88% tile-identical \u2014 17 of 35 arenas have no elevation, 5 have authored barrels, 8 are left-right mirrors",
+    "kind": "improvement",
+    "evidence": "src/Mission.cs:1752 `PickLayout(missionNum) => DeckPick(DeckSeed, missionNum)` \u2014 the only inputs are seed and mission number; DeployFor (src/Mission.cs:78) likewise. Parsed census of src/Maps.cs Layouts (35): no elevation 17 (PILLARS, FOXHOLES, THICKET, CHASM, HOOK, GRID, CONDUIT, PALISADE, WISHBONE, APPROACH, KILLBOX, TRENCHES, GARRISON, REFINERY, CRUCIBLE, COLONNADE, ENTRENCHED); tier-2 9; barrels 5; LR-mirror-symmetric 8; closest pairs ZIGGURAT/FORGE 88.9% identical tiles (same footprint, FORGE is the MAGMA-tinted twin), GARRISON/REFINERY 88.4%, HOOK/GARRISON 88.4%. Hint pull: the 8 BiomeLayoutHint arenas took 38.9% of L4's 2690 authored missions (THICKET 6.1%, CAUSEWAY 6.0%, DONJON 5.6%, CRUCIBLE 5.5%, REDANS 5.0%) vs a uniform 2.9%. CAUTION: per-arena n in L4 is quantized by 80 CRN slot seeds (APPROACH n=15, THICKET n=164), so it is not evidence of generator bias; EXPOSURETEST (DEVLOG:4723, 4000 seeds, 35/35 for every shape) is the instrument.",
+    "problem": "Defend on COLONNADE (a long gallery with no strongpoint) and Defend on DONJON are the same deal; Escort across CHASM's cover river and ENVELOP on a corner-heavy map are dealt as often as anything else. Arena variety is not where breadth runs out for a 5th-run player (~24-48 authored missions seen by run 10), but the arena never MATCHES the fight, so the same objective on the same arena class recurs without the set-piece pairing the arena comments describe.",
+    "proposal": "Add a small tag table beside Layouts (`Maps.Tags[idx]`: HOLD / ASSAULT / OPEN / HAZARD / VERTICAL, from the existing arena comments) and a soft objective-aware pull in DeckPick at the same 25% weight and zero-draw derivation as the biome hint: Defend/Rescue -> HOLD, Decapitate -> VERTICAL, Sabotage -> OPEN, Evac/Escort -> not HAZARD. Differentiate the two 88% twins (give FORGE a distinct footprint or fold it into ZIGGURAT's MAGMA skin). Pure derivation, but it changes which world a seed deals: its own wave, R0diag first.",
+    "acceptance": "EXPOSURETEST extended: over 4000 seeds P(HOLD arena | Defend) >= 40% while every arena stays reachable on every objective and shape; a byArena x objective cross-tab added to the report; PAIRTEST byte-identical on a pinned slot before and after (the pull is Hash3-only); SIGHTLINE_MAP screenshots of any edited arena; connectivity-reject rate stays ~0 in the ARENA FUNNEL.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 3,
+    "pillars": [
+     "well-designed loop",
+     "looks good"
+    ]
+   },
+   {
+    "title": "ARID SOFT SAND \u2014 the S-cost mechanical biome: a CostMap-only slow tile, the inverse of ice, symmetric by construction",
+    "kind": "improvement",
+    "evidence": "src/Grid.cs:478-484 CostMap already branches on GroundKind per step (`Ice` -> Terrain.IceStepOrth/Diag, `Vent` -> += VentStepExtra); src/Terrain.cs:60-64 the ice constants; StampPatches (src/Terrain.cs ~150) is a reusable blob walker; V3 draws an ARID 'dune ridge' feature (DEVLOG:4353). ARID is a paint room asserted by BIOMETEST (src/Game.Harness.cs:3901) and mid-pack in L4 byBiome (79.9%, n=422). The Codex FIELD CRAFT block for ground rules is gated on Terrain.Enabled and takes one Add() per rule (src/Codex.cs ~130-155).",
+    "problem": "The movement axis has only a fast lane; there is no slow ground anywhere in the game, so 'fight around it or crawl through it' is a decision no board asks. It is also the safest first paint-to-mechanic conversion because it has no hazard, no sight effect and no cover interaction to mis-price.",
+    "proposal": "GroundKind.Sand for ARID (index 1): step cost orth 3 / diag 4 (SandStepOrth/Diag as static ints so BIOMETEST can pin them), nothing else; stamped as 3-4 lobed patches with a budget ~40 via StampPatches; the move overlay shrinks the same way the ice bulge grows. Tag 'SOFT SAND', rule 'a dune costs half a step MORE - slow ground for both sides'. Autopilot needs no term (reach comes from the shared cost map, exactly as C4 found for ice).",
+    "acceptance": "BIOMETEST: flip ARID's paint assertion deliberately; legs: CostMap onto sand == 3/4; a Mobility-4 soldier's reachable set on a sand board is a strict subset of the flag-off set on the same board; density pin printed each sweep; SIGHTLINE_BIOMEMECH=0 restores. PAIRTEST byte-identical. Screenshot SIGHTLINE_FORCEBIOME=1 SIGHTLINE_SHOT=760 with the codex row visible via SIGHTLINE_CODEXTAB=0. 40-campaign paired round, ARID byBiome row vs paint control.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "well-designed loop",
+     "reads clearly"
+    ]
+   },
+   {
+    "title": "Field events never touch the NEXT FIGHT \u2014 19 outcome kinds, 18 of them roster/economy state; no event changes a board, an opening or a force",
+    "kind": "improvement",
+    "evidence": "src/Events.cs:18-44 EventOutcomeKind: Intel, HealSoldier, WoundSoldier, GambleIntel, GrantWeaponMod, GrantBonusPerk, GrantGrenades, GrantArmor, Recruit, GrantTrait, AddHeat, GrantBoon, Nothing, GrantScar, CureScar, Salvage, GrantPrep, RankKills, ReleaseSoldier \u2014 only GrantPrep reaches a fight, as an aim modifier. All 17 events were seen in L4 (993 choice picks, 'cache' least at 24, 'informant' most at 101), so exposure is no longer the issue ROADMAP's 'Event exposure' item describes. The pins that would let an event shape a fight already exist: Mission.ForcedDeploy (src/Mission.cs:45), MissionCard.EnemyDelta/StatDelta (src/Run.cs CardForNode), BiomeLayoutHint (src/Mission.cs:224).",
+    "problem": "Every event is '+N intel versus a roster trade'; the '?' node is a shop with flavour text. Nothing a player chooses between missions changes what the next board looks like, which is the cheapest place in the loop to buy run-to-run combination variety (DESIGN \u00a73.F).",
+    "proposal": "Append 2-3 EventOutcomeKinds (the kind is not persisted, but the pending modifier must be: one new nullable Run field + SaveGame DTO leg): NextOpening (an ambush warning -> the next fight deals PINCER or ENVELOP via the ForcedDeploy path for one mission), NextForceTrim (bribe the garrison: -2 bodies next fight, +1 heat for the run), NextArenaPull (a local guide: the next fight pulls the biome's themed arena at 100%). Author 2 events using them ('AMBUSH INTEL', 'THE GARRISON TAKES BRIBES'). Consumed once in SetupMission and cleared.",
+    "acceptance": "EVENTTEST legs: apply -> the next SetupMission reads the modifier exactly once and clears it; save/load round-trip carries it (SAVETEST DTO fingerprint updated and pasted); the mission after is unaffected; autopilot's event valuation (Game.EventChoiceValue) prices the new kinds (FireWeight test rows). SIGHTLINE_EVENTID=<new id> screenshot at 4 text scales (FITTEST event-card leg). Autoplay x3 clean.",
+    "impact": 3,
+    "cost": "M",
+    "confidence": 3,
+    "pillars": [
+     "well-designed loop",
+     "stakes that bite"
+    ]
+   },
+   {
+    "title": "Every ground mechanic is met for the first time on a live mission \u2014 the TRAINING OP is pinned to STEEL and there is no just-in-time tip for UNDERGROWTH / ICE / VENTS",
+    "kind": "improvement",
+    "evidence": "DEVLOG \u00a7C4 'What I did NOT do' item 7: 'The mechanics are not taught by the tutorial/drill. The drill is pinned to STEEL, so a new player meets a mechanic for the first time on a live mission with only the briefing card, the banner and the codex.' Maps.TrainingArena (src/Maps.cs ~640) has no ground; FEATURES.md lists the 10 FIELD TIP cards (BRACE/STABILIZE/RELOAD/GRENADE/HUNKER/SHOVE/VAULT/DRAG/FOCUS/ITEM) \u2014 none is a ground rule; the biome briefing line is one sentence (src/Terrain.cs Rule) that auto-fades in 11 s and clears the moment the combat log has an entry. Not listed as an open item in ROADMAP.",
+    "problem": "The only content axis that changes the RULES of a fight (cover / movement / sight) has the weakest teaching layer of any verb; with more biomes going mechanical (findings above) this gap compounds.",
+    "proposal": "Add three FIELD TIP cards to Game.UpdateFieldTips fired once per profile the first time the squad deploys on a mechanical biome (precondition: BiomeIndex mechanical AND the tip bit unset), reusing the existing bitmask in display.json and the existing tip chrome; text from Terrain.Rule so it cannot drift. Optionally stamp a small undergrowth patch into the TrainingArena's centre lane as lesson 2b (cover) \u2014 cheap but it touches the drill's turn-budget fallbacks, so do the tips first.",
+    "acceptance": "TUTTEST legs: each of the three tips fires exactly once per profile, only on its biome, never while a lesson/briefing card owns the slot, and the seen-bits round-trip through display.json; SIGHTLINE_TIP screenshots for all three at the four text scales (FITTEST tip-card leg); SIGHTLINE_FORCEBIOME=3/2/7 with SIGHTLINE_FIRSTRUN=1 to photograph each.",
+    "impact": 3,
+    "cost": "S",
+    "confidence": 4,
+    "pillars": [
+     "reads clearly",
+     "well-designed loop"
+    ]
+   },
+   {
+    "title": "The balance report has no per-RUN content-exposure block, and the archived per-arena rows are quantized by 80 CRN seeds \u2014 nobody can currently say how many archetypes, biomes or kits a campaign fields",
+    "kind": "instrument",
+    "evidence": "L4 report DECK EXPOSURE prints only 'distinct authored arenas/run 3.40 mean' (docs/measurements/l4/L4-h0-b0.report.txt:127-129); ENEMY COMPOSITION is a spawn tally (src/Stats.cs:1104-1112) with no per-run distinct count; byBiome is mission-level (DEVLOG:11439 'No per-biome ladder'); across the 48 L4 chunks per-arena n ranges 15 (APPROACH) to 164 (THICKET) purely because the batch replays 80 slot seeds x 2 policies x 6 rungs, so those rows cannot be read as generator exposure. Content findings in this docket (skirmish roster, mid-boss cadence, biome cycle, rare contest archetypes) all had to be derived by hand from code and JSON.",
+    "problem": "Without a per-run distinct-content measure, no wave can prove it widened the deal, and the next reader will re-mis-read L4's byArena as arena bias.",
+    "proposal": "Add a CONTENT EXPOSURE block to Stats (report + aggregate JSON, report-only so it is inert): per campaign, distinct archetype classes fielded, distinct biomes and mechanical-room count, distinct arenas, distinct events, mid-boss/finale kits met, deployment shapes met, with mean/min/max over the batch; and an EXPOSURETEST leg that samples 4000 fresh seeds (not the CRN slots) for biome-sequence pair coverage and archetype first-appearance mission. Add a README note in docs/measurements/l4 that byArena is seed-quantized.",
+    "acceptance": "The block prints in SIGHTLINE_BALANCE=10 under xvfb and appears in the JSON; inert_diff.sh against the base binary shows zero non-harness fields moved; EXPOSURETEST prints archetypes-per-run mean and biome-pair coverage and is routed through the sweep's verdict so a regression fails the gate.",
+    "impact": 2,
+    "cost": "S",
+    "confidence": 5,
+    "pillars": [
+     "well-designed loop"
+    ]
+   }
+  ]
+ }
+]
