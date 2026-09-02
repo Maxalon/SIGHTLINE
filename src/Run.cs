@@ -1842,6 +1842,20 @@ public class Run
         _ => "",
     };
 
+    /// The one-line roster clause for a faction — the campaign fork's hover hint, and (THE MODES GET
+    /// THE BESTIARY) the skirmish/daily banner sub-line and the skirmish card's dial caption, so the
+    /// same sentence names the force wherever it is named. None is the mixed cascade, which is a
+    /// real thing to field (every archetype in the book) and is named as one, not left blank.
+    public static string FactionRosterLine(Faction f) => f switch
+    {
+        // APEX W5: name the setup-verb signatures now that the faction rosters field them
+        // (Legion += striker/lancer/hound, Syndicate/Wardens += screener).
+        Faction.Syndicate => "SYNDICATE: drones, shields + screeners",
+        Faction.Legion    => "LEGION: rushers, lancers + hounds",
+        Faction.Wardens   => "WARDENS: snipers, screeners + artillery",
+        _                 => "MIXED FORCE: no colours, every archetype",
+    };
+
     public static string EnemyHint(MissionNode node)
     {
         // SIGNAL W5: the Boss node is faction-stamped now (the FINALE KIT), and the KIT is the hint —
@@ -1857,15 +1871,7 @@ public class Run
         // Faction nodes read by their faction + signature units (the roster is faction-gated), so the
         // branch pick telegraphs the encounter's personality (counter-build before you commit).
         if (node.Faction != Faction.None)
-            return node.Faction switch
-            {
-                // APEX W5: name the setup-verb signatures now that the faction rosters field them
-                // (Legion += striker/lancer/hound, Syndicate/Wardens += screener).
-                Faction.Syndicate => "SYNDICATE: drones, shields + screeners",
-                Faction.Legion    => "LEGION: rushers, lancers + hounds",
-                Faction.Wardens   => "WARDENS: snipers, screeners + artillery",
-                _ => FactionName(node.Faction),
-            };
+            return FactionRosterLine(node.Faction);
         int m = node.Mission;   // 1-based column == mission number
         switch (node.Kind)
         {

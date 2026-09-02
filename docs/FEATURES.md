@@ -17,6 +17,18 @@ seeds (mix of WIN/LOSE, no exceptions):
   stat and damage point the dial promises, leaving only the qualitative flags. The grace is now gated on
   `Mode != GameMode.Skirmish`; MODETEST pins that a skirmish's force answers the dial AND that the campaign's
   mission-1 grace is untouched.
+  **THE MODES GET THE BESTIARY (PARALLAX P4):** both modes now draw from the WHOLE roster. `Mission.Build` /
+  `SpawnEnemies` take a `rosterTier` decoupled from the stat bump (default −1 = the mission number, so the campaign
+  is byte-identical; skirmish/daily pass 3 at heat 0-2, 4 at 3-5, 5 at 6-8 — the campaign's own m3/m4/m5 tiers),
+  pods of 3, and the named mid-boss from heat 4 (`midBossSlot`; the campaign's `n == 3 || n == 5` is untouched).
+  And a FACTION: the skirmish card's OPPOSITION dial (ANY / SYNDICATE / LEGION / WARDENS — `< >`, TAB / SHIFT+TAB;
+  ANY is dealt at deploy off the map seed among MIXED + the three, zero draws), the daily's derived from the date
+  seed like its objective/arena/heat (always a named faction). `Game.ModeFaction` is published through
+  `Combat.BeginMission` in place of the (always `None`) Start node. Named on the top bar for the whole fight, on the
+  banner sub-line (on the five paint biomes; the ground rule keeps that line on VERDANT/TUNDRA/MAGMA), and on the
+  intro's DAILY caption before the attempt. `SIGHTLINE_FACTION=syndicate|legion|wardens|mixed` pins a harness
+  skirmish. MODETEST legs 8-9 (FAIL on the pre-fix tree: `{GRUNT, SCOUT}` over 50 h0 builds, 0/50 pods of 3,
+  0/10 mid-bosses at h4/h8, daily faction `None`).
 - **BIOME MECHANICS — THE GROUND HAS RULES (CONTOUR C4, `src/Terrain.cs`):** three of the eight biomes now
   change how the fight works, on three different axes; the other five are still paint and say so.
   **VERDANT — UNDERGROWTH:** the fern mats are LOW COVER FROM EVERY ANGLE, but only against fire from more than

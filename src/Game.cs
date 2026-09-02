@@ -1697,6 +1697,7 @@ public partial class Game
         DailyMode = false;
         DailyStamp = 0;
         _dailyBest = -1;
+        ModeFaction = Faction.None;   // THE MODES GET THE BESTIARY: a skirmish's faction dies with it
         Wave = 0;
         // W9 review fix: an abandoned barracks' uncommitted pending spend dies with its run — a new
         // mode entry must never inherit (and later commit) a charge for goods that no longer exist.
@@ -1959,7 +1960,13 @@ public partial class Game
         // boons, the mission faction (read by the spawn roster in Mission.Build below, so it MUST be
         // set first), the bought counter-prep, and a clean PressureAim/AllUnits. Replaces the four
         // scattered manual resets that used to live here / at lines further down.
-        Combat.BeginMission(_run.ActiveBoons, _run.CurrentNode?.Faction ?? Faction.None, _run.PrepFaction);
+        // THE MODES GET THE BESTIARY: SKIRMISH/DAILY have no campaign node to be stamped by — a
+        // fresh Run sits on its Start node, which GenerateMap deliberately leaves Faction.None, so
+        // FactionRoster never ran in either mode. The mode entry publishes its own faction instead
+        // (ModeFaction: the skirmish card's dial, or the day seed). Every other mode reads the node
+        // exactly as before; this is the whole seam, and ResetModeState clears it at every mode entry.
+        Faction missionFac = Mode == GameMode.Skirmish ? ModeFaction : (_run.CurrentNode?.Faction ?? Faction.None);
+        Combat.BeginMission(_run.ActiveBoons, missionFac, _run.PrepFaction);
         _run.PrepFaction = Faction.None;   // counter-prep is one mission only — consume it
         Stats.ClearLog();   // fresh combat-log ledger each mission
         // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
@@ -2105,6 +2112,16 @@ public partial class Game
         // FUL-9: publish the run seed for the arena deck (pure derivation — Mission.PickLayout
         // deals draw n of a MapSeed-keyed no-repeat deck; all five mode entries route through here)
         Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
+        // THE MODES GET THE BESTIARY — ROSTER DEPTH, decoupled from the stat bump. SKIRMISH/DAILY
+        // enter at n == 1 (W9 made that n's heat ARITHMETIC real; it is left exactly alone), but the
+        // roster gates keyed on n — SelectArchetype's tier, pods of 3, the mid-boss slot — were
+        // pinned to mission 1's SCOUT/GRUNT teaching tier in both modes. The tier now rides the
+        // heat dial: 3 (the full roster) at heat 0-2, 4 at 3-5, 5 at 6-8 — the campaign's own m3/m4/m5
+        // tiers, so nothing here is a new archetype table — and the named mid-boss fields from
+        // heat 4 (ELITE CADRE, the rung that also opens Ai.Tier 1). Campaign/endless/training pass
+        // n, so the campaign path is byte-identical (PAIRTEST + the inert balance diff are the gate).
+        int rosterTier = Mode == GameMode.Skirmish ? Math.Clamp(3 + Math.Max(0, heat) / 3, 3, 5) : n;
+        bool modeMidBoss = Mode == GameMode.Skirmish && heat >= 4;
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
                       Objective == Objective.Defend,    // FUL-4: trim the opener — waves are the force
@@ -2116,7 +2133,8 @@ public partial class Game
                       // it was reverted — at h6 extra bodies feed the rout economy instead of
                       // pressuring the hold; it's h8's +4 stats that bite. The residual h6 cell
                       // is recorded in DEVLOG §FUL-13 with this mechanism.
-                      Objective == Objective.Defend ? heatEnemy / 2 : 0);
+                      Objective == Objective.Defend ? heatEnemy / 2 : 0,
+                      rosterTier, modeMidBoss);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
@@ -2259,7 +2277,17 @@ public partial class Game
             StartTutorialMaybe();   // first-run onboarding is a campaign-only feature
         }
         else if (Mode == GameMode.Skirmish)
+        {
             ShowBanner($"{(DailyMode ? $"DAILY {DailyStamp}" : "SKIRMISH")} - {SkirmishObjectiveLabel(Objective)} - {Biome.Name}{BiomeMechTag()}", false);
+            // THE MODES GET THE BESTIARY: the force is named on the SUB-line, not the main line —
+            // the 44px main line has no shrink-to-fit and a daily's stamp + objective + biome tag
+            // already fill it. Same clause the campaign fork's hover uses (Run.FactionRosterLine).
+            // The GROUND RULE outranks it (C4 REVIEW M4, below): on the three mechanical biomes that
+            // sentence has no other surface in these modes, and one 15px line holds one of them, not
+            // both (VERDANT's rule alone is 129 characters). The force still reads on the top bar for
+            // the whole fight (SkirmishHud) and on the skirmish card / intro DAILY caption before it.
+            if (BiomeMechRule() == null) BannerSub = Run.FactionRosterLine(Combat.MissionFaction);
+        }
         else if (Mode == GameMode.Training)
         {
             ShowBanner("TRAINING OP - LIVE-FIRE DRILL", false);

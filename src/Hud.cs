@@ -2718,9 +2718,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn5))
             caption = "FIELD MANUAL - every enemy, class and rule in one reference";
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn6))
-            caption = "SKIRMISH - one custom fight; pick the objective and the heat";
+            caption = "SKIRMISH - one custom fight; pick the objective, the opposition and the heat";
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn7))
-            caption = "DAILY - today's seeded run, one attempt, ranked by turns";
+            caption = $"DAILY - today's seeded run against the {g.TodayDailyForceName}, one attempt, ranked by turns";   // THE MODES GET THE BESTIARY: the day's force, named before the attempt
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn8))
         { caption = "TRAINING OP - a short live-fire drill; nothing is saved, restart it any time"; capCol = Pal.Good; }
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn9))
@@ -3236,13 +3236,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Cfg.TitleText(title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
         DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Friend, 0.5f * titleIn), 16f);
 
-        string blurb = "One custom fight — pick the objective and the heat, then deploy.";
+        string blurb = "One custom fight — pick the objective, the opposition and the heat, then deploy.";
         Vector2 bm = Cfg.Measure(blurb, 15, 1f);
         Cfg.Text(blurb, new Vector2(W / 2f - bm.X / 2f, ty + tfs + 4), 15, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
 
         // centred panel
         float pIn = PanelAnim("skPanel", 0.4f, 0.2f);
-        int pw = 460, ph = 260;
+        int pw = 460, ph = 350;   // THE MODES GET THE BESTIARY: +90 for the FACTION row
         int px = W / 2 - pw / 2, py = (int)(ty + tfs + 40);
         var panel = new Rectangle(px, py, pw, ph);
         Raylib.DrawRectangleRounded(panel, 0.06f, 8, Raylib.Fade(Pal.Panel, 0.94f * pIn));
@@ -3265,8 +3265,30 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Vector2 om = Cfg.Measure(objLabel, 22, 1f);
         Cfg.Text(objLabel, new Vector2(objBox.X + objBox.Width / 2 - om.X / 2 + 12, objBox.Y + objBox.Height / 2 - om.Y / 2), 22, 1f, Raylib.Fade(Pal.Txt, pIn));
 
+        // --- FACTION cycler (THE MODES GET THE BESTIARY) --- the objective row's own chrome, one
+        // size down: ghost < > steppers, a bordered box with the dial's label, and the roster clause
+        // the campaign fork's hover uses as a 12px caption, so ANY says what it will deal and a
+        // named faction says who it fields before the player commits.
+        int fRowY = cyc + cycH + 22;
+        Cfg.Text("OPPOSITION", new Vector2(px + 28, fRowY), 13, 1f, Raylib.Fade(Pal.TxtDim, pIn));
+        int fy = fRowY + 24, fH = 40;
+        SkirmFacPrev = new Rectangle(px + 28, fy, 44, fH);
+        SkirmFacNext = new Rectangle(px + pw - 28 - 44, fy, 44, fH);
+        DrawGhostButton(SkirmFacPrev, "<", null, pIn);
+        DrawGhostButton(SkirmFacNext, ">", null, pIn);
+        var facBox = new Rectangle(px + 84, fy, pw - 84 * 2, fH);
+        Raylib.DrawRectangleRounded(facBox, 0.16f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
+        Raylib.DrawRectangleLinesEx(facBox, 1.2f, Raylib.Fade(g.SkirmishFaction.HasValue ? Pal.Foe : Pal.TxtDim, 0.4f * pIn));
+        string facLabel = Game.SkirmishFactionLabel(g.SkirmishFaction);
+        CenterText(facLabel, facBox, 20, Raylib.Fade(g.SkirmishFaction.HasValue ? Pal.Foe : Pal.Txt, pIn));
+        string facCap = g.SkirmishFaction.HasValue
+            ? Run.FactionRosterLine(g.SkirmishFaction.Value)
+            : "dealt at deploy: a mixed force, or one of the three factions";
+        Vector2 fcm = Cfg.Measure(facCap, 12, 1f);
+        Cfg.Text(facCap, new Vector2(px + pw / 2f - fcm.X / 2f, fy + fH + 5), 12, 1f, Raylib.Fade(Pal.TxtDim, pIn));
+
         // --- HEAT dial ---
-        int hRowY = cyc + cycH + 28;
+        int hRowY = fy + fH + 5 + 14 + 16;
         Cfg.Text("HEAT / ASCENSION", new Vector2(px + 28, hRowY), 13, 1f, Raylib.Fade(Pal.TxtDim, pIn));
         int hy = hRowY + 26, hH = 40;
         SkirmHeatMinus = new Rectangle(px + 28, hy, 44, hH);
@@ -3294,8 +3316,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         DrawOverlayButton(SkirmStart, "DEPLOY", Pal.Friend, null, btnIn);
         DrawGhostButton(SkirmBack, "BACK", "Esc", btnIn);
 
-        Cfg.Text("< > objective   ·   +/- heat   ·   ENTER deploy",
-            new Vector2(W / 2f - 170, py + ph + 18), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
+        string legend = "< > objective   ·   TAB opposition   ·   +/- heat   ·   ENTER deploy";
+        Vector2 lgm = Cfg.Measure(legend, 12, 1f);
+        Cfg.Text(legend, new Vector2(W / 2f - lgm.X / 2f, py + ph + 18), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
     }
 
     // ============================================================================
@@ -6088,6 +6111,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
     public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;
+    // THE MODES GET THE BESTIARY: the FACTION cycler's < > buttons.
+    public static Rectangle SkirmFacPrev, SkirmFacNext;
 
     // WAR ROOM (W3): the BACK button + per-unlock BUY buttons, published by DrawWarRoom for hit-testing.
     public static Rectangle WarRoomBack;

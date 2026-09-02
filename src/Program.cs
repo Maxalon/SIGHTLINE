@@ -1112,7 +1112,17 @@ public static class Program
             else if (!string.IsNullOrEmpty(skirmishObj))
             {
                 int skHeat = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int _sh) ? _sh : 0;
-                game.BeginSkirmish(ParseObjective(skirmishObj), skHeat);
+                // THE MODES GET THE BESTIARY: SIGHTLINE_FACTION=syndicate|legion|wardens|mixed pins the
+                // skirmish's opposition (unset = ANY, dealt off the map seed like the card's default).
+                Faction? skFac = Environment.GetEnvironmentVariable("SIGHTLINE_FACTION")?.Trim().ToLowerInvariant() switch
+                {
+                    "syndicate" => Faction.Syndicate,
+                    "legion"    => Faction.Legion,
+                    "wardens"   => Faction.Wardens,
+                    "mixed" or "none" => Faction.None,
+                    _ => (Faction?)null,
+                };
+                game.BeginSkirmish(ParseObjective(skirmishObj), skHeat, skFac);
             }
             else if (endless) game.BeginEndless();
             else game.StartMission(startMission);

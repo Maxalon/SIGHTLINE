@@ -38,6 +38,18 @@ public partial class Game
     // The intro SKIRMISH button opens a compact setup: cycle the objective, dial heat, then START.
     public Objective SkirmishObjective = Objective.Eliminate;
     public int SkirmishHeat;   // 0..UnlockedHeat, shares the campaign Heat ladder
+    // THE MODES GET THE BESTIARY — the FACTION dial. null = ANY: dealt at deploy from the run's
+    // MapSeed (a pure derivation, zero Util.Rng draws) among MIXED / SYNDICATE / LEGION / WARDENS.
+    // UI state only — Faction is persisted-by-ordinal and APPEND-ONLY, so "ANY" is deliberately
+    // NOT an enum member (nothing was appended; SAVETEST's fingerprint is unchanged).
+    public Faction? SkirmishFaction;
+    /// The faction the ACTIVE skirmish/daily fields. Game.SetupMission publishes it through
+    /// Combat.BeginMission in place of the campaign node's stamp (a fresh Run sits on its Start
+    /// node, which is Faction.None by design). None = the mixed cascade. Cleared by ResetModeState.
+    public Faction ModeFaction = Faction.None;
+    static readonly Faction[] NamedFactions = { Faction.Syndicate, Faction.Legion, Faction.Wardens };
+    /// The dial's cycle order (ANY first, then the three named factions in enum order).
+    static readonly Faction?[] SkirmishFactionDial = { null, Faction.Syndicate, Faction.Legion, Faction.Wardens };
 
     /// The 8 selectable skirmish objectives, in enum order (matches the campaign rotation).
     static readonly Objective[] SkirmishObjectives =
@@ -55,6 +67,7 @@ public partial class Game
     {
         EnsureMetaLoaded();
         SkirmishObjective = Objective.Eliminate;
+        SkirmishFaction = null;   // ANY
         SkirmishHeat = Sightline.Heat.Clamp(Math.Min(PendingHeat, UnlockedHeat));
         Phase = Phase.SkirmishSetup;
         Audio.Play("select");
@@ -90,13 +103,29 @@ public partial class Game
         else if (Raylib.IsKeyPressed(KeyboardKey.Up) || Raylib.IsKeyPressed(KeyboardKey.W)
             || Raylib.IsKeyPressed(KeyboardKey.KpAdd) || Raylib.IsKeyPressed(KeyboardKey.Equal)) heatDelta = 1;
 
+        // THE MODES GET THE BESTIARY: the FACTION cycler. TAB steps it (the "next" idiom the
+        // in-mission TAB already carries for unit cycling; this handler runs only in
+        // Phase.SkirmishSetup, so no binding is displaced) — SHIFT+TAB steps back.
+        int facDelta = 0;
+        if (Raylib.IsKeyPressed(KeyboardKey.Tab))
+            facDelta = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift) ? -1 : 1;
+
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
             var m = Raylib.GetMousePosition();
             if (Raylib.CheckCollisionPointRec(m, Hud.SkirmObjPrev)) objDelta = -1;
             else if (Raylib.CheckCollisionPointRec(m, Hud.SkirmObjNext)) objDelta = 1;
+            else if (Raylib.CheckCollisionPointRec(m, Hud.SkirmFacPrev)) facDelta = -1;
+            else if (Raylib.CheckCollisionPointRec(m, Hud.SkirmFacNext)) facDelta = 1;
             else if (Raylib.CheckCollisionPointRec(m, Hud.SkirmHeatMinus)) heatDelta = -1;
             else if (Raylib.CheckCollisionPointRec(m, Hud.SkirmHeatPlus)) heatDelta = 1;
+        }
+        if (facDelta != 0)
+        {
+            int fi = Array.IndexOf(SkirmishFactionDial, SkirmishFaction);
+            if (fi < 0) fi = 0;
+            SkirmishFaction = SkirmishFactionDial[(fi + facDelta + SkirmishFactionDial.Length) % SkirmishFactionDial.Length];
+            Audio.Play("select");
         }
 
         if (objDelta != 0)
@@ -118,19 +147,37 @@ public partial class Game
         bool start = Raylib.IsKeyPressed(KeyboardKey.Enter)
                      || (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.SkirmStart));
-        if (start) { Audio.Play("turn"); BeginSkirmish(SkirmishObjective, SkirmishHeat); }
+        if (start) { Audio.Play("turn"); BeginSkirmish(SkirmishObjective, SkirmishHeat, SkirmishFaction); }
+    }
+
+    /// Display label for the FACTION dial (null = ANY).
+    public static string SkirmishFactionLabel(Faction? f) => f.HasValue ? Run.FactionName(f.Value) : "ANY";
+
+    /// The force the active skirmish/daily fields, as a short name for the HUD readout.
+    public string ModeForceName => ModeFaction == Faction.None ? "MIXED" : Run.FactionName(ModeFaction);
+
+    /// ANY, resolved: one of MIXED / SYNDICATE / LEGION / WARDENS off the run's MapSeed — bits 24+,
+    /// which nothing else reads (the arena deck and the biome key on the seed as a whole through
+    /// their own hashes). A pure derivation: zero Util.Rng draws, so the harness's reseed-then-
+    /// BeginSkirmish legs deal the same world they always did, faction included.
+    static Faction DealtFaction(int seed)
+    {
+        int k = (int)(((uint)seed >> 24) % 4u);
+        return k == 0 ? Faction.None : NamedFactions[k - 1];
     }
 
     /// Begin a SKIRMISH: one fight with the chosen objective + heat on a random arena. Mirrors the
     /// BeginEndless setup contract (fresh Run, default squad, heat, telemetry) but forces a single
     /// objective and leaves Mode == Skirmish so CheckEnd routes to CheckSkirmish (single-mission end).
-    public void BeginSkirmish(Objective obj, int heat)
+    public void BeginSkirmish(Objective obj, int heat, Faction? faction = null)
     {
         ResetModeState();   // W1 mode-seam: inherit nothing (incl. a daily-forced arena / leaked seed)
         Mode = GameMode.Skirmish;
         EnsureMetaLoaded();
         _run = new Run();
         _run.Start();                     // default founding squad + a campaign map we ignore (single mission)
+        // THE MODES GET THE BESTIARY: the dialled faction, or ANY dealt off the map seed Start just rolled.
+        ModeFaction = faction ?? DealtFaction(_run.MapSeed);
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
         _run.LossStreak = _metaLossStreak;
         // force the chosen objective for mission 1 (DebugForceObjective-style, but WITHOUT re-running
@@ -171,6 +218,10 @@ public partial class Game
         // pin the map seed so the whole board (biome + arena selection driven off MapSeed) is
         // reproducible for the day — the same seed reproduces the same layout signature (verified twice).
         _run.MapSeed = seed;
+        // THE MODES GET THE BESTIARY: the day's FACTION, derived from the seed like the objective,
+        // arena and heat — always one of the three named factions, so a daily is never the mixed
+        // cascade and the same stamp fields the same force (MODETEST leg 9 pins the composition).
+        ModeFaction = DailyFaction(seed);
         _run.CurrentCard = new MissionCard { Objective = obj, ModName = "DAILY", Reward = RewardKind.None };
         // force the day's arena. Set ForcedLayout so SetupMission -> Mission.Build stamps it (both live
         // and harness — the daily's determinism is the point). It is cleared when leaving skirmish.
@@ -223,6 +274,16 @@ public partial class Game
     /// The day's HEAT, derived from the seed. A modest fixed challenge band (0..3) so the daily is
     /// tough-but-fair regardless of the player's unlocked ceiling; the seed decides it, not the player.
     static int DailyHeat(int seed) => (int)(((uint)seed >> 16) % 4u);
+
+    /// The day's FACTION (THE MODES GET THE BESTIARY), derived from the seed's next byte up. Always a
+    /// NAMED faction — the daily's heat band (0..3) never reaches the mid-boss rung, so the faction is
+    /// the whole of what makes one day's force different from the next.
+    static Faction DailyFaction(int seed) => NamedFactions[(int)(((uint)seed >> 24) % 3u)];
+
+    /// The force TODAY's daily fields, for the intro's DAILY caption — the daily has no setup card, so
+    /// the caption is the one place a player learns the opposition before committing the day's single
+    /// attempt. Same stamp resolution BeginDaily uses (env / constant under NoPersist, the clock live).
+    public string TodayDailyForceName => Run.FactionName(DailyFaction(DailySeed(ResolveDailyStamp())));
 
     // ── PROGRAM RESONANCE T1 — the TRAINING OP ────────────────────────────────────────────────────
     // A fixed, scripted, NON-PERSISTENT, restartable drill. Every persistence seam in the codebase
@@ -438,12 +499,15 @@ public partial class Game
     {
         get
         {
+            // THE MODES GET THE BESTIARY: the readout names the force too — the top bar is the
+            // one line that outlives the banner, and a player mid-fight should not have to guess
+            // which faction rule (Legion close-range, Warden long-range, Syndicate low-cover) is on.
             if (DailyMode)
             {
                 int b = DailyBest;
-                return b > 0 ? $"DAILY {DailyStamp}   BEST {b}" : $"DAILY {DailyStamp}";
+                return b > 0 ? $"DAILY {DailyStamp} — {ModeForceName}   BEST {b}" : $"DAILY {DailyStamp} — {ModeForceName}";
             }
-            return $"SKIRMISH — {SkirmishObjectiveLabel(Objective)}";
+            return $"SKIRMISH — {SkirmishObjectiveLabel(Objective)} — {ModeForceName}";
         }
     }
 
@@ -462,7 +526,7 @@ public partial class Game
     };
 
     // ── harness: screenshot the SKIRMISH setup screen (SIGHTLINE_SKIRMISHSETUP=1) ────────────────
-    public void DebugSkirmishSetup() { BeginSkirmishSetup(); SkirmishObjective = Objective.Hack; }
+    public void DebugSkirmishSetup() { BeginSkirmishSetup(); SkirmishObjective = Objective.Hack; SkirmishFaction = Faction.Legion; }
 
     /// A cheap deterministic fingerprint of the current board (terrain tiles + heights + every unit's
     /// spawn tile), used by ModeSelfTest to prove the SEEDED DAILY reproduces the same board twice.
@@ -475,6 +539,22 @@ public partial class Game
             { Mix((int)Grid.Tiles[x, y]); Mix(Grid.Height[x, y]); }
         foreach (var u in Players) { Mix(u.X); Mix(u.Y); }
         foreach (var e in Enemies) { Mix(e.X); Mix(e.Y); }
+        return h.ToString("x8");
+    }
+
+    /// THE MODES GET THE BESTIARY: a fingerprint of the fielded FORCE — every hostile's class, name,
+    /// HP, aim and pod, in spawn order, plus the mission faction. BoardSignature pins WHERE the
+    /// bodies stand; this pins WHAT they are. Used by ModeSelfTest leg (9).
+    string ForceSignature()
+    {
+        uint h = 2166136261u;
+        void Mix(int v) { unchecked { h ^= (uint)v; h *= 16777619u; } }
+        Mix((int)Combat.MissionFaction);
+        foreach (var e in Enemies)
+        {
+            foreach (char c in e.Cls + "|" + e.Name) Mix(c);
+            Mix(e.MaxHp); Mix(e.Aim); Mix(e.PodId);
+        }
         return h.ToString("x8");
     }
 
@@ -647,10 +727,81 @@ public partial class Game
             int cCold = CampaignM1(0), cHot = CampaignM1(Sightline.Heat.Max);
             Sightline.Mission.ForcedLayout = -1;
             if (cHot != cCold) fails.Add($"campaignM1GraceLost h0={cCold} h{Sightline.Heat.Max}={cHot}");
+
+            // (8) THE MODES GET THE BESTIARY — A SKIRMISH'S FORCE MUST BE DRAWN FROM THE ROSTER, NOT
+            //     FROM MISSION 1'S TEACHING TIER.
+            // THE GAP leg (7) left open: it proved the force's SIZE answers the dial and said nothing
+            // about WHAT the force is. Both single-mission modes enter through SetupMission(1), and
+            // that n went straight to Mission.Build -> SelectArchetype, whose `n <= 1` branch deals
+            // SCOUT or GRUNT and nothing else; the mid-boss slot was `n == 3 || n == 5` and pods of 3
+            // `n >= 3`, so neither could ever fire; and a fresh Run sits on its Start node, which
+            // GenerateMap leaves Faction.None, so FactionRoster never ran. Measured on the pre-fix
+            // tree: 50 heat-0 skirmish builds fielded exactly {GRUNT, SCOUT} — 20 of 22 archetypes,
+            // all three factions, pods of 3 and every mid-boss kit unreachable in two of four modes.
+            // Fixed seed so the 50 builds are one deterministic sequence, not a probability claim.
+            NoPersist = true;
+            Util.Reseed(9001);
+            var seen = new HashSet<string>();
+            int podOf3Builds = 0, coldElites = 0;
+            for (int b = 0; b < 50; b++)
+            {
+                BeginSkirmish(Objective.Eliminate, 0);
+                foreach (var e in Enemies) seen.Add(e.Cls);
+                coldElites += Enemies.Count(e => e.Cls == "ELITE");
+                if (Enemies.GroupBy(e => e.PodId).Any(gp => gp.Count() == 3)) podOf3Builds++;
+            }
+            var specialists = seen.Where(c => c != "SCOUT" && c != "GRUNT" && c != "ELITE").OrderBy(c => c).ToList();
+            if (specialists.Count == 0)
+                fails.Add($"skirmishRosterShallow(classes={string.Join("/", seen.OrderBy(c => c))})");
+            else if (specialists.Count < 6)
+                fails.Add($"skirmishRosterNarrow({specialists.Count}: {string.Join("/", specialists)})");
+            if (podOf3Builds == 0) fails.Add("skirmishNeverPodsOf3");
+            if (coldElites != 0) fails.Add($"skirmishColdMidBoss({coldElites})");   // heat < 4 fields no named elite
+            // heat >= 4: EXACTLY one mid-boss (Cls ELITE) in every build — the slot is i==0, not a roll
+            foreach (int hh in new[] { 4, Sightline.Heat.Max })
+            {
+                int bad = 0;
+                for (int b = 0; b < 10; b++)
+                {
+                    BeginSkirmish(Objective.Eliminate, hh);
+                    if (Enemies.Count(e => e.Cls == "ELITE") != 1) bad++;
+                }
+                if (bad != 0) fails.Add($"skirmishMidBossMissing(h{hh}:{bad}/10)");
+            }
+            // measured, not inferred: the fielded headcount per rung (same seed + arena as leg 7)
+            int Bodies(int hh) { Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5; BeginSkirmish(Objective.Eliminate, hh); return Enemies.Count; }
+            int b0 = Bodies(0), b4 = Bodies(4), b8 = Bodies(Sightline.Heat.Max);
+            Sightline.Mission.ForcedLayout = -1;
+            // LEAD REVIEW: the headcount is PINNED, because the roster opening moved it and that must
+            // stay a declared fact. Pre-wave this seed + arena fielded 4/6/8 at h0/h4/h8; pods of 3
+            // bring FUL-6's trim with them (count-1, the pod package as measured in the campaign),
+            // so it is 3/5/7 now. The lead tried skipping the trim for the modes and the pod of 3
+            // stopped forming at h0 (four bodies plan as 2+2) — the pod and the trim are one
+            // mechanic, so the trim stays and this line makes the next drift visible.
+            if (b0 != 3 || b4 != 5 || b8 != 7) fails.Add($"skirmishHeadcountMoved({b0}/{b4}/{b8}, expected 3/5/7)");
+            Console.WriteLine($"MODETEST skirmish h0 roster over 50 builds: {string.Join("/", seen.OrderBy(c => c))}  pods-of-3 in {podOf3Builds}/50  bodies h0={b0} h4={b4} h8={b8}");
+
+            // (9) THE DAILY HAS A FACTION, AND THE SAME STAMP DEALS THE SAME FORCE.
+            //     A "deterministic date-seeded challenge" whose force was the same two bodies every
+            //     day was deterministic in the way a blank page is. The faction is derived from the
+            //     day seed like the objective/arena/heat, so it is (a) never None and (b) part of the
+            //     signature the second BeginDaily must reproduce — the COMPOSITION, not just the tiles
+            //     that leg (2)'s BoardSignature already pins.
+            NoPersist = true;
+            BeginDaily();
+            var facA = Combat.MissionFaction;
+            string forceA = ForceSignature();
+            BeginDaily();
+            var facB = Combat.MissionFaction;
+            string forceB = ForceSignature();
+            if (facA == Faction.None) fails.Add("dailyFactionNone");
+            if (facA != facB) fails.Add($"dailyFactionNonDeterministic({facA}/{facB})");
+            if (forceA != forceB) fails.Add("dailyForceNonDeterministic");
+            Console.WriteLine($"MODETEST daily {DailyStamp} faction={facA} force={forceA}  (must match across processes)");
         }
         catch (Exception e) { return "MODETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched)"
+            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched; a skirmish fields the full roster, pods of 3 and one mid-boss from heat 4; the daily has a named faction and the same stamp deals the same force)"
             : "MODETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
