@@ -7379,6 +7379,13 @@ public partial class Game
         new ScreenCase("INTRO",        g => { }),
         new ScreenCase("MISSION",      g => { g.StartMission(1); g.BriefLines = null; }),
         new ScreenCase("PAUSE",        g => { g.StartMission(1); g.Paused = true; }),
+        // SETTINGS EVERYWHERE (review round 1): the card in its two new homes, plus each home with
+        // QUIT ARMED so the phase-true warning sentence and the footer copy are inside the audit.
+        new ScreenCase("SETTINGS-INTRO",       g => g.Paused = true),
+        new ScreenCase("SETTINGS-INTRO-ARMED", g => { g.Paused = true; g.QuitArmed = true; }),
+        new ScreenCase("SETTINGS-SHOP",        g => { g.DebugShop(); g.Paused = true; }),
+        new ScreenCase("SETTINGS-SHOP-ARMED",  g => { g.DebugShop(); g.Paused = true; g.QuitArmed = true; }),
+        new ScreenCase("PAUSE-ARMED",          g => { g.StartMission(1); g.Paused = true; g.QuitArmed = true; }),
         new ScreenCase("TOOLTIP-AIM",  g => { g.StartMission(1); g.DebugTooltip(false); }),
         new ScreenCase("TOOLTIP-HOVER",g => { g.StartMission(1); g.DebugTooltip(true); }),
         new ScreenCase("THREATCARD",   g => { g.StartMission(1); g.DebugThreatShot(); }),
@@ -7560,6 +7567,294 @@ public partial class Game
               + "mission-start checkpoint byte-identical and never touches meta.json; both end "
               + "cards publish three non-overlapping doors and the third opens the War Room)"
             : "QUITTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── SETTINGS EVERYWHERE — reachability self-test (SIGHTLINE_SETTINGSTEST=1) ─────────────────
+    /// C5 recorded (ROADMAP, "Left open by C5") that TEXT SIZE and COLORBLIND could not be reached
+    /// until the player was in a fight: `Update`'s Escape handler was gated on PlayerTurn ||
+    /// EnemyTurn, the pause card was the SOLE home of those settings, the INTRO had no settings
+    /// door, and `case Phase.Barracks` had no Escape handler at all — nor a way to the FIELD MANUAL
+    /// (`K` was Intro-gated). QUITTEST pins the arm/confirm/checkpoint contract and NOTHING about
+    /// reachability; this is the other half. Each leg presses the same seam `Update` presses
+    /// (OnEscape), hits the same rect the mouse would (PauseHit -> ActPause), and asserts the
+    /// setting stuck, hit disk through Display's ONE writer, and the phase came back to where the
+    /// card was opened from.
+    ///
+    /// Stashes and restores display.json (the text-size change is a real Display.Save) and the
+    /// Display/Cfg scale statics, so a --full sweep leaves the profile byte-identical.
+    public string SettingsSelfTest()
+    {
+        Util.Reseed(70127);
+        var fails = new List<string>();
+        string dispPath = Display.SettingsPathPublic;
+        string dispStash = null; bool hadDisp = false;
+        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        int savedScale = Display.UiScaleIdx;
+        // W5 review: the card's hover fills read the live pointer; pin it off-card so a stray
+        // Xvfb pointer can never land on a control mid-test.
+        Hud.MousePin = new Vector2(-100, -100);
+
+        static Vector2 Centre(Rectangle r) => new Vector2(r.X + r.Width / 2f, r.Y + r.Height / 2f);
+        static void Frame(Game g) { Raylib.BeginDrawing(); Hud.Draw(g); Raylib.EndDrawing(); }
+        static bool Overlaps(Rectangle a, Rectangle b) => a.Width > 0 && b.Width > 0 && Raylib.CheckCollisionRecs(a, b);
+
+        // one card, three phases: open with Escape, change TEXT SIZE through the rect, close with Escape
+        void CardRoundTrip(Game g, string where, Phase home, bool expectAbandon, string expectVerb)
+        {
+            g.OnEscape();
+            if (!g.Paused) { fails.Add(where + ":escapeDoesNotOpenCard"); return; }
+            if (g.Phase != home) { fails.Add(where + ":escapeChangedPhase:" + g.Phase); return; }
+            Frame(g);                                   // publishes the card's rects
+            if (Hud.PauseUiScale.Width < 20) fails.Add(where + ":noTextSizeControl");
+            if (Hud.PauseColorblind.Width < 20) fails.Add(where + ":noColorblindControl");
+            if (Hud.PauseQuit.Width < 20) fails.Add(where + ":noQuitToDesktop");
+            if ((Hud.PauseAbandon.Width > 0) != expectAbandon) fails.Add(where + (expectAbandon ? ":abandonMissing" : ":abandonOffered"));
+            string verb = Hud.PauseResumeLabel(g);
+            if (verb != expectVerb) fails.Add(where + ":firstRowReads:" + verb);
+            // the TEXT SIZE control, through the same rect + dispatch the mouse uses
+            int before = Display.UiScaleIdx;
+            string id = g.PauseHit(Centre(Hud.PauseUiScale));
+            if (id != "uiscale") { fails.Add(where + ":textSizeRectHits:" + (id ?? "nothing")); return; }
+            g.ActPause(id);
+            int want = (before + 1) % Display.UiScaleLevels.Length;
+            if (Display.UiScaleIdx != want) fails.Add(where + ":textSizeDidNotChange");
+            if (MathF.Abs(Cfg.UiScale - Display.UiScale) > 1e-4f) fails.Add(where + ":textSizeNotApplied");
+            if (g.Paused != true || g.Phase != home) fails.Add(where + ":controlClosedTheCard");
+            // ...and it reached disk through Display's writer: reload the file into the statics
+            try
+            {
+                if (!System.IO.File.Exists(dispPath)) fails.Add(where + ":settingsNotWritten");
+                else
+                {
+                    Display.UiScaleIdx = -1;
+                    Display.LoadForTest();
+                    if (Display.UiScaleIdx != want) fails.Add(where + ":settingsOnDiskRead:" + Display.UiScaleIdx);
+                }
+            }
+            catch (Exception ex) { fails.Add(where + ":settingsReload:" + ex.GetType().Name); }
+            g.OnEscape();
+            if (g.Paused) fails.Add(where + ":escapeDoesNotCloseCard");
+            if (g.Phase != home) fails.Add(where + ":closeChangedPhase:" + g.Phase);
+        }
+
+        // FIELD MANUAL / AUDIO CHECK opened FROM the card must come back TO the card, in this phase.
+        // `key` != Null routes the id through the card's OWN key table (review round 1: the plate's
+        // "K" hint was dead — nothing read K while the card was open), so deleting the binding
+        // fails here rather than leaving a hint that lies.
+        void CardDetour(Game g, string where, Phase home, string id, KeyboardKey key = KeyboardKey.Null)
+        {
+            g.Paused = false;
+            g.OnEscape();
+            if (!g.Paused) { fails.Add(where + ":" + id + ":noCard"); return; }
+            if (key != KeyboardKey.Null)
+            {
+                if (Array.IndexOf(Game.PauseKeys, key) < 0) { fails.Add(where + ":" + id + ":key" + key + "NotRead"); g.Paused = false; return; }
+                string kid = Game.PauseKeyId(key);
+                if (kid != id) { fails.Add(where + ":" + id + ":key" + key + "Maps:" + (kid ?? "nothing")); g.Paused = false; return; }
+                id = kid;
+            }
+            g.ActPause(id);
+            Phase expect = id == "codex" ? Phase.Codex : Phase.AudioCheck;
+            if (g.Phase != expect) { fails.Add(where + ":" + id + ":didNotOpen:" + g.Phase); g.Paused = false; return; }
+            if (id == "codex") g.ExitCodex(); else g.ExitAudition();
+            if (g.Phase != home) fails.Add(where + ":" + id + ":backLandsOn:" + g.Phase);
+            else if (!g.Paused) fails.Add(where + ":" + id + ":backLostTheCard");
+            g.Paused = false;
+        }
+
+        // The ARMED quit sentence, as drawn: centred on the QUIT plate at 12px, it must end inside
+        // the card (review round 1: the first intro / barracks sentences ran ~65 px past its edge)
+        // — at EVERY shipped TEXT SIZE, because the sentence scales and the card does not (the
+        // first cut of this leg measured at whatever size the round trip had left behind, which is
+        // how a 50-char sentence read 409 px at 120% and passed at 100%).
+        void ArmedFits(Game g, string where)
+        {
+            g.QuitArmed = true;
+            string warn = g.QuitWarning;
+            if (string.IsNullOrWhiteSpace(warn)) fails.Add(where + ":armedSentenceEmpty");
+            int keep = Display.UiScaleIdx;
+            for (int i = 0; i < Display.UiScaleLevels.Length; i++)
+            {
+                Display.UiScaleIdx = i; Display.ApplyUiScale();
+                Frame(g);
+                float ww = Cfg.Measure(warn, 12, 1f).X;
+                float cx = Hud.PauseQuit.X + Hud.PauseQuit.Width / 2f;
+                float right = Hud.PauseCard.X + Hud.PauseCard.Width, left = Hud.PauseCard.X;
+                if (cx + ww / 2f > right - 4 || cx - ww / 2f < left + 4)
+                    fails.Add(where + ":armedSentenceOverflows@" + (int)(Display.UiScale * 100) + "%:" + (int)ww + "px");
+            }
+            Display.UiScaleIdx = keep; Display.ApplyUiScale();
+            g.QuitArmed = false;
+        }
+
+        try
+        {
+            // ---- (A) INTRO — the first screen a player sees ------------------------------------
+            {
+                var g = new Game { NoPersist = true };
+                if (g.Phase != Phase.Intro) fails.Add("bootPhase:" + g.Phase);
+                Frame(g);
+                var door = Hud.IntroSettingsBtn;
+                if (door.Width < 20 || door.Height < 20) fails.Add("intro:noSettingsDoor");
+                else
+                {
+                    var others = new[] { Hud.OverlayBtn, Hud.OverlayBtn2, Hud.OverlayBtn3, Hud.OverlayBtn4, Hud.OverlayBtn5,
+                                         Hud.OverlayBtn6, Hud.OverlayBtn7, Hud.OverlayBtn8, Hud.OverlayBtn9, Hud.IntroQuitBtn };
+                    foreach (var o in others) if (Overlaps(door, o)) { fails.Add("intro:settingsDoorOverlapsAnotherDoor"); break; }
+                    if (door.Y + door.Height > Cfg.ScreenH - 40) fails.Add("intro:settingsDoorOffTheBottom");
+                    // review round 1: the door OPENS the card — through the same click and key
+                    // dispatch the player uses (IntroHit -> ActIntro; IntroKeyId(O) -> ActIntro).
+                    string hit = g.IntroHit(Centre(door));
+                    if (hit != "settings") fails.Add("intro:settingsRectHits:" + (hit ?? "nothing"));
+                    else
+                    {
+                        g.ActIntro(hit);
+                        if (!g.Paused || g.Phase != Phase.Intro) fails.Add("intro:settingsClickDidNotOpenCard");
+                        g.Paused = false;
+                    }
+                    string kid = Game.IntroKeyId(KeyboardKey.O);
+                    if (kid != "settings") fails.Add("intro:keyOMaps:" + (kid ?? "nothing"));
+                    else
+                    {
+                        g.QuitArmed = true;   // the door disarms a stale confirm, like Escape does
+                        g.ActIntro(kid);
+                        if (!g.Paused || g.Phase != Phase.Intro) fails.Add("intro:keyODidNotOpenCard");
+                        if (g.QuitArmed) fails.Add("intro:doorDidNotDisarmQuit");
+                        g.Paused = false;
+                    }
+                }
+                CardRoundTrip(g, "intro", Phase.Intro, expectAbandon: false, expectVerb: "BACK");
+                CardDetour(g, "intro", Phase.Intro, "codex", KeyboardKey.K);
+                CardDetour(g, "intro", Phase.Intro, "audio");
+                g.OnEscape(); ArmedFits(g, "intro"); g.Paused = false;
+                // the door's key: Escape closes what it opened; a second press re-opens (toggle)
+                g.OnEscape(); g.OnEscape();
+                if (g.Paused || g.Phase != Phase.Intro) fails.Add("intro:escapeToggle");
+            }
+
+            // ---- (B) BARRACKS — the screen where the player deliberates ------------------------
+            {
+                var g = new Game { NoPersist = true };
+                g.DebugShop();
+                if (g.Phase != Phase.Barracks) fails.Add("stageBarracks:" + g.Phase);
+                // ABANDON is deliberately NOT offered here: the campaign checkpoint is written at
+                // MISSION START (SetupMission), so in the debrief the file on disk is the start of
+                // the mission just won — "the checkpoint is kept, CONTINUE resumes it" would
+                // resume a mission the player already finished and drop every debrief pick.
+                CardRoundTrip(g, "barracks", Phase.Barracks, expectAbandon: false, expectVerb: "BACK");
+                CardDetour(g, "barracks", Phase.Barracks, "codex", KeyboardKey.K);
+                CardDetour(g, "barracks", Phase.Barracks, "audio");
+                g.OnEscape(); ArmedFits(g, "barracks"); g.Paused = false;
+                g.Mode = GameMode.Endless; g.OnEscape(); ArmedFits(g, "barracks-endless"); g.Paused = false; g.Mode = GameMode.Campaign;
+                // the ARMORY owns Escape while it is open (HandleShopClick backs out one level)
+                g.ArmoryMode = true; g.OnEscape();
+                if (g.Paused) fails.Add("barracks:escapeStoleArmoryBack");
+                g.Paused = false;
+                // review round 1 (MAJOR): ARMORY open -> [Enter] / PROCEED -> Escape must open the
+                // card. The proceed path used to set _shopDone and leave ArmoryMode set; Hud stops
+                // drawing the requisition once ShopDone, so the stale flag was invisible, and
+                // OnEscape's armory exception swallowed Escape for the rest of the visit.
+                g.ProceedFromShop();
+                if (g.ArmoryMode || g.ArmorySoldier != null) fails.Add("barracks:proceedLeftArmoryOpen");
+                if (!g.ShopDone) fails.Add("barracks:proceedDidNotLeaveShop");
+                g.OnEscape();
+                if (!g.Paused) fails.Add("barracks:escapeDeadAfterArmoryProceed");
+                g.Paused = false;
+                // ...and the predicate is a lock of its own: a stale flag after the shop is closed
+                // (some future path that forgets to clear it) must not swallow Escape either
+                g.ArmoryMode = true; g.OnEscape();
+                if (!g.Paused) fails.Add("barracks:staleArmoryFlagSwallowsEscape");
+                g.ArmoryMode = false; g.Paused = false;
+                // [K] from the barracks: the manual opens, and BACK returns HERE, not to the intro
+                g.BeginCodex();
+                if (g.Phase != Phase.Codex) fails.Add("barracks:manualDidNotOpen");
+                g.ExitCodex();
+                if (g.Phase != Phase.Barracks) fails.Add("barracks:manualBackLandsOn:" + g.Phase);
+                if (g.Paused) fails.Add("barracks:manualBackInventedACard");
+            }
+
+            // ---- (C) PLAYER TURN — the existing home, pinned so the move cannot regress it ------
+            {
+                var g = new Game { NoPersist = true };
+                g.StartMission(1);
+                if (g.Phase != Phase.PlayerTurn) fails.Add("stageMission:" + g.Phase);
+                CardRoundTrip(g, "mission", Phase.PlayerTurn, expectAbandon: true, expectVerb: "RESUME");
+                CardDetour(g, "mission", Phase.PlayerTurn, "codex", KeyboardKey.K);
+                // Escape in a targeting mode cancels the mode and does NOT open the card
+                g.AimMode = true; g.OnEscape();
+                if (g.AimMode) fails.Add("mission:escapeDidNotCancelAim");
+                if (g.Paused) fails.Add("mission:escapeInAimOpenedCard");
+                // closing the card disarms QUIT (W5)
+                g.OnEscape(); g.RequestQuit(); if (!g.QuitArmed) fails.Add("mission:quitDidNotArm");
+                // review round 1 (MAJOR): a click on NOTHING disarms too — the old HandlePauseMenu
+                // disarmed on any left click that was not QUIT, and the PauseHit/ActPause split
+                // had put the null check above the disarm. Through the same seam the mouse uses.
+                Frame(g);
+                string off = g.PauseHit(new Vector2(5, 5));
+                if (off != null) fails.Add("mission:offCardPointHits:" + off);
+                g.ActPause(off);
+                if (g.QuitArmed) fails.Add("mission:clickOnNothingDidNotDisarmQuit");
+                g.RequestQuit(); if (!g.QuitArmed) fails.Add("mission:quitDidNotReArm");
+                g.OnEscape(); if (g.QuitArmed) fails.Add("mission:closeDidNotDisarmQuit");
+                if (g.QuitRequested) fails.Add("mission:quitFired");
+                // the armed sentence is mode-true AND fits the card in every mode a fight can be in
+                // (review round 1: LAST STAND / SKIRMISH / DAILY / TRAINING never write save.json,
+                // so "the current mission restarts from its start" was a lie in four of five modes)
+                g.OnEscape();
+                var fight = g.QuitWarning;
+                foreach (var (mode, daily, tag) in new[] { (GameMode.Campaign, false, "campaign"), (GameMode.Endless, false, "endless"),
+                                                            (GameMode.Skirmish, false, "skirmish"), (GameMode.Skirmish, true, "daily"),
+                                                            (GameMode.Training, false, "training") })
+                {
+                    g.Mode = mode; g.DailyMode = daily;
+                    ArmedFits(g, "mission-" + tag);
+                    if (mode != GameMode.Campaign && g.QuitWarning == fight) fails.Add("mission-" + tag + ":armedSentenceClaimsACheckpoint");
+                }
+                g.Mode = GameMode.Campaign; g.DailyMode = false; g.Paused = false;
+            }
+
+            // ---- (D) where the card has NO home, Escape must leave it closed -------------------
+            {
+                var g = new Game { NoPersist = true };
+                foreach (var p in new[] { Phase.WarRoom, Phase.Codex, Phase.Draft, Phase.SkirmishSetup, Phase.AudioCheck, Phase.Win, Phase.Lose })
+                {
+                    g.Phase = p; g.Paused = false; g.OnEscape();
+                    if (g.Paused) fails.Add("cardOpenedOn:" + p);
+                }
+                // and never under the autopilot (the flywheel must not see a card): OnEscape itself
+                // refuses (review round 1 — Update's own gate was the only lock before), and Update
+                // still never reaches it
+                g.Phase = Phase.Intro; g.AutoPlay = true; g.Paused = false;
+                g.OnEscape();
+                if (g.Paused) fails.Add("autoplayEscapeOpenedCard");
+                g.Update(1f / 60f);
+                if (g.Paused) fails.Add("autoplayUpdateOpenedCard");
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            Hud.MousePin = new Vector2(float.NaN, float.NaN);
+            Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "SETTINGSTEST: PASS (OnEscape opens the card on INTRO, BARRACKS and PLAYER TURN and "
+              + "closes it to the same phase; TEXT SIZE changes via PauseHit/ActPause and re-reads "
+              + "from display.json; intro SETTINGS door opens the card via IntroHit/ActIntro and "
+              + "IntroKeyId(O); BACK outside a fight, RESUME + ABANDON in one; [K] on the card is in "
+              + "PauseKeys and the manual/audio return to the card; BeginCodex from BARRACKS returns "
+              + "there; ARMORY owns Escape only while the shop is open (PROCEED clears it, a stale "
+              + "flag cannot swallow Escape); a click on nothing disarms QUIT; the armed sentence "
+              + "fits the card in every phase and mode; OnEscape is inert on 7 overlay phases and "
+              + "under AutoPlay)"
+            : "SETTINGSTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
     /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end

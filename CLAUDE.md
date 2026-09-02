@@ -219,8 +219,9 @@ not new, `Game.Codex.cs` has scrolled the field manual on held Left/Right/A/D si
 found four of the nine letters this line advertised as free were already bound (N/P/U/V),
 and the duplicate registry at `src/Game.cs` ("Free letters remaining…") disagreed with it.
 Run `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u` before binding anything.
-As of wave W5 the genuinely free letters are **`I J O Z`** — W5 bound **Q** (QUIT TO
-DESKTOP, pause card + main menu). Everything else is claimed somewhere.
+As of wave SETTINGS EVERYWHERE the genuinely free letters are **`I J Z`** — W5 bound **Q** (QUIT TO
+DESKTOP, pause card + main menu) and SETTINGS EVERYWHERE bound **O** (the main menu's SETTINGS
+door). Everything else is claimed somewhere.
 
 **Distribution** (publishing a build, the licence position, where saves live, and the
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +

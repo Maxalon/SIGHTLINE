@@ -92,11 +92,14 @@ memorise this table. The game teaches the verbs as they become relevant (there i
 | **Wheel** / **Middle-drag** / **C** | Zoom · pan · reset camera |
 | **Arrows / WASD + Space** | Keyboard cursor: move the cursor, Space confirms |
 | **M** / **U** | Mute-unmute · AUDIO CHECK screen |
-| **K** / **Q** | Field manual · quit to desktop |
+| **K** / **Q** | Field manual (main menu, barracks, pause card) · quit to desktop |
+| **O** / **Esc** on the main menu | Settings card |
 | **F11** / **F2** | Fullscreen · animation speed |
 
 The pause menu (`Esc`) carries the rest: window size, brightness, gamma, colourblind palette,
 screen shake, threat preview, animation speed, **text size**, and the four-channel audio mix.
+The same card opens as **SETTINGS** from the main menu (`O` or `Esc`) and from the barracks
+(`Esc`), so text size and the colourblind palette can be set before the first fight.
 It also shows the build version, which is what to quote in a bug report.
 
 ## Build & run

@@ -11662,6 +11662,183 @@ the surface they already have, and only when nothing else has claimed it.
    share, or the leash asymmetry. All four are in ROADMAP with their numbers.
 3. **It does not give the five paint biomes a mechanic.** Still declared, still asserted.
 
+# WAVE "SETTINGS EVERYWHERE" (2026-09-02, dev on `wave/settings-everywhere`, base `cee3cba`)
+
+## Thesis
+
+The pause card is the SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN
+SHAKE, THREAT PREVIEW, AUTO-CAM and FULLSCREEN, and `Game.Update` read Escape only under
+`Phase == PlayerTurn || Phase == EnemyTurn`. So the 120% text size that would lift every sub-12px
+string in the game to the floor, and the colourblind palette, could not be reached until the
+player was already in a fight. The INTRO had ten doors and no settings entry; `case Phase.Barracks`
+had no Escape handler at all, no route to the FIELD MANUAL (`K` was Intro-gated) and no way to
+the card. C5 found it, reproduced it and left it (ROADMAP "Left open by C5"). This wave closes it.
+
+**Confirmed on the base tree before touching anything:** `src/Game.cs` line 3960 read
+`if (!AutoPlay && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn))` around the only
+`KeyboardKey.Escape` read that toggles `Paused`; `grep -n 'KeyboardKey.K' src/Game.cs` gave one
+site, inside the `Phase == Phase.Intro` block of `HandleOverlayClick`; `case Phase.Barracks` in
+`Update` contained no `Escape` read and `HandleShopClick`'s only Escape read is gated on `ArmoryMode`.
+
+## What shipped
+
+- **`Game.SettingsCardPhase(p)`** is the ONE gate `Update` reads before it looks at Escape, and it
+  now names `PlayerTurn, EnemyTurn, Intro, Barracks`. The Escape read was lifted into
+  **`Game.OnEscape()`** (cancels a targeting mode first, else toggles the card and disarms QUIT —
+  the W5 contract, unchanged), and the pause card's click dispatch was split into
+  **`PauseHit(m)`** (which rect) + **`ActPause(id)`** (what it does) so a self-test can hit the SAME
+  rect the mouse would. `HandlePauseMenu` is now `ActPause(PauseHit(m))`; the in-fight behaviour is
+  byte-for-byte the same list of controls in the same order.
+- **INTRO:** a **SETTINGS** door in the utility grid, paired with AUDIO CHECK on the third row
+  (`Hud.IntroSettingsBtn`, key **`[O]`**), with a hover caption. QUIT moved to a fourth row at the
+  grid's full width, so the exit reads as the exit. Escape on the intro opens the same card.
+  `O` was derived free with `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u` before
+  binding: the free letters were `I J O Z`; they are now **`I J Z`**.
+- **BARRACKS:** Escape opens the card — unless the ARMORY sub-screen is open, where Escape already
+  means "back out one level" and the card must not steal it (`OnEscape` yields to `ArmoryMode`).
+  **`[K]`** opens the FIELD MANUAL from the barracks. `ExitCodex` / `ExitAudition` now return to
+  whichever `SettingsCardPhase` opened them (they returned to the intro from anything that was not a
+  fight), and restore the card if it was open — the FUL-2 rule, extended by the same predicate.
+- **The card outside a fight is a SETTINGS card:** title SETTINGS, first row **BACK** instead of
+  RESUME (`Hud.PauseResumeLabel` / `Hud.PauseTitle` key off `Game.CardInFight`), footer hint
+  "Every change is saved as you make it - [Esc] back" instead of the camera legend, **no ABANDON
+  row** (the two remaining exits stay bottom-aligned with the left column — the card was not
+  re-laid out), QUIT TO DESKTOP kept with a **phase-true armed sentence** (`Game.QuitWarning`).
+- **ABANDON in the BARRACKS — decided NO, and why.** `AbandonRun` promises "The checkpoint is
+  kept - CONTINUE resumes it". `SetupMission` is the only GAMEPLAY `SaveGame.Save` caller
+  (`src/Game.cs` ~line 2300, written at mission START; `grep -n 'SaveGame.Save('` gives seven
+  sites, and the other six are harness stashes — `Events.cs`'s self-test, `Game.Modes.cs`'s,
+  `Program.cs` x2 and `Ship.cs`), so in the debrief the file on disk is the start of the mission
+  the player just CLEARED. CONTINUE would replay a won mission and drop
+  every debrief pick, and `AbandonRun` would call `Stats.EndMission` on a mission already closed.
+  QUITTEST's contract (the quit path writes nothing, deletes nothing, keeps the mission-start
+  checkpoint byte-identical) is the one that IS safe there, so the barracks card offers BACK and
+  QUIT TO DESKTOP, and QUIT's armed sentence there says what it costs — the exact wording was
+  re-cut in review round 1 (below) after the first drafts overflowed the card; the shipped set is
+  in `Game.QuitWarning`. The in-fight CAMPAIGN sentence is unchanged; the other four modes got
+  their own in round 1.
+- **Persistence is the same writer.** The card's controls call the same `Display.CycleUiScale` /
+  `ToggleColorblind` / … as in-mission; each ends in `Display.Save()` (the atomic writer C6 proved).
+  Nothing new writes anywhere; the harness paths stay `NoPersist` (a screenshot run never clicks).
+
+## The test — and it FAILED on the pre-fix tree
+
+`SIGHTLINE_SETTINGSTEST=1` (`Game.SettingsSelfTest`, `src/Game.Harness.cs`), routed through
+`verdict` in `scripts/qa-sweep.sh`. Four legs: **(A) INTRO** — the door exists, overlaps no other
+door, sits above the footer; Escape opens the card on the intro, the card publishes TEXT SIZE /
+COLORBLIND / QUIT rects and NO abandon rect, the first row reads BACK, TEXT SIZE changes through
+`PauseHit` -> `ActPause` on the rect's centre, `Cfg.UiScale` follows, `display.json` re-read
+through `Display.LoadForTest` carries the new index, Escape closes it and the phase is still
+Intro; FIELD MANUAL and AUDIO CHECK opened from the card come back TO the card on the intro.
+**(B) BARRACKS** (`DebugShop`) — the same round trip, no abandon, BACK; Escape with the ARMORY
+open does NOT open the card; `[K]`'s `BeginCodex` returns to the barracks with no card invented.
+**(C) PLAYER TURN** — the existing home pinned: RESUME, abandon offered, Escape in AIM cancels aim
+and does not open the card, closing the card disarms QUIT. **(D)** Escape leaves the card closed
+on WarRoom / Codex / Draft / SkirmishSetup / AudioCheck / Win / Lose, and never opens under
+`AutoPlay`. Stashes and restores `display.json` and the scale statics; pins `Hud.MousePin` off-card.
+
+Pre-fix (the test in the tree, the fix not yet):
+
+    SETTINGSTEST: FAIL (intro:noSettingsDoor,intro:escapeDoesNotOpenCard,intro:codex:noCard,intro:audio:noCard,barracks:escapeDoesNotOpenCard,barracks:codex:noCard,barracks:audio:noCard,barracks:manualBackLandsOn:Intro)
+
+The mission leg passed pre-fix, which is the proof that the `OnEscape` / `PauseHit` / `ActPause`
+refactor is behaviour-preserving for the fight. Post-fix: PASS. CONTRASTTEST gained the SETTINGS
+door in its main-menu list (10 labels; SETTINGS reads ~12:1 — it floats with the clock-animated
+backdrop: 12.14, 11.88 and 11.99 on three runs, all far above the 4.5 floor). QUITTEST, CODEXTEST,
+AUDITIONTEST, FITTEST, CHROMETEST, BACKDROPTEST re-run green.
+
+## Screenshots
+
+`SIGHTLINE_SETTINGS=1` (alias of the existing `SIGHTLINE_PAUSE=1`) composes with
+`SIGHTLINE_INTRO=1` and `SIGHTLINE_SHOP=1`: the card opened from the intro and from the barracks
+were photographed at frame 90 and inspected — title SETTINGS, BACK, two exits, footer hint, every
+label through `Cfg.Text` at >= 12px. The intro with the door was photographed with
+`SIGHTLINE_INTRO=1 SIGHTLINE_SHOT=90`.
+
+## What this wave did NOT do
+
+1. **No re-layout of the pause card.** Two exits instead of three outside a fight is a row omitted,
+   not a layout; every rect the in-fight card publishes is where it was.
+2. **The 12px floor at the default text size** (the item above this one in ROADMAP) is untouched.
+   This wave only makes the 120% setting reachable before the first fight.
+3. **No route from the BARRACKS back to the intro.** The only candidate (`AbandonRun`) would lie
+   there, for the reason above; QUIT TO DESKTOP is the honest exit and it is now offered. A
+   "MAIN MENU" plate that costs exactly what QUIT costs is a separate decision.
+4. **No balance change.** Nothing in `Combat`, `Ai`, `Mission`, `Heat` or the map generator was
+   touched; autoplay `RESULT: WIN mission=6 frame=12410 turns=29` on one Debug run, no exception.
+5. `CardInFight` treats an in-fight TRAINING OP / SKIRMISH / LAST STAND like a campaign fight
+   (RESUME, mode-true abandon verb) — unchanged from before.
+
+## Review round 1 (2026-09-02) — what the reviewer found, what changed
+
+Ten findings; 1-8 required, 9-10 taken because they were cheap. Every code fix below ships an
+assertion in `SIGHTLINE_SETTINGSTEST` that was **proven to fail** by temporarily breaking the fix,
+building, running, and restoring (`cmp` byte-identical each time); the FAIL lines are quoted verbatim.
+
+1. **MAJOR — Escape went dead in the barracks after ARMORY + Enter.** `HandleShopClick` read Enter
+   before its armory branch and set `_shopDone` without clearing `ArmoryMode`; `Hud` stops drawing
+   the requisition once `ShopDone`, so the stale flag was invisible, but `OnEscape`'s armory
+   exception (`ArmoryMode && !Paused`) kept swallowing Escape for the rest of the visit. **Two
+   locks:** Enter and the PROCEED plate now leave the shop through one seam, `Game.ProceedFromShop`,
+   which clears `ArmoryMode`/`ArmorySoldier`; and the exception is gated on `!_shopDone`, mirroring
+   the reachability of the armory's own Escape read (`if (!_shopDone)` in `Update`). Either lock alone
+   closes the hole, which the break-tests show — breaking the predicate alone trips only
+   `barracks:staleArmoryFlagSwallowsEscape`, breaking the clear alone only
+   `barracks:proceedLeftArmoryOpen`, and breaking BOTH reproduces the reviewer's scenario:
+   `SETTINGSTEST: FAIL (barracks:proceedLeftArmoryOpen,barracks:escapeDeadAfterArmoryProceed,barracks:staleArmoryFlagSwallowsEscape`.
+2. **MAJOR — the intro / barracks armed-QUIT sentences overflowed the card.** 74-75 chars centred on
+   a plate whose centre is 200 px from the card's right edge. Every sentence is now **<= 46 chars**,
+   and the new `ArmedFits` leg measures each one against `Hud.PauseCard` (published by `DrawPause`)
+   — **at all four shipped TEXT SIZES**, because the leg's first cut found what the reviewer's 100%
+   arithmetic could not: `CardRoundTrip` cycles TEXT SIZE, so the barracks sentence was measured at
+   120% and a 50-char sentence read **409 px** there against 400 px of room (the sentence scales,
+   the card does not). 12px NotoMono is ~6.8 px/char at 100% and ~8.2 at 120%. Break-test with the
+   original intro sentence:
+   `intro:armedSentenceOverflows@90%:478px,…@100%:524px,…@110%:569px,…@120%:614px`.
+   `SIGHTLINE_QUITARMED=1` composes with `SIGHTLINE_PAUSE`/`SIGHTLINE_SETTINGS` to photograph the
+   armed state; all three homes were shot and inspected (the sentence ends at x≈977 inside a card
+   edge at 1019). The 12px line sits one row above the footer with a ~1-2 px gap in all three — that
+   is the geometry W5 shipped for the fight card, unchanged, and it was checked at 3x zoom for
+   overlap (none). Placement stays under the plate it explains rather than moving to the footer slot.
+3. **MAJOR — a click on nothing no longer disarmed QUIT.** The `PauseHit`/`ActPause` split had put
+   `if (id == null) return;` above the disarm. Order is now quit -> disarm -> null-return, which is
+   `HandlePauseMenu`'s original contract. Asserted through the same seam the mouse uses
+   (`PauseHit` at an off-card point returns null, `ActPause(null)` disarms). Break-test:
+   `mission:clickOnNothingDidNotDisarmQuit,mission:quitFired`. The "byte-for-byte the same" claim
+   in "What shipped" above was FALSE for this one path between round 0 and this fix.
+4. **MAJOR — "[K] FIELD MANUAL" on the card was a dead hint** in all three homes (only Q was read
+   while the card was open) and README promised it. `Game.PauseKeys` / `PauseKeyId` is the card's
+   key table; `HandlePauseMenu` walks it. `CardDetour` now routes the codex id through
+   `PauseKeyId(K)` and asserts K is in `PauseKeys`. Break-test (K removed from the table):
+   `intro:codex:keyKNotRead,barracks:codex:keyKNotRead,mission:codex:keyKNotRead`. `Codex.cs`'s
+   "THE REST" entry no longer says "[K] opens this manual from anywhere" — it names the three
+   places (main menu, barracks, pause card) and the [O] / Esc settings routes.
+5. **MINOR — the PASS sentence over-claimed.** The intro's nine `bool x = (click && rect) || key`
+   doors are now one table, `Game.IntroKeys` + `IntroHit(m)` / `IntroKeyId(k)` / `ActIntro(id)`
+   (the `PauseHit`/`ActPause` shape; click resolved before key, as before; `ActIntro("continue")`
+   falls through when `ContinueRun` refuses, as `if (cont && ContinueRun()) return;` did). Leg A now
+   opens the card through `IntroHit` on the door's centre and through `IntroKeyId(O)` — break-test
+   (settings row removed): `intro:settingsRectHits:nothing,intro:keyOMaps:nothing`. `OnEscape`
+   itself refuses under `AutoPlay` — break-test: `autoplayEscapeOpenedCard,autoplayUpdateOpenedCard`.
+   The PASS sentence lists only what is asserted.
+6. **MINOR — the in-fight sentence lied in four of five modes.** LAST STAND / SKIRMISH / DAILY /
+   TRAINING never write `save.json` (`SetupMission`'s checkpoint is Campaign-only) and their one
+   persisted result is recorded at the END of the fight, so a mid-fight quit loses it.
+   `QuitWarning` is now mode-aware: endless "the stand ends here - its waves are not saved",
+   training "the drill is not saved - run it again any time", skirmish "nothing is saved - the fight
+   simply ends here", daily "today's run is not recorded - retry any time"; campaign unchanged. The
+   mission leg asserts each fits and that none of the four repeats the campaign sentence.
+7. **MINOR** — the duplicate key registry in `src/Game.cs` now reads I J Z and points at the grep.
+8. **MINOR** — the FEATURES bullet moved below QUIT TO DESKTOP's `(SIGHTLINE_QUITTEST.)` tail.
+9. **NIT** — "12.14:1" is now "~12:1, floats with the animated backdrop (12.14 / 11.88 / 11.99)";
+   "ONLY `SaveGame.Save` caller (one site)" is now "only GAMEPLAY writer" with the six harness sites named.
+10. **NIT** — ROADMAP's "deliberately not fixed" heading reworded over its ticked item; FITTEST gained
+    `SETTINGS-INTRO`, `SETTINGS-INTRO-ARMED`, `SETTINGS-SHOP`, `SETTINGS-SHOP-ARMED` and `PAUSE-ARMED`
+    (45 screens / 50 legs now), so the new footer copy and every armed sentence are inside the fit audit.
+
+**After:** `dotnet build -c Release` 0 warnings / 0 errors; `SETTINGSTEST: PASS`, `QUITTEST: PASS`,
+`FITTEST: PASS`, `CODEXTEST: PASS`, `CONTRASTTEST: PASS`; derived hook counts exist = run = 74; one
+Debug autoplay `RESULT: LOSE mission=6 frame=12235 turns=33`, no exception.
 # PROGRAM PARALLAX — GATE FIXES FOUND IN PASSING (2026-09-02, lead, working branch)
 
 ## BIOMETEST sampled the wall clock and failed one sweep in six

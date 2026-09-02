@@ -274,10 +274,11 @@ public static class Codex
             Desc = "Mouse wheel zooms, middle-drag pans, [C] resets. AUTO-CAM (pause menu) follows the action on " +
                    "its own." });
         e.Add(new CodexEntry { Title = "THE REST", Code = "GLOBAL",
-            Desc = "[Esc] cancels an aim / targeting mode, or opens the pause menu. [K] opens this manual from " +
-                   "anywhere. [T] writes a custom tag on the selected soldier. [V] shows every verb while the " +
-                   "onboarding is staging the bar. [M] mutes, [F11] is fullscreen, [F2] cycles animation speed, " +
-                   "[Q] quits from the pause card or the main menu." });
+            Desc = "[Esc] cancels an aim / targeting mode, or opens the pause card; on the main menu and in the " +
+                   "barracks the same [Esc] opens it as SETTINGS ([O] on the menu). [K] opens this manual from " +
+                   "the main menu, the barracks and the pause card. [T] writes a custom tag on the selected " +
+                   "soldier. [V] shows every verb while the onboarding is staging the bar. [M] mutes, [F11] is " +
+                   "fullscreen, [F2] cycles animation speed, [Q] quits from the pause card or the main menu." });
         return e;
     }
 
