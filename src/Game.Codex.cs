@@ -37,11 +37,15 @@ public partial class Game
     /// Leave the CODEX, returning to the phase it was opened from (Intro by default).
     void ExitCodex()
     {
-        Phase = (_codexPrior == Phase.PlayerTurn || _codexPrior == Phase.EnemyTurn) ? _codexPrior : Phase.Intro;
+        // SETTINGS EVERYWHERE: every phase the settings card can open from is a phase the manual
+        // returns to (the BARRACKS' [K] and its card both come back to the barracks); anything
+        // else still lands on the intro.
+        Phase = SettingsCardPhase(_codexPrior) ? _codexPrior : Phase.Intro;
         // FUL-2: reading the manual mid-fight must not un-pause the fight. Without this, opening
         // the codex from pause during the ENEMY turn resumed the queued shots the moment the
         // codex closed the pause overlay — soldiers died while the player read the rules.
-        if (_codexFromPause && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn)) Paused = true;
+        // The same rule puts the SETTINGS card back on the intro / barracks it was opened from.
+        if (_codexFromPause && SettingsCardPhase(Phase)) Paused = true;
         _codexFromPause = false;
         Audio.Play("select");
     }

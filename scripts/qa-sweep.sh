@@ -144,6 +144,8 @@ echo -n "FITTEST    : "; verdict "$(SIGHTLINE_FITTEST=1 run | grep -oE "FITTEST:
 # W5-FIX: the backdrop registry — no phase may paint a full-screen backdrop from the chrome pass.
 echo -n "BACKDROPTEST: "; verdict "$(SIGHTLINE_BACKDROPTEST=1 run | grep -oE "BACKDROPTEST: (PASS|FAIL)" | head -1)"
 echo -n "QUITTEST   : "; verdict "$(SIGHTLINE_QUITTEST=1   run | grep -oE "QUITTEST: (PASS|FAIL)" | head -1)"
+# SETTINGS EVERYWHERE: the settings card reachable from INTRO and BARRACKS, not just a fight.
+echo -n "SETTINGSTEST: "; verdict "$(SIGHTLINE_SETTINGSTEST=1 run | grep -oE "SETTINGSTEST: (PASS|FAIL)" | head -1)"
 echo -n "THREATTEST : "; verdict "$(SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1)"
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.

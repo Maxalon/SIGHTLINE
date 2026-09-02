@@ -2572,7 +2572,7 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns
       and the `.bak` beside it is corruption evidence, not a restore.
 
-### Left open by C5 "THE HARD EDGES" (found, reproduced, deliberately not fixed)
+### Left open by C5 "THE HARD EDGES" (found and reproduced; C5 fixed none — the ticked one was closed later)
 
 - [ ] **The 12px small-text floor is not met at the DEFAULT text size.** Measured at 100%: 10px on
       the AUDIO CHECK screen and 11px on seventeen others (in-mission HUD, end cards, WAR ROOM,
@@ -2583,7 +2583,11 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [ ] **Six shrink-to-fit calls reach their floor at 120%** (three WAR ROOM achievement
       descriptions, one shop body, one prep body). Nothing is lost yet; they are one authored
       character from losing a word. Counted in FITTEST's PASS line on every run.
-- [ ] **ACCESSIBILITY: TEXT SIZE AND COLOURBLIND MODE CANNOT BE REACHED UNTIL YOU ARE IN A FIGHT.**
+- [x] **ACCESSIBILITY: TEXT SIZE AND COLOURBLIND MODE CANNOT BE REACHED UNTIL YOU ARE IN A FIGHT.**
+      **CLOSED by wave SETTINGS EVERYWHERE** (DEVLOG §SETTINGS EVERYWHERE): the intro has a SETTINGS door
+      (`[O]`, or Escape), Escape in the BARRACKS opens the same card (BACK + QUIT TO DESKTOP, no ABANDON —
+      the reason is in `Hud.DrawPause`), `[K]` opens the FIELD MANUAL from the barracks and returns there,
+      and `SIGHTLINE_SETTINGSTEST` pins every round trip. The original finding, kept for provenance:
       `Update`'s Escape handler is gated on `PlayerTurn || EnemyTurn`, and the pause card is the
       SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN SHAKE, THREAT
       PREVIEW, AUTO-CAM and FULLSCREEN. The INTRO — the first screen a player sees — carries ten

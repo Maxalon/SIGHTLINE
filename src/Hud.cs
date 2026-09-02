@@ -447,6 +447,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static string IntroFooter => "GEOMETRY · PARTICLES · NO QUARTER   ·   " + Ship.VersionLabel;
 
     // ---------------- pause / settings ----------------
+    /// The card's first-row verb. RESUME over a fight (the card paused it); BACK on the intro and
+    /// in the barracks (nothing was paused — it is a SETTINGS card there). Exposed so
+    /// SIGHTLINE_SETTINGSTEST can assert the label the player reads in each phase.
+    public static string PauseResumeLabel(Game g) => g.CardInFight ? "RESUME" : "BACK";
+    /// The card's title, by the same rule.
+    public static string PauseTitle(Game g) => g.CardInFight ? "PAUSED" : "SETTINGS";
+
     static void DrawPause(Game g)
     {
         // scrim fades in with the card so the pause lands rather than snaps
@@ -464,10 +471,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(in_)) * 14f);
         var card = new Rectangle(x, y, w, h);
+        PauseCard = card;   // review round 1: published so SETTINGSTEST can fit the armed sentence to it
         Raylib.DrawRectangleRounded(card, 0.05f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
-        Cfg.TitleText("PAUSED", new Vector2(x + w / 2 - (int)Cfg.TitleMeasure("PAUSED", 40, 1f).X / 2, y + 22), 40, 1f, Pal.Friend);
+        string title = PauseTitle(g);
+        Cfg.TitleText(title, new Vector2(x + w / 2 - (int)Cfg.TitleMeasure(title, 40, 1f).X / 2, y + 22), 40, 1f, Pal.Friend);
         // C6: the build stamp, where a player who is about to file a bug report is already looking.
         // Right-aligned into the card's empty top-right corner (the title is centred), so it stays
         // clear of every row at every TEXT SIZE instead of competing with the centred controls hint.
@@ -492,7 +501,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         PauseAnimSpeed  = new Rectangle(cx1, by, bw, bh); by += bh + gap;   // W5 comfort
         PauseUiScale    = new Rectangle(cx1, by, bw, bh);                   // W5 comfort
 
-        DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
+        DrawButtonRect(PauseResume, PauseResumeLabel(g), "ESC", true, false, Pal.Friend);
         DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F11", true, !Display.Fullscreen, Pal.Accent);   // R1: was "F" — F is FOCUS
         DrawButtonRect(PauseWindow, "WINDOW: " + Display.SizeLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
@@ -531,17 +540,30 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         // bottom-align the two exits with the left column's last row, so the card reads as
         // two balanced columns rather than one long one next to a short one
-        by = top + leftRows * bh + (leftRows - 1) * gap - (bh + gap + bh + gap + bh);
+        // SETTINGS EVERYWHERE: ABANDON is a row only over a FIGHT. On the intro there is no run to
+        // abandon. In the BARRACKS there is one, but AbandonRun's promise — "the checkpoint is
+        // kept, CONTINUE resumes it" — would be FALSE there: SetupMission is the only checkpoint
+        // writer, so in the debrief the file on disk is the START of the mission just cleared;
+        // CONTINUE would replay a won mission and drop every debrief pick, and AbandonRun would
+        // also close a mission Stats already closed. So the barracks card offers BACK and QUIT TO
+        // DESKTOP (whose armed sentence names that same cost honestly) and no abandon row. The
+        // two remaining exits stay bottom-aligned with the left column.
+        int exitRows = g.CardInFight ? 3 : 2;
+        by = top + leftRows * bh + (leftRows - 1) * gap - (exitRows * bh + (exitRows - 1) * gap);
         PauseCodex   = new Rectangle(cx2, by, bw, bh); by += bh + gap;
-        PauseAbandon = new Rectangle(cx2, by, bw, bh); by += bh + gap;
+        if (g.CardInFight) { PauseAbandon = new Rectangle(cx2, by, bw, bh); by += bh + gap; }
+        else PauseAbandon = new Rectangle(0, 0, 0, 0);   // no stale rect for a click to find
         PauseQuit    = new Rectangle(cx2, by, bw, bh);
         DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
-        // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
-        string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
-                          : g.Mode == GameMode.Skirmish ? "ABANDON FIGHT"
-                          : g.Mode == GameMode.Training ? "END DRILL"          // T1: nothing to abandon
-                          : "ABANDON RUN";
-        DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
+        if (g.CardInFight)
+        {
+            // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
+            string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
+                              : g.Mode == GameMode.Skirmish ? "ABANDON FIGHT"
+                              : g.Mode == GameMode.Training ? "END DRILL"          // T1: nothing to abandon
+                              : "ABANDON RUN";
+            DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
+        }
         // W5 THE DOORS: QUIT TO DESKTOP, with an ARMED confirm rather than a modal — one more
         // click, and the honest sentence about what it costs. It is NOT red: quitting is a normal
         // thing a person needs to do, and the reserved danger colour belongs to ABANDON, which is
@@ -550,13 +572,18 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                        true, g.QuitArmed, g.QuitArmed ? Pal.Foe : Pal.Accent);
         if (g.QuitArmed)
         {
-            const string warn = "the current mission restarts from its start";
+            // SETTINGS EVERYWHERE: phase- and mode-true. Centred on the QUIT plate, whose centre sits
+            // 200 px from the card's right edge, so the sentence is capped at 50 chars (Game.QuitWarning).
+            string warn = g.QuitWarning;
             float ww = Cfg.Measure(warn, 12, 1f).X;
             Cfg.Text(warn, new Vector2((int)(PauseQuit.X + PauseQuit.Width / 2 - ww / 2), (int)(PauseQuit.Y + PauseQuit.Height + 5)),
                      12, 1f, Pal.Accent);
         }
 
-        string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
+        // SETTINGS EVERYWHERE: the camera legend is a FIGHT's legend; outside one the footer says
+        // the one thing a player at the settings card needs to know.
+        string ctl = g.CardInFight ? "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]"
+                                   : "Every change is saved as you make it  -  [Esc] back";
         Cfg.Text(ctl, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl, 12, 1f).X / 2, y + h - 24), 12, 1f, Pal.TxtDim);
     }
 
@@ -2648,16 +2675,24 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         DrawGhostButton(OverlayBtn6, "SKIRMISH", "S", smIn);
         OverlayBtn7 = new Rectangle(W / 2 + miniGap / 2, smBy, miniW, 40);
         DrawGhostButton(OverlayBtn7, "DAILY", "Y", smIn);
-        // RESONANCE A3: AUDIO CHECK — a third utility row, one centred plate. It is a tuning
-        // bench rather than a mode, so it takes the same neutral outline and sits last.
+        // RESONANCE A3: AUDIO CHECK — a third utility row. It is a tuning bench rather than a
+        // mode, so it takes the same neutral outline.
+        // SETTINGS EVERYWHERE: SETTINGS pairs with it — the two benches share the row (the
+        // settings card was reachable ONLY from a fight before this door existed; ROADMAP "Left
+        // open by C5"). Key [O]: derived free by grep before binding (I J O Z were free; now I J Z).
         float acIn = PanelAnim("introAudio", 0.3f, 0.80f);
         int acBy = smBy + 48;
         OverlayBtn9 = new Rectangle(W / 2 - miniW - miniGap / 2, acBy, miniW, 40);
         DrawGhostButton(OverlayBtn9, "AUDIO CHECK", "U", acIn);
+        IntroSettingsBtn = new Rectangle(W / 2 + miniGap / 2, acBy, miniW, 40);
+        DrawGhostButton(IntroSettingsBtn, "SETTINGS", "O", acIn);
         // W5 THE DOORS: the front door swings both ways. Same neutral outline as the utility grid —
-        // leaving is not a mode, and it is certainly not a danger.
-        IntroQuitBtn = new Rectangle(W / 2 + miniGap / 2, acBy, miniW, 40);
-        DrawGhostButton(IntroQuitBtn, "QUIT", "Q", acIn);
+        // leaving is not a mode, and it is certainly not a danger. It takes the last row alone, at
+        // the grid's full width: the exit reads as the exit, after everything the menu offers.
+        float qIn = PanelAnim("introQuit", 0.3f, 0.84f);
+        int qBy = acBy + 48;
+        IntroQuitBtn = new Rectangle(W / 2 - miniW - miniGap / 2, qBy, miniW * 2 + miniGap, 40);
+        DrawGhostButton(IntroQuitBtn, "QUIT", "Q", qIn);
 
         // ---- shared caption slot (between LAST STAND and the grid) ----
         // Hovering ANY mode button explains it here; at rest it carries LAST STAND's best-wave
@@ -2682,6 +2717,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         { caption = "TRAINING OP - a short live-fire drill; nothing is saved, restart it any time"; capCol = Pal.Good; }
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn9))
         { caption = "AUDIO CHECK - hear every cue, sweep the music, move the mix; measured numbers beside each"; capCol = Pal.Accent; }
+        else if (Raylib.CheckCollisionPointRec(introMouse, IntroSettingsBtn))
+        { caption = "SETTINGS - text size, colourblind palette, brightness, gamma, animation speed, the mix"; capCol = Pal.Accent; }
         else if (Raylib.CheckCollisionPointRec(introMouse, IntroQuitBtn))
         { caption = "QUIT - close the game; a campaign in progress resumes from its last mission start"; capCol = Pal.TxtDim; }
         else
@@ -6036,6 +6073,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// W5 THE DOORS: the main menu's QUIT TO DESKTOP plate. Key [Q] — verified free against both
     /// registries and `grep KeyboardKey.Q` before binding.
     public static Rectangle IntroQuitBtn;
+    public static Rectangle IntroSettingsBtn;   // SETTINGS EVERYWHERE: the intro's settings door
+    /// The pause / settings card's own rect (DrawPause publishes it every frame it draws). Review
+    /// round 1: the armed QUIT sentence is fitted against this in SETTINGSTEST.
+    public static Rectangle PauseCard;
 
     // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
     public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;
