@@ -245,7 +245,8 @@ public static class Mission
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
-                             int dmgDelta = 0, bool defend = false, int defendKeep = 0)
+                             int dmgDelta = 0, bool defend = false, int defendKeep = 0,
+                             int rosterTier = -1, bool midBossSlot = false)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -300,7 +301,8 @@ public static class Mission
         // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep, shape);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep, shape,
+                     rosterTier, midBossSlot);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -637,8 +639,20 @@ public static class Mission
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
                              int dmgDelta = 0, bool defend = false, int defendKeep = 0,
-                             int shape = DeployFrontal)
+                             int shape = DeployFrontal, int rosterTier = -1, bool midBossSlot = false)
     {
+        // THE MODES GET THE BESTIARY — ROSTER DEPTH is its own axis. `n` has always carried two
+        // jobs: the NUMERIC ramp (headcount, the (n-1) stat bump, the opener trim, W9's heat
+        // arithmetic) and the ROSTER tier (which archetypes SelectArchetype/FactionRoster may deal,
+        // whether pods come in threes, whether slot 0 is the named mid-boss). SKIRMISH and DAILY
+        // enter at n == 1 and dial difficulty through heat, so every one of the roster gates was
+        // pinned to mission 1's teaching tier — measured pre-fix: 50 heat-0 skirmish builds fielded
+        // exactly {GRUNT, SCOUT}. `rosterTier` is the second job on its own parameter. Default -1
+        // means "the mission number", so the CAMPAIGN is byte-identical (every read below that
+        // switched to rosterTier reads the same value it always did, and no draw moved); the modes
+        // pass 3-5 off the heat dial (Game.SetupMission). `midBossSlot` is the mode's own mid-boss
+        // arm (heat >= 4) — the campaign's `n == 3 || n == 5` rule is kept exactly as written.
+        if (rosterTier < 0) rosterTier = n;
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
         // fits easily: spawns occupy cols 14-17 over grid.H rows (44 slots) and the collision loop
@@ -748,7 +762,7 @@ public static class Mission
         // so pods land as visible clumps — the linked-activation geometry, the grenade stage, and
         // the POD x/y read all depend on this. ZERO extra RNG draws: rows[] reads are not draws,
         // and the collision-relocate loop stays the only conditional draw source, exactly as today.
-        bool podsOf3 = n >= 3 && n < Run.MaxMissions;
+        bool podsOf3 = rosterTier >= 3 && n < Run.MaxMissions;
         // FUL-6 ESCALATION LEVER 1 (measured breach): the full pod stack ran the h0 paired
         // flywheel at -12.5 pts completion vs the fresh same-slot R0 (chunk a -5, chunk b -20;
         // budget <= 8). The spec's first lever: trim the initial force by 1 on 3-pod missions
@@ -814,7 +828,7 @@ public static class Mission
             if (podsOf3 && member == 0) { podAnchor[podId] = y; podAnchorX[podId] = x; }   // the pod lead's final tile
 
             bool finalMission = n >= Run.MaxMissions;
-            bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
+            bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5 || midBossSlot);   // recurring named elite
             bool finalBody = n >= Run.MaxMissions;
             float r = Util.RandF();
             // W4 THE SECOND AXIS — POD UNIFORMITY. The wave's instrumentation says an armed
@@ -842,8 +856,8 @@ public static class Mission
             if (finalMission)
                 e = i == 0 ? MakeFinaleBoss(n, x, y) : MakeFinaleRetinue(i, n, bump, x, y);
             if (e == null)
-                e = midBoss ? MakeMidBoss(n, x, y)
-                            : SelectArchetype(n, r, bump, x, y);   // tier-appropriate rank-and-file
+                e = midBoss ? MakeMidBoss(rosterTier, x, y)
+                            : SelectArchetype(rosterTier, r, bump, x, y);   // tier-appropriate rank-and-file
             // FAIRNESS CAP: at most one SIEGE/BOMBARD per mission. SelectArchetype is stateless, so a
             // second roll could yield another -> demote any extra BOMBARD to a plain GRUNT here.
             // SIGNAL W5: this cap DELIBERATELY keys on Cls (not HasSiege) — a siege-armed BOSS elite
@@ -875,16 +889,16 @@ public static class Mission
             // only for the m3/m5 named elites; the final boss is finalMission && i==0.
             if (e.Cls == "ELITE") e.Grenades = midBoss ? 2 : 1;
             else if (e.Cls == "MORTAR") { /* keep MORTAR's 2-3 grenades from SelectArchetype */ }
-            else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && e.Cls != "BOMBARD" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
+            else if (rosterTier >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && e.Cls != "BOMBARD" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             // utility items (S2-B): snipers/scouts carry smoke to cover their movement;
             // some grunts get smoke from mission 3+. Flash given to berserkers (mission 3+)
             // to disorient the squad before charging. Never given to ELITE/MEDIC/TURRET/
             // DRONE/SHIELD/SAPPER (they each have a dedicated role already).
             if (e.Cls == "SNIPER" || e.Cls == "SCOUT")
                 { e.EnemyItem = ItemKind.Smoke; e.ItemCharge = 1; }
-            else if (n >= 3 && e.Cls == "BERSERKER")
+            else if (rosterTier >= 3 && e.Cls == "BERSERKER")
                 { e.EnemyItem = ItemKind.Flash; e.ItemCharge = 1; }
-            else if (n >= 3 && e.Cls == "GRUNT" && Util.Roll(18))
+            else if (rosterTier >= 3 && e.Cls == "GRUNT" && Util.Roll(18))
                 { e.EnemyItem = ItemKind.Smoke; e.ItemCharge = 1; }
             // W6c — NO QUARTER bites: the rung-8 Heat row's +1 enemy damage, applied to the
             // per-unit Weapon instance (Weapon.Make returns a FRESH Weapon per unit, so this
