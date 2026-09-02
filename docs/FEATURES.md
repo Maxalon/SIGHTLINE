@@ -284,6 +284,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   (enemy turn / live hostiles). Blind-shipped (no audio device in the sandbox).
 - **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
   weapon recoil + target knockback.
+- **THE STRIDE (2026-09-02):** a multi-tile walk is ONE motion — push-off, constant stride, brake
+  (`MoveStepAnim.Seg` + a path polyline from `Game.EnqueuePath`, drawn on the predicted commit period
+  so no tile boundary stalls); VAULT draws a 26 px arc over the cover with the shadow left on the
+  deck; floating text climbs a ladder clear of live text and twin numbers arc apart.
+  `SIGHTLINE_FEELTEST` gates all three; the commit clock is untouched.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
   promotions, between-mission barracks debrief + field-heal.
 - **Branching campaign map:** the barracks shows a Slay-the-Spire-style node path

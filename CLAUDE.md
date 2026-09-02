@@ -334,7 +334,11 @@ docs/screenshot.png    README image
   Don't call `OnStart` in `Enqueue`.
 - Player actions (move/shoot/overwatch/hunker/reload) → enqueue anims.
 - Movement is per-tile `MoveStepAnim`s; on each tile entry `Game.OnUnitEnteredTile` checks
-  **overwatch** and injects reaction `ShotAnim`s at the front.
+  **overwatch** and injects reaction `ShotAnim`s at the front. **Enqueue a path ONLY through
+  `Game.EnqueuePath`** (THE STRIDE): it tags the steps First/Mid/Last and shares the polyline that
+  draws one stride per walk; a hand-rolled `foreach (...) Enqueue(new MoveStepAnim(...))` brings
+  the per-tile caterpillar back, and `SIGHTLINE_FEELTEST` will not see it unless that path is the
+  one it stages.
 - Enemy turn is staged in `UpdateEnemy` (PickNext → ActAfterMove) using `Ai.Plan`; it
   enqueues the same anims, so overwatch/feel are shared.
 - `KillUnit` purges a dead unit's queued moves and spawns death FX.

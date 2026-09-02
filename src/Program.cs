@@ -979,6 +979,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FEELTEST=1 : THE STRIDE — pillar 2 probe: a 6-tile walk's per-frame speed profile (no
+        // caterpillar), the VAULT arc (lifts over the cover, lands on the centre), floating-text separation.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FEELTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "feeltest");   // Unit.SyncPos + MoveStepAnim use tile->px math
+            Console.WriteLine(new Game().FeelSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_HORDETEST=1 : LAST STAND endless horde — wave count/scale escalation + alive-cap + meta BestWave round-trip (HORIZON W2).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HORDETEST") == "1")
         {
@@ -1135,8 +1144,10 @@ public static class Program
             Display.UiScaleIdx = Math.Clamp(uiIdx, 0, Display.UiScaleLevels.Length - 1);
             Display.ApplyUiScale();
         }
-        bool longMove = shot && Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE") == "1";
-        if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
+        string longMoveEnv = Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE");
+        bool longMove = shot && (longMoveEnv == "1" || longMoveEnv == "vault");   // THE STRIDE: =vault films a leap instead
+        if (longMove && longMoveEnv == "vault") Console.WriteLine($"LONGMOVE: vault staged {game.DebugVaultMove()} at {game.AnimSpeed:0.##}x");
+        else if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);

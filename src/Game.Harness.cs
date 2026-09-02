@@ -8855,9 +8855,182 @@ public partial class Game
             if (len > bestLen) { bestLen = len; bestDir = (dx, dy); }
         }
         if (bestLen == 0) return 0;
-        for (int i = 1; i <= bestLen; i++)
-            Enqueue(new MoveStepAnim(u, u.X + bestDir.dx * i, u.Y + bestDir.dy * i), Team.Player);
+        var path = new List<(int x, int y)>();
+        for (int i = 1; i <= bestLen; i++) path.Add((u.X + bestDir.dx * i, u.Y + bestDir.dy * i));
+        EnqueuePath(u, path, Team.Player);   // THE STRIDE: the funnel every real move uses
         return bestLen;
+    }
+
+    /// THE STRIDE: stage a VAULT to film (SIGHTLINE_LONGMOVE=vault): the first soldier, the first
+    /// cardinal direction with two clear floor tiles ahead; the near one is stamped HIGH COVER and
+    /// IssueVault (the player's key-9 path, same Enqueue) lands the figure on the far one.
+    public bool DebugVaultMove()
+    {
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return false;
+        Selected = u;
+        foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+        {
+            int mx = u.X + dx, my = u.Y + dy, lx = u.X + 2 * dx, ly = u.Y + 2 * dy;
+            if (!Grid.IsFloor(mx, my) || UnitAt(mx, my) != null || !Grid.IsFloor(lx, ly) || UnitAt(lx, ly) != null) continue;
+            Grid.Tiles[mx, my] = TileType.HighCover; Grid.SetCoverHp(mx, my);
+            if (!VaultTargetOk(u, lx, ly)) { Grid.Tiles[mx, my] = TileType.Floor; continue; }
+            IssueVault(lx, ly);
+            return true;
+        }
+        return false;
+    }
+
+
+    // ── THE STRIDE — SIGHTLINE_FEELTEST: pillar 2 ("feels good") gets its first PASS/FAIL line ──
+    /// Every other pillar had a gate in the sweep; MOTION and BEAT TIMING had none, so the most
+    /// frequent action in the game — a multi-tile walk — could caterpillar (ease-in-out at EVERY
+    /// tile, a WalkLean re-kick at every tile), a VAULT could slide straight through the cover it
+    /// leaps, and a kill's three strings could print inside 24 px of each other with every self-test
+    /// green. This probe drives the REAL anim queue the way Game.Update's pump does (OnStart on
+    /// activation, one Update per frame at the harness's 1/60 dt) and MEASURES the tween:
+    ///   (a) a 6-tile walk staged through EnqueuePath (the funnel every move uses): the per-frame
+    ///       speed profile on Unit.Pos. Over the MID-PATH (the departure ramp and arrival brake —
+    ///       MoveStepAnim.FeelMidBand tiles at each end — are excluded, because a walk must start
+    ///       and stop) the slowest frame must be >= FeelMinSpeedRatio x the fastest, there must be
+    ///       ZERO frames under FeelStallRatio x the mean, no frame may step backwards, WalkLean is
+    ///       kicked ONCE (the push-off) rather than once per tile, and the frame count is PINNED
+    ///       (6 x ceil(0.12 s x 60) = 48) so no easing trick can move the commit cadence.
+    ///   (b) a VAULT via IssueVault: the figure must LIFT at least FeelVaultLiftMin px, the peak
+    ///       must sit over the cover tile it clears, X never reverses, and it lands EXACTLY on
+    ///       the tile centre (the commit is still `Unit.Pos = _to`).
+    ///   (c) floating text stacked at one anchor — the kill trio (impact number + KIA + name
+    ///       stamp), the BRACE pair (number + STAGGERED) and two identical overwatch numbers —
+    ///       after one Fx.Update: every pairwise anchor distance >= Fx.TextSep, and the twins arc
+    ///       in OPPOSITE directions.
+    /// PRESENTATION ONLY: it reads Unit.Pos and Fx.Texts, never the sim; it consumes no Util.Rng
+    /// beyond its own reseed.
+    public string FeelSelfTest()
+    {
+        Util.Reseed(70031);
+        NoPersist = true;
+        var fails = new List<string>();
+        var detail = new System.Text.StringBuilder();
+
+        void Stage()
+        {
+            Grid = new Grid();                       // all Floor, Height 0
+            Players = new List<Unit>(); Enemies = new List<Unit>();
+            Vip = null; CaptiveLocked = false; Objective = Objective.Eliminate; EvacZone.Clear();
+            Fx = new Fx(); _anims.Clear(); DragMode = VaultMode = false;
+        }
+        Unit MkP(int x, int y)
+        {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        // one Update per FRAME, exactly as Game.Update's pump does it: OnStart when a step becomes
+        // ACTIVE, pop index 0 only if the anim is genuinely still at the front.
+        int Pump(Unit u, List<Vector2> trace, Action onStart)
+        {
+            int frames = 0;
+            while (_anims.Count > 0 && frames < 600)
+            {
+                var a = _anims[0];
+                if (!a.Started) { a.Started = true; a.OnStart(this); onStart?.Invoke(); }
+                bool done = a.Update(this, 1f / 60f);
+                if (done && _anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+                trace.Add(u.Pos); frames++;
+            }
+            return frames;
+        }
+
+        // ---- (a) the 6-tile walk ----
+        Stage();
+        const int N = 6;
+        var w = MkP(3, 5); Players.Add(w); Selected = w;
+        var path = new List<(int x, int y)>();
+        for (int i = 1; i <= N; i++) path.Add((3 + i, 5));
+        EnqueuePath(w, path, Team.Player);
+        var trace = new List<Vector2> { w.Pos };
+        int kicks = 0;
+        int frames = Pump(w, trace, () => { if (w.WalkLean > 0f) { kicks++; w.WalkLean = 0f; } });
+        Vector2 start = Util.TileCenter(3, 5), end = Util.TileCenter(3 + N, 5);
+        if (w.X != 3 + N || w.Y != 5 || w.Pos != end) fails.Add($"walkDidNotLand({w.X},{w.Y})");
+        const int WalkFramesPinned = N * 8;          // 0.12 s / (1/60) = 7.2 -> the 8th frame commits; the cadence the sim runs on
+        if (frames != WalkFramesPinned) fails.Add($"walkFrames({frames}!={WalkFramesPinned})");
+        var sp = new List<float>(); var mid = new List<float>(); int back = 0;
+        for (int i = 1; i < trace.Count; i++)
+        {
+            float s = Vector2.Distance(trace[i], trace[i - 1]); sp.Add(s);
+            if (trace[i].X < trace[i - 1].X - 0.001f) back++;
+            float p0 = Vector2.Distance(trace[i - 1], start) / Cfg.Tile, p1 = Vector2.Distance(trace[i], start) / Cfg.Tile;
+            if (p0 >= MoveStepAnim.FeelMidBand && p1 <= N - MoveStepAnim.FeelMidBand) mid.Add(s);
+        }
+        float mn = mid.Count > 0 ? mid.Min() : 0f, mx = mid.Count > 0 ? mid.Max() : 0f, mean = mid.Count > 0 ? mid.Average() : 0f;
+        int stalls = mid.Count(s => s < MoveStepAnim.FeelStallRatio * mean);
+        detail.Append($"walk: {frames} frames, mid-path px/frame min {mn:0.0} mean {mean:0.0} max {mx:0.0} (min/max {(mx > 0 ? mn / mx : 0):0.00}), " +
+                      $"stalls<{MoveStepAnim.FeelStallRatio:0.00}xmean {stalls}, leanKicks {kicks}, backSteps {back}; " +
+                      $"profile [{string.Join(" ", sp.Select(s => s.ToString("0.0")))}]");
+        if (mid.Count == 0) fails.Add("walkNoMidPath");
+        if (mx > 0 && mn < MoveStepAnim.FeelMinSpeedRatio * mx) fails.Add($"walkMidSpeedDip({mn / mx:0.00}<{MoveStepAnim.FeelMinSpeedRatio:0.00})");
+        if (stalls > 0) fails.Add($"walkStalls({stalls})");
+        if (kicks != 1) fails.Add($"walkLeanKicks({kicks}!=1)");
+        if (back > 0) fails.Add($"walkBackSteps({back})");
+
+        // ---- (b) the VAULT ----
+        Stage();
+        var v = MkP(5, 5); Players.Add(v); Selected = v;
+        Grid.Tiles[6, 5] = TileType.HighCover; Grid.SetCoverHp(6, 5);   // cover directly east; land on (7,5)
+        if (!VaultTargetOk(v, 7, 5)) fails.Add("vaultStageInvalid");
+        IssueVault(7, 5);
+        var vt = new List<Vector2> { v.Pos };
+        int vf = Pump(v, vt, null);
+        float baseY = Util.TileCenter(5, 5).Y;
+        float lift = 0f; int peakI = 0;
+        for (int i = 0; i < vt.Count; i++) if (baseY - vt[i].Y > lift) { lift = baseY - vt[i].Y; peakI = i; }
+        float coverL = Cfg.OriginX + 6 * Cfg.Tile, coverR = coverL + Cfg.Tile;
+        float peakX = vt[peakI].X;
+        int vback = 0; for (int i = 1; i < vt.Count; i++) if (vt[i].X < vt[i - 1].X - 0.001f) vback++;
+        detail.Append($"; vault: {vf} frames, peak lift {lift:0.0}px at x={peakX:0} (cover spans {coverL:0}-{coverR:0}), " +
+                      $"landed ({v.X},{v.Y}) pos ({v.Pos.X:0.0},{v.Pos.Y:0.0}), backSteps {vback}");
+        if (lift < MoveStepAnim.FeelVaultLiftMin) fails.Add($"vaultLift({lift:0.0}px<{MoveStepAnim.FeelVaultLiftMin:0}px)");
+        if (peakX < coverL || peakX > coverR) fails.Add("vaultPeakNotOverCover");
+        if (v.X != 7 || v.Y != 5 || v.Pos != Util.TileCenter(7, 5)) fails.Add("vaultDidNotLandOnCentre");
+        if (vback > 0) fails.Add($"vaultBackSteps({vback})");
+
+        // ---- (c) floating text at one anchor ----
+        Fx = new Fx();
+        Vector2 A = new(400, 400), B = new(600, 400), C = new(800, 400);
+        var num = Pal.RGBA(255, 252, 245);
+        Fx.PopText(A + new Vector2(0, -26), "7", num, 32f);                       // ShotAnim: the killing number
+        Fx.PopText(A + new Vector2(0, -10), "KIA", Pal.Foe, 22f);                 // Game.KillUnit: the pop
+        Fx.Stamp(A + new Vector2(0, -34), "KIA  DOE", Pal.Foe, 30f, 2.4f);        // Game.KillUnit: the name stamp
+        Fx.PopText(B + new Vector2(0, -26), "3", num, 26f);                       // ShotAnim: BRACE hit number
+        Fx.PopText(B + new Vector2(0, -30), "STAGGERED", Pal.Good, 20f);          // ShotAnim: the stagger word
+        Fx.PopText(C + new Vector2(0, -26), "4", num, 32f);                       // two overwatch hits, equal damage
+        Fx.PopText(C + new Vector2(0, -26), "4", num, 32f);
+        Fx.Update(1f / 60f);
+        float MinSep(List<FloatText> g)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i < g.Count; i++) for (int j = i + 1; j < g.Count; j++)
+                best = MathF.Min(best, Vector2.Distance(g[i].Pos, g[j].Pos));
+            return best;
+        }
+        List<FloatText> Near(Vector2 a) => Fx.Texts.Where(t => MathF.Abs(t.Pos.X - a.X) < 60f).ToList();
+        var gA = Near(A); var gB = Near(B); var gC = Near(C);
+        float sA = MinSep(gA), sB = MinSep(gB), sC = MinSep(gC);
+        bool twinsDiverge = gC.Count == 2 && gC[0].Drift != 0f && Math.Sign(gC[0].Drift) != Math.Sign(gC[1].Drift);
+        detail.Append($"; text: kill-trio min sep {sA:0.0}px, brace-pair {sB:0.0}px, twin numbers {sC:0.0}px, twins diverge {twinsDiverge}");
+        if (gA.Count != 3 || gB.Count != 2 || gC.Count != 2) fails.Add("textGroupsMissing");
+        if (sA < Fx.TextSep) fails.Add($"killTrioOverprint({sA:0.0}px)");
+        if (sB < Fx.TextSep) fails.Add($"bracePairOverprint({sB:0.0}px)");
+        if (sC < Fx.TextSep) fails.Add($"twinNumbersOverprint({sC:0.0}px)");
+        if (!twinsDiverge) fails.Add("twinNumbersSameArc");
+
+        Console.WriteLine("FEELTEST: " + detail);
+        return fails.Count == 0
+            ? "FEELTEST: PASS (6-tile walk: mid-path speed never dips under " + MoveStepAnim.FeelMinSpeedRatio.ToString("0.00") +
+              "x its max, zero stall frames, one lean kick, 48-frame cadence pinned; VAULT lifts >= " + MoveStepAnim.FeelVaultLiftMin.ToString("0") +
+              "px over the cover and lands on the tile centre; stacked floating text keeps >= " + Fx.TextSep.ToString("0") + "px separation and twin numbers arc apart)"
+            : "FEELTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
 

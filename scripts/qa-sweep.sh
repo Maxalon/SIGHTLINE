@@ -74,6 +74,8 @@ echo -n "TRAITTEST  : "; verdict "$(SIGHTLINE_TRAITTEST=1 run | grep -oE "TRAITT
 echo -n "WOUNDTEST  : "; verdict "$(SIGHTLINE_WOUNDTEST=1 run | grep -oE "WOUNDTEST: (PASS|FAIL)" | head -1)"
 echo -n "CDTEST     : "; verdict "$(SIGHTLINE_CDTEST=1 run | grep -oE "CDTEST: (PASS|FAIL)" | head -1)"
 echo -n "FIELDTEST  : "; verdict "$(SIGHTLINE_FIELDTEST=1 run | grep -oE "FIELDTEST: (PASS|FAIL)" | head -1)"
+# THE STRIDE: pillar 2 ("feels good") — walk speed profile / vault arc / floating-text separation.
+echo -n "FEELTEST   : "; verdict "$(SIGHTLINE_FEELTEST=1 run | grep -oE "FEELTEST: (PASS|FAIL)" | head -1)"
 echo -n "SIEGETEST  : "; verdict "$(SIGHTLINE_SIEGETEST=1 run | grep -oE "SIEGETEST: (PASS|FAIL)" | head -1)"
 echo -n "EVENTTEST  : "; verdict "$(SIGHTLINE_EVENTTEST=1 run | grep -oE "EVENTTEST: (PASS|FAIL)" | head -1)"
 echo -n "VETTEST    : "; verdict "$(SIGHTLINE_VETTEST=1 run | grep -oE "VETTEST: (PASS|FAIL)" | head -1)"

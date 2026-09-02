@@ -3453,7 +3453,10 @@ public static class Renderer
         // the hover). Kept dark+subtle so it never competes with signal.
         {
             float sg = drone ? Util.Clamp(1f - hover / 22f, 0.45f, 1f) : 1f;   // drones: smaller/fainter when high
-            int scx = (int)(foot.X + 1.5f), scy = (int)(foot.Y + 18);
+            // THE STRIDE: a vaulting figure is lifted through Unit.Pos; its shadow stays on the deck
+            // underneath (Unit.HopLift), shrinking a touch at the top of the arc
+            if (u.HopLift > 0f) sg *= Util.Clamp(1f - u.HopLift / 70f, 0.6f, 1f);
+            int scx = (int)(foot.X + 1.5f), scy = (int)(foot.Y + 18 + u.HopLift);
             Raylib.DrawEllipse(scx, scy, 17f * sg, 7f * sg, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.18f * figAlpha * sg));
             Raylib.DrawEllipse(scx, scy, 12f * sg, 4.6f * sg, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.34f * figAlpha * sg));
         }
