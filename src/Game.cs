@@ -2936,6 +2936,36 @@ public partial class Game
     // _from at the original tile and the unit snaps back to the start each step.
     void Enqueue(Anim a, Team owner) { AnimOwner = owner; _anims.Add(a); }
 
+    /// THE STRIDE: every multi-tile path is enqueued through here (player move, enemy moves, pod
+    /// scatter, the VIP leash, the LONGMOVE filmstrip) — one MoveStepAnim per tile, exactly as the
+    /// old per-site foreach loops did. The single funnel is what lets the tween know where a step
+    /// sits in its path (see MoveStepAnim.Seg); the per-step COMMIT (k >= 1 -> tile entry ->
+    /// OnUnitEnteredTile/overwatch) is untouched.
+    void EnqueuePath(Unit u, List<(int x, int y)> path, Team owner)
+    {
+        int n = path.Count;
+        if (n == 0) return;
+        // a one-tile move is a Single step: today's ease-in-out tween, exactly
+        if (n == 1) { Enqueue(new MoveStepAnim(u, path[0].x, path[0].y), owner); return; }
+        // the walk's polyline, shared by its steps so the drawn stride is ONE profile over the whole
+        // path (push-off, constant stride, brake) instead of one lunge per tile; [0] is overwritten
+        // with the live Unit.Pos when the First step activates
+        var pts = new List<Vector2>(n + 1) { Util.TileCenter(u.X, u.Y) };
+        foreach (var (px, py) in path) pts.Add(Util.TileCenter(px, py));
+        for (int i = 0; i < n; i++)
+            Enqueue(new MoveStepAnim(u, path[i].x, path[i].y)
+                    { Seg = i == 0 ? StepSeg.First : i == n - 1 ? StepSeg.Last : StepSeg.Mid, Path = pts, Index = i }, owner);
+    }
+
+    /// THE STRIDE: does `u` still have a step queued beyond `except`? A Mid step asks this at its
+    /// commit; if the walk was just cut short (a reaction shot on this tile entry felled the mover
+    /// and purged its later steps) the drawn figure is set down on the tile instead of a stride off it.
+    public bool HasQueuedStep(Unit u, Anim except)
+    {
+        foreach (var a in _anims) if (a != except && a is MoveStepAnim m && m.Unit == u) return true;
+        return false;
+    }
+
     // ---------------- combat events ----------------
     public void OnUnitEnteredTile(Unit mover)
     {
@@ -3315,6 +3345,12 @@ public partial class Game
     /// is excluded so the current shot still finishes normally).
     void PurgeAnimsFor(Unit d)
     {
+        // THE STRIDE: a felled mover is drawn wherever its stride had it — up to 16 px off its tile
+        // mid-walk, or at the top of a vault. Its later steps go below, so nothing else will bring it
+        // home: set it down on the tile the sim says it is on. Presentation only; a body further off
+        // than half a tile is inside some other anim's tween (shove/drag) and is left to it.
+        var home = Util.TileCenter(d.X, d.Y);
+        if (d.HopLift > 0f || Vector2.Distance(d.Pos, home) <= Cfg.Tile * 0.5f) { d.Pos = home; d.HopLift = 0f; }
         _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
                            || (a is ShotAnim s && s.D == d && a != ActiveAnim)
                            // W9 THE REPAIR: ...and shots BY the felled unit. The purge only ever
@@ -3923,7 +3959,9 @@ public partial class Game
         // were advertised as free and were bound). DERIVE the set instead:
         //     grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u
         // W5 bound Q (QUIT TO DESKTOP — the pause card and the main menu; not an in-mission verb,
-        // so it does not collide with UpdatePlayer's set above). Free letters as of W5: I J O Z.
+        // so it does not collide with UpdatePlayer's set above). SETTINGS EVERYWHERE bound O (the
+        // main menu's SETTINGS door). Free letters as of that wave: I J Z — but DERIVE it with the
+        // grep above before binding; this line has been stale before.
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
@@ -3957,16 +3995,11 @@ public partial class Game
         if (HitStop > 0) { HitStop -= dt * AnimSpeed; return; }   // fast-forward shortens the hit-stop freeze too
 
         // pause/settings overlay + camera controls (live play only, never in autoplay)
-        if (!AutoPlay && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn))
+        if (!AutoPlay && SettingsCardPhase(Phase))
         {
-            if (Raylib.IsKeyPressed(KeyboardKey.Escape))
-            {
-                if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode || DragMode || VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
-                else { Paused = !Paused; QuitArmed = false; }   // W5: closing the card disarms QUIT
-            }
+            if (Raylib.IsKeyPressed(KeyboardKey.Escape)) OnEscape();
             if (Paused) { HandlePauseMenu(); return; }
-            HandleCamera();
-            UpdateAutoCam(dt);
+            if (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn) { HandleCamera(); UpdateAutoCam(dt); }
         }
 
         float t = MathF.Min(dt, 0.05f);
@@ -4020,6 +4053,11 @@ public partial class Game
             case Phase.PlayerTurn: UpdatePlayer(); break;
             case Phase.EnemyTurn: UpdateEnemy(); break;
             case Phase.Barracks:
+                // SETTINGS EVERYWHERE: [K] opens the FIELD MANUAL from the barracks (it was
+                // Intro-gated; the screen where a player deliberates over perks and the shop had no
+                // route to the reference). ExitCodex returns HERE, not to the intro. Live play only —
+                // the rename editor already returned above, so a typed K never reaches this line.
+                if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.K)) { BeginCodex(); break; }
                 // APEX W7 — LAST STAND mid-stand progression detour. Endless enters Barracks ONLY
                 // to resolve queued perk/spec/boon offers (CheckEndless sets _shopDone before the
                 // detour). The moment every offer is resolved, return to the fight and spawn the
@@ -4453,13 +4491,15 @@ public partial class Game
             // SINGLE move — no free dash on reveal (an immobile turret gets none).
             var plan = Ai.Plan(this, e, claimed);
             int cap = Math.Max(0, e.Mobility) * 2, spent = 0, lx = e.X, ly = e.Y;
+            var scatter = new List<(int x, int y)>();
             foreach (var (px, py) in plan.Path)
             {
                 int step = (px != lx && py != ly) ? 3 : 2;   // diag costs 3, ortho 2 (matches CostMap)
                 if (spent + step > cap) break;
                 spent += step; lx = px; ly = py;
-                Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+                scatter.Add((px, py));
             }
+            EnqueuePath(e, scatter, Team.Enemy);
             // claim where this member actually LANDS — after the move cap truncates the plan,
             // which can be short of plan.Path's end (or nowhere at all, in which case its
             // current tile is already covered by IsOccupiedByOther).
@@ -4746,7 +4786,7 @@ public partial class Game
         ShowOdds = false;
         PathPreview.Clear();
         // mouse -> board tile, through the (stable) picking camera so zoom/pan work
-        var world = Raylib.GetScreenToWorld2D(Raylib.GetMousePosition(), ViewCamera(false));
+        var world = Raylib.GetScreenToWorld2D(Hud.Mouse(), ViewCamera(false));   // PARALLAX: through the harness pin (NaN = live)
         HoverValid = Util.ScreenToTile(world, out HoverX, out HoverY);
         if (KbCursor) { HoverX = CurX; HoverY = CurY; HoverValid = Grid.InBounds(CurX, CurY); }
 
@@ -4890,7 +4930,7 @@ public partial class Game
         else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Raylib.IsKeyPressed(KeyboardKey.D)) cdx = 1;
         if (cdx != 0 || cdy != 0) MoveCursor(cdx, cdy);
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
-        if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
+        if (KbCursor && Hud.MouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over (a PINNED pointer never moves)
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; return; }
 
@@ -5064,12 +5104,133 @@ public partial class Game
     /// keep in sync with Hud.DrawVolSlider).
     static float VolFrac(Rectangle r, float mx) => Util.Clamp((mx - (r.X + 8f)) / MathF.Max(1f, r.Width - 16f), 0f, 1f);
 
+    /// The phases the pause / settings card has a home in — the one gate `Update` reads before it
+    /// looks at Escape. SETTINGS EVERYWHERE: this was the in-mission pair only, which made the
+    /// card — the SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA and the rest — unreachable
+    /// from the first screen a player sees and from the screen where they deliberate (ROADMAP,
+    /// "Left open by C5"). INTRO and BARRACKS now open the same card; SIGHTLINE_SETTINGSTEST pins
+    /// each phase's round trip. Every OTHER overlay phase (Draft, SkirmishSetup, WarRoom, Codex,
+    /// AudioCheck, the end cards) already takes Escape as its own BACK, so none is listed here.
+    public static bool SettingsCardPhase(Phase p) =>
+        p == Phase.PlayerTurn || p == Phase.EnemyTurn || p == Phase.Intro || p == Phase.Barracks;
+
+    /// TRUE while the card sits over a live fight — the only time it PAUSES anything, the only
+    /// time ABANDON is a coherent verb, and the only time the first row reads RESUME. On the intro
+    /// and in the barracks the same card is a SETTINGS card: nothing is in flight, so the first
+    /// row reads BACK and there is nothing to abandon (see DrawPause for the barracks reasoning).
+    public bool CardInFight => Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn;
+
+    /// The honest sentence under an ARMED quit, per phase AND per mode. In a campaign fight the
+    /// checkpoint is the mission start (QUITTEST proves the quit path never rewrites it). In the
+    /// BARRACKS that same checkpoint is the start of the mission just CLEARED — SetupMission is the
+    /// only gameplay writer and the debrief has not reached it yet — so the debrief's picks are
+    /// what a quit costs there. LAST STAND / SKIRMISH / DAILY / TRAINING never write save.json
+    /// (SetupMission's checkpoint is Campaign-only; Game.Endless.cs), and their one persisted
+    /// result (best wave, today's daily) is recorded at the END of the fight — so a quit mid-fight
+    /// simply loses it. Review round 1: every sentence is <= 46 chars, because it is centred on
+    /// the QUIT plate (x 660..980) inside a card whose right edge is x 1020 — 200 px of room each
+    /// side of the plate's centre — and the CARD does not scale with TEXT SIZE while the sentence
+    /// does: at the 120% level a 12px glyph is ~8.2 px wide, so 46 chars is ~376 px. The first
+    /// drafts ran 74-75 chars and ~65 px past the card at 100%. SETTINGSTEST measures every
+    /// sentence against Hud.PauseCard at all four shipped text sizes.
+    public string QuitWarning =>
+        Phase == Phase.Intro ? "nothing is in flight - your save is untouched"
+        : Mode == GameMode.Endless ? "the stand ends here - its waves are not saved"
+        : Mode == GameMode.Training ? "the drill is not saved - run it again any time"
+        : Mode == GameMode.Skirmish ? (DailyMode ? "today's run is not recorded - retry any time"
+                                                 : "nothing is saved - the fight simply ends here")
+        : Phase == Phase.Barracks ? "the debrief is lost - the won mission restarts"
+        : "the current mission restarts from its start";
+
+    /// One Escape press, exactly as `Update` reads it: cancels a targeting mode first; otherwise
+    /// toggles the card. Public so SIGHTLINE_SETTINGSTEST can press it from every phase.
+    /// BARRACKS exception: while the ARMORY sub-screen is open, Escape belongs to it (HandleShopClick
+    /// backs out one level) — the card must not steal the key the player is using to leave a dossier.
+    /// Review round 1: that exception is gated on `!_shopDone` because HandleShopClick's own Escape
+    /// read is only reachable under `if (!_shopDone)` — Enter used to leave ArmoryMode set after the
+    /// requisition stopped drawing, and this line then swallowed Escape for the rest of the visit.
+    /// The proceed path clears the flag too (ProceedFromShop); this predicate is the second lock.
+    /// Refuses under AutoPlay in its own right (Update never calls it there; the flywheel must not
+    /// see a card even if a future caller does).
+    public void OnEscape()
+    {
+        if (AutoPlay) return;
+        if (!SettingsCardPhase(Phase)) return;
+        if (Phase == Phase.Barracks && ArmoryMode && !_shopDone && !Paused) return;
+        if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode || DragMode || VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
+        else { Paused = !Paused; QuitArmed = false; }   // W5: closing the card disarms QUIT
+    }
+
+    /// The intro's SETTINGS door (button or [O]): opens the card the way Escape does, through the
+    /// same disarm rule. Split out so the door and the key share one line.
+    public void OpenSettings() { Paused = true; QuitArmed = false; Audio.Play("select"); }
+
+    /// Which pause-card control a click at `m` lands on (the rects Hud.DrawPause published this
+    /// frame), or null. Split from ActPause so a self-test can hit the SAME rect the mouse would.
+    public string PauseHit(Vector2 m)
+    {
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseQuit)) return "quit";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) return "resume";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) return "fullscreen";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) return "window";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) return "mute";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) return "shake";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) return "threat";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) return "bright";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) return "gamma";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) return "colorblind";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) return "autocam";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseAnimSpeed)) return "animspeed";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseUiScale)) return "uiscale";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) return "codex";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseAudio)) return "audio";
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) return "abandon";
+        return null;
+    }
+
+    /// Run one pause-card control by id (see PauseHit). "quit" is the only one that does NOT
+    /// disarm the quit confirm — every other control does, AND SO DOES A CLICK ON NOTHING (id null):
+    /// that is the W5 contract as HandlePauseMenu always had it ("any left click that is not QUIT
+    /// disarms"). Review round 1 put the null check back BELOW the disarm, where the first cut of
+    /// this split had silently moved it above.
+    public void ActPause(string id)
+    {
+        if (id == "quit") { RequestQuit(); return; }
+        QuitArmed = false;   // any other pause control — or no control at all — disarms the confirm
+        if (id == null) return;
+        switch (id)
+        {
+            case "resume":     Paused = false; break;
+            case "fullscreen": Display.ToggleFullscreen(); break;
+            case "window":     Display.CycleSize(); break;
+            case "mute":       Audio.ToggleMute(); break;
+            case "shake":      Fx.ShakeOn = !Fx.ShakeOn; break;
+            case "threat":     CycleThreatPref(); break;
+            case "bright":     Display.CycleBrightness(); break;
+            case "gamma":      Display.CycleGamma(); break;   // W9: true gamma (post-FX pass)
+            case "colorblind": Display.ToggleColorblind(); break;
+            case "autocam":    Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } break;
+            case "animspeed":  CycleAnimSpeed(); break;   // W5 comfort: playback pacing
+            case "uiscale":    Display.CycleUiScale(); break;  // W5 comfort: UI text size
+            case "codex":      BeginCodex(); break;   // W6: open the field manual (remembers this phase for BACK)
+            case "audio":      BeginAudition(); break;   // A3: open AUDIO CHECK (same remember-and-restore contract as the codex)
+            case "abandon":    AbandonRun(); break;
+        }
+    }
+
+    /// The pause card's keyboard shortcuts, as ActPause ids. [Q] is QUIT (W5 — arms, then quits,
+    /// the same two-step as the plate). [K] is FIELD MANUAL: the plate has carried a "K" hint since
+    /// W6 and the README promised it, but nothing READ the key while the card was open (review
+    /// round 1) — HandlePauseMenu now walks this table, and SETTINGSTEST asserts K is in it and
+    /// maps to the manual. Add a shortcut here and it is bound; the test sees the same table.
+    public static readonly KeyboardKey[] PauseKeys = { KeyboardKey.Q, KeyboardKey.K };
+    public static string PauseKeyId(KeyboardKey k) => k == KeyboardKey.Q ? "quit" : k == KeyboardKey.K ? "codex" : null;
+
     void HandlePauseMenu()
     {
         var m = Raylib.GetMousePosition();
-        // W5 THE DOORS: [Q] is the pause card's quit shortcut (arms, then quits — same two-step as
-        // the button). Q was verified unbound in every context before being claimed.
-        if (Raylib.IsKeyPressed(KeyboardKey.Q)) { RequestQuit(); return; }
+        foreach (var k in PauseKeys)
+            if (Raylib.IsKeyPressed(k)) { ActPause(PauseKeyId(k)); return; }
         // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
         // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
         if (_volDrag >= 0)
@@ -5087,23 +5248,7 @@ public partial class Game
                 Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
                 return;
             }
-        if (Raylib.CheckCollisionPointRec(m, Hud.PauseQuit)) { RequestQuit(); return; }
-        QuitArmed = false;   // any other pause control disarms the confirm
-        if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) Audio.ToggleMute();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) CycleThreatPref();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAnimSpeed)) CycleAnimSpeed();   // W5 comfort: playback pacing
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseUiScale)) Display.CycleUiScale();  // W5 comfort: UI text size
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAudio)) { BeginAudition(); }   // A3: open AUDIO CHECK (same remember-and-restore contract as the codex)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) AbandonRun();
+        ActPause(PauseHit(m));
     }
 
     /// PAUSE-menu ABANDON — mode-aware teardown (W1 mode-seam). LAST STAND and SKIRMISH/DAILY route
@@ -5535,7 +5680,9 @@ public partial class Game
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
-        Enqueue(new MoveStepAnim(u, tx, ty), Team.Player);   // A2: the footfall is per-tile now (MoveStepAnim.OnStart)
+        // A2: the footfall is per-tile now (MoveStepAnim.OnStart). THE STRIDE: the leap is DRAWN as an
+        // arc over the cover (Hop px, VisDur s); the tile-entry commit stays on the step's own clock.
+        Enqueue(new MoveStepAnim(u, tx, ty) { Hop = MoveStepAnim.VaultHop, VisDur = MoveStepAnim.VaultVisDur }, Team.Player);
         VaultMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false;
     }
 
@@ -5558,7 +5705,7 @@ public partial class Game
         Selected.ActionsLeft -= cost;
         if (blitz) Selected.Blitz = false;
         if (slip) _slipDest = (tx, ty);                     // mark the silent move's destination (cleared on arrival)
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(Selected, px, py), Team.Player);
+        EnqueuePath(Selected, path, Team.Player);
         Stats.RecordAction("MOVE");   // W2 verb telemetry (no-op unless the balance harness)
         AimMode = false;
         PathPreview.Clear();
@@ -6667,8 +6814,7 @@ public partial class Game
     void EnqueueLeashMove((int, int)[,] cameFrom, int tx, int ty)
     {
         Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);
-        foreach (var (px, py) in Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, tx, ty))
-            Enqueue(new MoveStepAnim(Vip, px, py), Team.Player);
+        EnqueuePath(Vip, Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, tx, ty), Team.Player);
     }
 
     // ---------------- squad coordination ----------------
@@ -7342,7 +7488,7 @@ public partial class Game
             if (keep == 0) { Fx.PopText(e.Pos + new Vector2(0, -34), "PINNED", Pal.Foe, 16f); return; }
         }
         e.ActionsLeft -= moveActions;
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
+        EnqueuePath(e, path, Team.Enemy);   // A2: per-tile footfalls (MoveStepAnim.OnStart)
     }
 
     // TEMPO mirror: after an enemy fires (a 1-action, non-turn-ending shot) it spends any remaining
@@ -7400,7 +7546,7 @@ public partial class Game
         var path = Grid.ReconstructPath(cameFrom, e.X, e.Y, best.x, best.y);
         if (path.Count == 0) return;
         e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
+        EnqueuePath(e, path, Team.Enemy);   // A2: per-tile footfalls (MoveStepAnim.OnStart)
     }
 
     // Clear the enemy-intent telegraph (so it doesn't render past the unit's action or into the
@@ -7650,9 +7796,16 @@ public partial class Game
         Audio.Play("select");
     }
 
+    /// Leave the requisition — [Enter] or the PROCEED plate. Review round 1: this also closes the
+    /// ARMORY sub-screen. Enter used to set _shopDone and nothing else; Hud stops drawing the
+    /// requisition once ShopDone, so a still-set ArmoryMode was invisible — and OnEscape, which
+    /// yields Escape to an open armory, kept yielding it for the rest of the barracks visit. Public
+    /// so SETTINGSTEST can leave the shop the way the player does.
+    public void ProceedFromShop() { _shopDone = true; ArmoryMode = false; ArmorySoldier = null; Audio.Play("turn"); }
+
     void HandleShopClick()
     {
-        if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { _shopDone = true; Audio.Play("turn"); return; }
+        if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { ProceedFromShop(); return; }
         // [A] toggles the ARMORY sub-screen; Esc backs out of it.
         if (Raylib.IsKeyPressed(KeyboardKey.A)) { ToggleArmory(); return; }
         if (ArmoryMode && Raylib.IsKeyPressed(KeyboardKey.Escape))
@@ -7693,7 +7846,7 @@ public partial class Game
         var offer = ShopOffer();
         for (int i = 0; i < Hud.ShopBtns.Length && i < offer.Count; i++)
             if (Raylib.CheckCollisionPointRec(m, Hud.ShopBtns[i])) { DoPurchase(offer[i]); return; }
-        if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
+        if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) ProceedFromShop();
     }
 
     // autopilot: spend Intel as a varied, realistic economy so the BALANCE analytics reflect a real
@@ -8101,6 +8254,64 @@ public partial class Game
     }
 
     // ---------------- overlay click ----------------
+    /// The intro's doors, (id, key), in the order HandleOverlayClick always resolved them:
+    /// CONTINUE [C] (only while a save exists), LAST STAND [L], WAR ROOM [W], FIELD MANUAL [K],
+    /// SKIRMISH [S], DAILY [Y], TRAINING OP [N], AUDIO CHECK [U], SETTINGS [O] (SETTINGS EVERYWHERE —
+    /// O was derived free with `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u`
+    /// before it was claimed; the free letters were I J O Z, now I J Z), QUIT [Q] (W5 — no confirm
+    /// on the title screen: nothing is in flight, and a campaign in progress is on disk at its
+    /// last mission start). NEW RUN and the HEAT dial are dispatched above this table.
+    public static readonly (string id, KeyboardKey key)[] IntroKeys =
+    {
+        ("continue", KeyboardKey.C), ("endless",  KeyboardKey.L), ("warroom", KeyboardKey.W),
+        ("codex",    KeyboardKey.K), ("skirmish", KeyboardKey.S), ("daily",   KeyboardKey.Y),
+        ("training", KeyboardKey.N), ("audio",    KeyboardKey.U), ("settings", KeyboardKey.O),
+        ("quit",     KeyboardKey.Q),
+    };
+    /// The door a key opens, or null.
+    public static string IntroKeyId(KeyboardKey k)
+    {
+        foreach (var (id, key) in IntroKeys) if (key == k) return id;
+        return null;
+    }
+    /// The plate a door is drawn on (the rects Hud.DrawIntro published this frame).
+    static Rectangle IntroRect(string id) => id switch
+    {
+        "continue" => Hud.OverlayBtn2, "endless" => Hud.OverlayBtn3, "warroom" => Hud.OverlayBtn4,
+        "codex" => Hud.OverlayBtn5, "skirmish" => Hud.OverlayBtn6, "daily" => Hud.OverlayBtn7,
+        "training" => Hud.OverlayBtn8, "audio" => Hud.OverlayBtn9, "settings" => Hud.IntroSettingsBtn,
+        "quit" => Hud.IntroQuitBtn, _ => new Rectangle(0, 0, 0, 0),
+    };
+    /// Which intro door a click at `m` lands on, or null.
+    public string IntroHit(Vector2 m)
+    {
+        foreach (var (id, _) in IntroKeys)
+        {
+            if (id == "continue" && !SaveGame.Exists) continue;
+            if (Raylib.CheckCollisionPointRec(m, IntroRect(id))) return id;
+        }
+        return null;
+    }
+    /// Open one intro door by id. Returns TRUE when the door took the input (the caller returns);
+    /// FALSE for null and for a CONTINUE that refused, so the frame's other reads still run.
+    public bool ActIntro(string id)
+    {
+        switch (id)
+        {
+            case "continue": return SaveGame.Exists && ContinueRun();
+            case "endless":  BeginEndless(); return true;
+            case "warroom":  BeginWarRoom(); return true;
+            case "codex":    BeginCodex(); return true;
+            case "skirmish": BeginSkirmishSetup(); return true;
+            case "daily":    BeginDaily(); return true;
+            case "training": BeginTraining(); return true;
+            case "audio":    BeginAudition(); return true;
+            case "settings": OpenSettings(); return true;
+            case "quit":     QuitRequested = true; return true;
+            default: return false;
+        }
+    }
+
     void HandleOverlayClick()
     {
         // intro HEAT/Ascension selector: dial the difficulty for the NEXT new run (0..unlocked).
@@ -8128,84 +8339,18 @@ public partial class Game
             }
         }
 
-        // intro CONTINUE: resume a saved campaign (button or key C)
-        if (Phase == Phase.Intro && SaveGame.Exists)
-        {
-            bool cont = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn2))
-                        || Raylib.IsKeyPressed(KeyboardKey.C);
-            if (cont && ContinueRun()) return;
-        }
-
-        // PROGRAM HORIZON W2: intro LAST STAND — begin the endless horde mode (button or key L).
+        // The intro's doors. Review round 1 of SETTINGS EVERYWHERE folded the nine copies of
+        // `bool x = (click && rect) || key; if (x) { ...; return; }` into one table so a self-test can
+        // hit the SAME rect and the SAME key path the player uses (IntroHit / IntroKeyId / ActIntro,
+        // the PauseHit / ActPause shape). Order is the old order; a click is resolved before a key,
+        // as it was (each old door read its click before its key). CONTINUE's plate is only drawn
+        // while a save exists, and ActIntro("continue") falls through when ContinueRun refuses,
+        // exactly as `if (cont && ContinueRun()) return;` did.
         if (Phase == Phase.Intro)
         {
-            bool endless = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                            Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn3))
-                           || Raylib.IsKeyPressed(KeyboardKey.L);
-            if (endless) { BeginEndless(); return; }
-        }
-
-        // PROGRAM HORIZON W3: intro WAR ROOM — open the cross-run meta screen (button or key W).
-        if (Phase == Phase.Intro)
-        {
-            bool warRoom = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                            Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn4))
-                           || Raylib.IsKeyPressed(KeyboardKey.W);
-            if (warRoom) { BeginWarRoom(); return; }
-        }
-
-        // PROGRAM HORIZON W6: intro CODEX — open the field-manual reference (button or key K).
-        if (Phase == Phase.Intro)
-        {
-            bool codex = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn5))
-                         || Raylib.IsKeyPressed(KeyboardKey.K);
-            if (codex) { BeginCodex(); return; }
-        }
-
-        // PROGRAM HORIZON W4: intro SKIRMISH — open the single-fight setup (button or key S).
-        if (Phase == Phase.Intro)
-        {
-            bool skirmish = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                             Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn6))
-                            || Raylib.IsKeyPressed(KeyboardKey.S);
-            if (skirmish) { BeginSkirmishSetup(); return; }
-        }
-
-        // PROGRAM HORIZON W4: intro DAILY — jump into today's seeded challenge (button or key Y).
-        if (Phase == Phase.Intro)
-        {
-            bool daily = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn7))
-                         || Raylib.IsKeyPressed(KeyboardKey.Y);
-            if (daily) { BeginDaily(); return; }
-        }
-
-        // RESONANCE T1: intro TRAINING OP — the scripted drill (button or key N). Always available,
-        // never gated on a "first launch" flag: a returning player can re-run it whenever.
-        if (Phase == Phase.Intro)
-        {
-            bool train = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn8))
-                         || Raylib.IsKeyPressed(KeyboardKey.N);
-            if (train) { BeginTraining(); return; }
-        }
-
-        // RESONANCE A3: intro AUDIO CHECK — the cue/mix audition screen (button or key U).
-        if (Phase == Phase.Intro)
-        {
-            bool audio = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn9))
-                         || Raylib.IsKeyPressed(KeyboardKey.U);
-            if (audio) { BeginAudition(); return; }
-
-            // W5 THE DOORS: QUIT from the main menu. No confirm here — nothing is in flight on the
-            // title screen, and a campaign in progress is already on disk at its last mission start.
-            bool quit = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
-                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.IntroQuitBtn))
-                        || Raylib.IsKeyPressed(KeyboardKey.Q);
-            if (quit) { QuitRequested = true; return; }
+            if (Raylib.IsMouseButtonPressed(MouseButton.Left) && ActIntro(IntroHit(Raylib.GetMousePosition()))) return;
+            foreach (var (id, key) in IntroKeys)
+                if (Raylib.IsKeyPressed(key) && ActIntro(id)) return;
         }
 
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without

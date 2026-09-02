@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Raylib_cs;
 
@@ -13,6 +14,9 @@ public abstract class Anim
     public virtual void Draw(Game g) { }
 }
 
+/// THE STRIDE: where a MoveStepAnim sits in its walk. Presentation only — the sim never reads it.
+public enum StepSeg { Single, First, Mid, Last }
+
 /// Move a single unit one tile along its path; checks overwatch on arrival.
 public class MoveStepAnim : Anim
 {
@@ -22,6 +26,71 @@ public class MoveStepAnim : Anim
     float _t, _dur;
 
     public MoveStepAnim(Unit u, int tx, int ty) { Unit = u; Tx = tx; Ty = ty; }
+
+    // ── THE STRIDE — the DRAWN stride, decoupled from the COMMIT clock ────────────────────────
+    // Everything in this block is presentation. None of it is read by the sim, none of it draws
+    // from Util.Rng, and none of it touches the commit clock (_t / _dur -> k >= 1 -> tile entry ->
+    // OnUnitEnteredTile / overwatch), which is why the autoplay frame counts and PAIRTEST identity
+    // are unchanged by the tween below. Before this, every tile of a walk eased in AND out and
+    // re-kicked the lean, so a six-tile move was six separate lunges — the caterpillar.
+    public StepSeg Seg = StepSeg.Single;
+    /// Shared by every step of one walk (Game.EnqueuePath builds it): [0] = where the figure stood,
+    /// [i+1] = the centre of step i's tile. The First step overwrites [0] with the live Unit.Pos at
+    /// activation, so a walk starts from wherever the figure is DRAWN — a stale origin cannot snap it.
+    public List<Vector2> Path;
+    public int Index;
+    /// VAULT: px of peak lift, and how long the leap is DRAWN over. The commit stays on _dur, so the
+    /// tile entry — and any overwatch it draws — fires at exactly the frame it did before.
+    public float Hop, VisDur;
+    float _period = -1f;     // the wall-clock length this step's commit will actually take at the frame rate seen (predicted on the first frame)
+    float _tau0;             // stride clock at activation (carried in from the previous step of the walk)
+    bool _committed;
+
+    public const float StrideRamp  = 0.5f;    // push-off / brake, in step-times (a ONE-tile walk of this profile IS Util.EaseInOutQuad)
+    public const float VaultHop    = 26f;     // px of lift at the top of a vault
+    public const float VaultVisDur = 0.24f;   // s a vault is DRAWN over (its commit stays at _dur)
+
+    /// The commit clock needs ceil(_dur / dt) frames: a 0.12 s step at 60 Hz commits on its 8th
+    /// frame (0.1333 s), so 7.2 frames of motion were squeezed into 8 and the 0.8 of a frame lost
+    /// at every tile boundary was a hitch on top of the easing (the "0.1 px" frame in FEELTEST's
+    /// pre-fix profile). The drawn stride runs on the PREDICTED commit period instead, so it reaches
+    /// each centre on the commit frame at one constant speed. A frame-time jitter makes the
+    /// prediction miss by a frame; the stride clock is carried across steps (Unit.StrideTau), so a
+    /// miss is a one-frame lead or lag the next step absorbs — never a snap back, never a stall.
+    static float PredictPeriod(float dur, float dt) => MathF.Max(dur, MathF.Ceiling(dur / dt - 0.001f) * dt);
+
+    /// Arc length (in STEPS) along the walk at stride clock `tau` (in step-times): a linear speed
+    /// ramp over the first StrideRamp step-times, one constant stride, and the mirror-image brake.
+    /// One push-off and one stop per WALK instead of one per tile. The stride speed is n/(n-ramp),
+    /// so the figure trails the commit clock by at most ramp/2 of a step (16 px) during the push-off
+    /// and leads it by the same on the brake — and by nothing at all in between.
+    static float StrideS(float tau, int n)
+    {
+        float a = MathF.Min(StrideRamp, n * 0.5f);
+        float v = n / (n - a);
+        if (tau <= 0f) return 0f;
+        if (tau >= n) return n;
+        if (tau < a) return v * tau * tau / (2f * a);
+        if (tau <= n - a) return v * (tau - a * 0.5f);
+        float r = n - tau;
+        return n - v * r * r / (2f * a);
+    }
+
+    Vector2 PathPoint(float s)
+    {
+        int n = Path.Count - 1;
+        if (s <= 0f) return Path[0];
+        if (s >= n) return Path[n];
+        int i = (int)s;
+        return Vector2.Lerp(Path[i], Path[i + 1], s - i);
+    }
+
+    // THE STRIDE — SIGHTLINE_FEELTEST thresholds (Game.Harness.FeelSelfTest reads them; they live
+    // beside the tween they gate). Per-frame speed is measured on Unit.Pos at the harness's 1/60 dt.
+    public const float FeelMidBand       = 0.5f;    // tiles excluded at each END of a walk (departure ramp / arrival brake)
+    public const float FeelMinSpeedRatio = 0.60f;   // mid-path: slowest frame must be >= this x the fastest frame
+    public const float FeelStallRatio    = 0.40f;   // mid-path: a frame under this x the mean speed is a STALL (zero allowed)
+    public const float FeelVaultLiftMin  = 20f;     // px of peak Y lift a VAULT must show mid-flight
 
     /// Q1 STACKTEST probe (harness-only; ALWAYS null in normal play, so this costs one null
     /// check per step). Fires the instant a step becomes the ACTIVE anim — i.e. the moment the
@@ -38,9 +107,21 @@ public class MoveStepAnim : Anim
         _to = Util.TileCenter(Tx, Ty);
         bool diag = Tx != Unit.X && Ty != Unit.Y;
         _dur = diag ? 0.155f : 0.12f;
-        var d = _to - _from;
+        bool walk = Path != null && Seg != StepSeg.Single;
+        if (walk)
+        {
+            if (Seg == StepSeg.First) { Path[0] = Unit.Pos; _tau0 = 0f; }
+            else _tau0 = Unit.StrideTau;
+        }
+        // face along the SEGMENT, not from the drawn position: mid-walk the figure trails or leads
+        // its tile by a few px, and a corner turned from there would come out a few degrees short.
+        var d = walk ? Path[Index + 1] - Path[Index] : _to - _from;
         if (d.LengthSquared() > 0.01f) Unit.Facing = MathF.Atan2(d.Y, d.X);
-        Unit.WalkLean = 1f;     // lean into the step (Renderer reads it as a forward body tilt); decays in Game.Update
+        // THE STRIDE: the lean is the PUSH-OFF (Renderer reads it as a forward body tilt; it decays
+        // in Game.DecayUnitFx), so it is kicked once per walk — First/Single — not once per tile: the
+        // re-kick every 0.12 s was the pumping half of the caterpillar. A vault crouches harder
+        // (1.5: the same decay holds it through the 0.24 s leap).
+        if (Seg == StepSeg.Single || Seg == StepSeg.First) Unit.WalkLean = Hop > 0f ? 1.5f : 1f;
         g.Fx.Dust(_from + new Vector2(0, 8f), 3);   // a small puff kicks up as the foot leaves
         // RESONANCE A2 — a footfall PER TILE, panned to where the step actually happens.
         // Audio.Play("move") used to fire once per move COMMAND, so a six-tile sprint got a
@@ -56,17 +137,55 @@ public class MoveStepAnim : Anim
 
     public override bool Update(Game g, float dt)
     {
+        if (_period < 0f && dt > 0f) _period = PredictPeriod(_dur, dt);
         _t += dt;
-        float k = Util.Clamp(_t / _dur, 0f, 1f);
-        Unit.Pos = Vector2.Lerp(_from, _to, Util.EaseInOutQuad(k));
-        if (k >= 1f)
+        float k = Util.Clamp(_t / _dur, 0f, 1f);                     // the COMMIT clock — untouched
+        bool walk = Path != null && Seg != StepSeg.Single;
+        bool visDone;
+        if (walk)
         {
-            Unit.X = Tx; Unit.Y = Ty;
-            Unit.Pos = _to;
-            g.OnUnitEnteredTile(Unit);
-            return true;
+            // the drawn stride: one profile over the whole walk, on the predicted commit period
+            float tau = _tau0 + _t / (_period > 0f ? _period : _dur);
+            Unit.StrideTau = tau;
+            Unit.Pos = PathPoint(StrideS(tau, Path.Count - 1));
+            visDone = k >= 1f;
         }
-        return false;
+        else if (Hop > 0f && VisDur > _dur)
+        {
+            // VAULT: a crouch-spring-land arc over the cover. Unit.Pos is what the renderer draws, so
+            // the lift goes into it; Unit.HopLift lets the shadow stay on the ground underneath.
+            float kv = Util.Clamp(_t / VisDur, 0f, 1f);
+            float lift = MathF.Sin(kv * MathF.PI) * Hop;
+            Unit.Pos = Vector2.Lerp(_from, _to, Util.EaseInOutQuad(kv)) - new Vector2(0f, lift);
+            Unit.HopLift = lift;
+            visDone = kv >= 1f;
+        }
+        else
+        {
+            Unit.Pos = Vector2.Lerp(_from, _to, Util.EaseInOutQuad(k));   // Single: today's tween, exactly
+            visDone = k >= 1f;
+        }
+        if (k >= 1f && !_committed)
+        {
+            _committed = true;
+            Unit.X = Tx; Unit.Y = Ty;
+            // the figure lands on the exact centre at the END of a walk (or of a one-tile step);
+            // mid-walk it keeps its stride — a trail/lead of <= 16 px the next step absorbs.
+            if (visDone && (!walk || Seg == StepSeg.Last)) Unit.Pos = _to;
+            g.OnUnitEnteredTile(Unit);
+            // a walk cut short right here (the tile entry drew a reaction that killed or downed the
+            // mover, and its later steps were purged) must not leave the figure a stride off its tile
+            if (walk && Seg != StepSeg.Last && !g.HasQueuedStep(Unit, this)) Unit.Pos = _to;
+        }
+        if (!(_committed && visDone)) return false;
+        if (Hop > 0f)
+        {
+            // touchdown: exactly on the centre, shadow back under the feet, a puff and a heavier footfall
+            Unit.Pos = _to; Unit.HopLift = 0f;
+            g.Fx.Dust(_to + new Vector2(0, 8f), 5);
+            Audio.Play("move", pitchVar: 0.10f, panX: Util.Clamp(_to.X / Cfg.ScreenW, 0f, 1f));
+        }
+        return true;
     }
 }
 

@@ -284,6 +284,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   (enemy turn / live hostiles). Blind-shipped (no audio device in the sandbox).
 - **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
   weapon recoil + target knockback.
+- **THE STRIDE (2026-09-02):** a multi-tile walk is ONE motion — push-off, constant stride, brake
+  (`MoveStepAnim.Seg` + a path polyline from `Game.EnqueuePath`, drawn on the predicted commit period
+  so no tile boundary stalls); VAULT draws a 26 px arc over the cover with the shadow left on the
+  deck; floating text climbs a ladder clear of live text and twin numbers arc apart.
+  `SIGHTLINE_FEELTEST` gates all three; the commit clock is untouched.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
   promotions, between-mission barracks debrief + field-heal.
 - **Branching campaign map:** the barracks shows a Slay-the-Spire-style node path
@@ -805,6 +810,21 @@ branch point.
   `meta.json` untouched. The mid-mission-checkpoint question is answered on the record in
   `docs/DESIGN.md` §5.1 (deferred, with the argument and the revisit conditions).
   (`SIGHTLINE_QUITTEST`.)
+- **SETTINGS EVERYWHERE.** The pause card is also a SETTINGS card outside a fight: the main menu's
+  SETTINGS door (`[O]` or Escape; `Hud.IntroSettingsBtn`) and Escape in the BARRACKS open it, titled
+  SETTINGS with BACK in place of RESUME, no ABANDON row (in the barracks the checkpoint on disk is the
+  start of the mission just cleared, so "CONTINUE resumes it" would be false there), QUIT TO DESKTOP kept
+  with a phase- AND mode-true armed sentence (`Game.QuitWarning`, <= 46 chars so it fits the card at
+  120% text size; LAST STAND / SKIRMISH / DAILY / TRAINING never write `save.json`, so theirs say what
+  is actually lost). `[K]` opens the FIELD MANUAL from the barracks and from the pause card itself
+  (`Game.PauseKeys`) and returns where it was opened; FIELD MANUAL / AUDIO CHECK opened from the card
+  come back to the card on whichever screen opened it (`Game.SettingsCardPhase`). The intro's doors are
+  one table (`Game.IntroKeys` / `IntroHit` / `ActIntro`), the card's one too (`PauseHit` / `ActPause`;
+  a click on nothing disarms QUIT, as W5 had it). Leaving the requisition (`Game.ProceedFromShop`) closes
+  the ARMORY, so Escape is never dead in the barracks. Every change persists through `Display`'s one
+  writer, same as in-mission. Hook: `SIGHTLINE_SETTINGSTEST`; screenshots: `SIGHTLINE_SETTINGS=1`
+  (alias of `SIGHTLINE_PAUSE=1`) with `SIGHTLINE_INTRO=1` / `SIGHTLINE_SHOP=1`, plus
+  `SIGHTLINE_QUITARMED=1` for the armed sentence.
 - **RECRUIT is the DEFAULT on a never-played profile.** `Game.FirstTimeProfile` (from
   `SaveGame.LoadRunTotals`) dials the intro to rung −1 and rewrites level 0's hint; "< RECRUIT"
   names the rung below zero on every profile. A default, not a rung — no measured heat number

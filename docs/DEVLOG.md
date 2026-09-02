@@ -11661,3 +11661,391 @@ the surface they already have, and only when nothing else has claimed it.
 2. **It does not repair the mission-1 concentration**, the mobility cliff, the mandatory-crossing
    share, or the leash asymmetry. All four are in ROADMAP with their numbers.
 3. **It does not give the five paint biomes a mechanic.** Still declared, still asserted.
+
+# WAVE "SETTINGS EVERYWHERE" (2026-09-02, dev on `wave/settings-everywhere`, base `cee3cba`)
+
+## Thesis
+
+The pause card is the SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN
+SHAKE, THREAT PREVIEW, AUTO-CAM and FULLSCREEN, and `Game.Update` read Escape only under
+`Phase == PlayerTurn || Phase == EnemyTurn`. So the 120% text size that would lift every sub-12px
+string in the game to the floor, and the colourblind palette, could not be reached until the
+player was already in a fight. The INTRO had ten doors and no settings entry; `case Phase.Barracks`
+had no Escape handler at all, no route to the FIELD MANUAL (`K` was Intro-gated) and no way to
+the card. C5 found it, reproduced it and left it (ROADMAP "Left open by C5"). This wave closes it.
+
+**Confirmed on the base tree before touching anything:** `src/Game.cs` line 3960 read
+`if (!AutoPlay && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn))` around the only
+`KeyboardKey.Escape` read that toggles `Paused`; `grep -n 'KeyboardKey.K' src/Game.cs` gave one
+site, inside the `Phase == Phase.Intro` block of `HandleOverlayClick`; `case Phase.Barracks` in
+`Update` contained no `Escape` read and `HandleShopClick`'s only Escape read is gated on `ArmoryMode`.
+
+## What shipped
+
+- **`Game.SettingsCardPhase(p)`** is the ONE gate `Update` reads before it looks at Escape, and it
+  now names `PlayerTurn, EnemyTurn, Intro, Barracks`. The Escape read was lifted into
+  **`Game.OnEscape()`** (cancels a targeting mode first, else toggles the card and disarms QUIT —
+  the W5 contract, unchanged), and the pause card's click dispatch was split into
+  **`PauseHit(m)`** (which rect) + **`ActPause(id)`** (what it does) so a self-test can hit the SAME
+  rect the mouse would. `HandlePauseMenu` is now `ActPause(PauseHit(m))`; the in-fight behaviour is
+  byte-for-byte the same list of controls in the same order.
+- **INTRO:** a **SETTINGS** door in the utility grid, paired with AUDIO CHECK on the third row
+  (`Hud.IntroSettingsBtn`, key **`[O]`**), with a hover caption. QUIT moved to a fourth row at the
+  grid's full width, so the exit reads as the exit. Escape on the intro opens the same card.
+  `O` was derived free with `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u` before
+  binding: the free letters were `I J O Z`; they are now **`I J Z`**.
+- **BARRACKS:** Escape opens the card — unless the ARMORY sub-screen is open, where Escape already
+  means "back out one level" and the card must not steal it (`OnEscape` yields to `ArmoryMode`).
+  **`[K]`** opens the FIELD MANUAL from the barracks. `ExitCodex` / `ExitAudition` now return to
+  whichever `SettingsCardPhase` opened them (they returned to the intro from anything that was not a
+  fight), and restore the card if it was open — the FUL-2 rule, extended by the same predicate.
+- **The card outside a fight is a SETTINGS card:** title SETTINGS, first row **BACK** instead of
+  RESUME (`Hud.PauseResumeLabel` / `Hud.PauseTitle` key off `Game.CardInFight`), footer hint
+  "Every change is saved as you make it - [Esc] back" instead of the camera legend, **no ABANDON
+  row** (the two remaining exits stay bottom-aligned with the left column — the card was not
+  re-laid out), QUIT TO DESKTOP kept with a **phase-true armed sentence** (`Game.QuitWarning`).
+- **ABANDON in the BARRACKS — decided NO, and why.** `AbandonRun` promises "The checkpoint is
+  kept - CONTINUE resumes it". `SetupMission` is the only GAMEPLAY `SaveGame.Save` caller
+  (`src/Game.cs` ~line 2300, written at mission START; `grep -n 'SaveGame.Save('` gives seven
+  sites, and the other six are harness stashes — `Events.cs`'s self-test, `Game.Modes.cs`'s,
+  `Program.cs` x2 and `Ship.cs`), so in the debrief the file on disk is the start of the mission
+  the player just CLEARED. CONTINUE would replay a won mission and drop
+  every debrief pick, and `AbandonRun` would call `Stats.EndMission` on a mission already closed.
+  QUITTEST's contract (the quit path writes nothing, deletes nothing, keeps the mission-start
+  checkpoint byte-identical) is the one that IS safe there, so the barracks card offers BACK and
+  QUIT TO DESKTOP, and QUIT's armed sentence there says what it costs — the exact wording was
+  re-cut in review round 1 (below) after the first drafts overflowed the card; the shipped set is
+  in `Game.QuitWarning`. The in-fight CAMPAIGN sentence is unchanged; the other four modes got
+  their own in round 1.
+- **Persistence is the same writer.** The card's controls call the same `Display.CycleUiScale` /
+  `ToggleColorblind` / … as in-mission; each ends in `Display.Save()` (the atomic writer C6 proved).
+  Nothing new writes anywhere; the harness paths stay `NoPersist` (a screenshot run never clicks).
+
+## The test — and it FAILED on the pre-fix tree
+
+`SIGHTLINE_SETTINGSTEST=1` (`Game.SettingsSelfTest`, `src/Game.Harness.cs`), routed through
+`verdict` in `scripts/qa-sweep.sh`. Four legs: **(A) INTRO** — the door exists, overlaps no other
+door, sits above the footer; Escape opens the card on the intro, the card publishes TEXT SIZE /
+COLORBLIND / QUIT rects and NO abandon rect, the first row reads BACK, TEXT SIZE changes through
+`PauseHit` -> `ActPause` on the rect's centre, `Cfg.UiScale` follows, `display.json` re-read
+through `Display.LoadForTest` carries the new index, Escape closes it and the phase is still
+Intro; FIELD MANUAL and AUDIO CHECK opened from the card come back TO the card on the intro.
+**(B) BARRACKS** (`DebugShop`) — the same round trip, no abandon, BACK; Escape with the ARMORY
+open does NOT open the card; `[K]`'s `BeginCodex` returns to the barracks with no card invented.
+**(C) PLAYER TURN** — the existing home pinned: RESUME, abandon offered, Escape in AIM cancels aim
+and does not open the card, closing the card disarms QUIT. **(D)** Escape leaves the card closed
+on WarRoom / Codex / Draft / SkirmishSetup / AudioCheck / Win / Lose, and never opens under
+`AutoPlay`. Stashes and restores `display.json` and the scale statics; pins `Hud.MousePin` off-card.
+
+Pre-fix (the test in the tree, the fix not yet):
+
+    SETTINGSTEST: FAIL (intro:noSettingsDoor,intro:escapeDoesNotOpenCard,intro:codex:noCard,intro:audio:noCard,barracks:escapeDoesNotOpenCard,barracks:codex:noCard,barracks:audio:noCard,barracks:manualBackLandsOn:Intro)
+
+The mission leg passed pre-fix, which is the proof that the `OnEscape` / `PauseHit` / `ActPause`
+refactor is behaviour-preserving for the fight. Post-fix: PASS. CONTRASTTEST gained the SETTINGS
+door in its main-menu list (10 labels; SETTINGS reads ~12:1 — it floats with the clock-animated
+backdrop: 12.14, 11.88 and 11.99 on three runs, all far above the 4.5 floor). QUITTEST, CODEXTEST,
+AUDITIONTEST, FITTEST, CHROMETEST, BACKDROPTEST re-run green.
+
+## Screenshots
+
+`SIGHTLINE_SETTINGS=1` (alias of the existing `SIGHTLINE_PAUSE=1`) composes with
+`SIGHTLINE_INTRO=1` and `SIGHTLINE_SHOP=1`: the card opened from the intro and from the barracks
+were photographed at frame 90 and inspected — title SETTINGS, BACK, two exits, footer hint, every
+label through `Cfg.Text` at >= 12px. The intro with the door was photographed with
+`SIGHTLINE_INTRO=1 SIGHTLINE_SHOT=90`.
+
+## What this wave did NOT do
+
+1. **No re-layout of the pause card.** Two exits instead of three outside a fight is a row omitted,
+   not a layout; every rect the in-fight card publishes is where it was.
+2. **The 12px floor at the default text size** (the item above this one in ROADMAP) is untouched.
+   This wave only makes the 120% setting reachable before the first fight.
+3. **No route from the BARRACKS back to the intro.** The only candidate (`AbandonRun`) would lie
+   there, for the reason above; QUIT TO DESKTOP is the honest exit and it is now offered. A
+   "MAIN MENU" plate that costs exactly what QUIT costs is a separate decision.
+4. **No balance change.** Nothing in `Combat`, `Ai`, `Mission`, `Heat` or the map generator was
+   touched; autoplay `RESULT: WIN mission=6 frame=12410 turns=29` on one Debug run, no exception.
+5. `CardInFight` treats an in-fight TRAINING OP / SKIRMISH / LAST STAND like a campaign fight
+   (RESUME, mode-true abandon verb) — unchanged from before.
+
+## Review round 1 (2026-09-02) — what the reviewer found, what changed
+
+Ten findings; 1-8 required, 9-10 taken because they were cheap. Every code fix below ships an
+assertion in `SIGHTLINE_SETTINGSTEST` that was **proven to fail** by temporarily breaking the fix,
+building, running, and restoring (`cmp` byte-identical each time); the FAIL lines are quoted verbatim.
+
+1. **MAJOR — Escape went dead in the barracks after ARMORY + Enter.** `HandleShopClick` read Enter
+   before its armory branch and set `_shopDone` without clearing `ArmoryMode`; `Hud` stops drawing
+   the requisition once `ShopDone`, so the stale flag was invisible, but `OnEscape`'s armory
+   exception (`ArmoryMode && !Paused`) kept swallowing Escape for the rest of the visit. **Two
+   locks:** Enter and the PROCEED plate now leave the shop through one seam, `Game.ProceedFromShop`,
+   which clears `ArmoryMode`/`ArmorySoldier`; and the exception is gated on `!_shopDone`, mirroring
+   the reachability of the armory's own Escape read (`if (!_shopDone)` in `Update`). Either lock alone
+   closes the hole, which the break-tests show — breaking the predicate alone trips only
+   `barracks:staleArmoryFlagSwallowsEscape`, breaking the clear alone only
+   `barracks:proceedLeftArmoryOpen`, and breaking BOTH reproduces the reviewer's scenario:
+   `SETTINGSTEST: FAIL (barracks:proceedLeftArmoryOpen,barracks:escapeDeadAfterArmoryProceed,barracks:staleArmoryFlagSwallowsEscape`.
+2. **MAJOR — the intro / barracks armed-QUIT sentences overflowed the card.** 74-75 chars centred on
+   a plate whose centre is 200 px from the card's right edge. Every sentence is now **<= 46 chars**,
+   and the new `ArmedFits` leg measures each one against `Hud.PauseCard` (published by `DrawPause`)
+   — **at all four shipped TEXT SIZES**, because the leg's first cut found what the reviewer's 100%
+   arithmetic could not: `CardRoundTrip` cycles TEXT SIZE, so the barracks sentence was measured at
+   120% and a 50-char sentence read **409 px** there against 400 px of room (the sentence scales,
+   the card does not). 12px NotoMono is ~6.8 px/char at 100% and ~8.2 at 120%. Break-test with the
+   original intro sentence:
+   `intro:armedSentenceOverflows@90%:478px,…@100%:524px,…@110%:569px,…@120%:614px`.
+   `SIGHTLINE_QUITARMED=1` composes with `SIGHTLINE_PAUSE`/`SIGHTLINE_SETTINGS` to photograph the
+   armed state; all three homes were shot and inspected (the sentence ends at x≈977 inside a card
+   edge at 1019). The 12px line sits one row above the footer with a ~1-2 px gap in all three — that
+   is the geometry W5 shipped for the fight card, unchanged, and it was checked at 3x zoom for
+   overlap (none). Placement stays under the plate it explains rather than moving to the footer slot.
+3. **MAJOR — a click on nothing no longer disarmed QUIT.** The `PauseHit`/`ActPause` split had put
+   `if (id == null) return;` above the disarm. Order is now quit -> disarm -> null-return, which is
+   `HandlePauseMenu`'s original contract. Asserted through the same seam the mouse uses
+   (`PauseHit` at an off-card point returns null, `ActPause(null)` disarms). Break-test:
+   `mission:clickOnNothingDidNotDisarmQuit,mission:quitFired`. The "byte-for-byte the same" claim
+   in "What shipped" above was FALSE for this one path between round 0 and this fix.
+4. **MAJOR — "[K] FIELD MANUAL" on the card was a dead hint** in all three homes (only Q was read
+   while the card was open) and README promised it. `Game.PauseKeys` / `PauseKeyId` is the card's
+   key table; `HandlePauseMenu` walks it. `CardDetour` now routes the codex id through
+   `PauseKeyId(K)` and asserts K is in `PauseKeys`. Break-test (K removed from the table):
+   `intro:codex:keyKNotRead,barracks:codex:keyKNotRead,mission:codex:keyKNotRead`. `Codex.cs`'s
+   "THE REST" entry no longer says "[K] opens this manual from anywhere" — it names the three
+   places (main menu, barracks, pause card) and the [O] / Esc settings routes.
+5. **MINOR — the PASS sentence over-claimed.** The intro's nine `bool x = (click && rect) || key`
+   doors are now one table, `Game.IntroKeys` + `IntroHit(m)` / `IntroKeyId(k)` / `ActIntro(id)`
+   (the `PauseHit`/`ActPause` shape; click resolved before key, as before; `ActIntro("continue")`
+   falls through when `ContinueRun` refuses, as `if (cont && ContinueRun()) return;` did). Leg A now
+   opens the card through `IntroHit` on the door's centre and through `IntroKeyId(O)` — break-test
+   (settings row removed): `intro:settingsRectHits:nothing,intro:keyOMaps:nothing`. `OnEscape`
+   itself refuses under `AutoPlay` — break-test: `autoplayEscapeOpenedCard,autoplayUpdateOpenedCard`.
+   The PASS sentence lists only what is asserted.
+6. **MINOR — the in-fight sentence lied in four of five modes.** LAST STAND / SKIRMISH / DAILY /
+   TRAINING never write `save.json` (`SetupMission`'s checkpoint is Campaign-only) and their one
+   persisted result is recorded at the END of the fight, so a mid-fight quit loses it.
+   `QuitWarning` is now mode-aware: endless "the stand ends here - its waves are not saved",
+   training "the drill is not saved - run it again any time", skirmish "nothing is saved - the fight
+   simply ends here", daily "today's run is not recorded - retry any time"; campaign unchanged. The
+   mission leg asserts each fits and that none of the four repeats the campaign sentence.
+7. **MINOR** — the duplicate key registry in `src/Game.cs` now reads I J Z and points at the grep.
+8. **MINOR** — the FEATURES bullet moved below QUIT TO DESKTOP's `(SIGHTLINE_QUITTEST.)` tail.
+9. **NIT** — "12.14:1" is now "~12:1, floats with the animated backdrop (12.14 / 11.88 / 11.99)";
+   "ONLY `SaveGame.Save` caller (one site)" is now "only GAMEPLAY writer" with the six harness sites named.
+10. **NIT** — ROADMAP's "deliberately not fixed" heading reworded over its ticked item; FITTEST gained
+    `SETTINGS-INTRO`, `SETTINGS-INTRO-ARMED`, `SETTINGS-SHOP`, `SETTINGS-SHOP-ARMED` and `PAUSE-ARMED`
+    (45 screens / 50 legs now), so the new footer copy and every armed sentence are inside the fit audit.
+
+**After:** `dotnet build -c Release` 0 warnings / 0 errors; `SETTINGSTEST: PASS`, `QUITTEST: PASS`,
+`FITTEST: PASS`, `CODEXTEST: PASS`, `CONTRASTTEST: PASS`; derived hook counts exist = run = 74; one
+Debug autoplay `RESULT: LOSE mission=6 frame=12235 turns=33`, no exception.
+# PROGRAM PARALLAX — GATE FIXES FOUND IN PASSING (2026-09-02, lead, working branch)
+
+## BIOMETEST sampled the wall clock and failed one sweep in six
+
+The C4 review moved BIOMETEST's density guard onto REAL boards built through `SetupMission`, and
+pinned `MapSeed` per board — but the ground stamp only decides *what* lands where the board is
+free, and *where the board is free* (cover, barrels, plateaus, the reserved rings) is rolled off
+the shared `Util.Rng`, which that loop never reseeded. So the "40-board" sample was a different
+forty boards every run, and its `realMin < 4` floor tripped on the tail. Measured on the untouched
+base binary (`cee3cba`, Release, six runs): **5 PASS, 1 FAIL (`realMin[MAGMA]=2`)**, and the PASS
+lines' densities drifted run to run (`TUNDRA~18.2(8-31)` … `18.0(4-34)`). It first showed as a red
+line in a green wave's pre-merge sweep, which is exactly the cost of a random gate.
+
+Fix: `Util.Reseed(70200 + sd * 4 + m)` before each `SetupMission` in the loop. Three consecutive
+runs now print the identical line (`TUNDRA~17.7(8-28) VERDANT~34.0(17-44) MAGMA~12.9(5-20)`), so
+the densities in the PASS line are comparable across commits for the first time.
+
+## FITTEST un-staged TOOLTIP-HOVER on one run in six — the pin came after the settle frames
+
+Two earlier commits (`4f91da0`, `28c6b63`) fixed this flake "by construction" and at "its actual
+root cause"; it still fired once in the merged P1+P2 gate and reproduced **1 in 6** on the Release
+binary under load: `screenNotStaged:TOOLTIP-HOVER@100%(identical frame to TOOLTIP-AIM)`. The
+mechanism this time: the screen audit stages a screen, runs **three `Update` frames** to let it
+settle, and only THEN parks `Hud.MousePin` — but `Game.UpdateHoverAndAim` resolved the hover tile
+from `Raylib.GetMousePosition()` (the live pointer, never the pin) and handed the keyboard cursor
+back to the mouse on any `GetMouseDelta()`. A spurious pointer event from Xvfb, whose timing
+depends on load, flipped `KbCursor` off during the settle, the hover fell back to the live
+pointer, the threat card never staged, and the HOVER frame collapsed onto the AIM frame.
+
+Fix, in three lines and a move: `Hud.Mouse()` is public and `Update` reads the pointer through it;
+`Hud.MouseDelta()` reports zero while pinned, so a pinned cursor cannot be handed back; and the
+audit parks the pointer BEFORE `Stage`, so a stager's own pin (the tooltip's foe seat) survives the
+settle and the draw instead of being overwritten by the park. In real play `MousePin` is NaN and
+every read is the live pointer, exactly as before. Measured after: 6/6 PASS on the same binary
+under the same load. The sweep now also quotes a FAIL line's detail (`qa-sweep.sh` keeps each
+hook's full output), which is how the next flake gets its mechanism named on the first sighting.
+
+**What this does NOT fix, recorded in ROADMAP:** the tail is real. On roughly one board in ~240
+MAGMA still stamps fewer than 4 vent tiles — C4's own "a mechanic that silently vanishes on some
+seeds" — and a pinned sample that happens to clear the floor does not make that go away. The
+floor assertion is now a regression guard on a fixed sample, not a claim about the population.
+
+# WAVE "THE STRIDE" — PILLAR 2 GETS A GATE (2026-09-02, dev on `wave/the-stride`, base `cee3cba`)
+
+**Branch** `wave/the-stride` off `main` at **`cee3cba`**. Files touched: `src/Anim.cs`, `src/Game.cs`,
+`src/Game.Harness.cs`, `src/Fx.cs`, `src/Unit.cs`, `src/Renderer.cs`, `src/Program.cs`,
+`scripts/qa-sweep.sh`. A first developer wrote the self-test and the scaffolding (the threshold
+constants on `MoveStepAnim`, `Fx.TextSep`, an `EnqueuePath` helper that was still a plain foreach)
+and was cut off; this write-up covers the whole wave.
+
+## THE STRIDE — the thesis
+
+Every pillar in `docs/DESIGN.md` had a line in the sweep except the second one. "Feels good" was
+graded on tracers, shake, hit-stop and floating numbers, and nothing ever measured the MOST
+FREQUENT action in the game: a soldier walking six tiles. It caterpillared. `MoveStepAnim` is one
+tile of a path, and every tile eased in AND out (`Util.EaseInOutQuad` per step) and re-kicked
+`WalkLean`, so a six-tile move was six separate lunges with the figure coming to rest 0.1 px short
+of every centre — and on top of the easing, a 0.12 s step at 60 Hz needs `ceil(7.2) = 8` frames to
+commit, so 7.2 frames of motion were squeezed into 8 at every boundary. A VAULT, the one verb whose
+whole meaning is "over the wall", was a straight 0.12 s slide through the cover tile. And a kill
+printed its three strings — the number, KIA, the name stamp — inside 24 px of one anchor, while two
+equal overwatch hits printed one number exactly on top of the other.
+
+None of that is the sim. All of it is what the player sees the sim do, forty times a mission.
+
+## The gate, and its FAIL on the pre-fix tree — verbatim
+
+`SIGHTLINE_FEELTEST=1` drives the REAL anim queue the way `Game.Update`'s pump does (activation
+`OnStart`, one `Update` per 1/60 s frame) and measures the tween on `Unit.Pos`. Three legs:
+a six-tile walk through `EnqueuePath` (per-frame speed over the mid-path with the departure ramp and
+arrival brake excluded, `MoveStepAnim.FeelMidBand` = half a tile at each end; stall frames; lean
+kicks; backward steps; the 48-frame commit cadence PINNED), a VAULT through `IssueVault` (peak lift,
+where the peak sits, landing on the exact centre), and stacked floating text after one `Fx.Update`
+(pairwise anchor distance against `Fx.TextSep`; the twins must arc in opposite directions).
+
+On `cee3cba` plus the scaffolding it FAILED on all nine assertions:
+
+```
+FEELTEST: walk: 48 frames, mid-path px/frame min 0.1 mean 7.8 max 16.5 (min/max 0.01), stalls<0.40xmean 10, leanKicks 6, backSteps 0; profile [2.5 7.4 12.3 16.5 13.3 8.4 3.5 0.1 x6]; vault: 8 frames, peak lift 0.0px at x=416 (cover spans 448-512), landed (7,5) pos (544.0,392.0); text: kill-trio min sep 7.2px, brace-pair 4.0px, twin numbers 0.0px, twins diverge False
+FEELTEST: FAIL (walkMidSpeedDip(0.01<0.60),walkStalls(10),walkLeanKicks(6!=1),vaultLift(0.0px<20px),vaultPeakNotOverCover,killTrioOverprint(7.2px),bracePairOverprint(4.0px),twinNumbersOverprint(0.0px),twinNumbersSameArc)
+```
+
+Read the profile: `2.5 7.4 12.3 16.5 13.3 8.4 3.5 0.1`, six times. The 0.1 is the quantisation
+frame (the commit clock's last 2.8% of the tile), the 16.5 → 2.5 is the easing. Ten of the 40
+mid-path frames were stalls.
+
+## What shipped
+
+**1. One stride per walk, not one per tile.** `MoveStepAnim` gained a segment flag
+(`StepSeg` Single / First / Mid / Last), a `Path` polyline shared by every step of one walk, and its
+`Index` in it — all set by `Game.EnqueuePath`, which is now the ONLY way a path is enqueued
+(player move, enemy planned move, enemy tempo reposition, the pod reveal-scatter, the VIP leash,
+`DebugLongMove`; `grep 'new MoveStepAnim'` finds the funnel itself, `IssueVault` and one harness
+purge probe, all Single). The drawn position is one arc-length profile over the WHOLE walk —
+a linear speed ramp over the first `StrideRamp` = 0.5 step-times, a constant stride at
+`n/(n − 0.5)` tiles per step-time, and the mirror-image brake — evaluated at a stride clock the
+steps hand to each other through `Unit.StrideTau`. For n = 1 that profile IS `EaseInOutQuad`
+(same triangle of speed), so a single step still draws exactly as it did. `WalkLean` is kicked on
+First/Single only: it is the push-off, not a per-tile pump.
+
+The part that took thought is the clock. The commit needs `ceil(_dur/dt)` frames, so a pure
+linear tween on `_t/_dur` still stalls on every 8th frame (1.8 px against 8.9) — the frame the
+old profile shows as 0.1. The drawn stride therefore runs on the PREDICTED commit period
+(`MoveStepAnim.PredictPeriod`: `ceil(_dur/dt)·dt`, taken from the first frame's dt) and reaches
+each centre ON the commit frame; a frame-time jitter that makes the prediction miss by a frame
+becomes a one-frame lead or lag the next step absorbs through the carried clock — never a snap
+back, never a stall. The commit clock (`_t/_dur → k ≥ 1 → tile entry → OnUnitEnteredTile →
+overwatch`) is untouched, and so is `_dur` (0.12 / 0.155 s).
+
+Consequences the reader should know: the figure now TRAILS the commit clock by up to a quarter
+tile during the push-off and LEADS it by the same during the brake (derived: `(1 − ramp/2)` of the
+first step; 11.6 px on a six-tile walk, 16 px in the limit) — so an overwatch reaction on the first
+tile fires with the figure a few px short of that tile's centre. A Mid step whose walk is cut short
+at its own commit (the reaction killed or downed the mover and `PurgeAnimsFor` dropped its later
+steps) sets the figure down on the tile (`Game.HasQueuedStep`), and `PurgeAnimsFor` itself now sets
+a felled mover on its tile if it is within half a tile of it (a body further off is inside a
+shove/drag tween and is left to that anim). A corner is faced along the segment
+(`Path[i+1] − Path[i]`), not from the drawn position, so the trail cannot turn it short.
+
+**Diagonals — derived, not measured.** A diagonal step commits in 0.155 s over 90.5 px against
+0.12 s over 64 px: the commit cadence ITSELF is 9.5% faster on a diagonal (584 vs 533 px/s), and at
+60 Hz it quantises to 10 frames against 8, so a diagonal draws at 9.87 px/frame in a walk whose
+straights draw at 8.73 — a 0.88 ratio against the 0.60 gate. Making them identical would need
+either a 0.170 s diagonal commit (a sim-timing change, out of scope) or letting the figure lag its
+committed tile by 15 ms per diagonal, which accumulates to a visible pop on the Last step. So the
+drawn speed follows the commit speed of each step type, and a mixed path has a 13% step at a
+straight→diagonal boundary. FEELTEST's walk is straight; nobody has filmed a mixed one.
+
+**2. The VAULT arcs.** `MoveStepAnim.Hop` (px of lift) and `VisDur` (the drawn duration);
+`IssueVault` sets 26 px and 0.24 s. The lift is `sin(k·π)·Hop` taken off the DRAWN Y — `Unit.Pos`,
+which is what `Renderer.DrawUnit` reads — with the horizontal on `EaseInOutQuad` (crouch, spring,
+settle). `Unit.HopLift` carries the lift to the renderer so the ground shadow stays on the deck and
+shrinks a touch at the top. The commit stays on `_dur`: the tile entry, and any overwatch it draws,
+fires on frame 8 of 15, with the figure over the cover — a vaulter can be shot out of the air, and
+if it dies there `PurgeAnimsFor` sets the body down on the landing tile. Landing: `Pos = _to`
+exactly, `HopLift = 0`, a 5-particle `Fx.Dust` puff and a heavier `move` footfall. The autopilot
+never vaults (`grep -i vault src/Game.Autopilot.cs` is empty), so the longer anim cannot move a
+flywheel number; a PLAYER's vault holds the queue 15 frames instead of 8.
+
+**3. Floating text climbs a ladder.** `Fx.PopText` and `Fx.Stamp` place a new text on the first
+rung above its anchor whose text box is clear of every LIVE text (`Fx.TextRung`: rungs 18 px up,
+odd rungs 18 px to one side; a box is `0.6 em × length` wide — NotoMono's advance, no font needed
+headless — and `size` tall; live texts are tested where they ARE now, so a number that has risen
+out of the way costs nothing). The brief said "count texts within 22 px and offset by n × 16 px";
+that rule mis-places a text against a neighbour that has ALREADY risen 16 px (it lands on top of
+it), which is why it became a clearance search instead. The arc direction hash is salted with a
+plain per-call counter (`_textSerial`, not `Util.Rng`), and a number popping within 48 px of a live
+ARCING number arcs the other way — structurally, so twin overwatch hits diverge every time rather
+than at the mercy of a hash. `Fx.Texts` is read by nothing in the sim.
+
+## The gate on the shipped tree — verbatim
+
+```
+FEELTEST: walk: 48 frames, mid-path px/frame min 8.7 mean 8.7 max 8.7 (min/max 1.00), stalls<0.40xmean 0, leanKicks 1, backSteps 0; profile [1.1 3.3 5.5 7.6 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 7.6 5.5 3.3 1.1]; vault: 15 frames, peak lift 26.0px at x=476 (cover spans 448-512), landed (7,5) pos (544.0,392.0), backSteps 0; text: kill-trio min sep 42.1px, brace-pair 28.4px, twin numbers 36.0px, twins diverge True
+FEELTEST: PASS (6-tile walk: mid-path speed never dips under 0.60x its max, zero stall frames, one lean kick, 48-frame cadence pinned; VAULT lifts >= 20px over the cover and lands on the tile centre; stacked floating text keeps >= 14px separation and twin numbers arc apart)
+```
+
+Four frames of push-off, forty at 8.7 px, four of brake; the cadence is still 48 frames because the
+commit clock never moved. `FEELTEST` is routed through `qa-sweep.sh`'s `verdict` (the derived
+counts read `exist=74 run=74` with the FUL11PROBE convention; the sweep's own footer says
+`73 self-tests exist in src/; this sweep ran 73`).
+
+## Inertness — the acceptance criteria, measured
+
+Presentation only, so the SAME seed must play the SAME campaign to the frame:
+
+| `SIGHTLINE_AUTOPLAY=1 SIGHTLINE_SEED=` | base `cee3cba` (throwaway worktree, Debug) | `wave/the-stride` (Debug) |
+|---|---|---|
+| 101 | `RESULT: WIN mission=6 frame=13803 turns=38` | `RESULT: WIN mission=6 frame=13803 turns=38` |
+| 202 | `RESULT: LOSE mission=4 frame=8782 turns=21` | `RESULT: LOSE mission=4 frame=8782 turns=21` |
+
+`SIGHTLINE_PAIRTEST=1`: `h0 slot0 legA WIN cleared=6 missions=5 turns=29 / legB same → MATCH`,
+`h4 slot1 legA LOSE cleared=0 missions=1 turns=8 / legB same → MATCH`, **PASS**. `STACKTEST`,
+`OWTEST`, `FIELDTEST` (whose vault leg pumps at dt = 0.05 s and still lands on (7,5)) and
+`SNAPTEST` PASS on the Release binary. `bash scripts/qa-sweep.sh --full`: exit status 0, zero FAIL lines,
+no COVERAGE GAP block, autoplay ×3 `LOSE m1 frame=2059 / LOSE m2 frame=2615 / LOSE m5 frame=15774`, no
+TIMEOUT. Release build 0 warnings / 0 errors.
+
+## Looked at, not just measured
+
+`SIGHTLINE_SHOT=1 SIGHTLINE_SHOTSEQ=50 SIGHTLINE_LONGMOVE=1` filmed a walk (the first soldier's
+longest clear run at that deploy was four tiles, so the strip is a four-tile walk; the six-tile
+profile is FEELTEST's): the `FILM` trace reads y = `1.1 4.6 10.3 18.3 27.4 36.6 … 237.7 245.7 251.4
+254.9 256.0` — 9.1 px per frame between a three-frame push-off and a three-frame brake, which is
+`4/3.5 × 8` exactly, zero backward steps, and it ends on `456.000`. `SIGHTLINE_LONGMOVE=vault` is
+new: it stamps HIGH COVER beside the first soldier and runs `IssueVault` through the player's
+path; its trace reads lift `5.6 11.0 15.8 19.9 23.1 25.1 26.0 25.6 24.0 21.3 17.6 13.0 7.8 2.3 0.0`
+over x `223 → 96`, and in the frames the figure is visibly above the cover block from frame 5 to 9
+with its shadow still on the deck under it. Contact sheets (not committed): the wave's scratchpad
+`walk_sheet.png` / `vault_sheet.png`, built from `sightline_seq_NN.png`. The briefing card's dark
+band covers the walk strip's middle rows, as CLAUDE.md says it will below frame ~700.
+
+## What this wave did NOT do
+
+- **No gameplay.** `_dur` is 0.12 / 0.155 s as before, the commit is on the same frame, no
+  `Util.Rng` draw was added or moved (the landing puff is `Fx.Dust` on the presentation stream and
+  the landing footfall's pitch is a hash). The seed table above is the proof.
+- **The lean is a push-off, not a held stride pose.** `WalkLean` decays to zero within a tile
+  (`DecayUnitFx`, 7.5/s), so a six-tile walk leans for the first tile only. A sustained lean is a
+  renderer/Unit change and would need FEELTEST's `leanKicks` contract restated.
+- **Diagonal speed is 13% off straight speed at 60 Hz** (derived above). Fixing it is a
+  sim-timing change.
+- **Nobody has filmed a vault under overwatch.** The reaction fires with the figure at the apex;
+  whether that reads as "shot out of the air" or as a glitch is unjudged. The film was unopposed.
+- **The text ladder's width is an estimate** (0.6 em). Floating text is NotoMono through
+  `Cfg.Text`, so it holds; if a display face ever carries a floating string it needs `Cfg.Measure`.
+- **Kill-cam, the reaction beat, the explosion cue** — other waves. This one is the walk, the
+  leap and the overprint.
+- **No screenshots were sent into the thread** — this session has no file-sending tool; the paths
+  are in the report and the sheets are in the scratchpad.

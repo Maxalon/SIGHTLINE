@@ -37,7 +37,15 @@ cd "$(dirname "$0")/.."
 FULL=0
 [ "${1:-}" = "--full" ] && FULL=1
 
-run() { xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug 2>/dev/null; }
+# PARALLAX: every hook's FULL stdout is kept under $SWEEP_LOGDIR (named by the env var that
+# selected it) so that a FAIL line can be quoted in full below. Before this the sweep captured
+# only the "X: FAIL" token and the reason was lost — a FITTEST flake on the merged P1+P2 tree
+# could not be diagnosed from the sweep that caught it.
+SWEEP_LOGDIR="$(mktemp -d /tmp/sightline-sweep.XXXXXX)"
+run() {
+  local hook; hook="$(env | grep -oE '^SIGHTLINE_[A-Z0-9_]+=' | head -1 | tr -d '=')"
+  xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug 2>/dev/null | tee "$SWEEP_LOGDIR/${hook:-run}.out"
+}
 
 # W9 REVIEW FIX — THE EXIT CODE IS THE GATE, so it has to mean the whole sweep.
 # W9 made this script exit non-zero on a TIMEOUT, and stopped there: a self-test line reading FAIL,
@@ -50,7 +58,14 @@ _fail=0
 verdict() {   # verdict <captured-text>
   if [ -z "$1" ]; then echo "<no result line>"; _fail=1; return; fi
   echo "$1"
-  case "$1" in *FAIL*) _fail=1 ;; esac
+  case "$1" in *FAIL*)
+    _fail=1
+    # quote the full failing line (first 900 chars) from the hook's kept output, so the sweep
+    # says WHY and not just THAT
+    local name; name="${1%%:*}"
+    grep -h -m1 -E "^${name}[^A-Za-z0-9]*.*FAIL" "$SWEEP_LOGDIR"/SIGHTLINE_"${name}"*.out 2>/dev/null | cut -c1-900 | sed 's/^/    detail: /'
+    ;;
+  esac
 }
 
 echo "=== BUILD (Release) ==="
@@ -74,6 +89,8 @@ echo -n "TRAITTEST  : "; verdict "$(SIGHTLINE_TRAITTEST=1 run | grep -oE "TRAITT
 echo -n "WOUNDTEST  : "; verdict "$(SIGHTLINE_WOUNDTEST=1 run | grep -oE "WOUNDTEST: (PASS|FAIL)" | head -1)"
 echo -n "CDTEST     : "; verdict "$(SIGHTLINE_CDTEST=1 run | grep -oE "CDTEST: (PASS|FAIL)" | head -1)"
 echo -n "FIELDTEST  : "; verdict "$(SIGHTLINE_FIELDTEST=1 run | grep -oE "FIELDTEST: (PASS|FAIL)" | head -1)"
+# THE STRIDE: pillar 2 ("feels good") — walk speed profile / vault arc / floating-text separation.
+echo -n "FEELTEST   : "; verdict "$(SIGHTLINE_FEELTEST=1 run | grep -oE "FEELTEST: (PASS|FAIL)" | head -1)"
 echo -n "SIEGETEST  : "; verdict "$(SIGHTLINE_SIEGETEST=1 run | grep -oE "SIEGETEST: (PASS|FAIL)" | head -1)"
 echo -n "EVENTTEST  : "; verdict "$(SIGHTLINE_EVENTTEST=1 run | grep -oE "EVENTTEST: (PASS|FAIL)" | head -1)"
 echo -n "VETTEST    : "; verdict "$(SIGHTLINE_VETTEST=1 run | grep -oE "VETTEST: (PASS|FAIL)" | head -1)"
@@ -144,6 +161,8 @@ echo -n "FITTEST    : "; verdict "$(SIGHTLINE_FITTEST=1 run | grep -oE "FITTEST:
 # W5-FIX: the backdrop registry — no phase may paint a full-screen backdrop from the chrome pass.
 echo -n "BACKDROPTEST: "; verdict "$(SIGHTLINE_BACKDROPTEST=1 run | grep -oE "BACKDROPTEST: (PASS|FAIL)" | head -1)"
 echo -n "QUITTEST   : "; verdict "$(SIGHTLINE_QUITTEST=1   run | grep -oE "QUITTEST: (PASS|FAIL)" | head -1)"
+# SETTINGS EVERYWHERE: the settings card reachable from INTRO and BARRACKS, not just a fight.
+echo -n "SETTINGSTEST: "; verdict "$(SIGHTLINE_SETTINGSTEST=1 run | grep -oE "SETTINGSTEST: (PASS|FAIL)" | head -1)"
 echo -n "THREATTEST : "; verdict "$(SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1)"
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
@@ -239,7 +258,7 @@ if [ "$_autofail" = 1 ]; then
   echo "   (Game.AutoMaxRunTurns + the within-turn idle guard) says this is unreachable;"
   echo "   if it fired, something regressed. DO NOT MERGE."
 fi
-echo "=== DONE ==="
+echo "=== DONE ===   (full per-hook outputs kept under $SWEEP_LOGDIR)"
 # DERIVED, not typed. This footer's number has now been wrong SIX times (41 / 46 / 49 / 51 / 53
 # claimed while a different count ran, and then TWO successive "derivations" that were themselves
 # wrong). The 2026 audit's wildcard-4 finding is exactly this class of hand-maintained registry

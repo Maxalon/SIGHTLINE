@@ -2275,6 +2275,16 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       **Run a new draw test under BOTH the Release binary and the sweep's own
       `dotnet run -c Debug`, several times each.**
 
+### Found by PROGRAM PARALLAX while landing its first waves
+
+- [ ] **MAGMA's vent count has a thin tail the pinned BIOMETEST cannot see.** Before the lead
+      pinned the real-board loop's `Util.Rng` stream (DEVLOG §PARALLAX gate fixes), six runs of the
+      unpinned guard on `cee3cba` failed once with `realMin[MAGMA]=2` — so on the order of one
+      MAGMA board in ~240 stamps fewer than 4 vent tiles, which is C4's own "mechanic that silently
+      vanishes on some seeds". The fix is in `Terrain` (a guaranteed minimum fissure length, or a
+      re-walk when the first pass lands under the floor), priced CRN-paired; the guard should then
+      sample more boards, not fewer.
+
 ### Standing gaps, honestly declared
 
 - [ ] **A FOUR-SLOT-SET RUNG IS NOT INTERCHANGEABLE WITH ANOTHER FOUR-SLOT-SET RUNG — measured.**
@@ -2572,7 +2582,7 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns
       and the `.bak` beside it is corruption evidence, not a restore.
 
-### Left open by C5 "THE HARD EDGES" (found, reproduced, deliberately not fixed)
+### Left open by C5 "THE HARD EDGES" (found and reproduced; C5 fixed none — the ticked one was closed later)
 
 - [ ] **The 12px small-text floor is not met at the DEFAULT text size.** Measured at 100%: 10px on
       the AUDIO CHECK screen and 11px on seventeen others (in-mission HUD, end cards, WAR ROOM,
@@ -2583,7 +2593,11 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [ ] **Six shrink-to-fit calls reach their floor at 120%** (three WAR ROOM achievement
       descriptions, one shop body, one prep body). Nothing is lost yet; they are one authored
       character from losing a word. Counted in FITTEST's PASS line on every run.
-- [ ] **ACCESSIBILITY: TEXT SIZE AND COLOURBLIND MODE CANNOT BE REACHED UNTIL YOU ARE IN A FIGHT.**
+- [x] **ACCESSIBILITY: TEXT SIZE AND COLOURBLIND MODE CANNOT BE REACHED UNTIL YOU ARE IN A FIGHT.**
+      **CLOSED by wave SETTINGS EVERYWHERE** (DEVLOG §SETTINGS EVERYWHERE): the intro has a SETTINGS door
+      (`[O]`, or Escape), Escape in the BARRACKS opens the same card (BACK + QUIT TO DESKTOP, no ABANDON —
+      the reason is in `Hud.DrawPause`), `[K]` opens the FIELD MANUAL from the barracks and returns there,
+      and `SIGHTLINE_SETTINGSTEST` pins every round trip. The original finding, kept for provenance:
       `Update`'s Escape handler is gated on `PlayerTurn || EnemyTurn`, and the pause card is the
       SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN SHAKE, THREAT
       PREVIEW, AUTO-CAM and FULLSCREEN. The INTRO — the first screen a player sees — carries ten
@@ -2697,3 +2711,27 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       turtling is structurally unmeasurable); and pin `Events.cs` `AddHeat` for measured batches —
       it contaminates every rung below 8 **upward** while heat 8 is clamped, so the instrument
       **compresses exactly the region that collapsed in L4.**
+
+### WAVE "THE STRIDE" (2026-09-02, base `cee3cba`, details in DEVLOG §THE STRIDE)
+
+- [x] **Pillar 2 has a gate.** `SIGHTLINE_FEELTEST=1` (in `qa-sweep.sh`) measures the tween on
+      `Unit.Pos` through the real anim pump: a six-tile walk's mid-path speed (min/max ≥ 0.60, zero
+      stall frames, one lean kick, 48-frame cadence pinned), a VAULT's lift (≥ 20 px, peak over the
+      cover, lands on the centre) and stacked floating text (pairwise ≥ `Fx.TextSep` = 14 px, twins
+      arc apart). It FAILED on all nine assertions on the pre-fix tree; the profiles are in the DEVLOG.
+- [x] **The caterpillar is gone.** `Game.EnqueuePath` is the only path funnel; `MoveStepAnim.Seg` +
+      a shared `Path` polyline draw ONE stride profile per walk (push-off, constant stride, brake)
+      on the PREDICTED commit period, so no tile boundary stalls. Mid-path reads `8.7 8.7 … 8.7`
+      (min/max 1.00) against `2.5 7.4 12.3 16.5 13.3 8.4 3.5 0.1` per tile before. Commit clock and
+      `_dur` untouched; seeds 101/202 give identical `frame=`/`turns=` against `cee3cba`; PAIRTEST PASS.
+- [x] **VAULT is a leap.** 26 px arc over 0.24 s (`MoveStepAnim.Hop`/`VisDur`), shadow left on the
+      deck (`Unit.HopLift`), landing puff + heavier footfall. The commit still fires on frame 8.
+- [x] **Floating text climbs a ladder** (`Fx.TextRung`): the kill trio reads 42 px apart (was 7.2),
+      the BRACE pair 28 (was 4.0), twin overwatch numbers 36 (was 0.0) and arc opposite ways.
+- [ ] **A held stride pose.** `WalkLean` is the push-off and decays within a tile; a lean carried
+      through the walk needs a renderer/Unit change and a restated `leanKicks` contract.
+- [ ] **Diagonal vs straight drawn speed differs by 13% at 60 Hz** (derived from the 0.155/0.12 s
+      commit durations, not measured on a mixed path). Only a diagonal commit of ~0.170 s closes it,
+      and that is sim timing.
+- [ ] **Film a vault UNDER overwatch.** The reaction fires with the figure at the apex; unjudged.
+- [ ] **Kill-cam / reaction beat / explosion cue** — pillar-2 items this wave deliberately left alone.

@@ -3932,6 +3932,15 @@ public partial class Game
                             _run.HeatLevel = 0;
                             _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate,
                                                                  ModName = "STANDARD", Reward = RewardKind.None };
+                            // PARALLAX: pin the BOARD, not just the map seed. The ground stamp is pure
+                            // (Hash3 on MapSeed), but WHERE it may land is the cover / plateau / barrel
+                            // layout SetupMission rolls off the shared Util.Rng — which was clock-seeded
+                            // here, so this "40-board" sample was a different 40 boards every run and
+                            // the `realMin` floor failed on the base tree about one sweep in six
+                            // (measured 1/6 on cee3cba: `realMin[MAGMA]=2`). A gate that samples the
+                            // wall clock is a gate that fails randomly; the same 40 boards every run is
+                            // what makes the densities in the PASS line comparable across commits.
+                            Util.Reseed(70200 + sd * 4 + m);
                             SetupMission(m);
                             int n = CountGroundTiles();
                             for (int x = 0; x < Grid.W; x++)
@@ -7148,6 +7157,14 @@ public partial class Game
                 // a different worst-case string on consecutive runs, which is a flaky gate rather
                 // than a gate. One fixed seed per screen, so a FAIL reproduces verbatim.
                 Util.Reseed(FitScreenSeed);
+                // PARALLAX: park the pointer BEFORE staging, not after the settle frames. The three
+                // Update frames below resolve the hover tile and can hand the keyboard cursor back
+                // to the mouse on a pointer delta — with the pin set only afterwards, a spurious X
+                // pointer event under Xvfb un-staged TOOLTIP-HOVER on ~1 run in 6 and its frame
+                // collapsed onto TOOLTIP-AIM (`screenNotStaged`). Parked off-canvas first, so no
+                // control is hovered by default; a stager that pins the pointer itself (the
+                // tooltip's foe seat) overrides this and KEEPS it through the settle and the draw.
+                Hud.MousePin = new System.Numerics.Vector2(-4000f, -4000f);
                 var g = new Game { NoPersist = true };
                 sc.Stage(g);
                 // Let the game settle exactly as it does before a screenshot: several stagers
@@ -7162,7 +7179,8 @@ public partial class Game
                 // 16-check disagreement between machines on the same commit (review E2). Parked
                 // off-canvas so no control is hovered and every cursor-anchored panel clamps to the
                 // same place on every run and every machine.
-                Hud.MousePin = new System.Numerics.Vector2(-4000f, -4000f);
+                // (the pointer pin was set before Stage — see above — and is deliberately NOT
+                // re-parked here, so a stager's pin survives into the audited frame)
                 var fp = new System.Text.StringBuilder();
                 Cfg.InkProbe = (t, pos, box, size, alpha) =>
                     {
@@ -7370,6 +7388,13 @@ public partial class Game
         new ScreenCase("INTRO",        g => { }),
         new ScreenCase("MISSION",      g => { g.StartMission(1); g.BriefLines = null; }),
         new ScreenCase("PAUSE",        g => { g.StartMission(1); g.Paused = true; }),
+        // SETTINGS EVERYWHERE (review round 1): the card in its two new homes, plus each home with
+        // QUIT ARMED so the phase-true warning sentence and the footer copy are inside the audit.
+        new ScreenCase("SETTINGS-INTRO",       g => g.Paused = true),
+        new ScreenCase("SETTINGS-INTRO-ARMED", g => { g.Paused = true; g.QuitArmed = true; }),
+        new ScreenCase("SETTINGS-SHOP",        g => { g.DebugShop(); g.Paused = true; }),
+        new ScreenCase("SETTINGS-SHOP-ARMED",  g => { g.DebugShop(); g.Paused = true; g.QuitArmed = true; }),
+        new ScreenCase("PAUSE-ARMED",          g => { g.StartMission(1); g.Paused = true; g.QuitArmed = true; }),
         new ScreenCase("TOOLTIP-AIM",  g => { g.StartMission(1); g.DebugTooltip(false); }),
         new ScreenCase("TOOLTIP-HOVER",g => { g.StartMission(1); g.DebugTooltip(true); }),
         new ScreenCase("THREATCARD",   g => { g.StartMission(1); g.DebugThreatShot(); }),
@@ -7551,6 +7576,294 @@ public partial class Game
               + "mission-start checkpoint byte-identical and never touches meta.json; both end "
               + "cards publish three non-overlapping doors and the third opens the War Room)"
             : "QUITTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── SETTINGS EVERYWHERE — reachability self-test (SIGHTLINE_SETTINGSTEST=1) ─────────────────
+    /// C5 recorded (ROADMAP, "Left open by C5") that TEXT SIZE and COLORBLIND could not be reached
+    /// until the player was in a fight: `Update`'s Escape handler was gated on PlayerTurn ||
+    /// EnemyTurn, the pause card was the SOLE home of those settings, the INTRO had no settings
+    /// door, and `case Phase.Barracks` had no Escape handler at all — nor a way to the FIELD MANUAL
+    /// (`K` was Intro-gated). QUITTEST pins the arm/confirm/checkpoint contract and NOTHING about
+    /// reachability; this is the other half. Each leg presses the same seam `Update` presses
+    /// (OnEscape), hits the same rect the mouse would (PauseHit -> ActPause), and asserts the
+    /// setting stuck, hit disk through Display's ONE writer, and the phase came back to where the
+    /// card was opened from.
+    ///
+    /// Stashes and restores display.json (the text-size change is a real Display.Save) and the
+    /// Display/Cfg scale statics, so a --full sweep leaves the profile byte-identical.
+    public string SettingsSelfTest()
+    {
+        Util.Reseed(70127);
+        var fails = new List<string>();
+        string dispPath = Display.SettingsPathPublic;
+        string dispStash = null; bool hadDisp = false;
+        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        int savedScale = Display.UiScaleIdx;
+        // W5 review: the card's hover fills read the live pointer; pin it off-card so a stray
+        // Xvfb pointer can never land on a control mid-test.
+        Hud.MousePin = new Vector2(-100, -100);
+
+        static Vector2 Centre(Rectangle r) => new Vector2(r.X + r.Width / 2f, r.Y + r.Height / 2f);
+        static void Frame(Game g) { Raylib.BeginDrawing(); Hud.Draw(g); Raylib.EndDrawing(); }
+        static bool Overlaps(Rectangle a, Rectangle b) => a.Width > 0 && b.Width > 0 && Raylib.CheckCollisionRecs(a, b);
+
+        // one card, three phases: open with Escape, change TEXT SIZE through the rect, close with Escape
+        void CardRoundTrip(Game g, string where, Phase home, bool expectAbandon, string expectVerb)
+        {
+            g.OnEscape();
+            if (!g.Paused) { fails.Add(where + ":escapeDoesNotOpenCard"); return; }
+            if (g.Phase != home) { fails.Add(where + ":escapeChangedPhase:" + g.Phase); return; }
+            Frame(g);                                   // publishes the card's rects
+            if (Hud.PauseUiScale.Width < 20) fails.Add(where + ":noTextSizeControl");
+            if (Hud.PauseColorblind.Width < 20) fails.Add(where + ":noColorblindControl");
+            if (Hud.PauseQuit.Width < 20) fails.Add(where + ":noQuitToDesktop");
+            if ((Hud.PauseAbandon.Width > 0) != expectAbandon) fails.Add(where + (expectAbandon ? ":abandonMissing" : ":abandonOffered"));
+            string verb = Hud.PauseResumeLabel(g);
+            if (verb != expectVerb) fails.Add(where + ":firstRowReads:" + verb);
+            // the TEXT SIZE control, through the same rect + dispatch the mouse uses
+            int before = Display.UiScaleIdx;
+            string id = g.PauseHit(Centre(Hud.PauseUiScale));
+            if (id != "uiscale") { fails.Add(where + ":textSizeRectHits:" + (id ?? "nothing")); return; }
+            g.ActPause(id);
+            int want = (before + 1) % Display.UiScaleLevels.Length;
+            if (Display.UiScaleIdx != want) fails.Add(where + ":textSizeDidNotChange");
+            if (MathF.Abs(Cfg.UiScale - Display.UiScale) > 1e-4f) fails.Add(where + ":textSizeNotApplied");
+            if (g.Paused != true || g.Phase != home) fails.Add(where + ":controlClosedTheCard");
+            // ...and it reached disk through Display's writer: reload the file into the statics
+            try
+            {
+                if (!System.IO.File.Exists(dispPath)) fails.Add(where + ":settingsNotWritten");
+                else
+                {
+                    Display.UiScaleIdx = -1;
+                    Display.LoadForTest();
+                    if (Display.UiScaleIdx != want) fails.Add(where + ":settingsOnDiskRead:" + Display.UiScaleIdx);
+                }
+            }
+            catch (Exception ex) { fails.Add(where + ":settingsReload:" + ex.GetType().Name); }
+            g.OnEscape();
+            if (g.Paused) fails.Add(where + ":escapeDoesNotCloseCard");
+            if (g.Phase != home) fails.Add(where + ":closeChangedPhase:" + g.Phase);
+        }
+
+        // FIELD MANUAL / AUDIO CHECK opened FROM the card must come back TO the card, in this phase.
+        // `key` != Null routes the id through the card's OWN key table (review round 1: the plate's
+        // "K" hint was dead — nothing read K while the card was open), so deleting the binding
+        // fails here rather than leaving a hint that lies.
+        void CardDetour(Game g, string where, Phase home, string id, KeyboardKey key = KeyboardKey.Null)
+        {
+            g.Paused = false;
+            g.OnEscape();
+            if (!g.Paused) { fails.Add(where + ":" + id + ":noCard"); return; }
+            if (key != KeyboardKey.Null)
+            {
+                if (Array.IndexOf(Game.PauseKeys, key) < 0) { fails.Add(where + ":" + id + ":key" + key + "NotRead"); g.Paused = false; return; }
+                string kid = Game.PauseKeyId(key);
+                if (kid != id) { fails.Add(where + ":" + id + ":key" + key + "Maps:" + (kid ?? "nothing")); g.Paused = false; return; }
+                id = kid;
+            }
+            g.ActPause(id);
+            Phase expect = id == "codex" ? Phase.Codex : Phase.AudioCheck;
+            if (g.Phase != expect) { fails.Add(where + ":" + id + ":didNotOpen:" + g.Phase); g.Paused = false; return; }
+            if (id == "codex") g.ExitCodex(); else g.ExitAudition();
+            if (g.Phase != home) fails.Add(where + ":" + id + ":backLandsOn:" + g.Phase);
+            else if (!g.Paused) fails.Add(where + ":" + id + ":backLostTheCard");
+            g.Paused = false;
+        }
+
+        // The ARMED quit sentence, as drawn: centred on the QUIT plate at 12px, it must end inside
+        // the card (review round 1: the first intro / barracks sentences ran ~65 px past its edge)
+        // — at EVERY shipped TEXT SIZE, because the sentence scales and the card does not (the
+        // first cut of this leg measured at whatever size the round trip had left behind, which is
+        // how a 50-char sentence read 409 px at 120% and passed at 100%).
+        void ArmedFits(Game g, string where)
+        {
+            g.QuitArmed = true;
+            string warn = g.QuitWarning;
+            if (string.IsNullOrWhiteSpace(warn)) fails.Add(where + ":armedSentenceEmpty");
+            int keep = Display.UiScaleIdx;
+            for (int i = 0; i < Display.UiScaleLevels.Length; i++)
+            {
+                Display.UiScaleIdx = i; Display.ApplyUiScale();
+                Frame(g);
+                float ww = Cfg.Measure(warn, 12, 1f).X;
+                float cx = Hud.PauseQuit.X + Hud.PauseQuit.Width / 2f;
+                float right = Hud.PauseCard.X + Hud.PauseCard.Width, left = Hud.PauseCard.X;
+                if (cx + ww / 2f > right - 4 || cx - ww / 2f < left + 4)
+                    fails.Add(where + ":armedSentenceOverflows@" + (int)(Display.UiScale * 100) + "%:" + (int)ww + "px");
+            }
+            Display.UiScaleIdx = keep; Display.ApplyUiScale();
+            g.QuitArmed = false;
+        }
+
+        try
+        {
+            // ---- (A) INTRO — the first screen a player sees ------------------------------------
+            {
+                var g = new Game { NoPersist = true };
+                if (g.Phase != Phase.Intro) fails.Add("bootPhase:" + g.Phase);
+                Frame(g);
+                var door = Hud.IntroSettingsBtn;
+                if (door.Width < 20 || door.Height < 20) fails.Add("intro:noSettingsDoor");
+                else
+                {
+                    var others = new[] { Hud.OverlayBtn, Hud.OverlayBtn2, Hud.OverlayBtn3, Hud.OverlayBtn4, Hud.OverlayBtn5,
+                                         Hud.OverlayBtn6, Hud.OverlayBtn7, Hud.OverlayBtn8, Hud.OverlayBtn9, Hud.IntroQuitBtn };
+                    foreach (var o in others) if (Overlaps(door, o)) { fails.Add("intro:settingsDoorOverlapsAnotherDoor"); break; }
+                    if (door.Y + door.Height > Cfg.ScreenH - 40) fails.Add("intro:settingsDoorOffTheBottom");
+                    // review round 1: the door OPENS the card — through the same click and key
+                    // dispatch the player uses (IntroHit -> ActIntro; IntroKeyId(O) -> ActIntro).
+                    string hit = g.IntroHit(Centre(door));
+                    if (hit != "settings") fails.Add("intro:settingsRectHits:" + (hit ?? "nothing"));
+                    else
+                    {
+                        g.ActIntro(hit);
+                        if (!g.Paused || g.Phase != Phase.Intro) fails.Add("intro:settingsClickDidNotOpenCard");
+                        g.Paused = false;
+                    }
+                    string kid = Game.IntroKeyId(KeyboardKey.O);
+                    if (kid != "settings") fails.Add("intro:keyOMaps:" + (kid ?? "nothing"));
+                    else
+                    {
+                        g.QuitArmed = true;   // the door disarms a stale confirm, like Escape does
+                        g.ActIntro(kid);
+                        if (!g.Paused || g.Phase != Phase.Intro) fails.Add("intro:keyODidNotOpenCard");
+                        if (g.QuitArmed) fails.Add("intro:doorDidNotDisarmQuit");
+                        g.Paused = false;
+                    }
+                }
+                CardRoundTrip(g, "intro", Phase.Intro, expectAbandon: false, expectVerb: "BACK");
+                CardDetour(g, "intro", Phase.Intro, "codex", KeyboardKey.K);
+                CardDetour(g, "intro", Phase.Intro, "audio");
+                g.OnEscape(); ArmedFits(g, "intro"); g.Paused = false;
+                // the door's key: Escape closes what it opened; a second press re-opens (toggle)
+                g.OnEscape(); g.OnEscape();
+                if (g.Paused || g.Phase != Phase.Intro) fails.Add("intro:escapeToggle");
+            }
+
+            // ---- (B) BARRACKS — the screen where the player deliberates ------------------------
+            {
+                var g = new Game { NoPersist = true };
+                g.DebugShop();
+                if (g.Phase != Phase.Barracks) fails.Add("stageBarracks:" + g.Phase);
+                // ABANDON is deliberately NOT offered here: the campaign checkpoint is written at
+                // MISSION START (SetupMission), so in the debrief the file on disk is the start of
+                // the mission just won — "the checkpoint is kept, CONTINUE resumes it" would
+                // resume a mission the player already finished and drop every debrief pick.
+                CardRoundTrip(g, "barracks", Phase.Barracks, expectAbandon: false, expectVerb: "BACK");
+                CardDetour(g, "barracks", Phase.Barracks, "codex", KeyboardKey.K);
+                CardDetour(g, "barracks", Phase.Barracks, "audio");
+                g.OnEscape(); ArmedFits(g, "barracks"); g.Paused = false;
+                g.Mode = GameMode.Endless; g.OnEscape(); ArmedFits(g, "barracks-endless"); g.Paused = false; g.Mode = GameMode.Campaign;
+                // the ARMORY owns Escape while it is open (HandleShopClick backs out one level)
+                g.ArmoryMode = true; g.OnEscape();
+                if (g.Paused) fails.Add("barracks:escapeStoleArmoryBack");
+                g.Paused = false;
+                // review round 1 (MAJOR): ARMORY open -> [Enter] / PROCEED -> Escape must open the
+                // card. The proceed path used to set _shopDone and leave ArmoryMode set; Hud stops
+                // drawing the requisition once ShopDone, so the stale flag was invisible, and
+                // OnEscape's armory exception swallowed Escape for the rest of the visit.
+                g.ProceedFromShop();
+                if (g.ArmoryMode || g.ArmorySoldier != null) fails.Add("barracks:proceedLeftArmoryOpen");
+                if (!g.ShopDone) fails.Add("barracks:proceedDidNotLeaveShop");
+                g.OnEscape();
+                if (!g.Paused) fails.Add("barracks:escapeDeadAfterArmoryProceed");
+                g.Paused = false;
+                // ...and the predicate is a lock of its own: a stale flag after the shop is closed
+                // (some future path that forgets to clear it) must not swallow Escape either
+                g.ArmoryMode = true; g.OnEscape();
+                if (!g.Paused) fails.Add("barracks:staleArmoryFlagSwallowsEscape");
+                g.ArmoryMode = false; g.Paused = false;
+                // [K] from the barracks: the manual opens, and BACK returns HERE, not to the intro
+                g.BeginCodex();
+                if (g.Phase != Phase.Codex) fails.Add("barracks:manualDidNotOpen");
+                g.ExitCodex();
+                if (g.Phase != Phase.Barracks) fails.Add("barracks:manualBackLandsOn:" + g.Phase);
+                if (g.Paused) fails.Add("barracks:manualBackInventedACard");
+            }
+
+            // ---- (C) PLAYER TURN — the existing home, pinned so the move cannot regress it ------
+            {
+                var g = new Game { NoPersist = true };
+                g.StartMission(1);
+                if (g.Phase != Phase.PlayerTurn) fails.Add("stageMission:" + g.Phase);
+                CardRoundTrip(g, "mission", Phase.PlayerTurn, expectAbandon: true, expectVerb: "RESUME");
+                CardDetour(g, "mission", Phase.PlayerTurn, "codex", KeyboardKey.K);
+                // Escape in a targeting mode cancels the mode and does NOT open the card
+                g.AimMode = true; g.OnEscape();
+                if (g.AimMode) fails.Add("mission:escapeDidNotCancelAim");
+                if (g.Paused) fails.Add("mission:escapeInAimOpenedCard");
+                // closing the card disarms QUIT (W5)
+                g.OnEscape(); g.RequestQuit(); if (!g.QuitArmed) fails.Add("mission:quitDidNotArm");
+                // review round 1 (MAJOR): a click on NOTHING disarms too — the old HandlePauseMenu
+                // disarmed on any left click that was not QUIT, and the PauseHit/ActPause split
+                // had put the null check above the disarm. Through the same seam the mouse uses.
+                Frame(g);
+                string off = g.PauseHit(new Vector2(5, 5));
+                if (off != null) fails.Add("mission:offCardPointHits:" + off);
+                g.ActPause(off);
+                if (g.QuitArmed) fails.Add("mission:clickOnNothingDidNotDisarmQuit");
+                g.RequestQuit(); if (!g.QuitArmed) fails.Add("mission:quitDidNotReArm");
+                g.OnEscape(); if (g.QuitArmed) fails.Add("mission:closeDidNotDisarmQuit");
+                if (g.QuitRequested) fails.Add("mission:quitFired");
+                // the armed sentence is mode-true AND fits the card in every mode a fight can be in
+                // (review round 1: LAST STAND / SKIRMISH / DAILY / TRAINING never write save.json,
+                // so "the current mission restarts from its start" was a lie in four of five modes)
+                g.OnEscape();
+                var fight = g.QuitWarning;
+                foreach (var (mode, daily, tag) in new[] { (GameMode.Campaign, false, "campaign"), (GameMode.Endless, false, "endless"),
+                                                            (GameMode.Skirmish, false, "skirmish"), (GameMode.Skirmish, true, "daily"),
+                                                            (GameMode.Training, false, "training") })
+                {
+                    g.Mode = mode; g.DailyMode = daily;
+                    ArmedFits(g, "mission-" + tag);
+                    if (mode != GameMode.Campaign && g.QuitWarning == fight) fails.Add("mission-" + tag + ":armedSentenceClaimsACheckpoint");
+                }
+                g.Mode = GameMode.Campaign; g.DailyMode = false; g.Paused = false;
+            }
+
+            // ---- (D) where the card has NO home, Escape must leave it closed -------------------
+            {
+                var g = new Game { NoPersist = true };
+                foreach (var p in new[] { Phase.WarRoom, Phase.Codex, Phase.Draft, Phase.SkirmishSetup, Phase.AudioCheck, Phase.Win, Phase.Lose })
+                {
+                    g.Phase = p; g.Paused = false; g.OnEscape();
+                    if (g.Paused) fails.Add("cardOpenedOn:" + p);
+                }
+                // and never under the autopilot (the flywheel must not see a card): OnEscape itself
+                // refuses (review round 1 — Update's own gate was the only lock before), and Update
+                // still never reaches it
+                g.Phase = Phase.Intro; g.AutoPlay = true; g.Paused = false;
+                g.OnEscape();
+                if (g.Paused) fails.Add("autoplayEscapeOpenedCard");
+                g.Update(1f / 60f);
+                if (g.Paused) fails.Add("autoplayUpdateOpenedCard");
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            Hud.MousePin = new Vector2(float.NaN, float.NaN);
+            Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "SETTINGSTEST: PASS (OnEscape opens the card on INTRO, BARRACKS and PLAYER TURN and "
+              + "closes it to the same phase; TEXT SIZE changes via PauseHit/ActPause and re-reads "
+              + "from display.json; intro SETTINGS door opens the card via IntroHit/ActIntro and "
+              + "IntroKeyId(O); BACK outside a fight, RESUME + ABANDON in one; [K] on the card is in "
+              + "PauseKeys and the manual/audio return to the card; BeginCodex from BARRACKS returns "
+              + "there; ARMORY owns Escape only while the shop is open (PROCEED clears it, a stale "
+              + "flag cannot swallow Escape); a click on nothing disarms QUIT; the armed sentence "
+              + "fits the card in every phase and mode; OnEscape is inert on 7 overlay phases and "
+              + "under AutoPlay)"
+            : "SETTINGSTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
     /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end
@@ -8855,9 +9168,182 @@ public partial class Game
             if (len > bestLen) { bestLen = len; bestDir = (dx, dy); }
         }
         if (bestLen == 0) return 0;
-        for (int i = 1; i <= bestLen; i++)
-            Enqueue(new MoveStepAnim(u, u.X + bestDir.dx * i, u.Y + bestDir.dy * i), Team.Player);
+        var path = new List<(int x, int y)>();
+        for (int i = 1; i <= bestLen; i++) path.Add((u.X + bestDir.dx * i, u.Y + bestDir.dy * i));
+        EnqueuePath(u, path, Team.Player);   // THE STRIDE: the funnel every real move uses
         return bestLen;
+    }
+
+    /// THE STRIDE: stage a VAULT to film (SIGHTLINE_LONGMOVE=vault): the first soldier, the first
+    /// cardinal direction with two clear floor tiles ahead; the near one is stamped HIGH COVER and
+    /// IssueVault (the player's key-9 path, same Enqueue) lands the figure on the far one.
+    public bool DebugVaultMove()
+    {
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return false;
+        Selected = u;
+        foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+        {
+            int mx = u.X + dx, my = u.Y + dy, lx = u.X + 2 * dx, ly = u.Y + 2 * dy;
+            if (!Grid.IsFloor(mx, my) || UnitAt(mx, my) != null || !Grid.IsFloor(lx, ly) || UnitAt(lx, ly) != null) continue;
+            Grid.Tiles[mx, my] = TileType.HighCover; Grid.SetCoverHp(mx, my);
+            if (!VaultTargetOk(u, lx, ly)) { Grid.Tiles[mx, my] = TileType.Floor; continue; }
+            IssueVault(lx, ly);
+            return true;
+        }
+        return false;
+    }
+
+
+    // ── THE STRIDE — SIGHTLINE_FEELTEST: pillar 2 ("feels good") gets its first PASS/FAIL line ──
+    /// Every other pillar had a gate in the sweep; MOTION and BEAT TIMING had none, so the most
+    /// frequent action in the game — a multi-tile walk — could caterpillar (ease-in-out at EVERY
+    /// tile, a WalkLean re-kick at every tile), a VAULT could slide straight through the cover it
+    /// leaps, and a kill's three strings could print inside 24 px of each other with every self-test
+    /// green. This probe drives the REAL anim queue the way Game.Update's pump does (OnStart on
+    /// activation, one Update per frame at the harness's 1/60 dt) and MEASURES the tween:
+    ///   (a) a 6-tile walk staged through EnqueuePath (the funnel every move uses): the per-frame
+    ///       speed profile on Unit.Pos. Over the MID-PATH (the departure ramp and arrival brake —
+    ///       MoveStepAnim.FeelMidBand tiles at each end — are excluded, because a walk must start
+    ///       and stop) the slowest frame must be >= FeelMinSpeedRatio x the fastest, there must be
+    ///       ZERO frames under FeelStallRatio x the mean, no frame may step backwards, WalkLean is
+    ///       kicked ONCE (the push-off) rather than once per tile, and the frame count is PINNED
+    ///       (6 x ceil(0.12 s x 60) = 48) so no easing trick can move the commit cadence.
+    ///   (b) a VAULT via IssueVault: the figure must LIFT at least FeelVaultLiftMin px, the peak
+    ///       must sit over the cover tile it clears, X never reverses, and it lands EXACTLY on
+    ///       the tile centre (the commit is still `Unit.Pos = _to`).
+    ///   (c) floating text stacked at one anchor — the kill trio (impact number + KIA + name
+    ///       stamp), the BRACE pair (number + STAGGERED) and two identical overwatch numbers —
+    ///       after one Fx.Update: every pairwise anchor distance >= Fx.TextSep, and the twins arc
+    ///       in OPPOSITE directions.
+    /// PRESENTATION ONLY: it reads Unit.Pos and Fx.Texts, never the sim; it consumes no Util.Rng
+    /// beyond its own reseed.
+    public string FeelSelfTest()
+    {
+        Util.Reseed(70031);
+        NoPersist = true;
+        var fails = new List<string>();
+        var detail = new System.Text.StringBuilder();
+
+        void Stage()
+        {
+            Grid = new Grid();                       // all Floor, Height 0
+            Players = new List<Unit>(); Enemies = new List<Unit>();
+            Vip = null; CaptiveLocked = false; Objective = Objective.Eliminate; EvacZone.Clear();
+            Fx = new Fx(); _anims.Clear(); DragMode = VaultMode = false;
+        }
+        Unit MkP(int x, int y)
+        {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        // one Update per FRAME, exactly as Game.Update's pump does it: OnStart when a step becomes
+        // ACTIVE, pop index 0 only if the anim is genuinely still at the front.
+        int Pump(Unit u, List<Vector2> trace, Action onStart)
+        {
+            int frames = 0;
+            while (_anims.Count > 0 && frames < 600)
+            {
+                var a = _anims[0];
+                if (!a.Started) { a.Started = true; a.OnStart(this); onStart?.Invoke(); }
+                bool done = a.Update(this, 1f / 60f);
+                if (done && _anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+                trace.Add(u.Pos); frames++;
+            }
+            return frames;
+        }
+
+        // ---- (a) the 6-tile walk ----
+        Stage();
+        const int N = 6;
+        var w = MkP(3, 5); Players.Add(w); Selected = w;
+        var path = new List<(int x, int y)>();
+        for (int i = 1; i <= N; i++) path.Add((3 + i, 5));
+        EnqueuePath(w, path, Team.Player);
+        var trace = new List<Vector2> { w.Pos };
+        int kicks = 0;
+        int frames = Pump(w, trace, () => { if (w.WalkLean > 0f) { kicks++; w.WalkLean = 0f; } });
+        Vector2 start = Util.TileCenter(3, 5), end = Util.TileCenter(3 + N, 5);
+        if (w.X != 3 + N || w.Y != 5 || w.Pos != end) fails.Add($"walkDidNotLand({w.X},{w.Y})");
+        const int WalkFramesPinned = N * 8;          // 0.12 s / (1/60) = 7.2 -> the 8th frame commits; the cadence the sim runs on
+        if (frames != WalkFramesPinned) fails.Add($"walkFrames({frames}!={WalkFramesPinned})");
+        var sp = new List<float>(); var mid = new List<float>(); int back = 0;
+        for (int i = 1; i < trace.Count; i++)
+        {
+            float s = Vector2.Distance(trace[i], trace[i - 1]); sp.Add(s);
+            if (trace[i].X < trace[i - 1].X - 0.001f) back++;
+            float p0 = Vector2.Distance(trace[i - 1], start) / Cfg.Tile, p1 = Vector2.Distance(trace[i], start) / Cfg.Tile;
+            if (p0 >= MoveStepAnim.FeelMidBand && p1 <= N - MoveStepAnim.FeelMidBand) mid.Add(s);
+        }
+        float mn = mid.Count > 0 ? mid.Min() : 0f, mx = mid.Count > 0 ? mid.Max() : 0f, mean = mid.Count > 0 ? mid.Average() : 0f;
+        int stalls = mid.Count(s => s < MoveStepAnim.FeelStallRatio * mean);
+        detail.Append($"walk: {frames} frames, mid-path px/frame min {mn:0.0} mean {mean:0.0} max {mx:0.0} (min/max {(mx > 0 ? mn / mx : 0):0.00}), " +
+                      $"stalls<{MoveStepAnim.FeelStallRatio:0.00}xmean {stalls}, leanKicks {kicks}, backSteps {back}; " +
+                      $"profile [{string.Join(" ", sp.Select(s => s.ToString("0.0")))}]");
+        if (mid.Count == 0) fails.Add("walkNoMidPath");
+        if (mx > 0 && mn < MoveStepAnim.FeelMinSpeedRatio * mx) fails.Add($"walkMidSpeedDip({mn / mx:0.00}<{MoveStepAnim.FeelMinSpeedRatio:0.00})");
+        if (stalls > 0) fails.Add($"walkStalls({stalls})");
+        if (kicks != 1) fails.Add($"walkLeanKicks({kicks}!=1)");
+        if (back > 0) fails.Add($"walkBackSteps({back})");
+
+        // ---- (b) the VAULT ----
+        Stage();
+        var v = MkP(5, 5); Players.Add(v); Selected = v;
+        Grid.Tiles[6, 5] = TileType.HighCover; Grid.SetCoverHp(6, 5);   // cover directly east; land on (7,5)
+        if (!VaultTargetOk(v, 7, 5)) fails.Add("vaultStageInvalid");
+        IssueVault(7, 5);
+        var vt = new List<Vector2> { v.Pos };
+        int vf = Pump(v, vt, null);
+        float baseY = Util.TileCenter(5, 5).Y;
+        float lift = 0f; int peakI = 0;
+        for (int i = 0; i < vt.Count; i++) if (baseY - vt[i].Y > lift) { lift = baseY - vt[i].Y; peakI = i; }
+        float coverL = Cfg.OriginX + 6 * Cfg.Tile, coverR = coverL + Cfg.Tile;
+        float peakX = vt[peakI].X;
+        int vback = 0; for (int i = 1; i < vt.Count; i++) if (vt[i].X < vt[i - 1].X - 0.001f) vback++;
+        detail.Append($"; vault: {vf} frames, peak lift {lift:0.0}px at x={peakX:0} (cover spans {coverL:0}-{coverR:0}), " +
+                      $"landed ({v.X},{v.Y}) pos ({v.Pos.X:0.0},{v.Pos.Y:0.0}), backSteps {vback}");
+        if (lift < MoveStepAnim.FeelVaultLiftMin) fails.Add($"vaultLift({lift:0.0}px<{MoveStepAnim.FeelVaultLiftMin:0}px)");
+        if (peakX < coverL || peakX > coverR) fails.Add("vaultPeakNotOverCover");
+        if (v.X != 7 || v.Y != 5 || v.Pos != Util.TileCenter(7, 5)) fails.Add("vaultDidNotLandOnCentre");
+        if (vback > 0) fails.Add($"vaultBackSteps({vback})");
+
+        // ---- (c) floating text at one anchor ----
+        Fx = new Fx();
+        Vector2 A = new(400, 400), B = new(600, 400), C = new(800, 400);
+        var num = Pal.RGBA(255, 252, 245);
+        Fx.PopText(A + new Vector2(0, -26), "7", num, 32f);                       // ShotAnim: the killing number
+        Fx.PopText(A + new Vector2(0, -10), "KIA", Pal.Foe, 22f);                 // Game.KillUnit: the pop
+        Fx.Stamp(A + new Vector2(0, -34), "KIA  DOE", Pal.Foe, 30f, 2.4f);        // Game.KillUnit: the name stamp
+        Fx.PopText(B + new Vector2(0, -26), "3", num, 26f);                       // ShotAnim: BRACE hit number
+        Fx.PopText(B + new Vector2(0, -30), "STAGGERED", Pal.Good, 20f);          // ShotAnim: the stagger word
+        Fx.PopText(C + new Vector2(0, -26), "4", num, 32f);                       // two overwatch hits, equal damage
+        Fx.PopText(C + new Vector2(0, -26), "4", num, 32f);
+        Fx.Update(1f / 60f);
+        float MinSep(List<FloatText> g)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i < g.Count; i++) for (int j = i + 1; j < g.Count; j++)
+                best = MathF.Min(best, Vector2.Distance(g[i].Pos, g[j].Pos));
+            return best;
+        }
+        List<FloatText> Near(Vector2 a) => Fx.Texts.Where(t => MathF.Abs(t.Pos.X - a.X) < 60f).ToList();
+        var gA = Near(A); var gB = Near(B); var gC = Near(C);
+        float sA = MinSep(gA), sB = MinSep(gB), sC = MinSep(gC);
+        bool twinsDiverge = gC.Count == 2 && gC[0].Drift != 0f && Math.Sign(gC[0].Drift) != Math.Sign(gC[1].Drift);
+        detail.Append($"; text: kill-trio min sep {sA:0.0}px, brace-pair {sB:0.0}px, twin numbers {sC:0.0}px, twins diverge {twinsDiverge}");
+        if (gA.Count != 3 || gB.Count != 2 || gC.Count != 2) fails.Add("textGroupsMissing");
+        if (sA < Fx.TextSep) fails.Add($"killTrioOverprint({sA:0.0}px)");
+        if (sB < Fx.TextSep) fails.Add($"bracePairOverprint({sB:0.0}px)");
+        if (sC < Fx.TextSep) fails.Add($"twinNumbersOverprint({sC:0.0}px)");
+        if (!twinsDiverge) fails.Add("twinNumbersSameArc");
+
+        Console.WriteLine("FEELTEST: " + detail);
+        return fails.Count == 0
+            ? "FEELTEST: PASS (6-tile walk: mid-path speed never dips under " + MoveStepAnim.FeelMinSpeedRatio.ToString("0.00") +
+              "x its max, zero stall frames, one lean kick, 48-frame cadence pinned; VAULT lifts >= " + MoveStepAnim.FeelVaultLiftMin.ToString("0") +
+              "px over the cover and lands on the tile centre; stacked floating text keeps >= " + Fx.TextSep.ToString("0") + "px separation and twin numbers arc apart)"
+            : "FEELTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
 

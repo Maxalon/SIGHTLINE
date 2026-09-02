@@ -399,6 +399,17 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_SETTINGSTEST=1 : SETTINGS EVERYWHERE — the settings card is reachable from the
+        // INTRO and the BARRACKS, not just a fight (ROADMAP "Left open by C5"). Draws the intro and
+        // the card to publish their rects, so it needs a context + fonts; stashes display.json.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SETTINGSTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "settingstest");
+            LoadGameFonts();
+            Console.WriteLine(new Game().SettingsSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_CHROMETEST=1 : W5 THE FIRST HOUR — the action bar's fixed slot map, the
         // CONCEALED pill's pulse envelope, and the doctrine cards fitting their own text.
         // Needs a real draw context (the bar's layout and its paint are one pass), so it runs
@@ -979,6 +990,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FEELTEST=1 : THE STRIDE — pillar 2 probe: a 6-tile walk's per-frame speed profile (no
+        // caterpillar), the VAULT arc (lifts over the cover, lands on the centre), floating-text separation.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FEELTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "feeltest");   // Unit.SyncPos + MoveStepAnim use tile->px math
+            Console.WriteLine(new Game().FeelSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_HORDETEST=1 : LAST STAND endless horde — wave count/scale escalation + alive-cap + meta BestWave round-trip (HORIZON W2).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HORDETEST") == "1")
         {
@@ -1116,7 +1136,14 @@ public static class Program
         // screenshot-only hooks for verifying the camera + pause overlay
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
+        // SETTINGS EVERYWHERE: the card now has a home on the INTRO and in the BARRACKS, so this
+        // composes with SIGHTLINE_INTRO=1 / SIGHTLINE_SHOP=1 to photograph the card opened there
+        // (SIGHTLINE_SETTINGS=1 is the same switch under the name a reader will grep for).
+        if (shot && (Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1"
+                     || Environment.GetEnvironmentVariable("SIGHTLINE_SETTINGS") == "1")) game.Paused = true;
+        // Review round 1: SIGHTLINE_QUITARMED=1 photographs the card with QUIT ARMED — the phase- and
+        // mode-true warning sentence under the plate — in whichever home the shot is staged in.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_QUITARMED") == "1") game.QuitArmed = true;
         // W5 ON-RAMP (shot + the hand-run autoplay smoke test): SIGHTLINE_ANIMSPEED=<x> names the
         // playback multiplier and SIGHTLINE_LONGMOVE=1 stages a multi-tile walk to film. Autoplay is
         // included so the smoke test can be re-run AT the fastest setting (the pace change alters
@@ -1135,8 +1162,10 @@ public static class Program
             Display.UiScaleIdx = Math.Clamp(uiIdx, 0, Display.UiScaleLevels.Length - 1);
             Display.ApplyUiScale();
         }
-        bool longMove = shot && Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE") == "1";
-        if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
+        string longMoveEnv = Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE");
+        bool longMove = shot && (longMoveEnv == "1" || longMoveEnv == "vault");   // THE STRIDE: =vault films a leap instead
+        if (longMove && longMoveEnv == "vault") Console.WriteLine($"LONGMOVE: vault staged {game.DebugVaultMove()} at {game.AnimSpeed:0.##}x");
+        else if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
@@ -2285,7 +2314,7 @@ public static class Program
                 ("TRAINING_OP",  Hud.OverlayBtn8), ("LAST_STAND",   Hud.OverlayBtn3),
                 ("WAR_ROOM",     Hud.OverlayBtn4), ("FIELD_MANUAL", Hud.OverlayBtn5),
                 ("SKIRMISH",     Hud.OverlayBtn6), ("DAILY",        Hud.OverlayBtn7),
-                ("AUDIO_CHECK",  Hud.OverlayBtn9),
+                ("AUDIO_CHECK",  Hud.OverlayBtn9), ("SETTINGS",     Hud.IntroSettingsBtn),
             };
             var report = new List<string>();
             foreach (var (name, rect) in boxes)

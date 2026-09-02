@@ -84,8 +84,10 @@ public partial class Game
         // Only write display.json if a fader was actually moved. Merely LOOKING at the bench must
         // not touch disk (house rule: the harness paths stay disk-clean and byte-stable).
         if (_audVolTouched) { Display.CommitVol(); _audVolTouched = false; }
-        Phase = (_audPrior == Phase.PlayerTurn || _audPrior == Phase.EnemyTurn) ? _audPrior : Phase.Intro;
-        if (_audFromPause && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn)) Paused = true;
+        // SETTINGS EVERYWHERE: same return contract as ExitCodex — back to whichever card-bearing
+        // phase opened it (fight, intro or barracks), card restored if it was open.
+        Phase = SettingsCardPhase(_audPrior) ? _audPrior : Phase.Intro;
+        if (_audFromPause && SettingsCardPhase(Phase)) Paused = true;
         _audFromPause = false;
         Audio.Play("select");
     }
