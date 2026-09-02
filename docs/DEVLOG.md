@@ -11856,6 +11856,26 @@ Fix: `Util.Reseed(70200 + sd * 4 + m)` before each `SetupMission` in the loop. T
 runs now print the identical line (`TUNDRA~17.7(8-28) VERDANT~34.0(17-44) MAGMA~12.9(5-20)`), so
 the densities in the PASS line are comparable across commits for the first time.
 
+## FITTEST un-staged TOOLTIP-HOVER on one run in six — the pin came after the settle frames
+
+Two earlier commits (`4f91da0`, `28c6b63`) fixed this flake "by construction" and at "its actual
+root cause"; it still fired once in the merged P1+P2 gate and reproduced **1 in 6** on the Release
+binary under load: `screenNotStaged:TOOLTIP-HOVER@100%(identical frame to TOOLTIP-AIM)`. The
+mechanism this time: the screen audit stages a screen, runs **three `Update` frames** to let it
+settle, and only THEN parks `Hud.MousePin` — but `Game.UpdateHoverAndAim` resolved the hover tile
+from `Raylib.GetMousePosition()` (the live pointer, never the pin) and handed the keyboard cursor
+back to the mouse on any `GetMouseDelta()`. A spurious pointer event from Xvfb, whose timing
+depends on load, flipped `KbCursor` off during the settle, the hover fell back to the live
+pointer, the threat card never staged, and the HOVER frame collapsed onto the AIM frame.
+
+Fix, in three lines and a move: `Hud.Mouse()` is public and `Update` reads the pointer through it;
+`Hud.MouseDelta()` reports zero while pinned, so a pinned cursor cannot be handed back; and the
+audit parks the pointer BEFORE `Stage`, so a stager's own pin (the tooltip's foe seat) survives the
+settle and the draw instead of being overwritten by the park. In real play `MousePin` is NaN and
+every read is the live pointer, exactly as before. Measured after: 6/6 PASS on the same binary
+under the same load. The sweep now also quotes a FAIL line's detail (`qa-sweep.sh` keeps each
+hook's full output), which is how the next flake gets its mechanism named on the first sighting.
+
 **What this does NOT fix, recorded in ROADMAP:** the tail is real. On roughly one board in ~240
 MAGMA still stamps fewer than 4 vent tiles — C4's own "a mechanic that silently vanishes on some
 seeds" — and a pinned sample that happens to clear the floor does not make that go away. The

@@ -186,7 +186,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // call site that WAS the replacement. It survived its own wave's merge because `<no result
     // line>` contains no "FAIL" and the sweep's exit code was still hollow; C3's exit statement,
     // landing in the same merge, is what turned it into a refusal.
-    static Vector2 Mouse() => float.IsNaN(MousePin.X) ? Raylib.GetMousePosition() : MousePin;
+    // PARALLAX: public, because Game.Update's hover resolution and its keyboard-cursor handoff
+    // must see the SAME pointer the audited draw sees — the FITTEST screen audit settles a staged
+    // screen through three Update frames, and a live pointer read there (plus a spurious X
+    // pointer delta under Xvfb, timing-dependent) handed the keyboard cursor back to the mouse
+    // and un-staged TOOLTIP-HOVER on ~1 run in 6 (`screenNotStaged ... identical frame to
+    // TOOLTIP-AIM`). Real play: MousePin is NaN, so both read the live pointer exactly as before.
+    public static Vector2 Mouse() => float.IsNaN(MousePin.X) ? Raylib.GetMousePosition() : MousePin;
+    /// A pinned pointer does not move: no delta, so the keyboard cursor keeps control under a pin.
+    public static Vector2 MouseDelta() => float.IsNaN(MousePin.X) ? Raylib.GetMouseDelta() : Vector2.Zero;
 
     /// C5 THE HARD EDGES — harness-only entrance-animation PIN. `>= 0` makes every panel
     /// entrance report that progress instead of reading the wall clock, so a self-test can audit

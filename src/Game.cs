@@ -4786,7 +4786,7 @@ public partial class Game
         ShowOdds = false;
         PathPreview.Clear();
         // mouse -> board tile, through the (stable) picking camera so zoom/pan work
-        var world = Raylib.GetScreenToWorld2D(Raylib.GetMousePosition(), ViewCamera(false));
+        var world = Raylib.GetScreenToWorld2D(Hud.Mouse(), ViewCamera(false));   // PARALLAX: through the harness pin (NaN = live)
         HoverValid = Util.ScreenToTile(world, out HoverX, out HoverY);
         if (KbCursor) { HoverX = CurX; HoverY = CurY; HoverValid = Grid.InBounds(CurX, CurY); }
 
@@ -4930,7 +4930,7 @@ public partial class Game
         else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Raylib.IsKeyPressed(KeyboardKey.D)) cdx = 1;
         if (cdx != 0 || cdy != 0) MoveCursor(cdx, cdy);
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
-        if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
+        if (KbCursor && Hud.MouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over (a PINNED pointer never moves)
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; return; }
 

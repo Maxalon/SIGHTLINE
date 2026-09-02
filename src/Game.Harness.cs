@@ -7157,6 +7157,14 @@ public partial class Game
                 // a different worst-case string on consecutive runs, which is a flaky gate rather
                 // than a gate. One fixed seed per screen, so a FAIL reproduces verbatim.
                 Util.Reseed(FitScreenSeed);
+                // PARALLAX: park the pointer BEFORE staging, not after the settle frames. The three
+                // Update frames below resolve the hover tile and can hand the keyboard cursor back
+                // to the mouse on a pointer delta — with the pin set only afterwards, a spurious X
+                // pointer event under Xvfb un-staged TOOLTIP-HOVER on ~1 run in 6 and its frame
+                // collapsed onto TOOLTIP-AIM (`screenNotStaged`). Parked off-canvas first, so no
+                // control is hovered by default; a stager that pins the pointer itself (the
+                // tooltip's foe seat) overrides this and KEEPS it through the settle and the draw.
+                Hud.MousePin = new System.Numerics.Vector2(-4000f, -4000f);
                 var g = new Game { NoPersist = true };
                 sc.Stage(g);
                 // Let the game settle exactly as it does before a screenshot: several stagers
@@ -7171,7 +7179,8 @@ public partial class Game
                 // 16-check disagreement between machines on the same commit (review E2). Parked
                 // off-canvas so no control is hovered and every cursor-anchored panel clamps to the
                 // same place on every run and every machine.
-                Hud.MousePin = new System.Numerics.Vector2(-4000f, -4000f);
+                // (the pointer pin was set before Stage — see above — and is deliberately NOT
+                // re-parked here, so a stager's pin survives into the audited frame)
                 var fp = new System.Text.StringBuilder();
                 Cfg.InkProbe = (t, pos, box, size, alpha) =>
                     {
