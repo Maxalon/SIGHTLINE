@@ -11661,3 +11661,162 @@ the surface they already have, and only when nothing else has claimed it.
 2. **It does not repair the mission-1 concentration**, the mobility cliff, the mandatory-crossing
    share, or the leash asymmetry. All four are in ROADMAP with their numbers.
 3. **It does not give the five paint biomes a mechanic.** Still declared, still asserted.
+
+# WAVE "THE MODES GET THE BESTIARY" — TWO OF FOUR MODES SEE THE ROSTER (2026-09-02, dev on `wave/modes-bestiary`, base `3f3e478`; PARALLAX P4)
+
+## The thesis
+
+SKIRMISH and DAILY both enter the fight through `SetupMission(1)`, and `n` has always carried two
+jobs at once: the NUMERIC ramp (headcount, the `(n-1)` stat bump, the opener trim, W9's heat
+arithmetic) and the ROSTER gates — `SelectArchetype`'s tier (`n <= 1` deals SCOUT or GRUNT and
+nothing else), `podsOf3 = n >= 3`, the named mid-boss at `n == 3 || n == 5`. W9 THE REPAIR made
+the heat dial NUMERICALLY real for these modes and stopped there. A fresh `Run` sits on its Start
+node, which `GenerateMap` deliberately leaves `Faction.None`, so `FactionRoster` never ran either.
+The result, measured on `3f3e478`: **a heat-8 skirmish was a dozen SCOUT/GRUNTs with bigger
+numbers, and the DAILY was the same two archetypes every day.** Twenty of twenty-two archetypes,
+all three factions, pods of 3 and every mid-boss kit were unreachable in two of the game's four
+modes — the docket's content-breadth finding 0, research confidence 5.
+
+## The gate, and its FAIL on the pre-fix tree — verbatim
+
+`SIGHTLINE_MODETEST` gains legs (8) and (9). Leg 8 reseeds (`Util.Reseed(9001)`, so the fifty
+builds are one deterministic sequence, not a probability claim), runs `BeginSkirmish(Eliminate, 0)`
+fifty times and demands at least six classes outside SCOUT/GRUNT/ELITE, at least one build with a
+pod of three, and NO named elite at heat 0; then ten builds each at heat 4 and heat 8 must field
+EXACTLY one `ELITE`. Leg 9 runs `BeginDaily()` twice for the harness stamp and demands a non-`None`
+faction and an identical `ForceSignature()` — every hostile's class, name, HP, aim and pod in spawn
+order plus the mission faction; `BoardSignature` already pinned WHERE the bodies stand, this pins
+WHAT they are.
+
+Reproduced on the base worktree (`3f3e478`, clean) by porting ONLY `ForceSignature` and the two
+legs into its `Game.Modes.cs` — they compile against the old two-argument `BeginSkirmish` — then
+building Release, running, and restoring the file (`git checkout`, tree clean again):
+
+```
+MODETEST skirmish h0 roster over 50 builds: GRUNT/SCOUT  pods-of-3 in 0/50  bodies h0=4 h4=6 h8=8
+MODETEST daily 20260701 faction=None force=03cdcca8  (must match across processes)
+MODETEST: FAIL (skirmishRosterShallow(classes=GRUNT/SCOUT),skirmishNeverPodsOf3,skirmishMidBossMissing(h4:10/10),skirmishMidBossMissing(h8:10/10),dailyFactionNone)
+```
+
+Five independent assertions, all five failing, and the readout line says the whole finding in one
+row: two classes, no pods, no elite, no faction.
+
+## What shipped
+
+**1. ROSTER DEPTH is its own axis.** `Mission.Build` and `SpawnEnemies` take
+`int rosterTier = -1, bool midBossSlot = false`. `-1` means "the mission number", and every roster
+read that keyed on `n` — `SelectArchetype`'s tier, `MakeMidBoss`'s tier, `podsOf3`, the grenade
+gate at `n >= 2`, the BERSERKER flash / GRUNT smoke gates at `n >= 3` — now reads `rosterTier`.
+Headcount, the `bump`, the opener trim, the finale gates and W9's heat arithmetic stay on `n`.
+`SetupMission` passes `Mode == Skirmish ? Math.Clamp(3 + heat / 3, 3, 5) : n` — heat 0-2 deals the
+campaign's mission-3 tier (the full roster), 3-5 its mission-4 tier, 6-8 its mission-5 tier, so
+nothing here is a new archetype table — and `midBossSlot = Mode == Skirmish && heat >= 4` (ELITE
+CADRE, the rung that also opens `Ai.Tier` 1). The campaign's `n == 3 || n == 5` is kept verbatim
+(`|| midBossSlot`). DAILY is `Mode == Skirmish` with `DailyMode` set; its heat band is 0..3, so it
+deals tier 3 or 4 and never the mid-boss.
+
+A cost, declared: pods of 3 carry FUL-6's count−1 trim ("trim the initial force by 1 on 3-pod
+missions"), so **a skirmish now fields ONE BODY FEWER at every rung** — MODETEST's own readout
+went from `bodies h0=4 h4=6 h8=8` to `h0=3 h4=5 h8=7` — in exchange for the roster. That is the
+campaign's own trade from mission 3 on; whether it is the right trade for a single fight is
+unmeasured (below).
+
+**2. A FACTION.** SKIRMISH gets an OPPOSITION row on the setup card between OBJECTIVE and HEAT —
+the objective row's own chrome one size down: ghost `< >` steppers, a bordered box with the dial's
+label, and a 12px caption. The dial cycles ANY / SYNDICATE / LEGION / WARDENS (`< >`, or TAB /
+SHIFT+TAB — this handler runs only in `Phase.SkirmishSetup`, where TAB was unbound; in-mission TAB
+still cycles units). A named faction's caption is its roster clause; ANY's says "dealt at deploy: a
+mixed force, or one of the three factions". ANY resolves in `BeginSkirmish` off `Run.MapSeed`'s top
+byte (`DealtFaction`: `% 4` → MIXED / SYNDICATE / LEGION / WARDENS), a pure derivation with zero
+`Util.Rng` draws, so the harness's reseed-then-`BeginSkirmish` legs deal the same world they always
+did. The DAILY derives its faction from the date seed like its objective, arena and heat
+(`DailyFaction`: the seed's next byte `% 3`), always a NAMED faction — with heat capped at 3 the
+faction is the whole of what makes one day's force differ from the next, so a daily is never the
+mixed cascade. The panel grew 260 → 350 px; the blurb and the key legend name the new row.
+
+**"ANY" is UI state, not an enum member.** `Game.SkirmishFaction` is a `Faction?` whose `null` is
+ANY. `Faction` is persisted by ordinal and APPEND-ONLY; nothing was appended and SAVETEST's
+fingerprint is unchanged. The `Run.FactionRosterLine` clause ("SYNDICATE: drones, shields +
+screeners" …) was lifted out of `Run.EnemyHint` so the campaign fork's hover, the skirmish card's
+caption and the banner say the same sentence.
+
+**The seam, and why this one.** `Game.ModeFaction` is published in `SetupMission`:
+`Combat.BeginMission(boons, Mode == Skirmish ? ModeFaction : (_run.CurrentNode?.Faction ?? None), prep)`.
+The alternative — stamping `_run.CurrentNode.Faction` — was rejected because the Start node's
+`None` is a generator decision and a `MissionNode` is regenerated from `MapSeed` on load (the map
+generator is the save format's other half), so writing a faction onto the node would put mode
+state on a campaign object and make the in-memory graph disagree with what its seed regenerates.
+The ternary is one line; campaign, endless and training read the node exactly as before, and
+`ResetModeState` clears `ModeFaction` at every mode entry so a skirmish's faction dies with it.
+Harness: `SIGHTLINE_FACTION=syndicate|legion|wardens|mixed` pins a `SIGHTLINE_SKIRMISH` fight's
+opposition (unset = ANY, like the card).
+
+**3. LEGIBILITY.** The top bar (`SkirmishHud`) reads `SKIRMISH — ELIMINATE — LEGION` /
+`DAILY 20260908 — SYNDICATE` for the whole fight, and the hostile count already wore the faction
+name. The banner's SUB-line is the roster clause — on the five paint biomes. On VERDANT / TUNDRA /
+MAGMA the ground rule keeps it: C4 REVIEW M4 put that sentence there because these modes have no
+briefing card, and one 15px line holds one of them, not both (VERDANT's rule alone is 129
+characters; the clauses are 33-40; the band is 92 px with no room for a second line, and the 44 px
+main line — `DAILY 20260906 - HACK - TUNDRA - SLICK ICE` — has no shrink-to-fit). The intro's DAILY
+caption names today's force (`DAILY - today's seeded run against the SYNDICATE, one attempt, ranked
+by turns`, via `Game.TodayDailyForceName`, the same stamp resolution `BeginDaily` uses) — the daily
+has no setup card, so the caption is the one place a player learns the opposition before committing
+the day's single attempt. The SKIRMISH caption mentions the opposition.
+
+## The gate on the shipped tree — verbatim
+
+```
+MODETEST skirmish h0 roster over 50 builds: BERSERKER/BRUISER/CUSTODIAN/DRONE/GRUNT/HOUND/HUNTER/LANCER/MEDIC/MORTAR/PIKEMAN/SAPPER/SCOUT/SCREENER/SHIELD/SNIPER/SPOTTER/TURRET  pods-of-3 in 50/50  bodies h0=3 h4=5 h8=7
+MODETEST daily 20260701 faction=Syndicate force=b4af3e00  (must match across processes)
+MODETEST: PASS (... a skirmish fields the full roster, pods of 3 and one mid-boss from heat 4; the daily has a named faction and the same stamp deals the same force)
+```
+
+Eighteen classes over fifty heat-0 builds where there were two; pods of three in 50/50; exactly one
+named elite in 10/10 builds at heat 4 and at heat 8; `force=b4af3e00` printed identically by three
+separate processes.
+
+## Inertness — the campaign path, measured
+
+The campaign must not gain or lose a single `Util.Rng` draw. By construction it does not:
+`rosterTier` defaults to `n`, so every switched read sees the value it always saw; `DealtFaction`
+and `DailyFaction` are hash-free bit reads of a seed; the campaign's faction expression is the same
+expression. Measured anyway:
+
+* `SIGHTLINE_PAIRTEST=1` — **PASS**.
+* `SIGHTLINE_BALANCE=10 SIGHTLINE_BALANCE_BASE=0` under `xvfb-run`, Release binaries, XDG pinned
+  per worktree, target JSON `rm -f`'d first, exit code 0 and `runs=20` asserted on both sides:
+  the `3f3e478` binary in `/home/user/wt/modes-base` against this branch's.
+  `bash docs/measurements/w1/inert_diff.sh bal-base.json bal-branch.json harness` →
+  **`(empty diff — IDENTICAL)`**, and again after the legibility edits against the final binary.
+  With the `harness{}` block kept, the only differing keys are `elapsedToDataReadySec`, `loadAt*`
+  and `startedUtc`, which are designed to vary.
+* `SIGHTLINE_SAVETEST` PASS — no enum, no generator, no draw moved.
+* `bash scripts/qa-sweep.sh --full` → **`EXIT=0`**, `72 self-tests exist in src/; this sweep ran
+  72`, autoplay ×3 `LOSE mission=4 / WIN mission=6 / LOSE mission=5`, no TIMEOUT. BIOMETEST passed
+  on the first run (no re-run needed). Release build 0 warnings / 0 errors.
+* Skirmish autoplay smoke (not a rate): `SIGHTLINE_SKIRMISH=eliminate SIGHTLINE_HEAT=6
+  SIGHTLINE_AUTOPLAY=1` three times → `RESULT: LOSE mission=1` at frames 2249 / 1670 / 3013, no
+  exception, no stall.
+
+## Looked at, not just measured
+
+* The skirmish card with the OPPOSITION row set to LEGION (`SIGHTLINE_SKIRMISHSETUP=1`), a heat-6
+  LEGION skirmish at frame 760 (dormant pods still wear the `?` silhouette, so the class glyphs read
+  only partly until contact) and mid-autoplay (WRAITH leapers on the squad, a hex pod still dormant),
+  and two dailies at frame 45: STEEL/`20260908` with the SYNDICATE clause on the sub-line, and
+  TUNDRA/`20260906` with the SLICK ICE rule there and LEGION on the top bar.
+
+## What this wave did NOT do
+
+1. **No difficulty claim for a skirmish or a daily.** No flywheel policy plays one, and the
+   count−1 that came with pods of 3 is unpriced in win-rate terms. The `3/5/7` bodies line is a
+   count, not a verdict. Price it before touching the tier map.
+2. **No second banner sub-line.** On the three mechanical biomes the faction reads only on the top
+   bar; growing the 92 px band is a shared-chrome change this wave did not make. The end card does
+   not name the faction either.
+3. **No MIXED option on the dial.** The brief asked for ANY plus the real faction names; the mixed
+   cascade is a quarter of ANY's deal and `SIGHTLINE_FACTION=mixed` pins it for the harness.
+4. **ENDLESS untouched** — LAST STAND already fields the full roster through `SpawnEndlessWave`.
+5. **Nothing on the ladder re-measured** — the campaign is byte-identical, so there is nothing to
+   re-measure; the L4 ladder of record stands.
+6. **The PARALLAX docket's status cell** for P4 is the lead's to flip.

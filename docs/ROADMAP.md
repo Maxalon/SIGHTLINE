@@ -2697,3 +2697,26 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       turtling is structurally unmeasurable); and pin `Events.cs` `AddHeat` for measured batches —
       it contaminates every rung below 8 **upward** while heat 8 is clamped, so the instrument
       **compresses exactly the region that collapsed in L4.**
+
+### WAVE "THE MODES GET THE BESTIARY" (2026-09-02, base `3f3e478`, PARALLAX P4, details in DEVLOG §THE MODES GET THE BESTIARY)
+
+- [x] **Roster depth is its own axis.** `Mission.Build`/`SpawnEnemies(..., int rosterTier = -1, bool
+      midBossSlot = false)`: every roster gate that keyed on `n` (SelectArchetype's tier, pods of 3, the
+      mid-boss slot, the grenade/utility gates) reads `rosterTier`; the numeric ramp stays on `n`.
+      `SetupMission` passes `clamp(3 + heat/3, 3, 5)` and `heat >= 4` for SKIRMISH/DAILY, `n` for
+      everything else. Pre-fix MODETEST on `3f3e478`: 50 heat-0 skirmish builds fielded exactly
+      `GRUNT/SCOUT`, 0/50 pods of 3, 0/10 mid-bosses at h4 and h8. Shipped: 18 classes, 50/50, 10/10.
+- [x] **SKIRMISH has an OPPOSITION dial; the DAILY has a faction.** ANY / SYNDICATE / LEGION / WARDENS
+      on the setup card (ANY dealt off the map seed among MIXED + the three; a `Faction?` null, not an
+      enum member — nothing appended, SAVETEST untouched); `DailyFaction(seed)` off the date seed's
+      next byte. `Game.ModeFaction` → `Combat.BeginMission`; the Start node stays `None`.
+- [x] **Campaign byte-identical.** PAIRTEST PASS; `SIGHTLINE_BALANCE=10` base 0 on the `3f3e478`
+      Release binary vs this branch's, `inert_diff.sh … harness` → empty diff, twice.
+- [ ] **A skirmish's difficulty is unmeasured.** No flywheel policy plays one, and pods of 3 carry
+      FUL-6's count−1 trim, so a skirmish now fields ONE BODY FEWER at every rung (MODETEST's readout:
+      bodies h0/h4/h8 4/6/8 → 3/5/7) in exchange for the roster. Price it before touching the tier map.
+- [ ] **The banner names one thing.** On VERDANT/TUNDRA/MAGMA the ground rule keeps the sub-line
+      (C4 REVIEW M4) and the faction reads only on the top bar; a second sub-line needs the 92px band
+      to grow. The end card does not name the faction either.
+- [ ] **No MIXED option on the dial** — reachable only through ANY (a quarter of its deal) or
+      `SIGHTLINE_FACTION=mixed`.
