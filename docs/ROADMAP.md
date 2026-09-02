@@ -2275,6 +2275,16 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       **Run a new draw test under BOTH the Release binary and the sweep's own
       `dotnet run -c Debug`, several times each.**
 
+### Found by PROGRAM PARALLAX while landing its first waves
+
+- [ ] **MAGMA's vent count has a thin tail the pinned BIOMETEST cannot see.** Before the lead
+      pinned the real-board loop's `Util.Rng` stream (DEVLOG §PARALLAX gate fixes), six runs of the
+      unpinned guard on `cee3cba` failed once with `realMin[MAGMA]=2` — so on the order of one
+      MAGMA board in ~240 stamps fewer than 4 vent tiles, which is C4's own "mechanic that silently
+      vanishes on some seeds". The fix is in `Terrain` (a guaranteed minimum fissure length, or a
+      re-walk when the first pass lands under the floor), priced CRN-paired; the guard should then
+      sample more boards, not fewer.
+
 ### Standing gaps, honestly declared
 
 - [ ] **A FOUR-SLOT-SET RUNG IS NOT INTERCHANGEABLE WITH ANOTHER FOUR-SLOT-SET RUNG — measured.**

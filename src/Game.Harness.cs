@@ -3932,6 +3932,15 @@ public partial class Game
                             _run.HeatLevel = 0;
                             _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate,
                                                                  ModName = "STANDARD", Reward = RewardKind.None };
+                            // PARALLAX: pin the BOARD, not just the map seed. The ground stamp is pure
+                            // (Hash3 on MapSeed), but WHERE it may land is the cover / plateau / barrel
+                            // layout SetupMission rolls off the shared Util.Rng — which was clock-seeded
+                            // here, so this "40-board" sample was a different 40 boards every run and
+                            // the `realMin` floor failed on the base tree about one sweep in six
+                            // (measured 1/6 on cee3cba: `realMin[MAGMA]=2`). A gate that samples the
+                            // wall clock is a gate that fails randomly; the same 40 boards every run is
+                            // what makes the densities in the PASS line comparable across commits.
+                            Util.Reseed(70200 + sd * 4 + m);
                             SetupMission(m);
                             int n = CountGroundTiles();
                             for (int x = 0; x < Grid.W; x++)

@@ -11661,3 +11661,25 @@ the surface they already have, and only when nothing else has claimed it.
 2. **It does not repair the mission-1 concentration**, the mobility cliff, the mandatory-crossing
    share, or the leash asymmetry. All four are in ROADMAP with their numbers.
 3. **It does not give the five paint biomes a mechanic.** Still declared, still asserted.
+
+# PROGRAM PARALLAX — GATE FIXES FOUND IN PASSING (2026-09-02, lead, working branch)
+
+## BIOMETEST sampled the wall clock and failed one sweep in six
+
+The C4 review moved BIOMETEST's density guard onto REAL boards built through `SetupMission`, and
+pinned `MapSeed` per board — but the ground stamp only decides *what* lands where the board is
+free, and *where the board is free* (cover, barrels, plateaus, the reserved rings) is rolled off
+the shared `Util.Rng`, which that loop never reseeded. So the "40-board" sample was a different
+forty boards every run, and its `realMin < 4` floor tripped on the tail. Measured on the untouched
+base binary (`cee3cba`, Release, six runs): **5 PASS, 1 FAIL (`realMin[MAGMA]=2`)**, and the PASS
+lines' densities drifted run to run (`TUNDRA~18.2(8-31)` … `18.0(4-34)`). It first showed as a red
+line in a green wave's pre-merge sweep, which is exactly the cost of a random gate.
+
+Fix: `Util.Reseed(70200 + sd * 4 + m)` before each `SetupMission` in the loop. Three consecutive
+runs now print the identical line (`TUNDRA~17.7(8-28) VERDANT~34.0(17-44) MAGMA~12.9(5-20)`), so
+the densities in the PASS line are comparable across commits for the first time.
+
+**What this does NOT fix, recorded in ROADMAP:** the tail is real. On roughly one board in ~240
+MAGMA still stamps fewer than 4 vent tiles — C4's own "a mechanic that silently vanishes on some
+seeds" — and a pinned sample that happens to clear the floor does not make that go away. The
+floor assertion is now a regression guard on a fixed sample, not a claim about the population.
