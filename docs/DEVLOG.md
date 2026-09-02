@@ -11860,3 +11860,172 @@ the densities in the PASS line are comparable across commits for the first time.
 MAGMA still stamps fewer than 4 vent tiles — C4's own "a mechanic that silently vanishes on some
 seeds" — and a pinned sample that happens to clear the floor does not make that go away. The
 floor assertion is now a regression guard on a fixed sample, not a claim about the population.
+
+# WAVE "THE STRIDE" — PILLAR 2 GETS A GATE (2026-09-02, dev on `wave/the-stride`, base `cee3cba`)
+
+**Branch** `wave/the-stride` off `main` at **`cee3cba`**. Files touched: `src/Anim.cs`, `src/Game.cs`,
+`src/Game.Harness.cs`, `src/Fx.cs`, `src/Unit.cs`, `src/Renderer.cs`, `src/Program.cs`,
+`scripts/qa-sweep.sh`. A first developer wrote the self-test and the scaffolding (the threshold
+constants on `MoveStepAnim`, `Fx.TextSep`, an `EnqueuePath` helper that was still a plain foreach)
+and was cut off; this write-up covers the whole wave.
+
+## THE STRIDE — the thesis
+
+Every pillar in `docs/DESIGN.md` had a line in the sweep except the second one. "Feels good" was
+graded on tracers, shake, hit-stop and floating numbers, and nothing ever measured the MOST
+FREQUENT action in the game: a soldier walking six tiles. It caterpillared. `MoveStepAnim` is one
+tile of a path, and every tile eased in AND out (`Util.EaseInOutQuad` per step) and re-kicked
+`WalkLean`, so a six-tile move was six separate lunges with the figure coming to rest 0.1 px short
+of every centre — and on top of the easing, a 0.12 s step at 60 Hz needs `ceil(7.2) = 8` frames to
+commit, so 7.2 frames of motion were squeezed into 8 at every boundary. A VAULT, the one verb whose
+whole meaning is "over the wall", was a straight 0.12 s slide through the cover tile. And a kill
+printed its three strings — the number, KIA, the name stamp — inside 24 px of one anchor, while two
+equal overwatch hits printed one number exactly on top of the other.
+
+None of that is the sim. All of it is what the player sees the sim do, forty times a mission.
+
+## The gate, and its FAIL on the pre-fix tree — verbatim
+
+`SIGHTLINE_FEELTEST=1` drives the REAL anim queue the way `Game.Update`'s pump does (activation
+`OnStart`, one `Update` per 1/60 s frame) and measures the tween on `Unit.Pos`. Three legs:
+a six-tile walk through `EnqueuePath` (per-frame speed over the mid-path with the departure ramp and
+arrival brake excluded, `MoveStepAnim.FeelMidBand` = half a tile at each end; stall frames; lean
+kicks; backward steps; the 48-frame commit cadence PINNED), a VAULT through `IssueVault` (peak lift,
+where the peak sits, landing on the exact centre), and stacked floating text after one `Fx.Update`
+(pairwise anchor distance against `Fx.TextSep`; the twins must arc in opposite directions).
+
+On `cee3cba` plus the scaffolding it FAILED on all nine assertions:
+
+```
+FEELTEST: walk: 48 frames, mid-path px/frame min 0.1 mean 7.8 max 16.5 (min/max 0.01), stalls<0.40xmean 10, leanKicks 6, backSteps 0; profile [2.5 7.4 12.3 16.5 13.3 8.4 3.5 0.1 x6]; vault: 8 frames, peak lift 0.0px at x=416 (cover spans 448-512), landed (7,5) pos (544.0,392.0); text: kill-trio min sep 7.2px, brace-pair 4.0px, twin numbers 0.0px, twins diverge False
+FEELTEST: FAIL (walkMidSpeedDip(0.01<0.60),walkStalls(10),walkLeanKicks(6!=1),vaultLift(0.0px<20px),vaultPeakNotOverCover,killTrioOverprint(7.2px),bracePairOverprint(4.0px),twinNumbersOverprint(0.0px),twinNumbersSameArc)
+```
+
+Read the profile: `2.5 7.4 12.3 16.5 13.3 8.4 3.5 0.1`, six times. The 0.1 is the quantisation
+frame (the commit clock's last 2.8% of the tile), the 16.5 → 2.5 is the easing. Ten of the 40
+mid-path frames were stalls.
+
+## What shipped
+
+**1. One stride per walk, not one per tile.** `MoveStepAnim` gained a segment flag
+(`StepSeg` Single / First / Mid / Last), a `Path` polyline shared by every step of one walk, and its
+`Index` in it — all set by `Game.EnqueuePath`, which is now the ONLY way a path is enqueued
+(player move, enemy planned move, enemy tempo reposition, the pod reveal-scatter, the VIP leash,
+`DebugLongMove`; `grep 'new MoveStepAnim'` finds the funnel itself, `IssueVault` and one harness
+purge probe, all Single). The drawn position is one arc-length profile over the WHOLE walk —
+a linear speed ramp over the first `StrideRamp` = 0.5 step-times, a constant stride at
+`n/(n − 0.5)` tiles per step-time, and the mirror-image brake — evaluated at a stride clock the
+steps hand to each other through `Unit.StrideTau`. For n = 1 that profile IS `EaseInOutQuad`
+(same triangle of speed), so a single step still draws exactly as it did. `WalkLean` is kicked on
+First/Single only: it is the push-off, not a per-tile pump.
+
+The part that took thought is the clock. The commit needs `ceil(_dur/dt)` frames, so a pure
+linear tween on `_t/_dur` still stalls on every 8th frame (1.8 px against 8.9) — the frame the
+old profile shows as 0.1. The drawn stride therefore runs on the PREDICTED commit period
+(`MoveStepAnim.PredictPeriod`: `ceil(_dur/dt)·dt`, taken from the first frame's dt) and reaches
+each centre ON the commit frame; a frame-time jitter that makes the prediction miss by a frame
+becomes a one-frame lead or lag the next step absorbs through the carried clock — never a snap
+back, never a stall. The commit clock (`_t/_dur → k ≥ 1 → tile entry → OnUnitEnteredTile →
+overwatch`) is untouched, and so is `_dur` (0.12 / 0.155 s).
+
+Consequences the reader should know: the figure now TRAILS the commit clock by up to a quarter
+tile during the push-off and LEADS it by the same during the brake (derived: `(1 − ramp/2)` of the
+first step; 11.6 px on a six-tile walk, 16 px in the limit) — so an overwatch reaction on the first
+tile fires with the figure a few px short of that tile's centre. A Mid step whose walk is cut short
+at its own commit (the reaction killed or downed the mover and `PurgeAnimsFor` dropped its later
+steps) sets the figure down on the tile (`Game.HasQueuedStep`), and `PurgeAnimsFor` itself now sets
+a felled mover on its tile if it is within half a tile of it (a body further off is inside a
+shove/drag tween and is left to that anim). A corner is faced along the segment
+(`Path[i+1] − Path[i]`), not from the drawn position, so the trail cannot turn it short.
+
+**Diagonals — derived, not measured.** A diagonal step commits in 0.155 s over 90.5 px against
+0.12 s over 64 px: the commit cadence ITSELF is 9.5% faster on a diagonal (584 vs 533 px/s), and at
+60 Hz it quantises to 10 frames against 8, so a diagonal draws at 9.87 px/frame in a walk whose
+straights draw at 8.73 — a 0.88 ratio against the 0.60 gate. Making them identical would need
+either a 0.170 s diagonal commit (a sim-timing change, out of scope) or letting the figure lag its
+committed tile by 15 ms per diagonal, which accumulates to a visible pop on the Last step. So the
+drawn speed follows the commit speed of each step type, and a mixed path has a 13% step at a
+straight→diagonal boundary. FEELTEST's walk is straight; nobody has filmed a mixed one.
+
+**2. The VAULT arcs.** `MoveStepAnim.Hop` (px of lift) and `VisDur` (the drawn duration);
+`IssueVault` sets 26 px and 0.24 s. The lift is `sin(k·π)·Hop` taken off the DRAWN Y — `Unit.Pos`,
+which is what `Renderer.DrawUnit` reads — with the horizontal on `EaseInOutQuad` (crouch, spring,
+settle). `Unit.HopLift` carries the lift to the renderer so the ground shadow stays on the deck and
+shrinks a touch at the top. The commit stays on `_dur`: the tile entry, and any overwatch it draws,
+fires on frame 8 of 15, with the figure over the cover — a vaulter can be shot out of the air, and
+if it dies there `PurgeAnimsFor` sets the body down on the landing tile. Landing: `Pos = _to`
+exactly, `HopLift = 0`, a 5-particle `Fx.Dust` puff and a heavier `move` footfall. The autopilot
+never vaults (`grep -i vault src/Game.Autopilot.cs` is empty), so the longer anim cannot move a
+flywheel number; a PLAYER's vault holds the queue 15 frames instead of 8.
+
+**3. Floating text climbs a ladder.** `Fx.PopText` and `Fx.Stamp` place a new text on the first
+rung above its anchor whose text box is clear of every LIVE text (`Fx.TextRung`: rungs 18 px up,
+odd rungs 18 px to one side; a box is `0.6 em × length` wide — NotoMono's advance, no font needed
+headless — and `size` tall; live texts are tested where they ARE now, so a number that has risen
+out of the way costs nothing). The brief said "count texts within 22 px and offset by n × 16 px";
+that rule mis-places a text against a neighbour that has ALREADY risen 16 px (it lands on top of
+it), which is why it became a clearance search instead. The arc direction hash is salted with a
+plain per-call counter (`_textSerial`, not `Util.Rng`), and a number popping within 48 px of a live
+ARCING number arcs the other way — structurally, so twin overwatch hits diverge every time rather
+than at the mercy of a hash. `Fx.Texts` is read by nothing in the sim.
+
+## The gate on the shipped tree — verbatim
+
+```
+FEELTEST: walk: 48 frames, mid-path px/frame min 8.7 mean 8.7 max 8.7 (min/max 1.00), stalls<0.40xmean 0, leanKicks 1, backSteps 0; profile [1.1 3.3 5.5 7.6 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 8.7 7.6 5.5 3.3 1.1]; vault: 15 frames, peak lift 26.0px at x=476 (cover spans 448-512), landed (7,5) pos (544.0,392.0), backSteps 0; text: kill-trio min sep 42.1px, brace-pair 28.4px, twin numbers 36.0px, twins diverge True
+FEELTEST: PASS (6-tile walk: mid-path speed never dips under 0.60x its max, zero stall frames, one lean kick, 48-frame cadence pinned; VAULT lifts >= 20px over the cover and lands on the tile centre; stacked floating text keeps >= 14px separation and twin numbers arc apart)
+```
+
+Four frames of push-off, forty at 8.7 px, four of brake; the cadence is still 48 frames because the
+commit clock never moved. `FEELTEST` is routed through `qa-sweep.sh`'s `verdict` (the derived
+counts read `exist=74 run=74` with the FUL11PROBE convention; the sweep's own footer says
+`73 self-tests exist in src/; this sweep ran 73`).
+
+## Inertness — the acceptance criteria, measured
+
+Presentation only, so the SAME seed must play the SAME campaign to the frame:
+
+| `SIGHTLINE_AUTOPLAY=1 SIGHTLINE_SEED=` | base `cee3cba` (throwaway worktree, Debug) | `wave/the-stride` (Debug) |
+|---|---|---|
+| 101 | `RESULT: WIN mission=6 frame=13803 turns=38` | `RESULT: WIN mission=6 frame=13803 turns=38` |
+| 202 | `RESULT: LOSE mission=4 frame=8782 turns=21` | `RESULT: LOSE mission=4 frame=8782 turns=21` |
+
+`SIGHTLINE_PAIRTEST=1`: `h0 slot0 legA WIN cleared=6 missions=5 turns=29 / legB same → MATCH`,
+`h4 slot1 legA LOSE cleared=0 missions=1 turns=8 / legB same → MATCH`, **PASS**. `STACKTEST`,
+`OWTEST`, `FIELDTEST` (whose vault leg pumps at dt = 0.05 s and still lands on (7,5)) and
+`SNAPTEST` PASS on the Release binary. `bash scripts/qa-sweep.sh --full`: exit status 0, zero FAIL lines,
+no COVERAGE GAP block, autoplay ×3 `LOSE m1 frame=2059 / LOSE m2 frame=2615 / LOSE m5 frame=15774`, no
+TIMEOUT. Release build 0 warnings / 0 errors.
+
+## Looked at, not just measured
+
+`SIGHTLINE_SHOT=1 SIGHTLINE_SHOTSEQ=50 SIGHTLINE_LONGMOVE=1` filmed a walk (the first soldier's
+longest clear run at that deploy was four tiles, so the strip is a four-tile walk; the six-tile
+profile is FEELTEST's): the `FILM` trace reads y = `1.1 4.6 10.3 18.3 27.4 36.6 … 237.7 245.7 251.4
+254.9 256.0` — 9.1 px per frame between a three-frame push-off and a three-frame brake, which is
+`4/3.5 × 8` exactly, zero backward steps, and it ends on `456.000`. `SIGHTLINE_LONGMOVE=vault` is
+new: it stamps HIGH COVER beside the first soldier and runs `IssueVault` through the player's
+path; its trace reads lift `5.6 11.0 15.8 19.9 23.1 25.1 26.0 25.6 24.0 21.3 17.6 13.0 7.8 2.3 0.0`
+over x `223 → 96`, and in the frames the figure is visibly above the cover block from frame 5 to 9
+with its shadow still on the deck under it. Contact sheets (not committed): the wave's scratchpad
+`walk_sheet.png` / `vault_sheet.png`, built from `sightline_seq_NN.png`. The briefing card's dark
+band covers the walk strip's middle rows, as CLAUDE.md says it will below frame ~700.
+
+## What this wave did NOT do
+
+- **No gameplay.** `_dur` is 0.12 / 0.155 s as before, the commit is on the same frame, no
+  `Util.Rng` draw was added or moved (the landing puff is `Fx.Dust` on the presentation stream and
+  the landing footfall's pitch is a hash). The seed table above is the proof.
+- **The lean is a push-off, not a held stride pose.** `WalkLean` decays to zero within a tile
+  (`DecayUnitFx`, 7.5/s), so a six-tile walk leans for the first tile only. A sustained lean is a
+  renderer/Unit change and would need FEELTEST's `leanKicks` contract restated.
+- **Diagonal speed is 13% off straight speed at 60 Hz** (derived above). Fixing it is a
+  sim-timing change.
+- **Nobody has filmed a vault under overwatch.** The reaction fires with the figure at the apex;
+  whether that reads as "shot out of the air" or as a glitch is unjudged. The film was unopposed.
+- **The text ladder's width is an estimate** (0.6 em). Floating text is NotoMono through
+  `Cfg.Text`, so it holds; if a display face ever carries a floating string it needs `Cfg.Measure`.
+- **Kill-cam, the reaction beat, the explosion cue** — other waves. This one is the walk, the
+  leap and the overprint.
+- **No screenshots were sent into the thread** — this session has no file-sending tool; the paths
+  are in the report and the sheets are in the scratchpad.

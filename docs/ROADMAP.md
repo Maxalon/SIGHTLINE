@@ -2711,3 +2711,27 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       turtling is structurally unmeasurable); and pin `Events.cs` `AddHeat` for measured batches —
       it contaminates every rung below 8 **upward** while heat 8 is clamped, so the instrument
       **compresses exactly the region that collapsed in L4.**
+
+### WAVE "THE STRIDE" (2026-09-02, base `cee3cba`, details in DEVLOG §THE STRIDE)
+
+- [x] **Pillar 2 has a gate.** `SIGHTLINE_FEELTEST=1` (in `qa-sweep.sh`) measures the tween on
+      `Unit.Pos` through the real anim pump: a six-tile walk's mid-path speed (min/max ≥ 0.60, zero
+      stall frames, one lean kick, 48-frame cadence pinned), a VAULT's lift (≥ 20 px, peak over the
+      cover, lands on the centre) and stacked floating text (pairwise ≥ `Fx.TextSep` = 14 px, twins
+      arc apart). It FAILED on all nine assertions on the pre-fix tree; the profiles are in the DEVLOG.
+- [x] **The caterpillar is gone.** `Game.EnqueuePath` is the only path funnel; `MoveStepAnim.Seg` +
+      a shared `Path` polyline draw ONE stride profile per walk (push-off, constant stride, brake)
+      on the PREDICTED commit period, so no tile boundary stalls. Mid-path reads `8.7 8.7 … 8.7`
+      (min/max 1.00) against `2.5 7.4 12.3 16.5 13.3 8.4 3.5 0.1` per tile before. Commit clock and
+      `_dur` untouched; seeds 101/202 give identical `frame=`/`turns=` against `cee3cba`; PAIRTEST PASS.
+- [x] **VAULT is a leap.** 26 px arc over 0.24 s (`MoveStepAnim.Hop`/`VisDur`), shadow left on the
+      deck (`Unit.HopLift`), landing puff + heavier footfall. The commit still fires on frame 8.
+- [x] **Floating text climbs a ladder** (`Fx.TextRung`): the kill trio reads 42 px apart (was 7.2),
+      the BRACE pair 28 (was 4.0), twin overwatch numbers 36 (was 0.0) and arc opposite ways.
+- [ ] **A held stride pose.** `WalkLean` is the push-off and decays within a tile; a lean carried
+      through the walk needs a renderer/Unit change and a restated `leanKicks` contract.
+- [ ] **Diagonal vs straight drawn speed differs by 13% at 60 Hz** (derived from the 0.155/0.12 s
+      commit durations, not measured on a mixed path). Only a diagonal commit of ~0.170 s closes it,
+      and that is sim timing.
+- [ ] **Film a vault UNDER overwatch.** The reaction fires with the figure at the apex; unjudged.
+- [ ] **Kill-cam / reaction beat / explosion cue** — pillar-2 items this wave deliberately left alone.

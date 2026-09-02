@@ -618,6 +618,11 @@ public class Unit
     public float RecoilAnim;    // 0..1 fire-recoil pose: body rocks back along -Facing, settles fast
     public float FlinchAnim;    // 0..1 hit-flinch: a quick shudder/scale-pop when struck
     public float WalkLean;      // 0..1 walk lean: leans into the direction of travel while stepping
+    // THE STRIDE (presentation only, written by MoveStepAnim): the walk's stride clock, carried from
+    // one step to the next so the drawn figure never snaps back or stalls at a tile boundary; and
+    // the px a vaulting figure is currently lifted, so Renderer can keep its shadow on the ground.
+    public float StrideTau;
+    public float HopLift;
 
     // half-tile budget. Wound (-mob while wounded) and the SHELL-SHOCKED scar (-mob lasting caution)
     // both subtract mobility, mirroring each other; floored at 1 tile so a unit can always move.

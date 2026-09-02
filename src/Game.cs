@@ -2936,6 +2936,36 @@ public partial class Game
     // _from at the original tile and the unit snaps back to the start each step.
     void Enqueue(Anim a, Team owner) { AnimOwner = owner; _anims.Add(a); }
 
+    /// THE STRIDE: every multi-tile path is enqueued through here (player move, enemy moves, pod
+    /// scatter, the VIP leash, the LONGMOVE filmstrip) — one MoveStepAnim per tile, exactly as the
+    /// old per-site foreach loops did. The single funnel is what lets the tween know where a step
+    /// sits in its path (see MoveStepAnim.Seg); the per-step COMMIT (k >= 1 -> tile entry ->
+    /// OnUnitEnteredTile/overwatch) is untouched.
+    void EnqueuePath(Unit u, List<(int x, int y)> path, Team owner)
+    {
+        int n = path.Count;
+        if (n == 0) return;
+        // a one-tile move is a Single step: today's ease-in-out tween, exactly
+        if (n == 1) { Enqueue(new MoveStepAnim(u, path[0].x, path[0].y), owner); return; }
+        // the walk's polyline, shared by its steps so the drawn stride is ONE profile over the whole
+        // path (push-off, constant stride, brake) instead of one lunge per tile; [0] is overwritten
+        // with the live Unit.Pos when the First step activates
+        var pts = new List<Vector2>(n + 1) { Util.TileCenter(u.X, u.Y) };
+        foreach (var (px, py) in path) pts.Add(Util.TileCenter(px, py));
+        for (int i = 0; i < n; i++)
+            Enqueue(new MoveStepAnim(u, path[i].x, path[i].y)
+                    { Seg = i == 0 ? StepSeg.First : i == n - 1 ? StepSeg.Last : StepSeg.Mid, Path = pts, Index = i }, owner);
+    }
+
+    /// THE STRIDE: does `u` still have a step queued beyond `except`? A Mid step asks this at its
+    /// commit; if the walk was just cut short (a reaction shot on this tile entry felled the mover
+    /// and purged its later steps) the drawn figure is set down on the tile instead of a stride off it.
+    public bool HasQueuedStep(Unit u, Anim except)
+    {
+        foreach (var a in _anims) if (a != except && a is MoveStepAnim m && m.Unit == u) return true;
+        return false;
+    }
+
     // ---------------- combat events ----------------
     public void OnUnitEnteredTile(Unit mover)
     {
@@ -3315,6 +3345,12 @@ public partial class Game
     /// is excluded so the current shot still finishes normally).
     void PurgeAnimsFor(Unit d)
     {
+        // THE STRIDE: a felled mover is drawn wherever its stride had it — up to 16 px off its tile
+        // mid-walk, or at the top of a vault. Its later steps go below, so nothing else will bring it
+        // home: set it down on the tile the sim says it is on. Presentation only; a body further off
+        // than half a tile is inside some other anim's tween (shove/drag) and is left to it.
+        var home = Util.TileCenter(d.X, d.Y);
+        if (d.HopLift > 0f || Vector2.Distance(d.Pos, home) <= Cfg.Tile * 0.5f) { d.Pos = home; d.HopLift = 0f; }
         _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
                            || (a is ShotAnim s && s.D == d && a != ActiveAnim)
                            // W9 THE REPAIR: ...and shots BY the felled unit. The purge only ever
@@ -4455,13 +4491,15 @@ public partial class Game
             // SINGLE move — no free dash on reveal (an immobile turret gets none).
             var plan = Ai.Plan(this, e, claimed);
             int cap = Math.Max(0, e.Mobility) * 2, spent = 0, lx = e.X, ly = e.Y;
+            var scatter = new List<(int x, int y)>();
             foreach (var (px, py) in plan.Path)
             {
                 int step = (px != lx && py != ly) ? 3 : 2;   // diag costs 3, ortho 2 (matches CostMap)
                 if (spent + step > cap) break;
                 spent += step; lx = px; ly = py;
-                Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+                scatter.Add((px, py));
             }
+            EnqueuePath(e, scatter, Team.Enemy);
             // claim where this member actually LANDS — after the move cap truncates the plan,
             // which can be short of plan.Path's end (or nowhere at all, in which case its
             // current tile is already covered by IsOccupiedByOther).
@@ -5642,7 +5680,9 @@ public partial class Game
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
-        Enqueue(new MoveStepAnim(u, tx, ty), Team.Player);   // A2: the footfall is per-tile now (MoveStepAnim.OnStart)
+        // A2: the footfall is per-tile now (MoveStepAnim.OnStart). THE STRIDE: the leap is DRAWN as an
+        // arc over the cover (Hop px, VisDur s); the tile-entry commit stays on the step's own clock.
+        Enqueue(new MoveStepAnim(u, tx, ty) { Hop = MoveStepAnim.VaultHop, VisDur = MoveStepAnim.VaultVisDur }, Team.Player);
         VaultMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false;
     }
 
@@ -5665,7 +5705,7 @@ public partial class Game
         Selected.ActionsLeft -= cost;
         if (blitz) Selected.Blitz = false;
         if (slip) _slipDest = (tx, ty);                     // mark the silent move's destination (cleared on arrival)
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(Selected, px, py), Team.Player);
+        EnqueuePath(Selected, path, Team.Player);
         Stats.RecordAction("MOVE");   // W2 verb telemetry (no-op unless the balance harness)
         AimMode = false;
         PathPreview.Clear();
@@ -6774,8 +6814,7 @@ public partial class Game
     void EnqueueLeashMove((int, int)[,] cameFrom, int tx, int ty)
     {
         Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);
-        foreach (var (px, py) in Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, tx, ty))
-            Enqueue(new MoveStepAnim(Vip, px, py), Team.Player);
+        EnqueuePath(Vip, Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, tx, ty), Team.Player);
     }
 
     // ---------------- squad coordination ----------------
@@ -7449,7 +7488,7 @@ public partial class Game
             if (keep == 0) { Fx.PopText(e.Pos + new Vector2(0, -34), "PINNED", Pal.Foe, 16f); return; }
         }
         e.ActionsLeft -= moveActions;
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
+        EnqueuePath(e, path, Team.Enemy);   // A2: per-tile footfalls (MoveStepAnim.OnStart)
     }
 
     // TEMPO mirror: after an enemy fires (a 1-action, non-turn-ending shot) it spends any remaining
@@ -7507,7 +7546,7 @@ public partial class Game
         var path = Grid.ReconstructPath(cameFrom, e.X, e.Y, best.x, best.y);
         if (path.Count == 0) return;
         e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
+        EnqueuePath(e, path, Team.Enemy);   // A2: per-tile footfalls (MoveStepAnim.OnStart)
     }
 
     // Clear the enemy-intent telegraph (so it doesn't render past the unit's action or into the

@@ -372,6 +372,40 @@ public class Fx
         }
     }
 
+    /// THE STRIDE — minimum pairwise anchor distance (px) between live floating texts at one
+    /// anchor (SIGHTLINE_FEELTEST asserts it on the kill trio, the BRACE pair and twin numbers).
+    public const float TextSep = 14f;
+    const float TextPitch = 18f, TextLateral = 18f;   // the ladder: one rung up per blocked slot; odd rungs sit to one side
+    int _textSerial;   // a plain counter (NOT Util.Rng): salts the arc hash so a repeated number does not always arc the same way
+
+    static float EstTextW(string text, float size) => 0.6f * size * (text?.Length ?? 0);   // NotoMono advance ~0.6 em (no font needed headless)
+
+    /// THE STRIDE: a kill used to print its three strings (the number, KIA, the name stamp) inside
+    /// 24 px of one anchor, and two equal overwatch hits printed one number on top of the other.
+    /// This finds the first rung of a ladder above `at` whose text box is clear of every LIVE text
+    /// — tested where they ARE now, not where they spawned, so a number that has already risen out
+    /// of the way costs nothing and one that has not is stepped over. Returns the rung (0 = unmoved).
+    int TextRung(Vector2 at, string text, float size, float side, out Vector2 pos)
+    {
+        float w = EstTextW(text, size);
+        for (int r = 0; r < 8; r++)
+        {
+            pos = at + new Vector2((r & 1) == 1 ? side * TextLateral : 0f, -TextPitch * r);
+            bool clear = true;
+            foreach (var t in Texts)
+            {
+                float dx = MathF.Abs(pos.X - t.Pos.X), dy = pos.Y - t.Pos.Y;   // Pos.Y is the TOP of a text
+                bool apart = dx >= (w + EstTextW(t.Text, t.Size)) * 0.5f + 2f  // beside it
+                          || dy >= t.Size + 2f                                   // under it
+                          || dy <= -(size + 2f);                                 // over it
+                if (!apart) { clear = false; break; }
+            }
+            if (clear) return r;
+        }
+        pos = at + new Vector2(0f, -TextPitch * 8);
+        return 8;
+    }
+
     public void PopText(Vector2 at, string text, Color col, float size = 26f)
     {
         // Big hits/crits/kills (they pass a larger `size`) get extra JUICE: a sideways arc +
@@ -379,16 +413,23 @@ public class Fx
         // The arc DIRECTION is a frozen per-text hash (deterministic — no RNG drift), so the
         // headless shot reproduces. Threshold ~30 matches the crit/kill number sizes in Anim.
         float weight = Util.Clamp((size - 26f) / 10f, 0f, 1f);   // 0 at 26 (normal) -> 1 at 36 (kill-crit)
-        float drift = 0f;
+        float drift = 0f, dir = 0f;
+        _textSerial++;
         if (weight > 0.01f)
         {
-            uint h = HashStr(text) ^ (uint)((int)at.X * 73856093) ^ (uint)((int)at.Y * 19349663);
-            float dir = (Hash01(h) < 0.5f) ? -1f : 1f;           // arc left or right, frozen per number
+            uint h = HashStr(text) ^ (uint)((int)at.X * 73856093) ^ (uint)((int)at.Y * 19349663)
+                   ^ (uint)(_textSerial * 0x9E3779B1);              // THE STRIDE: salted per call, still deterministic
+            dir = (Hash01(h) < 0.5f) ? -1f : 1f;                  // arc left or right, frozen per number
+            // THE STRIDE: a number popping onto a live arcing number arcs the OTHER way, so two equal
+            // overwatch hits read as two hits and not one bold one
+            foreach (var t in Texts) if (t.Drift != 0f && Vector2.Distance(t.Pos, at) < 48f) dir = -MathF.Sign(t.Drift);
             drift = dir * (26f + 22f * weight) * weight;          // bigger hits arc wider
         }
+        float side = dir != 0f ? dir : ((_textSerial & 1) == 0 ? 1f : -1f);   // odd rungs lean the way the number arcs
+        TextRung(at, text, size, side, out var pos);
         Texts.Add(new FloatText
         {
-            Pos = at,
+            Pos = pos,
             Text = text,
             Color = col,
             Life = 1.1f,
@@ -405,9 +446,11 @@ public class Fx
     /// A prominent, slow-fading, barely-rising stamp (e.g. a KIA marker on death).
     public void Stamp(Vector2 at, string text, Color col, float size, float life)
     {
+        _textSerial++;
+        TextRung(at, text, size, (_textSerial & 1) == 0 ? 1f : -1f, out var pos);   // THE STRIDE: clear of live text
         Texts.Add(new FloatText
         {
-            Pos = at,
+            Pos = pos,
             Text = text,
             Color = col,
             Life = life,
