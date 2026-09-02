@@ -772,6 +772,13 @@ public partial class Game
             int Bodies(int hh) { Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5; BeginSkirmish(Objective.Eliminate, hh); return Enemies.Count; }
             int b0 = Bodies(0), b4 = Bodies(4), b8 = Bodies(Sightline.Heat.Max);
             Sightline.Mission.ForcedLayout = -1;
+            // LEAD REVIEW: the headcount is PINNED, because the roster opening moved it and that must
+            // stay a declared fact. Pre-wave this seed + arena fielded 4/6/8 at h0/h4/h8; pods of 3
+            // bring FUL-6's trim with them (count-1, the pod package as measured in the campaign),
+            // so it is 3/5/7 now. The lead tried skipping the trim for the modes and the pod of 3
+            // stopped forming at h0 (four bodies plan as 2+2) — the pod and the trim are one
+            // mechanic, so the trim stays and this line makes the next drift visible.
+            if (b0 != 3 || b4 != 5 || b8 != 7) fails.Add($"skirmishHeadcountMoved({b0}/{b4}/{b8}, expected 3/5/7)");
             Console.WriteLine($"MODETEST skirmish h0 roster over 50 builds: {string.Join("/", seen.OrderBy(c => c))}  pods-of-3 in {podOf3Builds}/50  bodies h0={b0} h4={b4} h8={b8}");
 
             // (9) THE DAILY HAS A FACTION, AND THE SAME STAMP DEALS THE SAME FORCE.
