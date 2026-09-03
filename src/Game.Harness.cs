@@ -720,6 +720,146 @@ public partial class Game
             : "STALLTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    // ─── THE HEAT PIN AND L5 — SIGHTLINE_HEATPINTEST ───────────────────────────────────────
+    /// The balance INSTRUMENT's three new contracts, asserted.
+    ///  (A) THE PIN — EventCatalog.HeatPinProbe: the catalog carries exactly the three heat-raising
+    ///      arms the README names; with the pin OFF each raises HeatLevel (the leak is real on this
+    ///      tree — the half a "watch it fail" reading needs); with it ON each leaves HeatLevel
+    ///      alone, reports HeatPinnedLine, and still fires its other outcomes.
+    ///  (B) THE ROWS — Stats: RunRec.HeatEnd differs from Heat on a leaked run and equals it on a
+    ///      clean one; RunTurns is stamped; the JSON carries one `campaigns[]` row per RunRec
+    ///      (including a SINGLE-POLICY batch's, which pairedPolicy.slots drops) with the run's
+    ///      heat / heatEnd / lossCause / runTurns / last mission; heatLeak counts the raised
+    ///      campaigns and the off-rung missions; instrumentHealth splits the stalemates by arm.
+    ///  (C) THE ARMS — the autopilot's own guard, fired both ways on a real mission: the per-mission
+    ///      cap logs STALEMATE-MISSION, the run-scoped cap logs STALEMATE-RUN, and both are
+    ///      IsStalemate for every consumer that used to match the one word.
+    public static string HeatPinSelfTest()
+    {
+        var fails = new List<string>();
+        bool savedPin = EventCatalog.HeatPinned;
+        bool savedEnabled = Stats.Enabled;
+        try
+        {
+            Util.Reseed(70001);
+            // ---- (A) the catalog leg ----
+            string probe = EventCatalog.HeatPinProbe();
+            if (probe != "") fails.Add("probe:" + probe);
+
+            // ---- (B) the rows: a synthetic two-run batch, one leaked, one clean, SINGLE policy ----
+            Stats.Reset(); Stats.Enabled = true;
+            EventCatalog.HeatPinned = false;
+            Stats.Slot = 7;
+            Stats.BeginRun(2, "sloppy");
+            Stats.BeginMission(1, "Eliminate", 2, 4, 5);
+            Stats.RecordEvent("informant", 1);                    // the bot's value-best arm — a leak
+            Stats.EndMission(true, 6, 4, 5, "");
+            Stats.BeginMission(2, "Hack", 3, 4, 6);               // ...so mission 2 is played at heat 3
+            Stats.EndMission(false, 9, 0, 2, "SQUAD WIPED");
+            Stats.EndRun(false, 1, "SQUAD WIPED", 3, 15);
+            Stats.Slot = 8;
+            Stats.BeginRun(2, "sloppy");
+            Stats.BeginMission(1, "Eliminate", 2, 4, 5);
+            Stats.EndMission(false, 7, 0, 1, "SQUAD WIPED");
+            Stats.EndRun(false, 0, "SQUAD WIPED", 2, 7);
+            Stats.Slot = -1;
+            var leaked = Stats.Runs[0]; var clean = Stats.Runs[1];
+            if (leaked.HeatEnd != 3 || leaked.Heat != 2) fails.Add($"leakedHeatEnd={leaked.HeatEnd}/{leaked.Heat}");
+            if (clean.HeatEnd != clean.Heat) fails.Add($"cleanHeatEnd={clean.HeatEnd}/{clean.Heat}");
+            if (leaked.RunTurns != 15 || clean.RunTurns != 7) fails.Add($"runTurns={leaked.RunTurns}/{clean.RunTurns}");
+            using (var doc = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(Stats.BuildSummary())))
+            {
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("campaigns", out var rows) || rows.GetArrayLength() != 2)
+                    fails.Add("campaignsRows!=2");
+                else
+                {
+                    var r0 = rows[0];
+                    if (r0.GetProperty("slot").GetInt32() != 7 || r0.GetProperty("policy").GetString() != "sloppy"
+                        || r0.GetProperty("heat").GetInt32() != 2 || r0.GetProperty("heatEnd").GetInt32() != 3
+                        || r0.GetProperty("win").GetBoolean() || r0.GetProperty("missionsCleared").GetInt32() != 1
+                        || r0.GetProperty("lossCause").GetString() != "SQUAD WIPED" || r0.GetProperty("runTurns").GetInt32() != 15
+                        || r0.GetProperty("endMission").GetInt32() != 2 || r0.GetProperty("endObjective").GetString() != "Hack"
+                        || r0.GetProperty("heatRaisingPicks").GetInt32() != 1)
+                        fails.Add("row0:" + r0.GetRawText());
+                    if (rows[1].GetProperty("heatRaisingPicks").GetInt32() != 0 || rows[1].GetProperty("heatEnd").GetInt32() != 2)
+                        fails.Add("row1:" + rows[1].GetRawText());
+                }
+                // a single-policy batch has NO pairedPolicy rows — the gap campaigns[] exists to close
+                if (root.GetProperty("pairedPolicy").GetProperty("slots").GetArrayLength() != 0) fails.Add("pairedSlotsNotEmpty");
+                var leak = root.GetProperty("heatLeak");
+                if (leak.GetProperty("pinned").GetBoolean()) fails.Add("leak.pinned");
+                if (leak.GetProperty("heatRaisingPicks").GetInt32() != 1) fails.Add("leak.picks");
+                if (leak.GetProperty("campaignsRaised").GetInt32() != 1) fails.Add("leak.raised");
+                if (leak.GetProperty("missionsAbovePin").GetInt32() != 1) fails.Add("leak.offRung");
+                if (leak.GetProperty("maxHeatEnd").GetInt32() != 3) fails.Add("leak.max");
+            }
+            // ...and the flag itself lands in the JSON when set
+            EventCatalog.HeatPinned = true;
+            using (var doc = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(Stats.BuildSummary())))
+                if (!doc.RootElement.GetProperty("heatLeak").GetProperty("pinned").GetBoolean()) fails.Add("leak.pinnedFlagNotReported");
+            EventCatalog.HeatPinned = false;
+
+            // ---- (C) the arms, from the guard itself ----
+            Stats.Reset(); Stats.Enabled = true;
+            if (!Stats.IsStalemate(Stats.StalemateMission) || !Stats.IsStalemate(Stats.StalemateRun) || Stats.IsStalemate("SQUAD WIPED"))
+                fails.Add("isStalemate");
+            {
+                Util.Reseed(70002);
+                Stats.Slot = 1;
+                var g = new Game { NoPersist = true, AutoPlay = true };
+                g.StartMission(1);
+                g.DebugSetRunTurns(AutoMaxRunTurns);
+                g.DebugSetTurn(1);
+                g.StartPlayerTurn();                                // RunTurns -> AutoMaxRunTurns + 1
+                if (g.Phase != Phase.Lose) fails.Add("runArmDidNotFire");
+                else if (g.LoseTitle != Stats.StalemateRun) fails.Add("runArmTitle=" + g.LoseTitle);
+                if (!g.LoseReason.Contains("run turn")) fails.Add("runArmReason=" + g.LoseReason);
+            }
+            {
+                Util.Reseed(70003);
+                Stats.Slot = 2;
+                var g = new Game { NoPersist = true, AutoPlay = true };
+                g.StartMission(1);
+                g.DebugSetRunTurns(5);
+                g.DebugSetTurn(AutoMaxTurns);
+                g.StartPlayerTurn();                                // _turnCount -> AutoMaxTurns + 1
+                if (g.Phase != Phase.Lose) fails.Add("missionArmDidNotFire");
+                else if (g.LoseTitle != Stats.StalemateMission) fails.Add("missionArmTitle=" + g.LoseTitle);
+                if (!g.LoseReason.Contains("mission turn")) fails.Add("missionArmReason=" + g.LoseReason);
+            }
+            Stats.Slot = -1;
+            if (Stats.Runs.Count != 2) fails.Add($"stalemateRuns={Stats.Runs.Count}");
+            else
+            {
+                if (Stats.Runs[0].LossCause != Stats.StalemateRun || Stats.Runs[1].LossCause != Stats.StalemateMission)
+                    fails.Add($"stalemateCauses={Stats.Runs[0].LossCause}/{Stats.Runs[1].LossCause}");
+                if (Stats.Runs[0].RunTurns != AutoMaxRunTurns + 1) fails.Add($"stalemateRunTurns={Stats.Runs[0].RunTurns}");
+                if (Stats.Runs[0].HeatEnd != Stats.Runs[0].Heat) fails.Add("stalemateHeatEnd");
+                using var doc = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(Stats.BuildSummary()));
+                var ih = doc.RootElement.GetProperty("instrumentHealth");
+                if (ih.GetProperty("stalemateLosses").GetInt32() != 2 || ih.GetProperty("stalemateRunLosses").GetInt32() != 1
+                    || ih.GetProperty("stalemateMissionLosses").GetInt32() != 1)
+                    fails.Add("instrumentHealth:" + ih.GetRawText());
+                var st = ih.GetProperty("stalemates");
+                if (st.GetArrayLength() != 2 || st[1].GetProperty("arm").GetString() != Stats.StalemateMission
+                    || st[1].GetProperty("mission").GetInt32() != 1 || st[1].GetProperty("objective").GetString() == "")
+                    fails.Add("stalemateRows:" + st.GetRawText());
+                if (doc.RootElement.GetProperty("runWinRateExStalemate").GetDouble() != -1.0) fails.Add("exStalemateNotExcludingBothArms");
+                if (doc.RootElement.GetProperty("campaigns").GetArrayLength() != 2) fails.Add("campaignsRowsC");
+            }
+        }
+        catch (Exception e) { fails.Add("exception:" + e.GetType().Name + ":" + e.Message); }
+        finally
+        {
+            EventCatalog.HeatPinned = savedPin;
+            Stats.Reset(); Stats.Enabled = savedEnabled; Stats.Slot = -1;
+            Util.Reseed(0);
+        }
+        return fails.Count == 0 ? "HEATPINTEST: PASS (3 heat-raising arms pinned; HeatEnd/RunTurns/campaigns[]/heatLeak in the JSON; STALEMATE-MISSION + STALEMATE-RUN named)"
+                                : "HEATPINTEST: FAIL " + string.Join(",", fails);
+    }
+
     /// STALLTEST hooks. DebugResetupMission re-runs SetupMission for the CURRENT mission — exactly
     /// what TryReinforcements does for the mid-mission checkpoint redeploy, which is the call that
     /// used to re-arm the per-mission turn cap.

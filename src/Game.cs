@@ -2587,7 +2587,7 @@ public partial class Game
 
         // balance telemetry: this mission was just cleared (a win). A finished run also ends here.
         Stats.EndMission(true, _turnCount, survivors, Enemies.Count(e => !e.Alive), "");
-        if (finished) Stats.EndRun(true, _run.Mission, "");
+        if (finished) Stats.EndRun(true, _run.Mission, "", _run.HeatLevel, RunTurns);   // THE HEAT PIN: stamp HeatEnd / RunTurns
 
         // reward for clearing the chosen deployment
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal)
@@ -2770,7 +2770,7 @@ public partial class Game
         // balance telemetry: the active mission AND the run end here as a loss.
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
                          Enemies.Count(e => !e.Alive), title);
-        Stats.EndRun(false, _run.Mission - 1, title);
+        Stats.EndRun(false, _run.Mission - 1, title, _run.HeatLevel, RunTurns);   // THE HEAT PIN: stamp HeatEnd / RunTurns
         // adaptive assist: a lost run grows the streak, so a persistently-stuck player gets a
         // small, capped, reversible easing on their NEXT base-Heat run (Hades God-Mode).
         _run.RecordRunResult(false);
@@ -5301,7 +5301,7 @@ public partial class Game
         Audio.Play("lose");
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
                          Enemies.Count(e => !e.Alive), "abandoned");
-        Stats.EndRun(false, _run.Mission - 1, "abandoned");
+        Stats.EndRun(false, _run.Mission - 1, "abandoned", _run.HeatLevel, RunTurns);
     }
 
     void DoAction(string id)
