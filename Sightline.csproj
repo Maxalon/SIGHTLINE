@@ -1,7 +1,34 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- ══ P11 THE CRASH FILE — THE WINDOWS CONSOLE WINDOW ══════════════════════════════════
+         C6 left this open: the published Windows executable was a CONSOLE-subsystem binary, so a
+         Windows player double-clicking the game got a black console window sitting behind it for
+         the whole session. MEASURED, not inferred: `bash scripts/publish.sh` with a win-x64 RID, before
+         this change produced a Sightline.exe whose PE optional-header Subsystem field read 3
+         (IMAGE_SUBSYSTEM_WINDOWS_CUI); after it, 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI). publish.sh reads
+         that byte on every win-RID publish and FAILS the publish if it is not 2, so this cannot
+         silently regress — that check is the only part of the Windows story anything here can
+         actually verify (see docs/DISTRIBUTION.md section 7).
+
+         WHY IT IS CONDITIONAL, and why that matters more here than in most projects. A WinExe has
+         no console at all, so on Windows `Console.WriteLine` goes nowhere — and THIS PROJECT'S
+         ENTIRE VERIFICATION STORY IS STDOUT: every SIGHTLINE_*TEST prints PASS/FAIL to it and
+         scripts/qa-sweep.sh greps for those lines. Making the flag unconditional would therefore
+         have silenced the harness on Windows, and making it unconditional on LINUX would do
+         nothing at all (ELF has no subsystem field) while still confusing the next reader. So the
+         switch is scoped to Windows RIDs only: the Linux build, the Debug build everyone develops
+         against, and the headless harness are byte-for-byte unaffected — no RID is set for either,
+         so this condition is false and OutputType stays Exe.
+         Crash.AttachWindowsConsole is the other half: it re-attaches the parent process's console
+         at startup so a Windows harness run still prints. That half is UNVERIFIED — nothing in
+         this sandbox can execute a Windows binary — and is recorded as such, with the exact
+         command a Windows machine should run, in docs/DISTRIBUTION.md section 7.
+         (`DisableWinExeOutputInference` is the neighbouring knob and is deliberately NOT used: it
+         exists to stop the SDK inferring WinExe for WPF/WinForms projects, which is the opposite
+         of what is wanted here.) -->
     <OutputType>Exe</OutputType>
+    <OutputType Condition="'$(RuntimeIdentifier)' == 'win-x64' Or '$(RuntimeIdentifier)' == 'win-x86' Or '$(RuntimeIdentifier)' == 'win-arm64'">WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>

@@ -43,9 +43,13 @@
 # and Sightline.csproj roots our own assembly for the one remaining reflective site (the
 # SIGHTLINE_BALANCE telemetry export, which serialises anonymous types). Trimmed is therefore the
 # RECOMMENDED default, not a hazard to avoid; what you must not do is publish without this script,
-# which re-proves the artifact by running SAVETEST + METATEST + SHIPTEST against the binary it just
-# built. Sightline.csproj's C6GuardTrimmedPersistence target additionally makes removing either
-# mitigation a build ERROR.
+# which re-proves the artifact by running SAVETEST + METATEST + SHIPTEST + CRASHTEST against the
+# binary it just built. Sightline.csproj's C6GuardTrimmedPersistence target additionally makes
+# removing either mitigation a build ERROR.
+#
+# P11 THE CRASH FILE also added a WINDOWS-ONLY check at the bottom of this script: a win-* RID now
+# publishes as WinExe (no console window behind the game), and the script reads the published
+# .exe's PE subsystem byte to prove it. See docs/DISTRIBUTION.md section 7.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -82,11 +86,12 @@ echo
 echo ">> output: $(du -sh "$OUT" | cut -f1)"
 ls -1 "$OUT"
 
-# VERIFY: the two persistence self-tests, run against the PUBLISHED binary (not the build
-# output). This is exactly the check a trimmed publish used to fail while reporting "0 Errors".
+# VERIFY: the persistence self-tests plus the two artifact-contract ones (C6 SHIPTEST, P11
+# CRASHTEST), run against the PUBLISHED binary (not the build output). This is exactly the check a
+# trimmed publish used to fail while reporting "0 Errors".
 if [ -x "$OUT/Sightline" ] && [ "$RID" = "linux-x64" ]; then
   echo
-  echo ">> verifying persistence against the published binary"
+  echo ">> verifying persistence + shipping contract + the crash reporter against the published binary"
   # METATEST briefly opens a window; with no display raylib segfaults on shutdown AFTER printing
   # its verdict (true of every published build, trimmed or not), so run it under Xvfb when one is
   # available and judge on the printed line rather than the exit code.
@@ -100,7 +105,12 @@ if [ -x "$OUT/Sightline" ] && [ "$RID" = "linux-x64" ]; then
   # the repo instead of off the build output, which is exactly how RESONANCE F1's missing font
   # survived every self-test in the suite. Against the PUBLISHED directory there is no repo to fall
   # back to, so the manifest leg is testing the artifact a player actually receives.
-  for t in SAVETEST METATEST SHIPTEST; do
+  # P11: CRASHTEST joins the publish gate for the same reason SHIPTEST did — it is about the
+  # ARTIFACT, not the model. Run here it exercises the crash reporter inside the TRIMMED,
+  # single-file binary a player receives, where AppContext.BaseDirectory, the assembly version
+  # stamp and RuntimeInformation all behave differently from the source tree. A crash reporter
+  # that only works in the development build is the exact shape of defect C6 was created to find.
+  for t in SAVETEST METATEST SHIPTEST CRASHTEST; do
     line=$( cd "$OUT" && "${RUN[@]}" env "SIGHTLINE_$t=1" ./Sightline 2>/dev/null | grep -E "^$t: " || true )
     echo "   ${line:-$t: NO OUTPUT}"
     case "$line" in *": PASS"*) ;; *) ok=0 ;; esac
@@ -112,10 +122,54 @@ if [ -x "$OUT/Sightline" ] && [ "$RID" = "linux-x64" ]; then
     echo "   source-generated JsonSerializerContexts in SaveGame/Display." >&2
     echo "   SHIPTEST: a bundled file (font, licence text, THIRD-PARTY-NOTICES.txt, LICENSE) is" >&2
     echo "   missing from the output directory, or a player-data writer stopped being atomic." >&2
+    echo "   CRASHTEST: the crash reporter does not work in the PUBLISHED binary - most likely it" >&2
+    echo "   cannot resolve the player-data directory, or its write stopped being atomic." >&2
     echo "   See docs/DISTRIBUTION.md." >&2
     exit 1
   fi
 fi
+
+# ── P11 THE CRASH FILE: THE WINDOWS CONSOLE WINDOW, VERIFIED ON THE ARTIFACT ────────────────
+# C6 left "on Windows the player gets a black console window behind the game" open, and nothing
+# here can RUN a Windows binary to check a fix. But the defect is not a runtime behaviour — it is
+# ONE FIELD IN THE FILE, the PE optional header's Subsystem word, and that is readable from Linux.
+#   3 = IMAGE_SUBSYSTEM_WINDOWS_CUI -> the OS gives the process a console window   (the defect)
+#   2 = IMAGE_SUBSYSTEM_WINDOWS_GUI -> it does not                                 (the fix)
+# Sightline.csproj sets OutputType=WinExe for win-* RIDs; this reads back what that produced, so
+# the claim in docs/DISTRIBUTION.md section 7 is a MEASUREMENT of the shipped artifact rather than
+# a statement about a build flag. A win publish whose subsystem is not 2 FAILS here.
+#
+# HONEST SCOPE: this proves the console window is gone. It does NOT prove the harness still prints
+# on Windows (Crash.AttachWindowsConsole, unverified — section 7 carries the command that closes
+# that), and it does not prove the game runs there at all.
+case "$RID" in
+  win-*)
+    EXE="$OUT/Sightline.exe"
+    if [ ! -f "$EXE" ]; then
+      echo "!! no $EXE to check" >&2; exit 1
+    fi
+    echo
+    echo ">> verifying the Windows subsystem field of the published .exe"
+    SUB=$(python3 - "$EXE" <<'PYEOF'
+import sys, struct
+b = open(sys.argv[1], 'rb').read()
+pe = struct.unpack_from('<I', b, 0x3C)[0]
+if b[pe:pe+4] != b'PE\0\0':
+    print("notPE"); raise SystemExit
+print(struct.unpack_from('<H', b, pe + 24 + 68)[0])
+PYEOF
+)
+    case "$SUB" in
+      2) echo "   PE subsystem: 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI) - no console window. OK" ;;
+      3) echo "   PE subsystem: 3 (IMAGE_SUBSYSTEM_WINDOWS_CUI) - a console window WILL appear behind the game." >&2
+         echo "!! THIS PUBLISH IS NOT SHIPPABLE. OutputType is not WinExe for this RID;" >&2
+         echo "   see the OutputType block in Sightline.csproj and docs/DISTRIBUTION.md section 7." >&2
+         exit 1 ;;
+      *) echo "   PE subsystem: could not be read ('$SUB'). Not failing the publish on an unreadable" >&2
+         echo "   header, but do not claim the console-window fix without checking it by hand." >&2 ;;
+    esac
+    ;;
+esac
 
 echo
 echo ">> done. Ship the whole '$OUT' directory."

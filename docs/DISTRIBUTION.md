@@ -18,9 +18,13 @@ bash scripts/publish.sh --rid win-x64
 ```
 
 The script publishes, then **re-proves the artifact against the binary it just built** by running
-`SIGHTLINE_SAVETEST`, `SIGHTLINE_METATEST` and (C6) `SIGHTLINE_SHIPTEST` on it, and fails the
-publish if any of the three does not say PASS. The first two exist because of §3; the third exists
-because the source tree can resolve a bundled file the build output is missing (see below).
+`SIGHTLINE_SAVETEST`, `SIGHTLINE_METATEST`, (C6) `SIGHTLINE_SHIPTEST` and (P11)
+`SIGHTLINE_CRASHTEST` on it, and fails the publish if any of the four does not say PASS. The first
+two exist because of §3; the third exists because the source tree can resolve a bundled file the
+build output is missing (see below); the fourth because a crash reporter that only works in the
+development build is that same defect wearing a different hat (§6). On a **win-\*** RID it
+additionally reads the published `.exe`'s PE subsystem byte and fails if a console window would
+appear behind the game (§7).
 
 **Do not publish with a bare `dotnet publish`.** It is not that the flags are wrong — the script
 just passes them — it is that a bare publish skips all three verifications, which is precisely how
@@ -258,6 +262,7 @@ Files in it:
 | `*.json.bak` | a file that could not be read, moved aside instead of destroyed | until overwritten |
 | `*.json.tmp` | transient — every write goes to a `.tmp` then renames over the target, so a crash mid-write cannot tear a file | should not persist; a *failed* write sweeps its own, but see below |
 | `*.json.selftest-stash` | a self-test moved your profile aside and was killed before putting it back. **Your data, intact** — rename it back over the original | should never persist |
+| `crash-<yyyyMMdd-HHmmss>-<pid>.txt` | a crash report (P11) — the file to attach to a bug report. Newest 5 kept, 64 KB each, at most 3 per launch. See §6 | until pruned by a newer one |
 
 **To uninstall completely**, delete the publish directory and that folder.
 
@@ -325,3 +330,157 @@ Three separate limits, stated plainly:
    semantics differ and the rename path is not observable this way), while `SaveGame.WriteAtomic` —
    which `display.json` was moved onto — changed behaviour on **all** platforms. The Windows
    behaviour of that change is **unverified**, not assumed-good.
+
+---
+
+## 6. When it crashes: the crash report (PROGRAM PARALLAX wave P11, 2026-09-03)
+
+C6 left this at the top of its own not-fixed list: *"No crash reporter and no log file. An
+exception on a player's machine goes to a stdout nobody reads. The version stamp lets them name a
+build; there is nothing to attach."* A player who double-clicked the game has no terminal at all —
+the window simply vanishes, and the entire bug report you will ever receive is "it crashed".
+
+`src/Crash.cs` closes that. `Program.Main` is now nothing but `Crash.Guard(...)` around the whole
+launch, plus `Crash.Install()` for throws that unwind on a background thread or an unobserved task.
+
+### Where the file goes, and what to ask a player for
+
+**The same directory as their save** (§5) — resolved through `SaveGame.ConfigDir`, never a second
+derivation of that path, so the empty-`ApplicationData` fallback applies here too:
+
+| OS | Crash reports |
+|---|---|
+| Linux | `$XDG_CONFIG_HOME/Sightline/crash-*.txt`, else `~/.config/Sightline/crash-*.txt` |
+| Windows | `%AppData%\Sightline\crash-*.txt` |
+| macOS | `~/Library/Application Support/Sightline/crash-*.txt` |
+
+Named `crash-<yyyyMMdd-HHmmss>-<pid>.txt`, UTC. **Ask a player for the newest one**, and note that
+the terminal message already tells them: on a crash the game prints a headline to stderr naming
+the exact path and saying to attach it.
+
+### What it contains
+
+`SIGHTLINE CRASH REPORT`, then four blocks, each independently guarded so a section that cannot be
+read degrades to one `<unavailable: TypeName>` line instead of destroying the report:
+
+1. **BUILD AND MACHINE** — `Ship.Version` (so a report names a build), the UTC timestamp, *where*
+   in the process it died, OS description, OS/process architecture, the .NET runtime and RID, the
+   base directory, the working directory, the player-data directory, and process uptime.
+2. **NATIVE LIBRARY FAILURE** — only when one occurred; see below.
+3. **GAME STATE** — mode, phase, objective, mission, heat, map seed, map node, mission turn, run
+   turns, wave, soldiers alive/total, hostiles alive/total, the selected soldier, the animation in
+   flight, and `NoPersist`. `<no game was running>` when it died before the `Game` existed.
+4. **SIGHTLINE_\* ENVIRONMENT** — every `SIGHTLINE_*` variable in force. These change what the game
+   *does*, so a report without them can send you hunting a bug that only exists under a harness
+   pin. Nothing outside that namespace is read.
+5. **EXCEPTION CHAIN** — every level to a depth of 12, with type, message, source and stack trace,
+   and `AggregateException.InnerExceptions` expanded (walking only `InnerException` reports one of
+   N failures and hides the rest).
+
+It contains **no personal data**: no account details, and no paths outside the game's own
+directories. The file says so at the top, because a player deciding whether to send it should not
+have to take that on trust.
+
+### The native-library case
+
+A missing or unusable `libraylib.so` / `raylib.dll` is not a bug report a player can write. The
+report and the terminal headline both LEAD with plain English naming the file, whether it is
+present beside the executable, and every directory the loader searched
+(`AppContext.BaseDirectory`, `NATIVE_DLL_SEARCH_DIRECTORIES`, and `LD_LIBRARY_PATH` /
+`DYLD_LIBRARY_PATH` / `PATH`). Three shapes are recognised:
+
+| Exception | Meaning | What the report says |
+|---|---|---|
+| `DllNotFoundException` | the library is not there | "needs the file `libraylib.so` in the SAME FOLDER as the game program" + where it looked |
+| `BadImageFormatException` | wrong architecture | "built for a different kind of processor", with this process's arch |
+| `EntryPointNotFoundException` | wrong raylib version | "a function this build needs is missing — a different raylib on this machine is being picked up" |
+
+**Measured, not asserted.** Deleting every `libraylib.so` from a build output and launching it
+produces `EXIT=70`, the plain-English headline above, and a complete report — reproduced verbatim
+in `docs/DEVLOG.md` §THE CRASH FILE. Note the message text: raylib-cs installs its own
+`DllImportResolver` and throws `DllNotFoundException("Failed to load raylib.")`, which carries no
+quoted library name at all — hence the fallback in `Crash.LibNameFrom`.
+
+> **WHAT IS NOT COVERED, SAID PLAINLY.** This catches **managed exceptions**. A raylib ABI
+> mismatch that faults *inside native code* — a SIGSEGV in `libraylib.so` itself — kills the
+> process without unwinding, and no managed handler anywhere runs: no file, no message, no exit
+> code but the signal. That is a real hole and it cannot be closed from managed code; closing it
+> would mean a native signal handler or an out-of-process supervisor, neither of which is in scope
+> here. `EntryPointNotFoundException` is the *catchable* corner of ABI mismatch (a function that is
+> simply absent), and it is covered. Nothing else is.
+>
+> Two smaller uncovered cases, for completeness: `StackOverflowException` and `Environment.FailFast`
+> are both uncatchable by design in .NET.
+
+### The four properties, and why each is a property rather than a hope
+
+| Property | Mechanism | How it is proven |
+|---|---|---|
+| **Atomic** | writes through `SaveGame.WriteAtomic` — C6's one writer, `.tmp` + rename | `SIGHTLINE_CRASHTEST` leg (b) holds an open read handle across the write and asserts it still sees the OLD bytes (the inode-swap probe from §5). Unix-only mechanism; self-skips off Unix like `Ship.AtomicityProbe` |
+| **Never throws** | every section composed in its own try/catch; a final backstop `catch` | leg (f) throws an exception whose `Message`, `StackTrace` *and* `ToString` all throw, and asserts a report is still written with `<unavailable: …>` in it |
+| **Bounded** | newest `Crash.MaxReports` (5) files kept; `Crash.MaxReportBytes` (64 KB) per file, truncated with a marker; `Crash.MaxPerProcess` (3) per launch | legs (c), (d), (i) |
+| **Degrades** | an unwritable directory ⇒ `LastPath` null, the WHOLE report to stderr, exit 70 | leg (e) makes the crash directory impossible (a regular file where a directory must be) |
+
+Exit code on a crash is **70** (`EX_SOFTWARE`), not an unhandled-exception abort.
+
+`SIGHTLINE_CRASHTEST` runs in `scripts/qa-sweep.sh` **and** in `scripts/publish.sh` against the
+published binary — where trimming, single-file packing and `AppContext.BaseDirectory` all behave
+differently from the source tree, which is the C6 lesson applied. It writes only to a temp
+directory: it redirects `Crash.DirOverride` rather than stashing the real profile (nothing to fail
+to put back), and leg (g) diffs the real player-data directory before and after to prove it.
+
+---
+
+## 7. The Windows console window — half measured, half declared open
+
+**The defect (C6, left open).** The published Windows executable was built as a *console*-subsystem
+binary, so a Windows player double-clicking the game got a black console window sitting behind it
+for the whole session.
+
+**Fixed and MEASURED.** `Sightline.csproj` sets `OutputType=WinExe` for `win-x64` / `win-x86` /
+`win-arm64` RIDs only. This is verifiable from Linux without running anything, because the defect
+is one field in the file — the PE optional header's `Subsystem` word:
+
+| | `Subsystem` | meaning |
+|---|---|---|
+| before | **3** | `IMAGE_SUBSYSTEM_WINDOWS_CUI` — the OS gives the process a console window |
+| after | **2** | `IMAGE_SUBSYSTEM_WINDOWS_GUI` — it does not |
+
+Both numbers were read off real `dist/win-x64-release/Sightline.exe` files cross-published from
+this container. `scripts/publish.sh` now reads that byte on **every** win-RID publish and **fails
+the publish** if it is not 2, so the fix cannot silently regress.
+
+**The cost, and the half that is NOT verified.** A `WinExe` has no console at all, so on Windows
+`Console.WriteLine` goes nowhere — and this project's entire verification story is stdout: every
+`SIGHTLINE_*TEST` prints PASS/FAIL to it and `qa-sweep.sh` greps for those lines. Making the flag
+unconditional would have silenced the harness on Windows. Two things keep both:
+
+1. The flag is scoped to Windows RIDs. The Linux build, the Debug build everyone develops against
+   and the whole headless harness set no RID, so they are byte-for-byte unaffected — `OutputType`
+   stays `Exe`.
+2. `Crash.AttachWindowsConsole()` runs first in `Main` and, on Windows only, calls
+   `AttachConsole(ATTACH_PARENT_PROCESS)` so a game launched from `cmd.exe` or PowerShell prints
+   into that window; if there is no parent console but a `SIGHTLINE_*` variable is set, it calls
+   `AllocConsole()`. A player double-clicking from Explorer has neither, so they get no window —
+   which is the entire point. It is a no-op off Windows (first line is the guard).
+
+> **DECLARED OPEN — item 2 IS NOT OBSERVED.** Nothing in this sandbox can execute a Windows binary.
+> `AttachWindowsConsole` is written from the documented `AttachConsole(ATTACH_PARENT_PROCESS)`
+> contract, not from a measurement, and no claim is made that the harness prints on Windows. **The
+> exact command a Windows machine should run to close this**, from the published directory, in
+> `cmd.exe`:
+>
+> ```
+> set SIGHTLINE_SAVETEST=1 && Sightline.exe
+> ```
+>
+> **PASS** = a `SAVETEST: PASS` line appears in that same console window. **FAIL** = the command
+> returns with no output at all, in which case the attach did not work and the honest options are
+> (a) a separate console-subsystem `Sightline-harness.exe` publish profile for the harness only, or
+> (b) accepting that the harness is Linux-only, which is what it is in practice today. Do not tick
+> this item off any list until somebody has seen that line on Windows.
+>
+> Also still open from C6 and untouched here: the Windows build remains **unverified beyond its
+> file list** (nothing here can run it), the binary is **unsigned** so SmartScreen will warn (code
+> signing costs money and is permanently out of scope under this project's rules), and **macOS has
+> never been cross-published**.

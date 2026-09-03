@@ -2617,12 +2617,44 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
       (headless byte-stability), and it means the settings round trip has no coverage past "the
       file is written correctly". SHIPTEST's second-launch fork closes the equivalent gap for
       `meta.json` only.
-- [ ] **No crash reporter and no log file.** An exception on a player's machine goes to a stdout
-      nobody reads. The version stamp lets them name a build; there is nothing to attach.
+- [x] **No crash reporter and no log file.** **CRASH REPORTER CLOSED by PARALLAX wave P11 THE CRASH
+      FILE** (DEVLOG §THE CRASH FILE; contract in `docs/DISTRIBUTION.md` §6). `Program.Main` is now
+      `Crash.Guard` around the whole launch plus `Crash.Install` for background-thread throws; a
+      crash writes `crash-<utc>-<pid>.txt` into the player's own data directory (through
+      `SaveGame.ConfigDir`, not a second path derivation) carrying `Ship.Version`, the UTC stamp,
+      OS/arch/runtime/RID, live game state (mode/phase/objective/mission/heat/turn/roster/anim),
+      every `SIGHTLINE_*` variable in force, and the full exception chain; exits 70. Atomic
+      (`SaveGame.WriteAtomic`, proven by the open-handle inode probe), never-throws, bounded
+      (5 files / 64 KB / 3 per launch), and it degrades to stderr when the directory is unwritable.
+      A missing/wrong `libraylib.so` gets plain English naming the file and the loader's search
+      path instead of a P/Invoke trace — measured against a build with every `libraylib.so`
+      actually deleted. `SIGHTLINE_CRASHTEST` is the gate, in `qa-sweep.sh` and in `publish.sh`
+      against the PUBLISHED binary; it was seen RED on three separate pre-fix mutations.
+      **STILL OPEN — the other half of this item: there is no general LOG FILE**, only a crash
+      file. A rolling session log is a separate decision (where, how large, what it may contain)
+      and was deliberately not made in P11.
+      **ALSO STILL OPEN, and stated in DISTRIBUTION §6:** a raylib ABI mismatch that faults inside
+      NATIVE code (SIGSEGV) still produces nothing at all — no managed handler runs. Only the
+      catchable corner (`EntryPointNotFoundException`) is covered. Closing the rest needs a native
+      signal handler or an out-of-process supervisor.
+- [x] **On Windows the published binary opens a black console window behind the game.**
+      **CLOSED by P11** — `Sightline.csproj` sets `OutputType=WinExe` for `win-*` RIDs only (so the
+      Linux build, the Debug build and the whole headless harness, which set no RID, are
+      byte-for-byte unaffected). **Measured on the artifact from Linux**: the published
+      `Sightline.exe`'s PE optional-header `Subsystem` word read **3 (`WINDOWS_CUI`) before and 2
+      (`WINDOWS_GUI`) after**, and `scripts/publish.sh` now reads that byte on every win-RID publish
+      and FAILS the publish if it is not 2.
+      **DECLARED OPEN and NOT TICKED: the harness half.** A `WinExe` has no console, so
+      `Console.WriteLine` — which is this project's entire verification story — goes nowhere on
+      Windows. `Crash.AttachWindowsConsole` re-attaches the parent process's console at startup to
+      keep it working, but **nothing in this sandbox can execute a Windows binary and it has not
+      been observed.** The exact command a Windows machine must run to close it, from the published
+      directory in `cmd.exe`, is `set SIGHTLINE_SAVETEST=1 && Sightline.exe` — PASS is a
+      `SAVETEST: PASS` line in that same window. See `docs/DISTRIBUTION.md` §7.
 - [ ] **No installer, icon, window-title art or `.desktop` file**; on Windows the binary is
       unsigned and SmartScreen will warn. **Code signing costs money and is out of scope
       permanently** under this project's rules — but say so out loud rather than leaving it as a
-      surprise.
+      surprise. (P11 fixed the console window on this line's platform; none of the rest of it.)
 - [ ] **macOS was never even cross-published**, and the Windows build is unverified beyond its
       file list (nothing here can run either).
 - [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns

@@ -13172,3 +13172,187 @@ scissored**: FITTEST audits draw calls, not pixels, and the first cut of the scr
   the DEPLOY COVER **UP** ability. Two collisions, both one-site, left for a later pass — they are
   the same defect this wave fixed and would take the same shape (`GameEvent.Shove`, a cover cue).
   A grep for the class: `grep -ohE 'Audio\.Play\("[a-z_]+"' src/*.cs | sort | uniq -c | sort -rn`.
+
+---
+
+# §THE CRASH FILE — PROGRAM PARALLAX wave P11 (2026-09-03, `wave/crash-file`, base `4c1ca3a`)
+
+Files touched: `src/Crash.cs` (new), `src/Crash.SelfTest.cs` (new), `src/Program.cs`,
+`Sightline.csproj`, `scripts/publish.sh`, `scripts/qa-sweep.sh`, the docs.
+Two items off C6's own not-fixed docket (`docs/ROADMAP.md` §"What C6 found and deliberately did NOT
+fix"): **the crash reporter** and **the Windows console window**.
+
+## The thesis
+
+C6 took the game from *builds clean* to *a thing you can hand someone*, and then wrote down what it
+had not done. Top of that list: *"An exception on a player's machine goes to a stdout nobody reads.
+The version stamp lets them name a build; there is nothing to attach."*
+
+That is the whole distance between "it runs on my machine" and "someone else can report a bug to
+me". A player who double-clicks the game has no terminal: the window vanishes and the report you
+receive is "it crashed". And the single likeliest first-launch failure — a missing or wrong
+`libraylib.so` — is not even a normal C# exception path a player could read if they *did* have a
+terminal; it is a P/Invoke stack trace.
+
+## What shipped
+
+**`Program.Main` is now four lines.** Everything the game does runs inside `Crash.Guard("game
+loop", RealMain)`; `Crash.Install()` additionally subscribes `AppDomain.UnhandledException` and
+`TaskScheduler.UnobservedTaskException` for throws that unwind past `Main` on another thread. A
+crash exits **70** (`EX_SOFTWARE`) rather than aborting.
+
+**A report in the player's own data directory**, resolved through `SaveGame.ConfigDir` — never a
+second derivation of that path, which is exactly how you get a crash file the player cannot find.
+Contents, layout and the "what to ask a player for" section are in `docs/DISTRIBUTION.md` §6 and
+are not duplicated here. The short version: build stamp, UTC timestamp, OS/arch/runtime/RID, base
+and working directories, **live game state** (mode / phase / objective / mission / heat / map seed
+/ turn / roster alive / selected soldier / animation in flight), every `SIGHTLINE_*` variable in
+force, and the whole exception chain with stacks and `AggregateException` expanded.
+
+**Four properties, each with a mechanism rather than an intention** — atomic (through C6's
+`SaveGame.WriteAtomic`), never-throws, bounded (5 files / 64 KB / 3 per launch), and degrades to
+stderr when the directory is unwritable. Each is a `SIGHTLINE_CRASHTEST` leg; the table is in
+DISTRIBUTION §6.
+
+**The native-library case, in plain English.** `Crash.NativeDiagnosis` walks the whole chain (a
+missing library can surface as a `TypeInitializationException` wrapping the real one) and turns
+`DllNotFoundException` / `BadImageFormatException` / `EntryPointNotFoundException` into a message
+that names the file, says whether it is beside the executable, and lists every directory the loader
+searched. One implementation note worth keeping: **raylib-cs installs its own `DllImportResolver`
+and throws `DllNotFoundException("Failed to load raylib.")`** — no quoted library name at all,
+unlike the runtime's own message — so `Crash.LibNameFrom`'s fallback is load-bearing, not defensive
+padding.
+
+**The Windows console window.** `Sightline.csproj` sets `OutputType=WinExe` for `win-*` RIDs only.
+Measured on the artifact, from Linux, by reading the PE optional header's `Subsystem` word:
+**3 (`WINDOWS_CUI`) before, 2 (`WINDOWS_GUI`) after** — `scripts/publish.sh` now reads that byte on
+every win-RID publish and fails the publish if it is not 2.
+
+## The gate — `SIGHTLINE_CRASHTEST`, and its FAIL on three pre-fix trees
+
+The hook lives in `src/Crash.SelfTest.cs`, prints one PASS/FAIL line, and is wired into
+`qa-sweep.sh` **through `verdict`** (C3's lesson: a line not routed through `verdict` is invisible
+to the sweep's exit code) and into `publish.sh`'s verification loop.
+
+It does not assert the reporter exists. Every leg throws a **real** exception through
+`Crash.Guard` — the same function `Program.Main` is — and then reads the file back off the disk.
+Legs: (0) the default directory IS the player-data directory; (a) contents — version, a UTC stamp
+that must parse and be now-ish, OS/runtime, both levels of the chain, a real stack frame naming
+`Sightline.Crash.Guard`, the live game-state block with non-zero rosters, the env capture, and *no*
+native section on an ordinary bug; (a2) the terminal headline names the path and says what to do
+with it; (b) atomicity by the inode probe; (c) the file-count cap keeps the NEWEST; (d) the size
+cap truncates and says so, and the terminal line is capped too; (e) unwritable directory; (f) a
+null exception and one whose `Message`/`StackTrace`/`ToString` all throw; (g) no debris in the real
+profile; (h) all three native shapes, reaching the file; (i) the per-launch ceiling.
+
+**Green on the shipped tree:**
+
+```
+CRASHTEST: PASS (dir=…/.xdg/Sightline, keep=5 files, cap=65536B, perLaunch=3,
+                 native=libraylib.so, atomicity=probed)
+```
+
+**Red, three ways, each reproducing a real pre-fix state** (source mutated, hook run, mutation
+reverted — a test never seen red is not evidence):
+
+*PRE-FIX A — the actual C6 state: no crash file at all, just a trace nobody reads.*
+```
+CRASHTEST: FAIL (noReportWritten:…/crash-a-realpath.txt,stderrHasNoHeadline,
+stderrDidNotNameTheReportPath,stderrDoesNotSayWhatToDoWithIt,atomicWriteDidNotLand,
+capKept=0 want=5,capDroppedNewest:c-03,…,stderrHeadlineNotCapped=400262,sizeCapNoFile,
+unwritableDidNotFallBackToStderr,unwritableDidNotSaySo,nullExceptionProducedNoReport,
+handlerThrewOnHostile:NotSupportedException,hostileProducedNoReport,
+nativeCrashProducedNoReport,perLaunchCeilingWroteNothingAtAll)
+```
+Note `handlerThrewOnHostile` in that list. The pre-fix emulation is one line —
+`Console.Error.WriteLine(ex)` — and `Exception.ToString()` on the hostile exception throws. That is
+not a contrived leg: it is the reason the handler composes every field through a guard.
+
+*PRE-FIX B — the `display.json`-class defect: `File.WriteAllText` instead of `WriteAtomic`.*
+```
+CRASHTEST: FAIL (notAtomic:handleSawNewBytes)
+```
+
+*PRE-FIX C — no caps, so a crash loop fills the disk.*
+```
+CRASHTEST: FAIL (capKept=8 want=5,capKeptOldest:c-00,capKeptOldest:c-01,capKeptOldest:c-02,
+sizeCapExceeded=401707,sizeCapNotAnnounced,perLaunchCeilingIgnored=5)
+```
+
+## A real crash, not a synthesised one
+
+Every `libraylib.so` deleted from a build output (there are two: the output root **and**
+`runtimes/linux-x64/native/` — the first attempt deleted only the first and raylib still loaded,
+which is worth knowing before anyone tries to reproduce this), then launched under Xvfb:
+
+```
+EXIT=70
+--- NATIVE LIBRARY FAILURE ------------------------------------
+  SIGHTLINE COULD NOT LOAD ITS GRAPHICS LIBRARY, so it cannot start.
+  The game needs the file  libraylib.so  to sit in the SAME FOLDER as the game program. …
+  library the runtime asked for : raylib
+  file it looked for            : libraylib.so
+  beside the program            : MISSING  (…/nolib/libraylib.so)
+  the loader searched           :
+      AppContext.BaseDirectory = …/nolib/
+      NATIVE_DLL_SEARCH_DIRECTORIES: …/nolib/runtimes/linux-x64/native/
+      NATIVE_DLL_SEARCH_DIRECTORIES: /usr/lib/dotnet/shared/Microsoft.NETCore.App/8.0.30/
+      LD_LIBRARY_PATH = (not set)
+  runtime message               : Failed to load raylib.
+--- EXCEPTION CHAIN -------------------------------------------
+[1] System.DllNotFoundException: Failed to load raylib.
+     source: Raylib-cs
+   at Raylib_cs.Raylib.ResolveDllImport(…)
+   at Raylib_cs.Raylib.SetConfigFlags(ConfigFlags flags)
+   at Sightline.Program.RealMain() in …/src/Program.cs:line 1128
+   at Sightline.Crash.Guard(String where, Action body) in …/src/Crash.cs:line 127
+```
+
+And a mid-mission one (a throw injected into the frame loop for the demonstration only, reverted
+immediately), showing the state block doing its job:
+
+```
+  mode           : Campaign          missionTurn    : 1
+  phase          : PlayerTurn        runTurns       : 1
+  objective      : Eliminate         soldiers       : 4/4 alive
+  mission        : 1                 hostiles       : 4/4 alive
+  heat           : 0                 selected       : NOX (SHARPSHOOTER)
+  mapSeed        : 1439011540        activeAnim     : MoveStepAnim
+```
+
+## Gates
+
+- `dotnet build -c Release` → **0 warning / 0 error**.
+- `bash scripts/publish.sh` → **exit 0**, all four verification lines PASS against the published,
+  **trimmed, single-file** binary — including `CRASHTEST`, which is the leg that proves the
+  reporter works where `AppContext.BaseDirectory` and the assembly version stamp behave differently
+  from the source tree.
+- `bash scripts/publish.sh --rid win-x64` → 10 files, `PE subsystem: 2 (…WINDOWS_GUI)`.
+- `bash scripts/qa-sweep.sh --full` → **SWEEP-EXIT=0**, 78 PASS lines, no COVERAGE GAP, autoplay
+  LOSE / WIN / LOSE, no TIMEOUT. Derived counts read **78 exist / 78 ran**.
+
+## What this wave did NOT do, and what it found and left
+
+- **`Crash.AttachWindowsConsole` is NOT observed.** Nothing here can execute a Windows binary. The
+  console-window fix itself IS measured (the PE byte); the harness-still-prints half is written
+  from the documented `AttachConsole(ATTACH_PARENT_PROCESS)` contract and is a **declared-open
+  item** with the exact `cmd.exe` command that closes it, in `docs/DISTRIBUTION.md` §7. Nobody may
+  tick it off until somebody has seen `SAVETEST: PASS` in a Windows console.
+- **A native SIGSEGV is still silent, and always will be from managed code.** A raylib ABI mismatch
+  that faults *inside* `libraylib.so` kills the process without unwinding: no file, no message.
+  `EntryPointNotFoundException` is the catchable corner of that family and is covered; the rest
+  needs a native signal handler or an out-of-process supervisor, which is a different wave.
+  `StackOverflowException` and `FailFast` are uncatchable in .NET by design. DISTRIBUTION §6 says
+  all of this out loud rather than implying coverage.
+- **There is still no general LOG file** — only a crash file. C6's item names both; this closes the
+  half that a bug report needs. A rolling session log is a separate decision (where, how big, what
+  it may contain) and was not made here.
+- **`xvfb-run` merges stderr into stdout** (`"$@" 2>&1`, /usr/bin/xvfb-run line 184). That is why
+  `CRASHTEST` captures `Console.Error` for its whole run: without it, leg (d)'s deliberate
+  400,000-character exception message lands in the sweep's kept log for the hook. It also means a
+  real crash during a sweep prints its report onto stdout — harmless, but worth knowing before
+  someone reads it as a test writing garbage.
+- **The stderr headline is capped at 400 characters** for the same reason: the file carries the
+  full text, and nobody wants 400 KB pasted into their shell.
+- **No gameplay, balance or presentation change.** Nothing in `Ai.cs`, `Combat.cs`, `Renderer.cs`
+  or `Hud.cs` was touched, and the ladder is untouched.
