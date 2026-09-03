@@ -152,6 +152,13 @@ echo -n "STACKTEST  : "; verdict "$(SIGHTLINE_STACKTEST=1 run | grep -oE "STACKT
 # "NAME PASS" with no colon; the others use "NAME: PASS".)
 echo -n "DOWNTEST   : "; verdict "$(SIGHTLINE_DOWNTEST=1 run | grep -oE "DOWNTEST: (PASS|FAIL)" | head -1)"
 echo -n "PIKETEST   : "; verdict "$(SIGHTLINE_PIKETEST=1 run | grep -oE "PIKETEST: (PASS|FAIL)" | head -1)"
+# P10 THE HELD LANE (~22 s: it walks 80 short campaigns for its planner legs): the ordinary enemy
+# overwatch's CONE. Arms the player's own OwFocused flag set with an axis Ai.ChooseLane picked; the
+# lane covers approach ground; the red wash / Threat[].Watched predicate (Game.WatchCovers) agrees
+# TILE FOR TILE with the real OnUnitEnteredTile reaction in both directions; and the marked fraction
+# of the floor collapses (59.1% -> 28.4% on its staged board). Reads the AMBIENT dial, so
+# `SIGHTLINE_AILANE=0 SIGHTLINE_LANETEST=1` FAILS — that is the proof it can.
+echo -n "LANETEST   : "; verdict "$(SIGHTLINE_LANETEST=1 run | grep -oE "LANETEST: (PASS|FAIL)" | head -1)"
 echo -n "PODTEST    : "; verdict "$(SIGHTLINE_PODTEST=1 run | grep -oE "PODTEST: (PASS|FAIL)" | head -1)"
 echo -n "EXPOSURETEST: "; verdict "$(SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST (PASS|FAIL)" | head -1)"
 echo -n "FUL11PROBE : "; verdict "$(SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1)"
@@ -203,6 +210,16 @@ echo -n "GEOMTEST   : "; verdict "$(SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTES
 # leg that matters most — "is the artifact a player receives complete?" — can only be judged
 # against a published directory, and `bash scripts/publish.sh` runs SHIPTEST there on every publish.
 echo -n "SHIPTEST   : "; verdict "$(SIGHTLINE_SHIPTEST=1 run | grep -oE "SHIPTEST: (PASS|FAIL)" | head -1)"
+# PARALLAX P11 THE CRASH FILE: the crash reporter's own contract, and the only self-test in this
+# project that deliberately THROWS. It runs a real exception through Crash.Guard - the same
+# function Program.Main is - and then reads the file back: contents (version / UTC stamp / OS /
+# runtime / the whole exception chain / live game state), location (the player-data directory, not
+# a second derivation of it), the atomic write (C6's open-handle inode probe, same technique), the
+# unwritable-directory fallback to stderr, and both disk caps. It writes to a TEMP directory, never
+# a real profile, and leg (g) proves that by diffing the real one before and after.
+# scripts/publish.sh runs it against the PUBLISHED binary too, where trimming and single-file
+# packing change how the version stamp and the base directory resolve.
+echo -n "CRASHTEST  : "; verdict "$(SIGHTLINE_CRASHTEST=1 run | grep -oE "CRASHTEST: (PASS|FAIL)" | head -1)"
 echo -n "TRUTHTEST  : "; verdict "$(SIGHTLINE_TRUTHTEST=1 run | grep -oE "TRUTHTEST: (PASS|FAIL)" | head -1)"
 echo -n "GRAPPLETEST: "; verdict "$(SIGHTLINE_GRAPPLETEST=1 run | grep -oE "GRAPPLETEST: (PASS|FAIL)" | head -1)"
 echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLTEST: (PASS|FAIL)" | head -1)"

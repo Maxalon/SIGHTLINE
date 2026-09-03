@@ -3766,10 +3766,13 @@ public partial class Game
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || !e.OnOverwatch || !e.OwBrace || e.ReactedThisTurn || e.Ammo <= 0) continue;
-            if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
-            bool commanding = Grid.HeightAt(e.X, e.Y) - Grid.HeightAt(x, y) >= 2;
-            if (!Grid.HasLineOfSight(e.X, e.Y, x, y, commanding)) continue;
-            if (e.OwFocused && !InOwCone(e, x, y)) continue;
+            // P10: the geometry half is Game.WatchCovers, shared with the wash and the forecast.
+            // NOTE the OwBrace filter above is UNCHANGED and deliberately so — this is the
+            // FLYWHEEL's read, and ROADMAP requires that giving the bot a term for the ordinary
+            // enemy lane be a wave of its own with its own R0diag, never smuggled into a gameplay
+            // wave. So P10's new ordinary cones are invisible here, exactly as the 360 watches
+            // they replace were.
+            if (!WatchCovers(e, x, y)) continue;
             return true;
         }
         return false;
@@ -4860,9 +4863,12 @@ public partial class Game
                         float score = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
                         if (score > bestScore) { bestScore = score; bestHit = o.HitChance; c.WorstCls = e.Cls; }
 
-                        // a live reaction lane: mirrors Game.OnUnitEnteredTile's overwatch gate exactly
-                        // (range + commanding LoS already checked above, plus the FOCUSED cone).
-                        if (e.OnOverwatch && (!e.OwFocused || InOwCone(e, x, y))) c.Watched = true;
+                        // a live reaction lane: mirrors Game.OnUnitEnteredTile's overwatch gate exactly.
+                        // P10: through the SHARED Game.WatchCovers, so this cell and the red wash on
+                        // the same tile can never drift apart. It re-checks the range + LoS the loop
+                        // above already established (one extra Bresenham per in-range foe per tile,
+                        // against a ComputeOdds on the same line) — the cost of one truth.
+                        if (e.OnOverwatch && WatchCovers(e, x, y)) c.Watched = true;
                     }
                     c.BestHit = (sbyte)Math.Min(bestHit, (int)sbyte.MaxValue);
                 }
@@ -5954,6 +5960,30 @@ public partial class Game
     /// True when tile (tx,ty) lies inside watcher w's braced 90-degree overwatch cone (centre = OwDir).
     public bool InOwCone(Unit w, int tx, int ty) => InConeDir(w.X, w.Y, w.OwDirX, w.OwDirY, tx, ty);
 
+    /// P10 THE HELD LANE — THE ONE PREDICATE for "watcher w's held lane covers tile (x,y)".
+    /// It is exactly `OnUnitEnteredTile`'s reaction gate reduced to GEOMETRY: weapon MaxRange
+    /// (Euclidean, matching Util.TileDist), line of sight under CanTarget's commanding-height
+    /// rule, and — if the watch is focused — the cone. Every surface that claims to show a
+    /// kill-zone now calls this and nothing re-derives it: the enemy wash and the friendly cone
+    /// wash (Renderer), the forecast's `Threat[].Watched`, the bot's `InEnemyBraceLane` and the
+    /// player-side `PlayerOverwatchTiles`. Before P10 that predicate was written out five times;
+    /// the wash could not be raised to a perceptible alpha until a washed tile was PROVEN to be a
+    /// tile that draws a reaction, in both directions (SIGHTLINE_LANETEST leg (c) walks the whole
+    /// board against the REAL OnUnitEnteredTile).
+    ///
+    /// WHAT IT DELIBERATELY LEAVES TO THE CALLER: the watcher's own liveness (Alive / Active /
+    /// OnOverwatch / Ammo / ReactedThisTurn), because the four call sites legitimately differ on
+    /// it, and CanTarget's caged-VIP rule, which is a fact about the MOVER, not about the ground.
+    public bool WatchCovers(Unit w, int x, int y)
+    {
+        if (w == null || w.Weapon == null) return false;
+        if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) return false;
+        bool commanding = Grid.HeightAt(w.X, w.Y) - Grid.HeightAt(x, y) >= 2;
+        if (!Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) return false;
+        if (w.OwFocused && !InOwCone(w, x, y)) return false;
+        return true;
+    }
+
     /// The cone test with an EXPLICIT origin + direction (W2: shared by InOwCone and the
     /// autopilot's FOCUS probe, which must test a candidate cone BEFORE committing OwDir).
     public static bool InConeDir(int ox, int oy, int dirX, int dirY, int tx, int ty)
@@ -7003,12 +7033,10 @@ public partial class Game
                     foreach (var w in watchers)
                     {
                         if (w.X == x && w.Y == y) continue;
-                        if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
-                        bool commanding = Grid.HeightAt(w.X, w.Y) - Grid.HeightAt(x, y) >= 2;
-                        if (!Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
                         // COUNTERPLAY: a FOCUSED watcher threatens only its cone, so the AI reads (and can
                         // exploit) the blind zone — mirror the exact reaction gate in OnUnitEnteredTile.
-                        if (w.OwFocused && !InOwCone(w, x, y)) continue;
+                        // P10: through the SHARED Game.WatchCovers (range + commanding LoS + cone).
+                        if (!WatchCovers(w, x, y)) continue;
                         PlayerOverwatchTiles.Add((x, y));
                         break;   // one watcher is enough to mark the tile threatened
                     }
@@ -7389,6 +7417,20 @@ public partial class Game
                 {
                     _actBranch = "overwatch";
                     e.OnOverwatch = true; e.ActionsLeft = 0;
+                    // P10 THE HELD LANE: arm the cone the planner chose. Same flag set the player's
+                    // FOCUS [F] arms (OwFocused + OwDir), so the reaction, the wash, the forecast's
+                    // Threat[].Watched and the bot's own lane read all run through the identical
+                    // (already team-symmetric) code — no enemy-only branch anywhere. A (0,0) axis
+                    // means no lane: SIGHTLINE_AILANE=0, or a watcher with no covered ground and no
+                    // living soldier to face, and it falls back to the pre-P10 360-degree watch.
+                    if (AiLane && (_aiPlan.OwDirX != 0 || _aiPlan.OwDirY != 0))
+                    {
+                        e.OwFocused = true;
+                        e.OwDirX = _aiPlan.OwDirX; e.OwDirY = _aiPlan.OwDirY;
+                        // face down the lane — without this the figure keeps its walk-in facing and
+                        // points away from the cone the board is drawing (the FUL-8 PIKEMAN lesson).
+                        e.Facing = MathF.Atan2(e.OwDirY, e.OwDirX);
+                    }
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
                     Audio.Cue(Audio.GameEvent.OverwatchSet, foe: true);
                 }
@@ -7521,6 +7563,27 @@ public partial class Game
     /// Shipped ON. Mutable so SIGHTLINE_DECLINETEST can run BOTH legs in one process, and so an
     /// R0diag chunk can prove the wave's telemetry inert.
     public static bool AiDecline = true;
+
+    // ── P10 THE HELD LANE ───────────────────────────────────────────────────────────────────
+    /// SIGHTLINE_AILANE — this wave's single dial. `=0` restores the pre-P10 opponent EXACTLY:
+    /// `Ai.Plan` computes no lane axis (plan.OwDirX/Y stay 0) and the ordinary-overwatch exec
+    /// arms `OnOverwatch` alone, i.e. the 360-degree watch held from wherever the unit happened
+    /// to stop that every enemy overwatch has been since the verb existed. Note what `=0` does
+    /// NOT change: the PIKEMAN's BRACE, which has always picked a cone (Ai's own Brace branch,
+    /// FUL-8), and the player's FOCUS [F].
+    ///
+    /// WHY A CHOSEN LANE IS WORTH MORE THAN A 360 WATCH — and it is a TRADE, not a buff. The
+    /// reaction site (OnUnitEnteredTile) is already team-symmetric: `w.OwFocused ?
+    /// Combat.FocusOwAim : 0` is one line with no team test in it, so arming the cone on a
+    /// hostile buys it the same +15 the player's braced soldier gets, and costs it the same
+    /// blindness outside the arc. That symmetry is the whole design claim: before this wave the
+    /// opponent held a watch that threatened EVERYTHING at -10 and could not be walked around,
+    /// which is a worse verb for the player to play against (no counterplay) AND a worse verb to
+    /// look at (the kill-zone wash covered the open board, so it marked nothing). Whether the
+    /// trade nets out stronger or weaker for the opponent is an empirical question, and it is
+    /// what this wave's CRN round measures — see docs/measurements/p10/.
+    /// Shipped ON. Mutable so SIGHTLINE_LANETEST can run BOTH legs in one process.
+    public static bool AiLane = true;
 
     /// SIGHTLINE_AIIDLETEST probe (harness-only; ALWAYS null in normal play). Called once per
     /// enemy act-opportunity, immediately after the ActAfterMove branch chain:

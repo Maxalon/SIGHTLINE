@@ -13225,3 +13225,386 @@ is deleted and the derive-it one kept (`grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' 
 re-derived today: **`I J Z`**, confirming the surviving paragraph). The file map's
 `Game.cs ... (4707 lines)` read 8563 in fact; the count is replaced with an instruction not to write
 one, for the same reason the sweep footer does not.
+
+---
+
+# §THE CRASH FILE — PROGRAM PARALLAX wave P11 (2026-09-03, `wave/crash-file`, base `4c1ca3a`)
+
+Files touched: `src/Crash.cs` (new), `src/Crash.SelfTest.cs` (new), `src/Program.cs`,
+`Sightline.csproj`, `scripts/publish.sh`, `scripts/qa-sweep.sh`, the docs.
+Two items off C6's own not-fixed docket (`docs/ROADMAP.md` §"What C6 found and deliberately did NOT
+fix"): **the crash reporter** and **the Windows console window**.
+
+## The thesis
+
+C6 took the game from *builds clean* to *a thing you can hand someone*, and then wrote down what it
+had not done. Top of that list: *"An exception on a player's machine goes to a stdout nobody reads.
+The version stamp lets them name a build; there is nothing to attach."*
+
+That is the whole distance between "it runs on my machine" and "someone else can report a bug to
+me". A player who double-clicks the game has no terminal: the window vanishes and the report you
+receive is "it crashed". And the single likeliest first-launch failure — a missing or wrong
+`libraylib.so` — is not even a normal C# exception path a player could read if they *did* have a
+terminal; it is a P/Invoke stack trace.
+
+## What shipped
+
+**`Program.Main` is now four lines.** Everything the game does runs inside `Crash.Guard("game
+loop", RealMain)`; `Crash.Install()` additionally subscribes `AppDomain.UnhandledException` and
+`TaskScheduler.UnobservedTaskException` for throws that unwind past `Main` on another thread. A
+crash exits **70** (`EX_SOFTWARE`) rather than aborting.
+
+**A report in the player's own data directory**, resolved through `SaveGame.ConfigDir` — never a
+second derivation of that path, which is exactly how you get a crash file the player cannot find.
+Contents, layout and the "what to ask a player for" section are in `docs/DISTRIBUTION.md` §6 and
+are not duplicated here. The short version: build stamp, UTC timestamp, OS/arch/runtime/RID, base
+and working directories, **live game state** (mode / phase / objective / mission / heat / map seed
+/ turn / roster alive / selected soldier / animation in flight), every `SIGHTLINE_*` variable in
+force, and the whole exception chain with stacks and `AggregateException` expanded.
+
+**Four properties, each with a mechanism rather than an intention** — atomic (through C6's
+`SaveGame.WriteAtomic`), never-throws, bounded (5 files / 64 KB / 3 per launch), and degrades to
+stderr when the directory is unwritable. Each is a `SIGHTLINE_CRASHTEST` leg; the table is in
+DISTRIBUTION §6.
+
+**The native-library case, in plain English.** `Crash.NativeDiagnosis` walks the whole chain (a
+missing library can surface as a `TypeInitializationException` wrapping the real one) and turns
+`DllNotFoundException` / `BadImageFormatException` / `EntryPointNotFoundException` into a message
+that names the file, says whether it is beside the executable, and lists every directory the loader
+searched. One implementation note worth keeping: **raylib-cs installs its own `DllImportResolver`
+and throws `DllNotFoundException("Failed to load raylib.")`** — no quoted library name at all,
+unlike the runtime's own message — so `Crash.LibNameFrom`'s fallback is load-bearing, not defensive
+padding.
+
+**The Windows console window.** `Sightline.csproj` sets `OutputType=WinExe` for `win-*` RIDs only.
+Measured on the artifact, from Linux, by reading the PE optional header's `Subsystem` word:
+**3 (`WINDOWS_CUI`) before, 2 (`WINDOWS_GUI`) after** — `scripts/publish.sh` now reads that byte on
+every win-RID publish and fails the publish if it is not 2.
+
+## The gate — `SIGHTLINE_CRASHTEST`, and its FAIL on three pre-fix trees
+
+The hook lives in `src/Crash.SelfTest.cs`, prints one PASS/FAIL line, and is wired into
+`qa-sweep.sh` **through `verdict`** (C3's lesson: a line not routed through `verdict` is invisible
+to the sweep's exit code) and into `publish.sh`'s verification loop.
+
+It does not assert the reporter exists. Every leg throws a **real** exception through
+`Crash.Guard` — the same function `Program.Main` is — and then reads the file back off the disk.
+Legs: (0) the default directory IS the player-data directory; (a) contents — version, a UTC stamp
+that must parse and be now-ish, OS/runtime, both levels of the chain, a real stack frame naming
+`Sightline.Crash.Guard`, the live game-state block with non-zero rosters, the env capture, and *no*
+native section on an ordinary bug; (a2) the terminal headline names the path and says what to do
+with it; (b) atomicity by the inode probe; (c) the file-count cap keeps the NEWEST; (d) the size
+cap truncates and says so, and the terminal line is capped too; (e) unwritable directory; (f) a
+null exception and one whose `Message`/`StackTrace`/`ToString` all throw; (g) no debris in the real
+profile; (h) all three native shapes, reaching the file; (i) the per-launch ceiling.
+
+**Green on the shipped tree:**
+
+```
+CRASHTEST: PASS (dir=…/.xdg/Sightline, keep=5 files, cap=65536B, perLaunch=3,
+                 native=libraylib.so, atomicity=probed)
+```
+
+**Red, three ways, each reproducing a real pre-fix state** (source mutated, hook run, mutation
+reverted — a test never seen red is not evidence):
+
+*PRE-FIX A — the actual C6 state: no crash file at all, just a trace nobody reads.*
+```
+CRASHTEST: FAIL (noReportWritten:…/crash-a-realpath.txt,stderrHasNoHeadline,
+stderrDidNotNameTheReportPath,stderrDoesNotSayWhatToDoWithIt,atomicWriteDidNotLand,
+capKept=0 want=5,capDroppedNewest:c-03,…,stderrHeadlineNotCapped=400262,sizeCapNoFile,
+unwritableDidNotFallBackToStderr,unwritableDidNotSaySo,nullExceptionProducedNoReport,
+handlerThrewOnHostile:NotSupportedException,hostileProducedNoReport,
+nativeCrashProducedNoReport,perLaunchCeilingWroteNothingAtAll)
+```
+Note `handlerThrewOnHostile` in that list. The pre-fix emulation is one line —
+`Console.Error.WriteLine(ex)` — and `Exception.ToString()` on the hostile exception throws. That is
+not a contrived leg: it is the reason the handler composes every field through a guard.
+
+*PRE-FIX B — the `display.json`-class defect: `File.WriteAllText` instead of `WriteAtomic`.*
+```
+CRASHTEST: FAIL (notAtomic:handleSawNewBytes)
+```
+
+*PRE-FIX C — no caps, so a crash loop fills the disk.*
+```
+CRASHTEST: FAIL (capKept=8 want=5,capKeptOldest:c-00,capKeptOldest:c-01,capKeptOldest:c-02,
+sizeCapExceeded=401707,sizeCapNotAnnounced,perLaunchCeilingIgnored=5)
+```
+
+## A real crash, not a synthesised one
+
+Every `libraylib.so` deleted from a build output (there are two: the output root **and**
+`runtimes/linux-x64/native/` — the first attempt deleted only the first and raylib still loaded,
+which is worth knowing before anyone tries to reproduce this), then launched under Xvfb:
+
+```
+EXIT=70
+--- NATIVE LIBRARY FAILURE ------------------------------------
+  SIGHTLINE COULD NOT LOAD ITS GRAPHICS LIBRARY, so it cannot start.
+  The game needs the file  libraylib.so  to sit in the SAME FOLDER as the game program. …
+  library the runtime asked for : raylib
+  file it looked for            : libraylib.so
+  beside the program            : MISSING  (…/nolib/libraylib.so)
+  the loader searched           :
+      AppContext.BaseDirectory = …/nolib/
+      NATIVE_DLL_SEARCH_DIRECTORIES: …/nolib/runtimes/linux-x64/native/
+      NATIVE_DLL_SEARCH_DIRECTORIES: /usr/lib/dotnet/shared/Microsoft.NETCore.App/8.0.30/
+      LD_LIBRARY_PATH = (not set)
+  runtime message               : Failed to load raylib.
+--- EXCEPTION CHAIN -------------------------------------------
+[1] System.DllNotFoundException: Failed to load raylib.
+     source: Raylib-cs
+   at Raylib_cs.Raylib.ResolveDllImport(…)
+   at Raylib_cs.Raylib.SetConfigFlags(ConfigFlags flags)
+   at Sightline.Program.RealMain() in …/src/Program.cs:line 1128
+   at Sightline.Crash.Guard(String where, Action body) in …/src/Crash.cs:line 127
+```
+
+And a mid-mission one (a throw injected into the frame loop for the demonstration only, reverted
+immediately), showing the state block doing its job:
+
+```
+  mode           : Campaign          missionTurn    : 1
+  phase          : PlayerTurn        runTurns       : 1
+  objective      : Eliminate         soldiers       : 4/4 alive
+  mission        : 1                 hostiles       : 4/4 alive
+  heat           : 0                 selected       : NOX (SHARPSHOOTER)
+  mapSeed        : 1439011540        activeAnim     : MoveStepAnim
+```
+
+## Gates
+
+- `dotnet build -c Release` → **0 warning / 0 error**.
+- `bash scripts/publish.sh` → **exit 0**, all four verification lines PASS against the published,
+  **trimmed, single-file** binary — including `CRASHTEST`, which is the leg that proves the
+  reporter works where `AppContext.BaseDirectory` and the assembly version stamp behave differently
+  from the source tree.
+- `bash scripts/publish.sh --rid win-x64` → 10 files, `PE subsystem: 2 (…WINDOWS_GUI)`.
+- `bash scripts/qa-sweep.sh --full` → **SWEEP-EXIT=0**, 78 PASS lines, no COVERAGE GAP, autoplay
+  LOSE / WIN / LOSE, no TIMEOUT. Derived counts read **78 exist / 78 ran**.
+
+## What this wave did NOT do, and what it found and left
+
+- **`Crash.AttachWindowsConsole` is NOT observed.** Nothing here can execute a Windows binary. The
+  console-window fix itself IS measured (the PE byte); the harness-still-prints half is written
+  from the documented `AttachConsole(ATTACH_PARENT_PROCESS)` contract and is a **declared-open
+  item** with the exact `cmd.exe` command that closes it, in `docs/DISTRIBUTION.md` §7. Nobody may
+  tick it off until somebody has seen `SAVETEST: PASS` in a Windows console.
+- **A native SIGSEGV is still silent, and always will be from managed code.** A raylib ABI mismatch
+  that faults *inside* `libraylib.so` kills the process without unwinding: no file, no message.
+  `EntryPointNotFoundException` is the catchable corner of that family and is covered; the rest
+  needs a native signal handler or an out-of-process supervisor, which is a different wave.
+  `StackOverflowException` and `FailFast` are uncatchable in .NET by design. DISTRIBUTION §6 says
+  all of this out loud rather than implying coverage.
+- **There is still no general LOG file** — only a crash file. C6's item names both; this closes the
+  half that a bug report needs. A rolling session log is a separate decision (where, how big, what
+  it may contain) and was not made here.
+- **`xvfb-run` merges stderr into stdout** (`"$@" 2>&1`, /usr/bin/xvfb-run line 184). That is why
+  `CRASHTEST` captures `Console.Error` for its whole run: without it, leg (d)'s deliberate
+  400,000-character exception message lands in the sweep's kept log for the hook. It also means a
+  real crash during a sweep prints its report onto stdout — harmless, but worth knowing before
+  someone reads it as a test writing garbage.
+- **The stderr headline is capped at 400 characters** for the same reason: the file carries the
+  full text, and nobody wants 400 KB pasted into their shell.
+- **No gameplay, balance or presentation change.** Nothing in `Ai.cs`, `Combat.cs`, `Renderer.cs`
+  or `Hud.cs` was touched, and the ladder is untouched.
+
+---
+
+# §THE HELD LANE — PROGRAM PARALLAX wave P10 (2026-09-03, `wave/held-lane`, base `4c1ca3a`)
+
+**Thesis (from `docs/ROADMAP.md`, which called it "the binding constraint"): an enemy overwatch is
+a 360-degree watch held from wherever the unit happened to stop. Only the PIKEMAN's BRACE ever
+picked a cone. Give the opponent a reason to watch a particular piece of ground and the verb —
+and the red wash that draws it — start meaning something.**
+
+The mechanism shipped. **The predicted effect did not arrive, and the wave's real product is the
+measurement that says why.** Read the numbers section before quoting this wave as a difficulty
+change; it is not one.
+
+## What was wrong
+
+Three ROADMAP items, and P10's first finding is that they were **one** item seen from three sides:
+
+1. **No lane selection.** `Ai.Plan` set `plan.Overwatch = true` and stopped; `Game`'s exec at the
+   `overwatch` branch armed `e.OnOverwatch = true; e.ActionsLeft = 0;` and nothing else. C2
+   measured a held lane firing 24-27% of the time.
+2. **The kill-zone wash was below perceptual threshold AND covered the board.** 7-12% alpha,
+   measured by C2's review as invisible on a warm biome even at 2.6x contrast. It could not simply
+   be raised: with no cone, the wash covered nearly all open floor, and a brighter signal that
+   marks everything would only have made the board unreadable. **The wash was blocked on the
+   cone, not on the alpha** — which is why one wave closes both.
+3. **The branch is effectively dead.** C5's census: `overwatch` fires ~1% of enemy acts.
+
+## What shipped
+
+**`Ai.ChooseLane` / `Ai.LaneScore` (src/Ai.cs) — the opponent chooses WHERE it watches.** Argmax
+over the eight compass axes (a +-45-degree cone: eight axes tile the plane with overlap and no gap,
+so a ninth cannot cover ground the eight do not). The score of an axis is the APPROACH GROUND it
+covers: the union of the living soldiers' Chebyshev discs of radius `LaneReach` (4), filtered to
+tiles that are floor, in the cone, inside weapon MaxRange and in line of sight from the watch tile
+under CanTarget's commanding-height rule — **the same range + LoS pair `OnUnitEnteredTile` gates
+the reaction on, so a lane is only ever credited for ground it can really cover** — weighted
+`(LaneReach + 1 - cheby(tile, soldier))` summed over soldiers, plus `LaneStandBonus` (3) on a
+soldier's own tile. Deliberately ignores walls between soldier and tile (a disc is not a CostMap,
+and a Dijkstra per plan is not worth it for a choice between eight axes), the objective, the other
+hostiles' lanes (no coordination term), and cover on the candidate tile (overwatch reacts on tile
+ENTRY, and a soldier crossing into cover is uncovered on the way in — C2's `AsIfExposed` premise).
+**Zero `Util.Rng` draws**, so the CRN pairing between the arms survives to the first tile they
+actually disagree on. Computed once per plan and ONLY on plans that already decided to hold a lane,
+never inside the per-reachable-tile scorer.
+
+**The exec arms the player's own flag set.** `OwFocused` + `OwDirX/Y` + a `Facing` down the lane —
+identical to what `DoFocusOverwatch` [F] arms for a soldier. **This is where the "worth more than a
+360 watch" question is settled, and it is settled by a line that already existed:** the reaction
+site reads `w.OwFocused ? Combat.FocusOwAim : 0` with **no team test in it**, so a focused hostile
+gets the same +15 the player's braced soldier gets, and pays the same blindness outside the arc.
+The alternative — an enemy cone with no aim bonus — was rejected: it would make the enemy's cone a
+strictly worse 360 watch and the verb would deserve to stay dead. **It is a TRADE, not a buff**,
+and the wave's round measured exactly that trade (below).
+
+**The wash means something.** `Renderer.DrawOverwatchThreat` 0.07-0.12 -> **0.11-0.16** (mean 0.095
+-> 0.135, +42%), still a tier under the player's own braced lane (0.14-0.21, mean 0.175): a plan
+the player made must out-read a plan the opponent made. `DrawConeRays` — the cone-edge rays and
+direction chevron, PIKEMAN-only since FUL-8 — now draws for **any** focused enemy watcher. The two
+enemy lane verbs are deliberately NOT differentiated by the lane art (they make the same geometric
+promise); the unit tag already separates them, `BRC` in `Pal.Good` vs `OW` in `Pal.Accent`.
+
+**`Game.WatchCovers` — one predicate for "this watcher's lane covers this tile."** It is
+`OnUnitEnteredTile`'s reaction gate reduced to geometry (range, commanding LoS, cone). Before P10
+that predicate was written out **five times**: the enemy wash, the friendly cone wash,
+`Threat[].Watched`, `InEnemyBraceLane`, `PlayerOverwatchTiles`. All five call it now. **This is what
+the alpha rise actually rests on** — a brighter lie is worse than a dim one.
+
+**`Game.AiLane` / `SIGHTLINE_AILANE=0`** restores the pre-P10 opponent exactly (no axis planned, no
+cone armed), wired beside `SIGHTLINE_AIDECLINE` in `Program.cs`.
+
+## The gate — `SIGHTLINE_LANETEST`, and its FAIL on the pre-fix tree
+
+Five legs, in `scripts/qa-sweep.sh` through `verdict`: **(a)** the plan -> exec path arms
+`OwFocused` and the axis the planner chose; **(b)** the scorer is a real argmax, it FOLLOWS the
+squad across four unambiguous posts, a walled-off lane scores exactly 0 (the LoS filter is real),
+and over a 64-campaign walk **every** armed lane satisfies the shipped invariant — `LaneScore > 0`,
+or, when no axis can cover any ground, the cone contains the nearest living soldier; **(c)** the
+overlay predicate agrees TILE FOR TILE with the REAL `OnUnitEnteredTile` on a live mission board,
+in BOTH directions, for a focused watcher and a wide one; **(d)** the census; **(e)** the dial.
+
+**Watched red, twice.** (1) The documented idiom — `SIGHTLINE_AILANE=0`, which is an exact
+restoration of the pre-wave opponent:
+
+```
+LANETEST: FAIL (planNoLaneAxis,execNotFocused,execZeroAxis,vacuousWalk(ordinaryLanesArmed=0),
+laneMarksTooMuch=1.000) [acts=3851 lanes=0 bad=0 wideOff=11 tileChecks=358 lies=0 misses=0
+census=1.000 posts=52]
+```
+
+(2) A genuine SOURCE revert of the three behaviour hunks (the `ChooseLane` call, the exec's cone
+arming, both `Renderer` changes), test unchanged:
+
+```
+LANETEST: FAIL (planNoLaneAxis,execNotFocused,execZeroAxis,laneInvariantBroken=6/6)
+[acts=3851 lanes=6 bad=6 wideOff=5 tileChecks=358 lies=0 misses=0 census=0.480 posts=52]
+```
+
+The second is the sharper one: 6 of 6 lanes armed in real play with no cone. (Legs (c)/(d) read
+`Game.AiLane`, so they go red under the dial and not under a source revert that leaves the dial on
+— stated because it is the honest scope of each leg.) Green after:
+
+```
+LANETEST: PASS (ambient SIGHTLINE_AILANE=1; exec arms OwFocused+axis; scorer is argmax and blind
+lanes score 0; 6 ordinary lanes armed over a campaign walk of 3825 enemy acts, all covering
+approach ground (5 wide watches with the dial off, 0 focused); overlay == reaction on 358
+tile-checks, 0 lies / 0 misses; census over 52 posts: a 360 watch marks 59.1% of the floor,
+a chosen lane 28.4% (2654/5529 = 0.480 of the 360 watch))
+```
+
+**Leg (c) is the one to keep**: 358 tile-checks against the real reaction, **0 washed tiles that
+draw nothing and 0 reactions on unwashed ground**. Leg (d) is ROADMAP's "a signal that marks
+everything marks nothing", made mechanical.
+
+`SIGHTLINE_AICOVTEST=6` needs **no registry change**: `overwatch` reads **87/8404 = 1.04%** with the
+lane on and **the same 87** with it off, above the rate gate and not in `AiCovKnownRare`.
+
+## THE NUMBERS — n and base commit on every one
+
+Base `4c1ca3a`. Raw round, every command line, and the full tables: **`docs/measurements/p10/`**.
+3 rungs {h0,h4,h8} x 8 CRN slot bases x 40 campaigns = **n=320 per rung per arm**; 120 chunks,
+**120/120 `runs=40` asserted, zero BAD**. Heat PINNED.
+
+**1. The lane, at the shipped `Ai.DeclineWatchRatio`: INERT.**
+
+| rung | LANE ON | LANE OFF | discordant b/c | McNemar p | MDE (pts) |
+|---|---|---|---|---|---|
+| h0 | 43.8% | 44.4% | 0/2 | 0.500 | 1.2 |
+| h4 | 21.9% | 21.9% | **0/0** | 1.000 | 1.5\* |
+| h8 |  5.3% |  5.3% | **0/0** | 1.000 | 1.5\* |
+
+\*rule-of-three bound on the discordant rate. **At h4 and h8 the arms produced identical outcomes
+in all 320 worlds** — not "no significant difference", no difference. **Why: the `overwatch`
+branch fires 84 / 41 / 102 times in 21,874 / 27,708 / 22,226 enemy acts — 0.38% / 0.15% / 0.46%.**
+A quality improvement to a verb taken once every 200-700 acts has nothing to move.
+
+**2. `Ai.DeclineWatchRatio` — PRICED, NOT SPENT, and ROADMAP's premise REFUTED.** ROADMAP said a
+real lane "would justify a much higher" ratio. `SIGHTLINE_DECLINEWATCH=1.20` (from 0.45) takes the
+branch from 0.15-0.46% of acts to **10-15%** — the ratio IS the lever that feeds it — and makes the
+opponent **significantly weaker**: player win rate **+5.6 / +9.0 / +5.6** points at h0/h4/h8,
+McNemar **p = 0.123 / 0.0019 / 0.0079** on the same 320 worlds. 3.00 adds almost nothing over 1.20
+(the gate saturates). This reproduces at proper n what C2 could only call suggestive (51% declines,
+run completion 55% -> 75%, p = 0.29 on 20 worlds). C2's arithmetic survives its own wave: a lane
+pays off 25-36% of the time and the reaction is a -10 (+15 focused) shot, so **a watch is worth
+well under half the aimed shot it replaces, however well it is aimed.** Not spent.
+
+**3. THE LANE, MEASURED WHERE THE BRANCH IS NOT STARVED — a null with power behind it.** Pin the
+ratio at the diagnostic 1.20 (3,100-4,300 lanes per rung per arm instead of ~200) and flip
+`SIGHTLINE_AILANE`:
+
+| rung | paid off, LANE ON | paid off, LANE OFF | win-rate delta | discordant | McNemar p |
+|---|---|---|---|---|---|
+| h0 | 25.3% | 27.2% | -1.56 +- 2.00 | 49/320 | 0.568 |
+| h4 | 29.9% | 35.8% | +0.62 +- 1.13 | 44/320 | 0.880 |
+| h8 | 23.8% | 35.6% | -0.31 +- 1.00 | 21/320 | 1.000 |
+
+**A chosen lane trades COVERAGE for ACCURACY, and the trade is a wash.** The cone is blind outside
+itself, so the watcher fires on materially fewer of the lanes it holds (35.6% -> 23.8% at h8, a
+third of the reactions gone); `Combat.FocusOwAim` makes each remaining shot +15. Win rate does not
+move at 21-49 discordant pairs a rung.
+
+**So why ship it?** Because the case was never the win rate, and this wave's own measurement is the
+first evidence for that reading. The lane is **counterplay** (a 360 watch cannot be walked around;
+a cone can) and **information** (a wash over 59.1% of the floor at an invisible alpha versus one
+over 28.4% at a perceptible one). Balance-neutral at n=320 with a tight CRN pairing is exactly the
+licence a legibility change needs.
+
+## THE CAVEAT THAT MATTERS MOST
+
+**The flywheel is structurally blind to the thing the lane exists to create.**
+`Game.Autopilot.TileExposure` carries `+18` for a PIKEMAN BRACE lane and **no term at all** for an
+ordinary enemy overwatch. ROADMAP requires that fixing this be a wave of its own with its own
+R0diag — so P10 did not touch it, and `InEnemyBraceLane` deliberately kept its `OwBrace` filter
+through the `WatchCovers` refactor. **The bot therefore walks into a chosen cone exactly as blindly
+as it walked into a 360 watch, and a player who can see the cone would route around it.** Every
+number above is an *upper* bound on the opponent's strength under the lane.
+
+## What I deliberately did NOT do
+
+* **Did not raise `Ai.DeclineWatchRatio`.** Priced it instead, in its own round, and published the
+  refutation. It is a difficulty lever worth 5.6-9.0 points in the wrong direction.
+* **Did not touch `Game.Autopilot.TileExposure`.** ROADMAP forbids smuggling an instrument change
+  into a gameplay wave; it invalidates every CRN world in the repo.
+* **Did not give the enemy cone its own aim number.** It takes `Combat.FocusOwAim` through the
+  already-team-symmetric reaction line. A separate enemy-only constant is a second tuning surface
+  for one verb.
+* **Did not coordinate lanes across a pod.** `ChooseLane` has no anti-overlap term; two hostiles
+  watching the same corridor is legal and often correct. A joint optimisation is a different wave.
+* **Did not use a CostMap for approach ground.** A Chebyshev disc ignores walls between soldier and
+  tile; the LoS filter already removes ground the watcher cannot shoot.
+
+## Open, handed on
+
+* **The branch is starved, and that is now the whole story.** 0.15-0.46% of enemy acts. The
+  frequency levers are `Ai.DeclineWatchRatio` (measured: wrong direction) and whatever makes a
+  hostile *want* to hold ground — which is a design question, not a constant.
+* The flywheel's missing enemy-overwatch exposure term (ROADMAP, unchanged).
+* `Ai.ChooseLane` re-derives the squad's discs per call. Harmless at 0.4% of acts; if a future wave
+  makes the branch common, cache it per enemy turn.

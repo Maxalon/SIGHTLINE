@@ -161,6 +161,10 @@ export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
 > Two file names that mean "a self-test died holding your data", and what to do:
 > `<name>.json.selftest-stash` — **your profile, whole**; rename it back over the original.
 > `<name>.json.tmp` — a write that never landed; the original is untouched, so just delete it.
+> A THIRD name in that directory is not debris: `crash-<utc>-<pid>.txt` is a **crash report** (P11),
+> the file a player attaches to a bug report. Newest 5 kept, 64 KB each, 3 per launch. It is written
+> by the real handler, never by a self-test — `SIGHTLINE_CRASHTEST` redirects to a temp dir and
+> proves it did (leg g diffs the real directory before/after). docs/DISTRIBUTION.md §6.
 
 Run autoplay a few times (RNG varies); confirm **no exceptions and no TIMEOUT**. The
 contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. **W9 THE REPAIR made
@@ -315,6 +319,14 @@ src/
   Stats.cs      SIGHTLINE_BALANCE analytics harness
   Ship.cs       C6: the DISTRIBUTABLE's contract — version stamp (Ship.Version, off the assembly),
                 the bundled-file manifest (Ship.RequiredFiles) and SIGHTLINE_SHIPTEST
+  Crash.cs      P11: the top-level crash handler. `Program.Main` is now nothing but
+                `Crash.Guard(...)` around `RealMain` (+ Crash.Install for background-thread
+                throws), so **the "MUST STAY FIRST IN Main" SHIPCHILD branch is now first in
+                `RealMain`** — keep it there. Writes crash-<utc>-<pid>.txt into the PLAYER-DATA
+                dir via SaveGame.WriteAtomic; exits 70. docs/DISTRIBUTION.md §6.
+  Crash.SelfTest.cs  SIGHTLINE_CRASHTEST — the only self-test here that deliberately THROWS. It
+                redirects Crash.DirOverride to a temp dir, so unlike SHIPTEST it can strand
+                nothing; also runs in publish.sh against the published binary.
 scripts/dev-setup.sh   sandbox setup
 scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST); counts DERIVED
 scripts/publish.sh     hand-run distributable build + persistence re-proof
@@ -409,6 +421,12 @@ docs/screenshot.png    README image
   `.csproj` copy list; `SIGHTLINE_SHIPTEST` resolves the manifest strictly against
   `AppContext.BaseDirectory` and `scripts/publish.sh` runs it against the published directory,
   which is the only place that leg is testing the artifact a player receives.
+- **A `win-*` RID publishes as `WinExe`** (P11) so a Windows player gets no console window behind
+  the game — measured on the artifact, by the PE `Subsystem` byte (3 -> 2), which `publish.sh` now
+  checks and fails on. It is scoped to Windows RIDs: no RID is set for the Linux build, the Debug
+  build or the harness, so stdout there is untouched. The half that is NOT verified (does the
+  harness still print on Windows) is a declared-open item in `docs/DISTRIBUTION.md` §7 with the
+  exact command that closes it — do not claim it.
 - **Publish with `bash scripts/publish.sh`, never a bare `dotnet publish`.** The old line here
   ("never publish with `-p:PublishTrimmed=true`") was **stale and actively harmful** — trimmed is
   the recommended default and has been since F1 fixed the hazard (source-generated JSON contexts +
@@ -832,6 +850,22 @@ resolved at n=160** (DiD t = −1.61); only MAGMA is negative at every rung.
 **The shipped layer is NOT the measured layer** — the review pass moved it off plateaus and
 re-tuned density, so the ladder above is a pre-fix number and C5 owes it a re-measure.
 `SIGHTLINE_BIOMEMECH=0` restores the pre-C4 board exactly. DEVLOG §C4.
+
+**PROGRAM PARALLAX — wave P10 "THE HELD LANE" (2026-09-03, base `4c1ca3a`)** gave the ORDINARY
+enemy overwatch a cone (`Ai.ChooseLane` picks one of eight axes by the approach ground it covers;
+the exec arms the player's own `OwFocused` flag set, so the hostile takes the same FOCUS trade —
+`+Combat.FocusOwAim` inside, blind outside). `Game.WatchCovers` is now the ONE predicate for "this
+watcher's lane covers this tile" — the red wash, the friendly cone wash, `Threat[].Watched`,
+`InEnemyBraceLane` and `PlayerOverwatchTiles` all call it — which is what let the enemy kill-zone
+wash rise 0.07-0.12 → 0.11-0.16 without lying. `SIGHTLINE_AILANE=0` restores the pre-P10 opponent;
+`SIGHTLINE_LANETEST` is the gate. **Two measured facts a fresh session should not re-discover
+(n=320/rung/arm CRN-paired, `docs/measurements/p10/`): the lane is INERT on win rate — h4 and h8
+gave 0 discordant campaigns in 320 — because the `overwatch` branch fires only 0.15-0.46% of
+enemy acts; and raising `Ai.DeclineWatchRatio` (the lever that DOES feed it: 0.45 → 1.20 takes the
+branch to 10-15% of acts) makes the opponent 5.6-9.0 points WEAKER, p ≤ 0.008 at h4/h8.** So
+ROADMAP's "a real lane would justify a much higher ratio" is refuted, `SIGHTLINE_DECLINEWATCH` is
+a priced-but-unspent dial, and the flywheel still has no term for an ordinary enemy lane (that fix
+is its own wave, per ROADMAP). DEVLOG §THE HELD LANE.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

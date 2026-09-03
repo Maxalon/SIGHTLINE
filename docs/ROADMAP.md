@@ -2362,28 +2362,48 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       hard rung is an absence of evidence. **Report n_discordant and the MDE beside every paired
       ladder**, or the flat rows will keep being read as neutrality. `docs/measurements/c2/paired.py`.
 
-- [ ] **THE ENEMY OVERWATCH HAS NO LANE SELECTION, and that is now the binding constraint.**
-      C2 measured a held enemy lane FIRING **24-27%** of the time (n=457/461 lanes in the
-      maximal-decline diagnostic, of which 442/455 are genuine overwatch; the shipped round's own
-      lane counts are mostly PIKEMAN BRACE and do NOT corroborate this). *Fired*, not *paid off* —
-      at the reaction's −10 aim a fired shot often misses, so true payoff is lower. An overwatch is
-      therefore worth at most ~0.20 of the shot it replaces. A decline rate large enough to be
-      *felt* also looked like a weaker opponent (51% declines, run completion 55% → 75%), but that
-      probe is suggestive only: p = 0.29 on 20 paired worlds, and confounded by an interim binary.
-      The cause is that an enemy overwatch is a 360 degree watch
-      held from wherever the unit is standing; only the PIKEMAN's BRACE ever picks a cone. **A
-      hostile that chose WHERE to watch would be worth several times this, and would justify a
-      much higher `Ai.DeclineWatchRatio`.** This is the next wave in this area, not another pass
-      at the gate.
-- [ ] **The enemy kill-zone wash is below perceptual threshold, and covers the whole board.**
-      `Renderer` washes every tile an enemy overwatch threatens at **7-12% alpha**, which C2's
-      code review measured as invisible on a warm biome even at 2.6x contrast — so the one visual
-      that is supposed to communicate "this ground is denied" communicates nothing. It is also
-      **the same finding as the lane-selection gap seen from the other end**: because a plain
-      enemy overwatch has no cone, the wash covers nearly the entire open board, and a signal that
-      marks everything marks nothing. Fixing lane selection would fix the wash's *information*;
-      the alpha needs raising regardless. (C2's `SIGHTLINE_DECLINESHOT` doc comment claimed the
-      wash "lights the ground it now denies"; that claim is withdrawn in the code.)
+- [x] **CLOSED (mechanically) by PROGRAM PARALLAX wave P10 "THE HELD LANE" — THE ENEMY OVERWATCH
+      NOW HAS LANE SELECTION.** `Ai.ChooseLane` scores the eight compass axes by the approach
+      ground each would cover — the union of the squad's move-radius discs, filtered to tiles the
+      watcher can genuinely react on (weapon range + commanding LoS, the same pair
+      `OnUnitEnteredTile` gates on) and weighted by soldier proximity — and the ordinary-overwatch
+      exec arms the player's own `OwFocused` cone with it. The reaction site is already
+      team-symmetric, so the hostile takes the identical FOCUS trade the player takes:
+      `+Combat.FocusOwAim` inside the lane, blind outside it. `SIGHTLINE_AILANE=0` restores the
+      pre-P10 opponent exactly; `SIGHTLINE_LANETEST` is the gate. **But read the next item before
+      quoting this one as a fix — the mechanism landed and the effect did not.**
+- [ ] **OPEN, AND SHARPENED BY P10 — THE ORDINARY ENEMY OVERWATCH IS STARVED, NOT BADLY AIMED.**
+      P10 gave the branch a chosen lane and measured it CRN-paired (base `4c1ca3a`, 3 rungs x 8
+      slot bases x 40, n=320/rung/arm, 1,920 campaigns, `docs/measurements/p10/`): **h4 and h8 came
+      out with ZERO discordant campaigns in 320 — the two arms produced literally identical
+      outcomes in every world — and h0 with 2 of 320 (0/2, exact p = 0.50).** The cause is in the
+      telemetry beside the ladder: the `overwatch` branch fires **84 / 41 / 102 times in 21,874 /
+      27,708 / 22,226 enemy acts (0.38% / 0.15% / 0.46%)** at h0/h4/h8. A quality improvement to a
+      verb taken once in every 300-700 acts has nothing to move. **The open lever is FREQUENCY, and
+      `Ai.DeclineWatchRatio` is priced but NOT spent** — `SIGHTLINE_DECLINEWATCH=<ratio>` (default =
+      the shipped 0.45, and `R0diag.json` proves the dial inert at the default). See
+      `docs/DEVLOG.md` §THE HELD LANE for what the probe measured and why P10 did not spend it.
+      C2's original figures stand as history: a held lane FIRED 24-27% of the time (n=457/461 lanes
+      in the maximal-decline diagnostic), *fired* and not *paid off*, so an overwatch was worth at
+      most ~0.20 of the shot it replaces; and a decline rate large enough to be *felt* also looked
+      like a weaker opponent (51% declines, run completion 55% → 75%, p = 0.29 on 20 paired worlds,
+      confounded by an interim binary). **P10's own paid-off column: 20.1% / 15.4% / 32.4% of lanes
+      held drew a reaction shot, lane on — statistically indistinguishable from lane off
+      (21.8% / 15.4% / 32.4%), on 204 / 175 / 216 lanes per rung.**
+- [x] **CLOSED by P10 — the enemy kill-zone wash is perceptible AND selective.** The alpha went
+      **0.07-0.12 -> 0.11-0.16** (mean 0.095 -> 0.135, +42%), still a tier below the player's own
+      braced lane (0.14-0.21, mean 0.175) so a plan the player made out-reads a plan the opponent
+      made; and `DrawConeRays` — the cone-edge rays and direction chevron that were PIKEMAN-only —
+      now draw for any focused enemy watcher. The alpha could not be raised BEFORE the cone existed
+      and that was the real blocker, not the number: `SIGHTLINE_LANETEST` leg (d) measures it on a
+      staged board and a 360 watch marks **59.1% of the floor** against a chosen lane's **28.4%**.
+      Leg (c) is what the raise rests on — the wash predicate is now the single shared
+      `Game.WatchCovers` (the red wash, the friendly cone wash, `Threat[].Watched`, the bot's
+      `InEnemyBraceLane` and `PlayerOverwatchTiles` all call it), and the leg walks every floor tile
+      of a live mission board against the REAL `OnUnitEnteredTile` in BOTH directions: 358
+      tile-checks, 0 washed tiles that draw nothing, 0 reactions on unwashed ground.
+      (C2's `SIGHTLINE_DECLINESHOT` doc comment claimed the wash "lights the ground it now denies";
+      that claim was withdrawn in the code and is true again now.)
 - [ ] **The flywheel is structurally blind to enemy area denial.**
       `Game.Autopilot.TileExposure` carries `+18` for an enemy BRACE lane (`InEnemyBraceLane`) and
       **no term at all** for an ordinary enemy overwatch — its "exposed to this gun" `+6` is
@@ -2631,12 +2651,44 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
       (headless byte-stability), and it means the settings round trip has no coverage past "the
       file is written correctly". SHIPTEST's second-launch fork closes the equivalent gap for
       `meta.json` only.
-- [ ] **No crash reporter and no log file.** An exception on a player's machine goes to a stdout
-      nobody reads. The version stamp lets them name a build; there is nothing to attach.
+- [x] **No crash reporter and no log file.** **CRASH REPORTER CLOSED by PARALLAX wave P11 THE CRASH
+      FILE** (DEVLOG §THE CRASH FILE; contract in `docs/DISTRIBUTION.md` §6). `Program.Main` is now
+      `Crash.Guard` around the whole launch plus `Crash.Install` for background-thread throws; a
+      crash writes `crash-<utc>-<pid>.txt` into the player's own data directory (through
+      `SaveGame.ConfigDir`, not a second path derivation) carrying `Ship.Version`, the UTC stamp,
+      OS/arch/runtime/RID, live game state (mode/phase/objective/mission/heat/turn/roster/anim),
+      every `SIGHTLINE_*` variable in force, and the full exception chain; exits 70. Atomic
+      (`SaveGame.WriteAtomic`, proven by the open-handle inode probe), never-throws, bounded
+      (5 files / 64 KB / 3 per launch), and it degrades to stderr when the directory is unwritable.
+      A missing/wrong `libraylib.so` gets plain English naming the file and the loader's search
+      path instead of a P/Invoke trace — measured against a build with every `libraylib.so`
+      actually deleted. `SIGHTLINE_CRASHTEST` is the gate, in `qa-sweep.sh` and in `publish.sh`
+      against the PUBLISHED binary; it was seen RED on three separate pre-fix mutations.
+      **STILL OPEN — the other half of this item: there is no general LOG FILE**, only a crash
+      file. A rolling session log is a separate decision (where, how large, what it may contain)
+      and was deliberately not made in P11.
+      **ALSO STILL OPEN, and stated in DISTRIBUTION §6:** a raylib ABI mismatch that faults inside
+      NATIVE code (SIGSEGV) still produces nothing at all — no managed handler runs. Only the
+      catchable corner (`EntryPointNotFoundException`) is covered. Closing the rest needs a native
+      signal handler or an out-of-process supervisor.
+- [x] **On Windows the published binary opens a black console window behind the game.**
+      **CLOSED by P11** — `Sightline.csproj` sets `OutputType=WinExe` for `win-*` RIDs only (so the
+      Linux build, the Debug build and the whole headless harness, which set no RID, are
+      byte-for-byte unaffected). **Measured on the artifact from Linux**: the published
+      `Sightline.exe`'s PE optional-header `Subsystem` word read **3 (`WINDOWS_CUI`) before and 2
+      (`WINDOWS_GUI`) after**, and `scripts/publish.sh` now reads that byte on every win-RID publish
+      and FAILS the publish if it is not 2.
+      **DECLARED OPEN and NOT TICKED: the harness half.** A `WinExe` has no console, so
+      `Console.WriteLine` — which is this project's entire verification story — goes nowhere on
+      Windows. `Crash.AttachWindowsConsole` re-attaches the parent process's console at startup to
+      keep it working, but **nothing in this sandbox can execute a Windows binary and it has not
+      been observed.** The exact command a Windows machine must run to close it, from the published
+      directory in `cmd.exe`, is `set SIGHTLINE_SAVETEST=1 && Sightline.exe` — PASS is a
+      `SAVETEST: PASS` line in that same window. See `docs/DISTRIBUTION.md` §7.
 - [ ] **No installer, icon, window-title art or `.desktop` file**; on Windows the binary is
       unsigned and SmartScreen will warn. **Code signing costs money and is out of scope
       permanently** under this project's rules — but say so out loud rather than leaving it as a
-      surprise.
+      surprise. (P11 fixed the console window on this line's platform; none of the rest of it.)
 - [ ] **macOS was never even cross-published**, and the Windows build is unverified beyond its
       file list (nothing here can run either).
 - [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns

@@ -1790,10 +1790,8 @@ public static class Renderer
                 if (!g.Grid.IsFloor(x, y)) continue;
                 foreach (var w in watchers)
                 {
-                    if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
-                    bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
-                    if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
-                    if (!g.InOwCone(w, x, y)) continue;
+                    // P10: through the SHARED Game.WatchCovers (range + commanding LoS + cone).
+                    if (!g.WatchCovers(w, x, y)) continue;
                     Raylib.DrawRectangleRec(ElevRect(g, x, y), wash);
                     break;
                 }
@@ -1845,9 +1843,19 @@ public static class Renderer
         if (watchers == null) return;
 
         float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 3.2f);
-        // soft red wash — well below signal level so it informs without dominating the board, but
-        // nudged up to a reliably-perceptible floor so "this tile is in a reaction kill-zone" reads.
-        Color wash = Raylib.Fade(Pal.Foe, 0.07f + 0.05f * pulse);
+        // P10 THE HELD LANE — wash lifted 0.07-0.12 -> 0.11-0.16 (mean 0.095 -> 0.135, +42%).
+        // C2's code review measured the old band as invisible on a warm biome even at 2.6x
+        // contrast, and ROADMAP carried it as an open defect: "the one visual that is supposed to
+        // communicate 'this ground is denied' communicates nothing". It could not simply be raised
+        // then, because a plain enemy overwatch had no cone and the wash therefore covered nearly
+        // the whole open board — a signal that marks everything marks nothing, and making it
+        // BRIGHTER would only have made the board unreadable. Now that the ordinary enemy watch
+        // picks a lane (Ai.ChooseLane) the washed region is a fraction of the floor
+        // (SIGHTLINE_LANETEST leg (d) is that census, made mechanical), so the alpha can rise.
+        // Still a TIER BELOW the player's own braced lane (DrawFocusCones, 0.14-0.21, mean 0.175):
+        // a lane the player planned must out-read a lane the opponent planned, or the board starts
+        // arguing with the plan. And still under the objective/selection signal tier.
+        Color wash = Raylib.Fade(Pal.Foe, 0.11f + 0.05f * pulse);
 
         // wash every watched tile (a tile may be watched by more than one enemy — the
         // overlapping fills naturally read as a denser, more dangerous kill-zone)
@@ -1857,13 +1865,11 @@ public static class Renderer
                 if (!g.Grid.IsFloor(x, y)) continue;   // only walkable tiles can be moved into
                 foreach (var w in watchers)
                 {
-                    if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
-                    bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
-                    if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
-                    // FUL-8 truth gate: a FOCUSED enemy watcher (the PIKEMAN's plant) only reacts
-                    // inside its cone — the red wash must mirror the OnUnitEnteredTile gate exactly,
-                    // or the board lies about where walking is safe.
-                    if (w.OwFocused && !g.InOwCone(w, x, y)) continue;
+                    // FUL-8 truth gate: a FOCUSED enemy watcher (the PIKEMAN's plant, and since P10
+                    // every ordinary enemy overwatch) only reacts inside its cone — the red wash must
+                    // mirror the OnUnitEnteredTile gate exactly, or the board lies about where walking
+                    // is safe. P10: through the SHARED Game.WatchCovers, which IS that gate's geometry.
+                    if (!g.WatchCovers(w, x, y)) continue;
                     var r = ElevRect(g, x, y);
                     Raylib.DrawRectangleRec(r, wash);
                     break;   // one wash per tile is enough; overlap is conveyed by adjacency
@@ -1873,8 +1879,13 @@ public static class Renderer
         // FUL-8 PIKEMAN: a braced+focused enemy watcher shows its cone edges + chevron in foe-red
         // over the wash — the same lane vocabulary as the player's own BRACE, because it IS the
         // player's own BRACE pointed back at the squad.
+        // P10 THE HELD LANE: the gate is now `OwFocused` alone, so an ORDINARY focused enemy watch
+        // draws the same rays. The two are deliberately NOT differentiated by the lane art — they
+        // are the same geometric promise ("I react in here") — and the unit tag already separates
+        // the verbs: DrawUnit paints "BRC" (Pal.Good) for a brace and "OW" (Pal.Accent) for a
+        // watch, which is where the stagger-vs-kill distinction belongs.
         foreach (var w in watchers)
-            if (w.OwBrace && w.OwFocused) DrawConeRays(g, w, Pal.Foe, pulse);
+            if (w.OwFocused) DrawConeRays(g, w, Pal.Foe, pulse);
 
         // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads, plus a
         // slow expanding "watching" pulse ring that draws the eye to the threat without occluding it.

@@ -5,7 +5,31 @@ namespace Sightline;
 
 public static class Program
 {
+    /// PARALLAX P11 "THE CRASH FILE" — the whole process, inside one handler.
+    ///
+    /// `Main` is deliberately nothing but this. Everything the game does now runs inside
+    /// `Crash.Guard`, so an exception that would previously have printed a stack trace to a stdout
+    /// nobody reads (C6's open item: "there is nothing to attach") instead writes a report the
+    /// player can send, into the same directory their save already lives in, and exits cleanly
+    /// with 70 (EX_SOFTWARE) rather than as an unhandled-exception abort.
+    ///
+    /// `Crash.Install` additionally covers what `Guard` structurally cannot: a throw on a
+    /// background thread or an unobserved task, which unwinds past Main entirely.
+    ///
+    /// SCOPE, STATED HONESTLY (docs/DISTRIBUTION.md §6): this covers MANAGED exceptions. A raylib
+    /// ABI mismatch that faults inside native code kills the process without unwinding, and no
+    /// handler here runs. The load-time family — missing / wrong-architecture / wrong-version
+    /// native library — IS catchable, and is turned into plain English by `Crash.NativeDiagnosis`
+    /// instead of a P/Invoke stack trace.
     public static void Main()
+    {
+        Crash.AttachWindowsConsole();   // no-op off Windows; see Crash.AttachWindowsConsole
+        Crash.Install();
+        int rc = Crash.Guard("game loop", RealMain);
+        if (rc != 0) Environment.Exit(rc);
+    }
+
+    static void RealMain()
     {
         // ══ C6: THE SECOND-LAUNCH CHILD. THIS BRANCH MUST STAY FIRST IN Main. ══════════════════
         // SIGHTLINE_SHIPTEST forks this same binary with SIGHTLINE_SHIPCHILD=1 so that "quit the
@@ -155,6 +179,22 @@ public static class Program
         // pre-C2 opponent exactly (constant term, no decline gate). See docs/measurements/c2/.
         string aiDeclineEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIDECLINE");
         if (aiDeclineEnv == "1") Game.AiDecline = true; else if (aiDeclineEnv == "0") Game.AiDecline = false;
+        // P10 THE HELD LANE — SIGHTLINE_AILANE=0/1: an ordinary enemy overwatch picks a 90-degree
+        // cone (Ai.ChooseLane) instead of holding a 360-degree watch from wherever it stopped, and
+        // therefore takes the player's own FOCUS trade — +Combat.FocusOwAim inside the lane, blind
+        // outside it. =0 restores the pre-P10 opponent exactly (no axis planned, no cone armed).
+        // See docs/measurements/p10/ for the CRN round and docs/DEVLOG.md §THE HELD LANE.
+        string aiLaneEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AILANE");
+        if (aiLaneEnv == "1") Game.AiLane = true; else if (aiLaneEnv == "0") Game.AiLane = false;
+        // P10, PRICED AND NOT SPENT — SIGHTLINE_DECLINEWATCH=<ratio> overrides Ai.DeclineWatchRatio
+        // (shipped 0.45), the bar a hostile's marginal shot must clear before it drops the shot for
+        // a watch. ROADMAP's standing claim was that a real lane would justify raising it. Unset =
+        // the shipped value, so this is inert by default; the measured price is in
+        // docs/measurements/p10/ and docs/DEVLOG.md §THE HELD LANE.
+        if (float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_DECLINEWATCH"),
+                           System.Globalization.NumberStyles.Float,
+                           System.Globalization.CultureInfo.InvariantCulture, out float dwRatio)
+            && dwRatio >= 0f) Ai.DeclineWatchRatio = dwRatio;
         // C4 "EIGHT BIOMES ARE PAINT" — SIGHTLINE_BIOMEMECH=0/1: the biome GROUND layer (VERDANT
         // undergrowth / TUNDRA slick ice / MAGMA thermal vents). =0 restores the pre-C4 board
         // EXACTLY (Terrain.Enabled gates the stamper AND every Grid predicate), which is both the
@@ -301,6 +341,29 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "shiptest");
             Console.WriteLine(Ship.SelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+
+        // PARALLAX P11 "THE CRASH FILE" — SIGHTLINE_CRASHTEST=1: the crash reporter's own contract.
+        // Same family as SHIPTEST (both are about the artifact a player receives rather than the
+        // game model), and the only self-test in this project that deliberately THROWS.
+        //
+        // It stages a REAL GAME first and publishes it as Crash.Live, exactly the way the normal
+        // launch below does, because the half of the report that is worth anything is the half
+        // that says what was happening — and a test with no game running would assert the empty
+        // shape and pass over a state block that never worked. Tiny window: `new Game()` +
+        // StartMission do tile math. NoPersist is set BEFORE StartMission so the staging cannot
+        // touch a real profile (house rule), and the report itself goes to a temp directory —
+        // see CrashTest.SelfTest's isolation note.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CRASHTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "crashtest");
+            var cg = new Game { NoPersist = true };
+            cg.StartMission(1);
+            Crash.Live = cg;
+            Console.WriteLine(CrashTest.SelfTest());
+            Crash.Live = null;
             Raylib.CloseWindow();
             return;
         }
@@ -780,6 +843,29 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_LANETEST=1 : P10 THE HELD LANE — the ordinary enemy overwatch's cone. Arms the
+        // player's own OwFocused flag set with an axis the planner chose (Ai.ChooseLane); the cone
+        // covers approach ground; the red wash / Threat[].Watched predicate (Game.WatchCovers)
+        // agrees TILE FOR TILE with the real OnUnitEnteredTile reaction in both directions; the
+        // marked fraction of the board collapses with lane selection on. It reads the AMBIENT dial,
+        // so `SIGHTLINE_AILANE=0 SIGHTLINE_LANETEST=1` FAILS — that is the proof it can.
+        // Walks real campaigns for its (b3)/(e) legs, so it needs the full window (Renderer's
+        // tile->px math and the headless frame pump).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_LANETEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "lanetest");
+            RequireWindow("LANETEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(new Game().LaneSelfTest());
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MORALETEST=1 : UNDERTOW W3 — enemy pod morale / rout.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_MORALETEST") == "1")
         {
@@ -940,8 +1026,10 @@ public static class Program
         }
         // SIGHTLINE_AICOVTEST=<N> : C5 THE HARD EDGES — the ENEMY DECISION CENSUS. Walks N
         // campaigns per (heat x objective) cell and asserts every branch of the enemy exec chain
-        // is REACHED at least once; the known-dead OVERWATCH branch is waived by name and its
-        // count is printed on every run. SIGHTLINE_AICOVSTRICT=1 drops the waiver (and fails on
+        // is REACHED at least once; the effectively-dead branches are waived BY NAME through
+        // Game.AiCovKnownRare and every branch's count is printed on every run. (`overwatch` was
+        // on that list at C5 and is NOT any more — C2's decline gate revived it, and P10 THE HELD
+        // LANE re-measured it; the PASS line carries today's rate.) SIGHTLINE_AICOVSTRICT=1 drops the waiver (and fails on
         // this tree, which is the proof the gate can fail). Needs a window: it drives real play.
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AICOVTEST"), out int covN) && covN > 0)
         {
@@ -1095,6 +1183,10 @@ public static class Program
 
         var game = new Game();
         game.NoPersist = shot || autoplay;   // the harness never reads/writes the save file
+        // P11 THE CRASH FILE: publish the live game so a crash report can say what was happening
+        // (mode / phase / mission / heat / turn / roster). Read defensively by Crash.Compose —
+        // at crash time this object is by definition in a state nobody designed.
+        Crash.Live = game;
         // SIGHTLINE_CONTRACT=ironveterans|highstakes|spearhead|mrc|lgd (FUL-10) : force a run contract
         // on the headless run (honored only under NoPersist, since the draft never runs there); None otherwise.
         game.ForcedContract = ContractDef.Parse(Environment.GetEnvironmentVariable("SIGHTLINE_CONTRACT"));
@@ -1249,6 +1341,7 @@ public static class Program
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_LANESHOT") == "1") game.DebugEnemyLane();   // P10: an ordinary enemy overwatch holding a CHOSEN lane (pair with SIGHTLINE_SHOT=760; flip SIGHTLINE_AILANE for the contrast)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DECLINESHOT") == "1") game.DebugDeclineShot();   // C2: the opponent declines (pair with SIGHTLINE_SHOT=760 and flip SIGHTLINE_AIDECLINE for the contrast)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();

@@ -1,0 +1,20 @@
+P10 THE HELD LANE — CRN round.  n=320 campaigns per rung per arm (8 slot bases x 40), 1920 campaigns total.
+
+ rung   LANE ON  LANE OFF   delta  chunk-t(7)   disc b/c  McNemar p  MDE(pts)
+h0        43.8%     44.4%    -0.6       -1.53        0/2     0.5000      1.2 
+h4        21.9%     21.9%    +0.0         nan        0/0     1.0000      1.5*
+h8         5.3%      5.3%    +0.0         nan        0/0     1.0000      1.5*
+  * MDE from the rule-of-three upper bound on the discordant rate (0 discordant observed).
+
+h0: binomial SE on/off 2.77/2.78; CLUSTER SE 3.17/3.12; chunk delta -0.62 +- 0.41; discordant 2/320 pairs
+h4: binomial SE on/off 2.31/2.31; CLUSTER SE 2.86/2.86; chunk delta +0.00 +- 0.00; discordant 0/320 pairs
+h8: binomial SE on/off 1.25/1.25; CLUSTER SE 1.29/1.29; chunk delta +0.00 +- 0.00; discordant 0/320 pairs
+
+ENEMY LANE TELEMETRY (summed over the rung's 8 chunks)
+ rung  arm    acts  ow branch   brace   lanes  reactions  react/lane
+h0      on   21874         84     120     204         41       20.1%
+h0     off   21866         86     120     206         45       21.8%
+h4      on   27708         41     134     175         27       15.4%
+h4     off   27708         41     134     175         27       15.4%
+h8      on   22226        102     114     216         70       32.4%
+h8     off   22224        102     114     216         70       32.4%
