@@ -1730,7 +1730,7 @@ public partial class Game
         DraftedSquad = new List<Unit>(DraftPicked);
         DraftBoon = DraftSelectedBoon;
         DraftContract = DraftSelectedContract ?? Contract.None;   // null == STANDARD
-        Audio.Play("turn");
+        Audio.Cue(Audio.GameEvent.Turn);   // P14: through the table (see Audio.CueMap.cs)
         StartMission();   // threads DraftedSquad/DraftBoon/DraftContract into the new Run, then clears them
     }
 
@@ -2007,6 +2007,19 @@ public partial class Game
     void SetupMission(int n)
     {
         _run.Mission = n;
+        // P14 THE UNVERIFIED — PUBLISH THIS FIGHT'S DEPTH FIRST, because four things below read it.
+        // P4 THE MODES GET THE BESTIARY threaded this same dial into Mission.Build as `rosterTier`
+        // (see the roster note further down) for the ARCHETYPE gates and stopped there. Everything
+        // else that asks "how deep is this fight" — Mission.OpenerTrim, Mission.MakeVip (the escort
+        // asset, created ~80 lines below), Combat.HvtHpBonus and the DEFEND waves — was still
+        // reading the literal `1` that SKIRMISH and DAILY pass at every heat rung. Mission.DepthFor
+        // is the one read now; -1 in every other mode, where DepthFor is the identity, so
+        // campaign / endless / training are byte-identical.
+        // IT MUST BE SET HERE AND NOT AT THE rosterTier LINE: the VIP is built before that point,
+        // and a depth published after it would hand MakeVip the PREVIOUS mission's dial.
+        Mission.ModeDepth = Mode == GameMode.Skirmish && Mission.ModeDepthOn
+            ? Mission.ModeTierFor(_run.HeatLevel)
+            : -1;
         // TEMPO wave 4: publish ALL this mission's combat statics in one lifecycle call — the run's
         // boons, the mission faction (read by the spawn roster in Mission.Build below, so it MUST be
         // set first), the bought counter-prep, and a clean PressureAim/AllUnits. Replaces the four
@@ -2171,7 +2184,10 @@ public partial class Game
         // tiers, so nothing here is a new archetype table — and the named mid-boss fields from
         // heat 4 (ELITE CADRE, the rung that also opens Ai.Tier 1). Campaign/endless/training pass
         // n, so the campaign path is byte-identical (PAIRTEST + the inert balance diff are the gate).
-        int rosterTier = Mode == GameMode.Skirmish ? Math.Clamp(3 + Math.Max(0, heat) / 3, 3, 5) : n;
+        // P4's roster tier and P14's depth are the SAME formula (Mission.ModeTierFor) but they are
+        // separate levers: SIGHTLINE_MODEDEPTH=0 must restore P14's four consumers WITHOUT undoing
+        // P4's roster opening, so this line does not read Mission.ModeDepth.
+        int rosterTier = Mode == GameMode.Skirmish ? Mission.ModeTierFor(heat) : n;
         bool modeMidBoss = Mode == GameMode.Skirmish && heat >= 4;
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
@@ -2945,7 +2961,9 @@ public partial class Game
         // player's own turn starting. Named beats (a threat, an alarm, an objective) pass `cue`.
         cue ??= Audio.CueFor(enemy ? Audio.GameEvent.EnemyTurn : Audio.GameEvent.Turn);
         LastBannerCue = cue; LastBannerBus = Audio.BusOf(cue, enemy);
-        Audio.Play(cue, foe: enemy);
+        // P14: Audio.SilentCue means "this beat already has a sound on this frame" — see VIP DOWN /
+        // SOLDIER DOWN, which fire on the same frame as the falling body's own Casualty cue.
+        if (cue != Audio.SilentCue) Audio.Play(cue, foe: enemy);
     }
 
     // ---------------- W11 NEW CONTACT (teach the roster where it's played) ----------------
@@ -3170,10 +3188,14 @@ public partial class Game
             if (brace && res.Hit && !Combat.BraceFullDamage(w)) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
             // FUL-1 PROC: the boon actually waived the halving on a landed brace (no-op unless Stats.Enabled)
             if (brace && res.Hit && Combat.BraceFullDamage(w)) Stats.RecordProc("SHK");
-            Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
-            // THE BEAT: the reaction's OWN cue (a descending snap, panned to the watcher) — it used to
-            // play the same rising "over" as SETTING overwatch, so the two beats were indistinguishable.
-            Audio.Cue(Audio.GameEvent.OverwatchFires, panX: Util.Clamp(w.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
+            // P14 THE UNVERIFIED — the reaction's ANNOUNCE (its "OVERWATCH"/"BRACE" pop and its cue)
+            // used to fire HERE, at ENQUEUE, for every watcher on the same frame, while the beat it
+            // announces — the snap-freeze, the reticle closing on the mover, the flash, the tracer —
+            // plays at ShotAnim.OnStart, one reaction at a time. With two watchers the second one's
+            // sound and picture were a whole reaction apart (ShotAnim's reaction TotalAt = 0.68 s),
+            // and a watcher whose shot was later PURGED (the mover died to the first) had already
+            // announced a reaction that never happened. Both now fire from OnStart, so the announce
+            // is on the same frame as the beat it announces. See ShotAnim.OnStart.
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
             // OnStart runs when this reaction becomes the active anim (Started is false),
             // by which point the mover has settled on the reacted-to tile.
@@ -3333,12 +3355,16 @@ public partial class Game
         // FUL-7 vocabulary honesty: a soldier's true death pops "KIA" (DOWN now means the
         // bleeding-out state); enemies keep the generic "DOWN" (they have no bleed-out).
         Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : (d.Team == Team.Player ? "KIA" : "DOWN"), c, 22f);
-        if (d.IsVip) { ShowBanner("VIP DOWN", true, Audio.CueFor(Audio.GameEvent.Reinforce)); Fx.AddShake(13f); }
+        // P14 THE UNVERIFIED: this banner used to fire `Reinforce` — the REINFORCEMENT ALARM, whose
+        // meaning is "more of them are coming". Losing the asset the mission is about is not that.
+        // It is silent now because the beat it announces already speaks: the Casualty cue fires
+        // four lines below, on this same frame, for this same body.
+        if (d.IsVip) { ShowBanner("VIP DOWN", true, Audio.SilentCue); Fx.AddShake(13f); }
         Fx.AddShake(7f);
         AddHitStop(0.1f);
         AddZoomPunch(0.05f);
         AddBloom(0.1f);
-        Audio.Play("death");
+        Audio.Cue(Audio.GameEvent.Casualty, panX: Util.Clamp(d.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
 
         // KIA feedback (3.11): a fallen soldier gets a prominent stamp with their
         // name/nickname, a red screen-flash, and is logged for the debrief.
@@ -3515,10 +3541,12 @@ public partial class Game
         Fx.Burst(d.Pos, c, 18, 200f, 0.6f, 3.5f, true);
         Fx.AddShake(5f);                         // softer than the kill's 7+9
         AddHitStop(0.08f);
-        Audio.Play("death");
+        Audio.Cue(Audio.GameEvent.Casualty, panX: Util.Clamp(d.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
         // review F3 (honesty): the pill counts 3->2->1 and death lands when it would hit 0, so
         // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
-        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true, Audio.CueFor(Audio.GameEvent.Reinforce));
+        // P14: was `Reinforce`, the reinforcement alarm — see the VIP DOWN note in KillUnit. The
+        // Casualty cue for this same body fired a few lines above; the banner adds no second sound.
+        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true, Audio.SilentCue);
         BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
         // C1 VOICE: the squad has bonds and the game has never once acknowledged one. BondPartnerOf
         // returns null unless a REAL bonded squadmate is on their feet, so a bondless soldier can
@@ -3570,7 +3598,8 @@ public partial class Game
         Fx.PopText(t.Pos + new Vector2(0, -30), "STABILIZED", Pal.Good, 20f);
         Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
-        Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: a mend sounds like a mend (was the "reload" cha-chk)
+        // THE BEAT: a mend sounds like a mend (was the "reload" cha-chk). P14: panned to the patient.
+        Audio.Cue(Audio.GameEvent.Mend, panX: Util.Clamp(t.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
         // C1 VOICE: the clutch save. This is the beat the game most needed words for — 146 soldiers
         // went down across 16 measured campaigns and exactly ONE was revived, in total silence.
         Bark(Voice.Beat.Stabilize, Selected, t);
@@ -6561,7 +6590,8 @@ public partial class Game
                     Fx.Flash(ally.Pos, Pal.Good, 22f, 0.16f, 0.5f);
                     Fx.PopText(at, "PATCH", Pal.Good, 16f);
                     ally.Flash = 0.6f;
-                    Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: the medic's own cue (was "reload")
+                    // THE BEAT: the medic's own cue (was "reload"). P14: panned to the patient.
+                    Audio.Cue(Audio.GameEvent.Mend, panX: Util.Clamp(ally.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
                     break;
                 }
                 int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
@@ -6579,7 +6609,8 @@ public partial class Game
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
                 ally.Flash = 0.6f;                          // a brief restorative flash on the patient
-                Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: the medic's own cue (was "reload")
+                // THE BEAT: the medic's own cue (was "reload"). P14: panned to the patient.
+                Audio.Cue(Audio.GameEvent.Mend, panX: Util.Clamp(ally.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
                 break;
         }
         AimMode = false;
@@ -6611,10 +6642,17 @@ public partial class Game
         // initial force (Game.cs SetupMission ramp) — without it a heat-8 SKIRMISH Defend (n=1,
         // grace zeroes every numeric delta) fielded +4-stat waves, contradicting the documented
         // grace contract and pre-empting the skirmish-grace owner decision.
+        // P14: the m1-2 grace is the CAMPAIGN opener's grace (the comment above says so in as many
+        // words: it was added to "pre-empt the skirmish-grace owner decision"). W9 then MADE that
+        // decision — a SKIRMISH/DAILY player dialled the rung and gets no grace — and this line was
+        // not updated, so `_run.Mission == 1` held for every skirmish and every daily and the wave
+        // heat stat was hard-zeroed on all nine rungs. Reading the DEPTH restores the campaign's
+        // behaviour exactly (DepthFor(n) == n there) and gives the modes the dial they asked for.
+        int waveDepth = Mission.DepthFor(_run.Mission);
         int waveHeatStat = Sightline.Heat.StatDelta(_run.HeatLevel);
-        if (_run.Mission <= 1) waveHeatStat = 0;
-        else if (_run.Mission == 2) waveHeatStat /= 2;
-        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true,
+        if (waveDepth <= 1) waveHeatStat = 0;
+        else if (waveDepth == 2) waveHeatStat /= 2;
+        SpawnReinforcements(1 + waveDepth / 2, 12, "WAVE", rich: true, podded: true,
                             heatStat: waveHeatStat);   // FUL-13: waves were heat-blind
     }
 
@@ -6634,7 +6672,10 @@ public partial class Game
     int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false, int heatStat = 0)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
-        int n = _run.Mission;
+        // P14: the wave's tier + stat bump come from the fight's DEPTH. In SKIRMISH/DAILY that was
+        // the literal mission 1 at every rung, so a heat-8 DEFEND wave arrived as a 9 HP / 61 aim
+        // tier-1 body — the same body it arrived as at heat 0 (measured, SIGHTLINE_MODEFORCEPROBE).
+        int n = Mission.DepthFor(_run.Mission);
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
         var waveClasses = new List<string>();   // harness-only composition echo (AutoPlay)
@@ -8057,7 +8098,7 @@ public partial class Game
     /// requisition once ShopDone, so a still-set ArmoryMode was invisible — and OnEscape, which
     /// yields Escape to an open armory, kept yielding it for the rest of the barracks visit. Public
     /// so SETTINGSTEST can leave the shop the way the player does.
-    public void ProceedFromShop() { _shopDone = true; ArmoryMode = false; ArmorySoldier = null; Audio.Play("turn"); }
+    public void ProceedFromShop() { _shopDone = true; ArmoryMode = false; ArmorySoldier = null; Audio.Cue(Audio.GameEvent.Turn); }
 
     void HandleShopClick()
     {
@@ -8439,7 +8480,7 @@ public partial class Game
                            || _run.Squad.Exists(u => !rosterBefore.Contains(u))
                            || _run.Deployed.Count != deployedBefore;
         if (rosterMoved) _run.ReconcileDeployment(rosterBefore);
-        Audio.Play("turn");
+        Audio.Cue(Audio.GameEvent.Turn);   // P14: through the table (see Audio.CueMap.cs)
         _activeEvent = null; _eventNode = null;
         // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its
         // outgoing edges -> the player picks the next real node (the same barracks pass surfaces any

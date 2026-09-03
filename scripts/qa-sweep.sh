@@ -300,7 +300,12 @@ fi
 # Exempting BY NAME (rather than by leaving them outside the regex) is the point: anything new is
 # named by the guard until someone deliberately adds it here.
 #   SIGHTLINE_BANDPROBE - TRUE BAND's choice-band instrument-DESIGN probe (Game.Autopilot.cs:2277).
-_SWEEP_EXEMPT='SIGHTLINE_BANDPROBE'
+#   SIGHTLINE_MODEFORCEPROBE - P14's SKIRMISH/DAILY force-composition report (Game.Modes.cs): the
+#     before/after evidence a change to the single-mission modes has to show. MODETEST asserts.
+#   SIGHTLINE_DAILYSIGPROBE  - P14's daily-signature line (Program.cs), the CHILD half of
+#     MODETEST leg (11)'s cross-process check. MODETEST launches it and does the comparing, so
+#     running it from here would print one hash and gate on nothing.
+_SWEEP_EXEMPT='SIGHTLINE_BANDPROBE|SIGHTLINE_MODEFORCEPROBE|SIGHTLINE_DAILYSIGPROBE'
 _missing=$(comm -23 \
   <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u | grep -vxE "$_SWEEP_EXEMPT") \
   <(grep -vE '^[[:space:]]*#' "$_SELF" | grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' | sort -u | grep -vxE "$_SWEEP_EXEMPT"))

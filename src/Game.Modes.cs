@@ -147,7 +147,7 @@ public partial class Game
         bool start = Raylib.IsKeyPressed(KeyboardKey.Enter)
                      || (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.SkirmStart));
-        if (start) { Audio.Play("turn"); BeginSkirmish(SkirmishObjective, SkirmishHeat, SkirmishFaction); }
+        if (start) { Audio.Cue(Audio.GameEvent.Turn); BeginSkirmish(SkirmishObjective, SkirmishHeat, SkirmishFaction); }
     }
 
     /// Display label for the FACTION dial (null = ANY).
@@ -558,6 +558,133 @@ public partial class Game
         return h.ToString("x8");
     }
 
+    // ── SIGHTLINE_MODEFORCEPROBE — a REPORT, not an assertion ────────────────────────────────────
+    //  P14 THE UNVERIFIED. Findings 9-13 are all "what force does a SKIRMISH or DAILY actually
+    //  field?", and until this hook the only headless answer was MODETEST's one printed headcount
+    //  line. This dumps the whole composition per heat rung so a change to the single-mission
+    //  modes can be shown rather than described: headcount, pod plan, the class histogram, how
+    //  often the ENTIRE opposition is one uniform pod / immobile, the escort asset's statline, the
+    //  Decapitate HVT's bonus, the mid-boss callsign and kit, and one DEFEND wave's composition.
+    //
+    //  It asserts nothing (it is named ...PROBE and sits in the sweep's _SWEEP_EXEMPT list for
+    //  exactly that reason) — the assertions live in MODETEST.
+    public string ModeForceProbe()
+    {
+        var sb = new System.Text.StringBuilder();
+        NoPersist = true;
+        int[] rungs = { 0, 2, 4, 6, 8 };
+        sb.AppendLine("MODEFORCEPROBE: skirmish force composition per heat rung");
+        foreach (int hh in rungs)
+        {
+            // pinned seed + arena, exactly like MODETEST legs 7-8, so the rungs are comparable
+            Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+            BeginSkirmish(Objective.Eliminate, hh);
+            var pods = Enemies.GroupBy(e => e.PodId).OrderBy(g => g.Key).Select(g => g.Count()).ToList();
+            string cls = string.Join(",", Enemies.GroupBy(e => e.Cls).OrderBy(g => g.Key)
+                                                 .Select(g => g.Key + "x" + g.Count()));
+            sb.AppendLine($"  h{hh} pinned: bodies={Enemies.Count} pods=[{string.Join("+", pods)}] {cls}");
+
+            // 40 unpinned builds: how often is the WHOLE force one uniform pod, or entirely immobile?
+            Util.Reseed(9001 + hh);
+            int onePod = 0, allStatic = 0, allOneCls = 0; var seen = new SortedSet<string>();
+            for (int b = 0; b < 40; b++)
+            {
+                BeginSkirmish(Objective.Eliminate, hh);
+                foreach (var e in Enemies) seen.Add(e.Cls);
+                if (Enemies.Select(e => e.PodId).Distinct().Count() == 1) onePod++;
+                if (Enemies.Count > 0 && Enemies.All(e => e.Mobility == 0)) allStatic++;
+                if (Enemies.Select(e => e.Cls).Distinct().Count() == 1) allOneCls++;
+            }
+            sb.AppendLine($"  h{hh} x40:    single-pod {onePod}/40  ALL-IMMOBILE {allStatic}/40  one-class {allOneCls}/40  roster={string.Join("/", seen)}");
+
+            // the escort asset and the HVT — do they scale with the dial the enemy does?
+            Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+            BeginSkirmish(Objective.Escort, hh);
+            string vip = Vip != null ? $"hp={Vip.MaxHp} armor={Vip.Armor}" : "none";
+            Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+            BeginSkirmish(Objective.Decapitate, hh);
+            string hvt = Hvt != null ? $"{Hvt.Name} hp={Hvt.MaxHp} aim={Hvt.Aim} buffed={HvtBuffed}" : "none";
+            sb.AppendLine($"  h{hh} asset:  VIP {vip}   HVT {hvt}");
+
+            // the mid-boss slot (heat >= 4) and its kit
+            if (hh >= 4)
+            {
+                Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+                BeginSkirmish(Objective.Eliminate, hh, Faction.None);
+                var el = Enemies.FirstOrDefault(e => e.Cls == "ELITE");
+                sb.AppendLine(el == null
+                    ? $"  h{hh} midboss: NONE (MIXED)"
+                    : $"  h{hh} midboss: MIXED -> {el.Name} hp={el.MaxHp} rage={el.RagesTwice} shield={el.HasShieldArc} siege={el.HasSiege}");
+            }
+
+            // one DEFEND wave, staged exactly as the objective stages it
+            Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+            BeginSkirmish(Objective.Defend, hh);
+            int before = Enemies.Count;
+            _turnCount = 3;
+            SpawnDefendWave();
+            var wave = Enemies.Skip(before).ToList();
+            sb.AppendLine($"  h{hh} wave:   initial={before} +{wave.Count} [" +
+                          string.Join(" ", wave.Select(e => $"{e.Cls}/{e.MaxHp}hp/{e.Aim}aim")) + "]");
+        }
+        Sightline.Mission.ForcedLayout = -1;
+        Util.Reseed(0);
+        sb.Append("MODEFORCEPROBE: done (report only - no assertion)");
+        return sb.ToString();
+    }
+
+    /// P14 — the DAILY SIGNATURE this process computes, for the cross-process leg. One line, no
+    /// player data (NoPersist), no window beyond the tiny one Program already opened.
+    public string DailySignatureLine()
+    {
+        NoPersist = true;
+        BeginDaily();
+        return DailyStamp + "|" + (int)Combat.MissionFaction + "|" + ForceSignature() + "|" + BoardSignature();
+    }
+
+    /// Run THIS binary again with SIGHTLINE_DAILYSIGPROBE=1 and read back the one line it prints.
+    /// The same shape as SHIPTEST's second launch (Ship.cs) — bounded, and the child writes nothing
+    /// (it never leaves NoPersist), so unlike SHIPTEST it can strand no player data at all.
+    /// Returns null if the child could not be run or printed nothing recognisable.
+    string RunDailySigChild()
+    {
+        try
+        {
+            string exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe)) return null;
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = exe,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                WorkingDirectory = System.IO.Directory.GetCurrentDirectory(),
+            };
+            // a `dotnet run` harness launches through the host: re-launch the managed dll the same way
+            var asm = System.Reflection.Assembly.GetEntryAssembly()?.Location;
+            if (!string.IsNullOrEmpty(asm) && System.IO.Path.GetFileNameWithoutExtension(exe) == "dotnet")
+                psi.ArgumentList.Add(asm);
+            // The child INHERITS this process's environment on purpose — every measurement dial
+            // (MODEDEPTH / OPENERTRIM / PODUNIFORM / BIOMEMECH / ...) must apply to both or the two
+            // processes are not the same game and the comparison is meaningless. Program's
+            // DAILYSIGPROBE branch is the FIRST hook branch it reaches, so an inherited
+            // SIGHTLINE_MODETEST cannot make the child re-run this suite.
+            psi.Environment["SIGHTLINE_DAILYSIGPROBE"] = "1";
+            // the child must derive the SAME day: pass this process's resolved stamp explicitly.
+            psi.Environment["SIGHTLINE_DAILY"] = DailyStamp.ToString();
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return null;
+            string outp = proc.StandardOutput.ReadToEnd();
+            proc.StandardError.ReadToEnd();
+            if (!proc.WaitForExit(20000)) { try { proc.Kill(true); } catch { } return null; }
+            foreach (var line in outp.Split('\n'))
+                if (line.StartsWith("DAILYSIG:", StringComparison.Ordinal))
+                    return line.Substring("DAILYSIG:".Length).Trim();
+            return null;
+        }
+        catch { return null; }
+    }
+
     // ── MODETEST self-test (SIGHTLINE_MODETEST) ──────────────────────────────────────────────────
     // Asserts: (1) the same daily seed reproduces identical objective+arena+heat (twice); (2) a
     // skirmish single-mission end sets Phase (Win/Lose), NOT Barracks; (3) the meta daily stamp/best
@@ -755,7 +882,17 @@ public partial class Game
                 fails.Add($"skirmishRosterShallow(classes={string.Join("/", seen.OrderBy(c => c))})");
             else if (specialists.Count < 6)
                 fails.Add($"skirmishRosterNarrow({specialists.Count}: {string.Join("/", specialists)})");
-            if (podOf3Builds == 0) fails.Add("skirmishNeverPodsOf3");
+            // P14 moved this leg off heat 0. The pod PLAN is a function of the headcount: at 4 bodies
+            // PodPlan deals {2,2} and a pod of 3 cannot form, so "no pod of 3 at heat 0" is now a
+            // property of the arithmetic, not evidence that podsOf3 is off. It is asserted at heat 4
+            // (7 bodies -> the pod trim -> 6 -> {3,3}) instead, which is what the leg was ever for.
+            int podOf3AtH4 = 0;
+            for (int b = 0; b < 20; b++)
+            {
+                BeginSkirmish(Objective.Eliminate, 4);
+                if (Enemies.GroupBy(e => e.PodId).Any(gp => gp.Count() == 3)) podOf3AtH4++;
+            }
+            if (podOf3AtH4 == 0) fails.Add("skirmishNeverPodsOf3(h4)");
             if (coldElites != 0) fails.Add($"skirmishColdMidBoss({coldElites})");   // heat < 4 fields no named elite
             // heat >= 4: EXACTLY one mid-boss (Cls ELITE) in every build — the slot is i==0, not a roll
             foreach (int hh in new[] { 4, Sightline.Heat.Max })
@@ -773,12 +910,22 @@ public partial class Game
             int b0 = Bodies(0), b4 = Bodies(4), b8 = Bodies(Sightline.Heat.Max);
             Sightline.Mission.ForcedLayout = -1;
             // LEAD REVIEW: the headcount is PINNED, because the roster opening moved it and that must
-            // stay a declared fact. Pre-wave this seed + arena fielded 4/6/8 at h0/h4/h8; pods of 3
+            // stay a declared fact. Pre-P4 this seed + arena fielded 4/6/8 at h0/h4/h8; pods of 3
             // bring FUL-6's trim with them (count-1, the pod package as measured in the campaign),
-            // so it is 3/5/7 now. The lead tried skipping the trim for the modes and the pod of 3
-            // stopped forming at h0 (four bodies plan as 2+2) — the pod and the trim are one
-            // mechanic, so the trim stays and this line makes the next drift visible.
-            if (b0 != 3 || b4 != 5 || b8 != 7) fails.Add($"skirmishHeadcountMoved({b0}/{b4}/{b8}, expected 3/5/7)");
+            // so P4 declared it 3/5/7.
+            //
+            // P14 MOVES IT BACK TO 4/6/8, DELIBERATELY, and this is the body of that decision.
+            // The second body P4's note is describing is not the pod trim — it is `Mission.OpenerTrim`,
+            // the CAMPAIGN cold-opener grace, which was still firing in both single-mission modes at
+            // every rung. W9 had already made the call for the sibling grace ("a SKIRMISH or DAILY
+            // player explicitly DIALLED the rung; there is no green squad to protect and no campaign
+            // ahead to front-load anxiety into") and did not carry it here. So the trim is now gated
+            // on Mission.DepthFor rather than on the raw mission number, the pod trim is untouched,
+            // and the modes are back on the headcount they fielded before P4 — a RESTORATION, not an
+            // escalation. It also removes the finding that sent this wave here: at 3 bodies the force
+            // was ONE pod 40/40 builds and ONE archetype 38/40 (SIGHTLINE_MODEFORCEPROBE); at 4 it is
+            // 0/40 and 4/40.
+            if (b0 != 4 || b4 != 6 || b8 != 8) fails.Add($"skirmishHeadcountMoved({b0}/{b4}/{b8}, expected 4/6/8)");
             Console.WriteLine($"MODETEST skirmish h0 roster over 50 builds: {string.Join("/", seen.OrderBy(c => c))}  pods-of-3 in {podOf3Builds}/50  bodies h0={b0} h4={b4} h8={b8}");
 
             // (9) THE DAILY HAS A FACTION, AND THE SAME STAMP DEALS THE SAME FORCE.
@@ -849,10 +996,101 @@ public partial class Game
                     if (!skIn.Contains(manual)) fails.Add($"keyTable:skirmishSetupRowOmits[{key}]as'{manual}'");
                     if (!skAct.Contains(what)) fails.Add($"keyTable:skirmishSetupActionOmits'{what}'");
                 }
+
+            // ── (12) P14 THE UNVERIFIED — EVERY CONSUMER OF "HOW DEEP IS THIS FIGHT" ANSWERS THE DIAL.
+            //  P4 threaded a `rosterTier` into Mission.Build and legs (7)-(8) above pin what it bought:
+            //  the force's SIZE and its ARCHETYPES. Four other consumers of the mission number were
+            //  left reading the literal 1 these modes pass, and nothing here could see it. Measured
+            //  pre-fix with SIGHTLINE_MODEFORCEPROBE and each one asserted below:
+            //    * the ESCORT/RESCUE asset  — MakeVip(1): 16 HP / 0 armor from heat 0 to heat 8
+            //    * the DECAPITATE HVT bonus — Combat.HvtHpBonus(1): a flat +7 HP on every rung
+            //    * the DEFEND reinforcement wave — built at tier 1 with its heat stat hard-zeroed by
+            //      the CAMPAIGN's m1-2 grace, so a heat-8 wave was the heat-0 wave (9 HP / 61 aim)
+            //    * Mission.OpenerTrim — leg (8)'s headcount pin now carries that one
+            //  and the fifth assertion is the one the finding was about: a mode force is never
+            //  ENTIRELY IMMOBILE (three SENTRYs and nothing else was 7.5% of heat-0 skirmishes).
+            NoPersist = true;
+            (int hp, int armor) VipAt(int heat)
+            {
+                Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+                BeginSkirmish(Objective.Escort, heat);
+                return Vip == null ? (0, 0) : (Vip.MaxHp, Vip.Armor);
+            }
+            var vCold = VipAt(0); var vHot = VipAt(Sightline.Heat.Max);
+            if (vCold.hp <= 0) fails.Add("skirmishEscortNoVip");
+            else if (vHot.hp <= vCold.hp || vHot.armor < vCold.armor)
+                fails.Add($"skirmishVipDialInert(h0 {vCold.hp}hp/{vCold.armor}armor h{Sightline.Heat.Max} {vHot.hp}hp/{vHot.armor}armor)");
+
+            int HvtBonusAt(int heat)
+            {
+                Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+                BeginSkirmish(Objective.Decapitate, heat);
+                return Hvt == null ? -1 : Combat.HvtHpBonus(_run.Mission);
+            }
+            int hbCold = HvtBonusAt(0), hbHot = HvtBonusAt(Sightline.Heat.Max);
+            if (hbCold < 0 || hbHot < 0) fails.Add("skirmishDecapNoHvt");
+            else if (hbHot <= hbCold) fails.Add($"skirmishHvtDialInert(h0 +{hbCold} h{Sightline.Heat.Max} +{hbHot})");
+
+            // the DEFEND wave: bodies AND their statline must both move with the dial
+            (int n, int hp) WaveAt(int heat)
+            {
+                Util.Reseed(4242); Sightline.Mission.ForcedLayout = 5;
+                BeginSkirmish(Objective.Defend, heat);
+                int before = Enemies.Count;
+                _turnCount = 3;
+                SpawnDefendWave();
+                var w = Enemies.Skip(before).ToList();
+                return (w.Count, w.Count == 0 ? 0 : w.Max(e => e.MaxHp));
+            }
+            var wCold = WaveAt(0); var wHot = WaveAt(Sightline.Heat.Max);
+            if (wCold.n == 0 || wHot.n == 0) fails.Add($"skirmishDefendNoWave(h0 {wCold.n} h{Sightline.Heat.Max} {wHot.n})");
+            else if (wHot.hp <= wCold.hp)
+                fails.Add($"skirmishDefendWaveDialInert(h0 {wCold.n}x{wCold.hp}hp h{Sightline.Heat.Max} {wHot.n}x{wHot.hp}hp)");
+
+            // never an entirely immobile opposition (the SENTRY-only fight)
+            int allStatic = 0, singlePod = 0;
+            foreach (int hh in new[] { 0, 2 })
+            {
+                Util.Reseed(7700 + hh);
+                for (int b = 0; b < 40; b++)
+                {
+                    BeginSkirmish(Objective.Eliminate, hh);
+                    if (Enemies.Count > 0 && Enemies.All(e => e.Mobility == 0)) allStatic++;
+                    if (Enemies.Count > 1 && Enemies.Select(e => e.PodId).Distinct().Count() == 1) singlePod++;
+                }
+            }
+            if (allStatic != 0) fails.Add($"skirmishAllImmobileForce({allStatic}/80)");
+            if (singlePod != 0) fails.Add($"skirmishSinglePodForce({singlePod}/80)");
+            Sightline.Mission.ForcedLayout = -1;
+
+            // and the CAMPAIGN is untouched by the whole funnel: outside the single-mission modes
+            // Mission.ModeDepth is -1, so DepthFor is the identity on the mission number.
+            Sightline.Mission.ModeDepth = -1;
+            for (int m = 1; m <= Run.MaxMissions; m++)
+                if (Sightline.Mission.DepthFor(m) != m) fails.Add($"depthFunnelNotIdentityInCampaign(m{m})");
+
+            // ── (13) P14 — THE DAILY'S CROSS-PROCESS CONTRACT, ASSERTED RATHER THAN PRINTED.
+            //  Leg (9) proves the same stamp deals the same force TWICE IN ONE PROCESS and then
+            //  PRINTS "(must match across processes)". Nobody was comparing it: the sweep runs
+            //  MODETEST once. A same-process check cannot see a force that folds in anything a
+            //  fresh process would compute differently, which is the entire failure mode the daily
+            //  has. So this leg runs the real thing — a CHILD PROCESS of this same binary with
+            //  SIGHTLINE_DAILYSIGPROBE=1, which prints nothing but the signature — and compares.
+            //  It touches no player data (the child sets NoPersist), and it is bounded (20 s).
+            if (Environment.GetEnvironmentVariable("SIGHTLINE_DAILYSIGPROBE") != "1")
+            {
+                NoPersist = true;
+                BeginDaily();
+                string mine = DailyStamp + "|" + (int)Combat.MissionFaction + "|" + ForceSignature() + "|" + BoardSignature();
+                string child = RunDailySigChild();
+                if (child == null) fails.Add("dailyCrossProcessChildFailed");
+                else if (child != mine) fails.Add($"dailyCrossProcessForceDiffers(self={mine} child={child})");
+                else Console.WriteLine($"MODETEST daily cross-process: {mine} reproduced in a second process");
+            }
         }
         catch (Exception e) { return "MODETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched; a skirmish fields the full roster, pods of 3 and one mid-boss from heat 4; the daily has a named faction and the same stamp deals the same force; BOTH end-card doors to the main menu clear an ended run's mode, so the intro's DEPLOY plate opens a campaign and not the drill; the FIELD MANUAL's SKIRMISH SETUP row names every key that screen's own legend advertises)"
+            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched; a skirmish fields the full roster, pods of 3 from heat 4 and one mid-boss from heat 4, at a pinned 4/6/8 bodies; the escort asset, the HVT bonus and the DEFEND wave all answer the dial too; no mode force is a single pod or entirely immobile; the depth funnel is the identity in the campaign; and the same daily stamp fields the same force IN A SECOND PROCESS; BOTH end-card doors to the main menu clear an ended run's mode, so the intro's DEPLOY plate opens a campaign and not the drill; and the FIELD MANUAL's SKIRMISH SETUP row names every key that screen's own legend advertises)"
             : "MODETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

@@ -187,7 +187,12 @@ public static class Combat
 
     /// The HP surcharge a non-ELITE HVT takes at this mission depth. Floored at 0 so a negative
     /// depth coefficient can flatten the buff but never make the HVT weaker than its own archetype.
-    public static int HvtHpBonus(int mission) => Math.Max(0, HvtHpBonusBase + HvtHpBonusPerMission * mission);
+    // P14 THE UNVERIFIED: through Mission.DepthFor, so the HVT of a heat-8 SKIRMISH/DAILY is not
+    // priced at mission 1. Those modes always pass `_run.Mission == 1`, which pinned the bonus at
+    // a flat +7 HP on every rung while the body under it grew with the dial (measured, pre-fix:
+    // SIGHTLINE_MODEFORCEPROBE). Campaign-inert — DepthFor(n) == n whenever ModeDepth is -1.
+    public static int HvtHpBonus(int mission) =>
+        Math.Max(0, HvtHpBonusBase + HvtHpBonusPerMission * Mission.DepthFor(mission));
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
     // MISSION-STATIC LIFECYCLE (PROGRAM TEMPO wave 4). The five per-mission combat statics above
