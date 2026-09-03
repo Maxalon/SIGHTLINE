@@ -161,6 +161,10 @@ export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
 > Two file names that mean "a self-test died holding your data", and what to do:
 > `<name>.json.selftest-stash` — **your profile, whole**; rename it back over the original.
 > `<name>.json.tmp` — a write that never landed; the original is untouched, so just delete it.
+> A THIRD name in that directory is not debris: `crash-<utc>-<pid>.txt` is a **crash report** (P11),
+> the file a player attaches to a bug report. Newest 5 kept, 64 KB each, 3 per launch. It is written
+> by the real handler, never by a self-test — `SIGHTLINE_CRASHTEST` redirects to a temp dir and
+> proves it did (leg g diffs the real directory before/after). docs/DISTRIBUTION.md §6.
 
 Run autoplay a few times (RNG varies); confirm **no exceptions and no TIMEOUT**. The
 contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. **W9 THE REPAIR made
@@ -315,6 +319,14 @@ src/
   Stats.cs      SIGHTLINE_BALANCE analytics harness
   Ship.cs       C6: the DISTRIBUTABLE's contract — version stamp (Ship.Version, off the assembly),
                 the bundled-file manifest (Ship.RequiredFiles) and SIGHTLINE_SHIPTEST
+  Crash.cs      P11: the top-level crash handler. `Program.Main` is now nothing but
+                `Crash.Guard(...)` around `RealMain` (+ Crash.Install for background-thread
+                throws), so **the "MUST STAY FIRST IN Main" SHIPCHILD branch is now first in
+                `RealMain`** — keep it there. Writes crash-<utc>-<pid>.txt into the PLAYER-DATA
+                dir via SaveGame.WriteAtomic; exits 70. docs/DISTRIBUTION.md §6.
+  Crash.SelfTest.cs  SIGHTLINE_CRASHTEST — the only self-test here that deliberately THROWS. It
+                redirects Crash.DirOverride to a temp dir, so unlike SHIPTEST it can strand
+                nothing; also runs in publish.sh against the published binary.
 scripts/dev-setup.sh   sandbox setup
 scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST); counts DERIVED
 scripts/publish.sh     hand-run distributable build + persistence re-proof
@@ -409,6 +421,12 @@ docs/screenshot.png    README image
   `.csproj` copy list; `SIGHTLINE_SHIPTEST` resolves the manifest strictly against
   `AppContext.BaseDirectory` and `scripts/publish.sh` runs it against the published directory,
   which is the only place that leg is testing the artifact a player receives.
+- **A `win-*` RID publishes as `WinExe`** (P11) so a Windows player gets no console window behind
+  the game — measured on the artifact, by the PE `Subsystem` byte (3 -> 2), which `publish.sh` now
+  checks and fails on. It is scoped to Windows RIDs: no RID is set for the Linux build, the Debug
+  build or the harness, so stdout there is untouched. The half that is NOT verified (does the
+  harness still print on Windows) is a declared-open item in `docs/DISTRIBUTION.md` §7 with the
+  exact command that closes it — do not claim it.
 - **Publish with `bash scripts/publish.sh`, never a bare `dotnet publish`.** The old line here
   ("never publish with `-p:PublishTrimmed=true`") was **stale and actively harmful** — trimmed is
   the recommended default and has been since F1 fixed the hazard (source-generated JSON contexts +

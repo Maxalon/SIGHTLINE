@@ -5,7 +5,31 @@ namespace Sightline;
 
 public static class Program
 {
+    /// PARALLAX P11 "THE CRASH FILE" — the whole process, inside one handler.
+    ///
+    /// `Main` is deliberately nothing but this. Everything the game does now runs inside
+    /// `Crash.Guard`, so an exception that would previously have printed a stack trace to a stdout
+    /// nobody reads (C6's open item: "there is nothing to attach") instead writes a report the
+    /// player can send, into the same directory their save already lives in, and exits cleanly
+    /// with 70 (EX_SOFTWARE) rather than as an unhandled-exception abort.
+    ///
+    /// `Crash.Install` additionally covers what `Guard` structurally cannot: a throw on a
+    /// background thread or an unobserved task, which unwinds past Main entirely.
+    ///
+    /// SCOPE, STATED HONESTLY (docs/DISTRIBUTION.md §6): this covers MANAGED exceptions. A raylib
+    /// ABI mismatch that faults inside native code kills the process without unwinding, and no
+    /// handler here runs. The load-time family — missing / wrong-architecture / wrong-version
+    /// native library — IS catchable, and is turned into plain English by `Crash.NativeDiagnosis`
+    /// instead of a P/Invoke stack trace.
     public static void Main()
+    {
+        Crash.AttachWindowsConsole();   // no-op off Windows; see Crash.AttachWindowsConsole
+        Crash.Install();
+        int rc = Crash.Guard("game loop", RealMain);
+        if (rc != 0) Environment.Exit(rc);
+    }
+
+    static void RealMain()
     {
         // ══ C6: THE SECOND-LAUNCH CHILD. THIS BRANCH MUST STAY FIRST IN Main. ══════════════════
         // SIGHTLINE_SHIPTEST forks this same binary with SIGHTLINE_SHIPCHILD=1 so that "quit the
@@ -301,6 +325,29 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "shiptest");
             Console.WriteLine(Ship.SelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+
+        // PARALLAX P11 "THE CRASH FILE" — SIGHTLINE_CRASHTEST=1: the crash reporter's own contract.
+        // Same family as SHIPTEST (both are about the artifact a player receives rather than the
+        // game model), and the only self-test in this project that deliberately THROWS.
+        //
+        // It stages a REAL GAME first and publishes it as Crash.Live, exactly the way the normal
+        // launch below does, because the half of the report that is worth anything is the half
+        // that says what was happening — and a test with no game running would assert the empty
+        // shape and pass over a state block that never worked. Tiny window: `new Game()` +
+        // StartMission do tile math. NoPersist is set BEFORE StartMission so the staging cannot
+        // touch a real profile (house rule), and the report itself goes to a temp directory —
+        // see CrashTest.SelfTest's isolation note.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CRASHTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "crashtest");
+            var cg = new Game { NoPersist = true };
+            cg.StartMission(1);
+            Crash.Live = cg;
+            Console.WriteLine(CrashTest.SelfTest());
+            Crash.Live = null;
             Raylib.CloseWindow();
             return;
         }
@@ -1095,6 +1142,10 @@ public static class Program
 
         var game = new Game();
         game.NoPersist = shot || autoplay;   // the harness never reads/writes the save file
+        // P11 THE CRASH FILE: publish the live game so a crash report can say what was happening
+        // (mode / phase / mission / heat / turn / roster). Read defensively by Crash.Compose —
+        // at crash time this object is by definition in a state nobody designed.
+        Crash.Live = game;
         // SIGHTLINE_CONTRACT=ironveterans|highstakes|spearhead|mrc|lgd (FUL-10) : force a run contract
         // on the headless run (honored only under NoPersist, since the draft never runs there); None otherwise.
         game.ForcedContract = ContractDef.Parse(Environment.GetEnvironmentVariable("SIGHTLINE_CONTRACT"));
