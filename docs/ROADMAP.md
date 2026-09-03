@@ -446,8 +446,12 @@ ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), ver
       is logged to `_missionKia` → inserted at the top of the barracks debrief in
       `EnterBarracks` (`KIA  NAME`). **Final-blow kill-cam:** `Game.IsMissionEndingKill`
       (last hostile on Eliminate / squad wipe / lost VIP) punches up the deciding death
-      with extra `HitStop` (0.4s slow-mo) + `AddZoomPunch` + shake. Per-mission state
-      cleared in `SetupMission`. Verify: `SIGHTLINE_KIA=1` screenshot + autoplay clean.
+      with `AddZoomPunch` + shake and — since THE BEAT (2026-09-03) — a real 0.45 s SLOW-MO
+      window (`Game.KillCamWindow` / `KillCamScale`, the zoom held). The line here used to read
+      "extra `HitStop` (0.4s slow-mo)": that was a hard freeze in which nothing moved and the zoom
+      spent itself unseen; FEELTEST leg d FAILed on it with 24 still frames and the zoom at 1%.
+      Per-mission state cleared in `SetupMission`. Verify: `SIGHTLINE_FEELTEST=1`,
+      `SIGHTLINE_KILLCAM=750 SIGHTLINE_SHOT=750 SIGHTLINE_SHOTSEQ=60` filmstrip, autoplay clean.
 
 - [x] **3.12 Onboarding tutorial.** DONE. A **non-blocking** 4-step callout on the
       first-ever run (mission 1 only). `Game.TutStep`/`TutPrompts` + flags `_tutMoved`/
@@ -2763,7 +2767,8 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       commit durations, not measured on a mixed path). Only a diagonal commit of ~0.170 s closes it,
       and that is sim timing.
 - [ ] **Film a vault UNDER overwatch.** The reaction fires with the figure at the apex; unjudged.
-- [ ] **Kill-cam / reaction beat / explosion cue** — pillar-2 items this wave deliberately left alone.
+- [x] **Kill-cam / reaction beat / explosion cue** — pillar-2 items this wave deliberately left alone.
+      Built by WAVE "THE BEAT" (2026-09-03), below.
 
 ### WAVE "THE MODES GET THE BESTIARY" (2026-09-02, base `3f3e478`, PARALLAX P4, details in DEVLOG §THE MODES GET THE BESTIARY)
 
@@ -2823,3 +2828,24 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
 - [ ] **h0 and h4 are the OUT rungs on the pinned instrument** (46.9 on the floor; 20.0, −2.0). A
       base-difficulty lever, one at a time, CRN-paired on 16 slot sets — never 8 again.
 
+
+### WAVE "THE BEAT" (2026-09-03, base `23f0bc1`, details in DEVLOG §THE BEAT)
+
+- [x] **The kill-cam is slow-mo, not a freeze.** `Game.TimeScale` / `KillCamWindow` (0.45 s) /
+      `KillCamScale` (0.25): Fx, the anim pump, unit flinch/recoil and the scorch fade run on the scaled
+      clock and the zoom-punch is HELD for the window. Pre-fix FEELTEST leg d: 24/27 still frames, zoom
+      at 1% by frame 24. Post-fix: 0/27, ratio 0.36, zoom 100%. AutoPlay keeps the 0.4 s HitStop —
+      seeds 101/202/303 give identical `frame=`/`turns=` against `23f0bc1`.
+- [x] **A reaction shot has its own beat.** `ShotAnim.Reaction` (unread for two programs) now: 0.26 s
+      wind-up, 0.06 s snap-freeze, a 44 px reticle on the MOVER, a flash, a flinch, the `react` cue.
+      Plain shot 0.14 → 0.34 → 0.52 unchanged; windless unchanged (FEELTEST leg e).
+- [x] **Explosions, flashes, smoke and mends sound like themselves.** `boom` / `flash` / `smoke` /
+      `heal` / `react` recipes; grenade / barrel / siege → boom (incendiary −6 dB), flashbang → flash,
+      smoke → smoke, HealAnim / STABILIZE / PATCH / REVIVE → heal. AUDIOGATE 28 cues, spread 11.0 dB,
+      `boom+death+st_kill` stack −5.0 dBFS / 0 clipped. AUDIO CHECK lists them (FIELD group).
+- [ ] **A vault under overwatch with the new reaction beat** — the reaction now freezes the frame with
+      the vaulter at its apex; nobody has filmed it.
+- [ ] **The kill-cam on a SQUAD WIPE / lost VIP.** Leg d stages the last-hostile case; the other two
+      arms of `IsMissionEndingKill` take the same window but were not photographed.
+- [ ] **Part B — the cue map** (one `over` carrying ~13 meanings, `reload` ~11, `turn` on every banner):
+      see DEVLOG §THE BEAT part B for what landed.

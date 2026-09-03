@@ -299,9 +299,21 @@ public class ShotAnim : Anim
     // charges) -> FIRE (muzzle/tracer/impact land) -> SETTLE. The wind-up is kept short so
     // play doesn't drag; under AutoPlay it's skipped (Anim Total is unchanged either way).
     const float WindUp = 0.10f;
-    const float Fire = WindUp + 0.04f;   // muzzle/tracer/Apply fire just after the wind-up
-    const float BeamEnd = 0.34f;
-    const float Total = 0.52f;
+    // THE BEAT — a REACTION winds up longer. `Reaction` was set by Game.OnUnitEnteredTile and read
+    // by no presentation code: a reaction fired on the same 0.10 s wind-up as any shot, with no
+    // hit-stop and no cue of its own, so "caught in the open" looked like any other shot. Now the
+    // mover gets a snap-freeze, a bigger team-tinted reticle, a flash and a flinch (OnStart), and the
+    // round leaves at ~0.30 s instead of 0.14. Windless (AutoPlay) collapses all of it.
+    public const float ReactWindUp  = 0.26f;
+    public const float ReactHitStop = 0.06f;
+    float _windUp = WindUp;
+    float Fire => _windUp + 0.04f;       // muzzle/tracer/Apply fire just after the wind-up
+    const float Total = 0.52f;           // the windless / plain-shot length (unchanged since 3.11)
+    // the beam and the settle are laid out FROM the fire beat, so a longer wind-up shifts them
+    // instead of eating them: plain 0.14 -> 0.34 -> 0.52 exactly as before; reaction 0.30 -> 0.50
+    // -> 0.68. Windless keeps Total so the harness's frame counts do not move.
+    float BeamEndAt => FireAt + 0.20f;
+    float TotalAt => _windless ? Total : FireAt + 0.38f;
     float _t;
     bool _applied;
     Vector2 _impact;
@@ -313,6 +325,10 @@ public class ShotAnim : Anim
     // effective fire time — under AutoPlay the wind-up anticipation is dropped so headless
     // runs don't slow (the visual beat is purely for a human watching).
     float FireAt => _windless ? 0.04f : Fire;
+    /// THE BEAT — harness reads (FEELTEST leg e): when the round leaves and when the anim ends,
+    /// as this instance will actually play them (OnStart decides windless / reaction).
+    public float FireAtSecs => FireAt;
+    public float TotalSecs => TotalAt;
 
     public override void OnStart(Game g)
     {
@@ -322,10 +338,25 @@ public class ShotAnim : Anim
         _windless = g.AutoPlay;
         if (!_windless)
         {
-            // anticipation: a reticle snaps onto the target over the wind-up beat, tinted to
-            // the firer's team, so the eye is drawn to the impact point before the round flies.
             Color ret = A.Team == Team.Player ? Pal.Friend : Pal.Foe;
-            g.Fx.ReticleSnap(D.Pos, ret, 26f, 13f, 0.7f, WindUp + 0.02f);
+            if (Reaction)
+            {
+                // THE BEAT — CAUGHT IN THE OPEN. The reaction is the one shot the player did not
+                // order (or did not expect): a short snap-freeze the instant the watcher answers, a
+                // bigger reticle closing on the MOVER, a flash of the watcher's colour on the mover
+                // and a flinch as it realises — then the longer wind-up plays out.
+                _windUp = ReactWindUp;
+                g.AddHitStop(ReactHitStop);
+                g.Fx.ReticleSnap(D.Pos, ret, 44f, 16f, 0.9f, _windUp + 0.02f);
+                g.Fx.Flash(D.Pos, ret, 24f, 0.18f, 0.5f);
+                D.FlinchAnim = MathF.Max(D.FlinchAnim, 0.6f);
+            }
+            else
+            {
+                // anticipation: a reticle snaps onto the target over the wind-up beat, tinted to
+                // the firer's team, so the eye is drawn to the impact point before the round flies.
+                g.Fx.ReticleSnap(D.Pos, ret, 26f, 13f, 0.7f, WindUp + 0.02f);
+            }
         }
     }
 
@@ -343,7 +374,7 @@ public class ShotAnim : Anim
             _applied = true;
             Apply(g);
         }
-        return _t >= Total;
+        return _t >= TotalAt;
     }
 
     void Apply(Game g)
@@ -535,9 +566,10 @@ public class ShotAnim : Anim
             Raylib.DrawCircleV(mouth, gr * 0.45f, Raylib.Fade(Pal.RGBA(255, 250, 235), 0.20f + 0.5f * w));
         }
         // recoil nudge handled via facing; draw tracer beam during/after fire
-        if (_t >= fireAt && _t <= BeamEnd)
+        float beamEnd = BeamEndAt;
+        if (_t >= fireAt && _t <= beamEnd)
         {
-            float k = 1f - (_t - fireAt) / (BeamEnd - fireAt);
+            float k = 1f - (_t - fireAt) / (beamEnd - fireAt);
             var dir = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
             Vector2 start = A.Pos + dir * 16f;
             // graze fires a dimmer beam than a solid hit (reinforces the lighter "GRAZE" read);
@@ -645,8 +677,7 @@ public class GrenadeAnim : Anim
     void Explode(Game g)
     {
         float pan = Util.Clamp(_to.X / (float)Cfg.ScreenW, 0f, 1f);
-        Audio.Play("crit", 0.05f, pan);
-        Audio.Play("death", 0.04f, pan);
+        Audio.Play("boom", 0f, pan);   // THE BEAT: a real explosion cue (was "crit"+"death" stacked)
         // a brief additive flash of LIGHT at the detonation core (the bloom haloes it)
         g.Fx.Flash(_to, Pal.RGBA(255, 226, 180), (Radius + 0.5f) * Cfg.Tile * 0.5f, 0.16f, 0.6f);
         g.Fx.AddShake(12f);
@@ -863,7 +894,7 @@ public class SmokeAnim : LobAnim
 
     protected override void Effect(Game g)
     {
-        Audio.Play("hunker");
+        Audio.Play("smoke");   // THE BEAT: a soft hiss (was the "hunker" thunk)
         g.Grid.AddSmoke(Tx, Ty, Radius, Turns);
         for (int x = Tx - Radius; x <= Tx + Radius; x++)
             for (int y = Ty - Radius; y <= Ty + Radius; y++)
@@ -883,7 +914,7 @@ public class FlashAnim : LobAnim
 
     protected override void Effect(Game g)
     {
-        Audio.Play("crit");
+        Audio.Play("flash");   // THE BEAT: a flashbang pings, it does not "crit"
         g.Fx.AddShake(7f);
         g.AddHitStop(0.04f);
         g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 250, 230), 34, 320f, 0.4f, 5f, true);
@@ -915,7 +946,7 @@ public class IncendiaryAnim : LobAnim
 
     protected override void Effect(Game g)
     {
-        Audio.Play("crit");
+        Audio.Play("boom", gainDb: -6f);   // THE BEAT: a smaller explosion (was "crit")
         g.Fx.AddShake(6f);
         g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 160, 70), 30, 300f, 0.5f, 5f, true);
         // lay the fire field. W10 PYROMANIACS boon: a SQUAD-thrown incendiary burns +2 turns
@@ -977,7 +1008,7 @@ public class HealAnim : Anim
                 int gained = Patient.Hp - before;
                 g.Fx.Burst(Patient.Pos, Pal.Good, 14, 150f, 0.6f, 3.5f, true);
                 g.Fx.PopText(Patient.Pos + new Vector2(0, -26), "+" + gained, Pal.Good, 24f);
-                Audio.Play("reload");
+                Audio.Play("heal");   // THE BEAT: a mend sounds like a mend (was "reload")
             }
         }
         return _t >= Total;

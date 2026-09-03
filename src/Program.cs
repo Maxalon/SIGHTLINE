@@ -1277,6 +1277,13 @@ public static class Program
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAPHOVER"), out int mapHover);   // C3: hover map choice k
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
+        // THE BEAT: SIGHTLINE_KILLCAM=<frame> — at that frame (before Update) the last hostile falls
+        // by Game.DebugKillCam, arming the LIVE kill-cam window (AutoPlay off, so it is the slow-mo a
+        // player sees, not autoplay's 0.4 s freeze). Pair with SIGHTLINE_SHOT=<same frame> and
+        // SIGHTLINE_SHOTSEQ=<n> to film the window; the mission-1 briefing covers the board until
+        // ~frame 700, so use 750+. Shot-only, so nothing measured moves.
+        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_KILLCAM"), out int killCamFrame);
+        if (!shot) killCamFrame = 0;
         // RESONANCE C1: SIGHTLINE_SHOTONBARK=1 — do not shoot a fixed frame; wait until a soldier
         // BARK has actually landed in the combat log during live play, then shoot 40 frames later
         // (long enough for the line to settle into the ledger, short enough that it is still one of
@@ -1333,6 +1340,7 @@ public static class Program
             }
             if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
                                                                // delta from the Xvfb pointer clears it otherwise)
+            if (killCamFrame > 0 && frame == killCamFrame) game.DebugKillCam();   // THE BEAT: film the live kill-cam
             game.Update(dt);
             Audio.UpdateMusic(dt);
 

@@ -1983,6 +1983,30 @@ public partial class Game
         if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.WasDownedThisMission = true; /* FUL-7: stage the TRUE death (skip the bleed-out) */ v.Hp = 0; KillUnit(v); }
     }
 
+    /// THE BEAT (screenshot/filmstrip only, SIGHTLINE_KILLCAM=<frame>): the last hostile falls to a
+    /// REAL ShotAnim from the first soldier (a forced lethal crit), exactly the path a mission-ending
+    /// kill takes in play — the blow lands at the shot's fire beat (0.14 s in), KillUnit arms the
+    /// kill-cam from inside the active anim, and the anim's remaining 0.38 s at KillCamScale keeps
+    /// the board on screen for the whole window before the queue drains and the mission ends. (A
+    /// bare KillUnit here reached CheckEnd the same frame and the requisition card covered the
+    /// window — that is not what a player sees.) The earlier hostiles are removed QUIETLY (their FX
+    /// cleared) so the frame shows one shatter. Presentation only; never runs under AutoPlay.
+    public void DebugKillCam()
+    {
+        if (AutoPlay) return;
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        var shooter = Players.FirstOrDefault(p => p.Alive && !p.IsVip && !p.Downed);
+        if (foes.Count == 0 || shooter == null) return;
+        for (int i = 0; i < foes.Count - 1; i++) { foes[i].Hp = 0; KillUnit(foes[i]); }
+        Fx.Particles.Clear(); Fx.Texts.Clear(); Fx.Rings.Clear(); Fx.Lights.Clear(); Scorches.Clear();
+        HitStop = 0f;
+        var last = foes[foes.Count - 1];
+        last.Alert = AlertLevel.Alert;               // a dormant "?" would shatter as a silhouette; ActivatePod
+                                                     // would queue the reveal-scatter AHEAD of the shot
+        var res = new ShotResult { Hit = true, Crit = true, Damage = last.Hp + 4 };
+        Enqueue(new ShotAnim(shooter, last, res), Team.Player);
+    }
+
     /// Harness hook (screenshot only, SIGHTLINE_SUMMARY): stage a finished run and jump to the
     /// VICTORY run-summary card so the rich payoff (surviving roster + MVP + KIA memorial +
     /// totals + confetti) can be inspected. Presentation only; never runs in normal play.
@@ -9478,11 +9502,107 @@ public partial class Game
         if (sC < Fx.TextSep) fails.Add($"twinNumbersOverprint({sC:0.0}px)");
         if (!twinsDiverge) fails.Add("twinNumbersSameArc");
 
+        // ---- (d) THE BEAT: the mission-ending KILL-CAM is slow-mo, not a freeze ----
+        // A REAL mission (StartMission: the kill-cam reads the objective and the live roster), the
+        // REAL Game.Update stepped at 1/60 with AutoPlay OFF (a human is watching), one death-FX
+        // particle followed BY REFERENCE across 30 frames. Pre-fix: KillUnit's mission-ending arm
+        // added HitStop(0.4) and Update returned before Fx.Update ran, so the particle sat still for
+        // 24 frames while the zoom-punch — decayed ABOVE that return — spent itself inside the freeze.
+        // The 'slow-mo kill-cam' FEATURES.md and ROADMAP 3.11 described was a still frame.
+        {
+            var g = new Game { NoPersist = true, ForcedObjective = Objective.Eliminate };
+            Util.Reseed(70032);
+            g.StartMission(1);
+            g.BriefLines = null;
+            var foes = g.Enemies.Where(e => e.Alive).ToList();
+            for (int i = 0; i < foes.Count - 1; i++) { foes[i].Hp = 0; g.KillUnit(foes[i]); }
+            g.Fx.Particles.Clear(); g.HitStop = 0f;
+            var lastFoe = foes[foes.Count - 1];
+            lastFoe.Hp = 0; g.KillUnit(lastFoe);                 // the deciding death: the field is clear
+            float peakPulse = g.CamPulse;
+            // KillUnit's shatter is Shockwave(ring) + 18 DirSparks + 30 spark Burst + 16 slow Burst:
+            // follow the first particle of the SLOW burst (life >= 0.48 s, drag 3) so it outlives the window.
+            var p = g.Fx.Particles.Count > 48 ? g.Fx.Particles[48] : (g.Fx.Particles.Count > 0 ? g.Fx.Particles[0] : null);
+            var kd = new List<float>();
+            float pulse24 = 0f;
+            Vector2 prev = p != null ? p.Pos : Vector2.Zero;
+            for (int f = 1; f <= 30; f++)
+            {
+                g.Update(1f / 60f);
+                if (p != null) { kd.Add(Vector2.Distance(p.Pos, prev)); prev = p.Pos; }
+                if (f == 24) pulse24 = g.CamPulse;
+            }
+            int winFrames = (int)MathF.Round(Game.KillCamWindow * 60f);   // 27 at 60 Hz
+            int still = kd.Take(winFrames).Count(d => d <= 0.001f);
+            float inWin = kd.Take(winFrames).DefaultIfEmpty(0f).Average();
+            float after = kd.Skip(winFrames).DefaultIfEmpty(0f).Average();
+            float ratio = after > 0f ? inWin / after : 0f;
+            float pulsePct = peakPulse > 0f ? pulse24 / peakPulse * 100f : 0f;
+            detail.Append($"; killcam: window {Game.KillCamWindow:0.00}s at x{Game.KillCamScale:0.00}, tracked particle still-frames {still}/{winFrames}, " +
+                          $"px/frame in-window {inWin:0.00} vs after {after:0.00} (ratio {ratio:0.00}), camPulse peak {peakPulse:0.000} -> frame 24 {pulse24:0.000} ({pulsePct:0}%), phase {g.Phase}");
+            if (p == null) fails.Add("killcamNoParticle");
+            if (peakPulse <= 0f) fails.Add("killcamNoZoomPunch");
+            if (still > 0) fails.Add($"killcamStillFrames({still})");
+            // the window runs at ~KillCamScale of the post-window rate (drag makes it a touch higher)
+            if (ratio < 0.18f || ratio > 0.45f) fails.Add($"killcamSlowmoRatio({ratio:0.00})");
+            if (peakPulse > 0f && pulsePct < 50f) fails.Add($"killcamZoomSpent({pulsePct:0}%<50%)");
+        }
+
+        // ---- (e) THE BEAT: an overwatch REACTION has its own beat ----
+        // ShotAnim.Reaction was set by OnUnitEnteredTile and read by no presentation code: a
+        // reaction fired on the same 0.10 s wind-up as any shot, with no hit-stop and no cue of its
+        // own. Constructed exactly as the reaction site does, OnStart'ed with AutoPlay OFF; the
+        // plain shot and the windless (AutoPlay) reaction are the two controls.
+        {
+            Stage();
+            var w2 = MkP(3, 5); Players.Add(w2);
+            var mv = new Unit { Name = "E", Cls = "GRUNT", Team = Team.Enemy, X = 8, Y = 5, Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            mv.Ammo = mv.Weapon.Clip; mv.SyncPos(); mv.BeginTurn(); Enemies.Add(mv);
+            var res = new ShotResult { Hit = true, Damage = 2 };
+            AutoPlay = false; HitStop = 0f;
+            int retBefore = Fx.Reticles.Count, lightBefore = Fx.Lights.Count;
+            var react = new ShotAnim(w2, mv, res, reaction: true);
+            react.OnStart(this);
+            float fireR = react.FireAtSecs, totR = react.TotalSecs, hsR = HitStop, flinchR = mv.FlinchAnim;
+            float retR = Fx.Reticles.Count > retBefore ? Fx.Reticles[Fx.Reticles.Count - 1].R0 : 0f;
+            int lightsR = Fx.Lights.Count - lightBefore;
+            HitStop = 0f; mv.FlinchAnim = 0f;
+            var plain = new ShotAnim(w2, mv, res);
+            plain.OnStart(this);
+            float fireP = plain.FireAtSecs, totP = plain.TotalSecs, hsP = HitStop;
+            AutoPlay = true; HitStop = 0f;
+            var auto = new ShotAnim(w2, mv, res, reaction: true);
+            auto.OnStart(this);
+            float fireA = auto.FireAtSecs, totA = auto.TotalSecs, hsA = HitStop;
+            AutoPlay = false; HitStop = 0f;
+            detail.Append($"; reaction: fires at {fireR:0.00}s (plain {fireP:0.00}s, autoplay {fireA:0.00}s), total {totR:0.00}s (plain {totP:0.00}s, autoplay {totA:0.00}s), " +
+                          $"hit-stop {hsR:0.00}s (plain {hsP:0.00}s, autoplay {hsA:0.00}s), reticle r0 {retR:0}px, mover lights {lightsR}, mover flinch {flinchR:0.00}");
+            if (fireR < 0.28f || fireR > 0.34f) fails.Add($"reactionWindUp({fireR:0.00}s)");
+            if (MathF.Abs(fireP - 0.14f) > 0.005f) fails.Add($"plainShotWindUpMoved({fireP:0.00}s)");
+            if (hsR <= 0f) fails.Add("reactionNoHitStop");
+            if (hsP != 0f) fails.Add($"plainShotHitStop({hsP:0.00}s)");
+            if (MathF.Abs(totP - 0.52f) > 0.005f) fails.Add($"plainShotTotalMoved({totP:0.00}s)");
+            if (MathF.Abs(fireA - 0.04f) > 0.005f || MathF.Abs(totA - 0.52f) > 0.005f || hsA != 0f) fails.Add($"autoplayReactionNotCollapsed({fireA:0.00}/{totA:0.00}/{hsA:0.00})");
+        }
+
+        // ---- (f) THE BEAT: the borrowed cues have recipes of their own ----
+        // grenade/barrel/siege played "crit"+"death", flashbang/incendiary "crit", smoke "hunker",
+        // heal/stabilize/patch "reload", a reaction the same "over" as SETTING overwatch. The routing
+        // is asserted by grep (DEVLOG §THE BEAT); this leg pins that the recipes exist to route to.
+        {
+            string[] beatCues = { "react", "boom", "flash", "heal", "smoke" };
+            var missing = beatCues.Where(id => !Audio.HasCue(id)).ToList();
+            detail.Append($"; cues: {string.Join(" ", beatCues.Select(id => id + (Audio.HasCue(id) ? "+" : "-")))}");
+            if (missing.Count > 0) fails.Add($"cueMissing({string.Join(",", missing)})");
+        }
+
         Console.WriteLine("FEELTEST: " + detail);
         return fails.Count == 0
             ? "FEELTEST: PASS (6-tile walk: mid-path speed never dips under " + MoveStepAnim.FeelMinSpeedRatio.ToString("0.00") +
               "x its max, zero stall frames, one lean kick, 48-frame cadence pinned; VAULT lifts >= " + MoveStepAnim.FeelVaultLiftMin.ToString("0") +
-              "px over the cover and lands on the tile centre; stacked floating text keeps >= " + Fx.TextSep.ToString("0") + "px separation and twin numbers arc apart)"
+              "px over the cover and lands on the tile centre; stacked floating text keeps >= " + Fx.TextSep.ToString("0") + "px separation and twin numbers arc apart; " +
+              "kill-cam: no still frame in the " + Game.KillCamWindow.ToString("0.00") + "s window, FX at ~x" + Game.KillCamScale.ToString("0.00") + " with the zoom held; " +
+              "a reaction shot winds up ~0.30s with its own hit-stop while a plain shot and the autoplay path are unchanged; react/boom/flash/heal/smoke are registered cues)"
             : "FEELTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
