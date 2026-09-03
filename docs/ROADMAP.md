@@ -2256,14 +2256,18 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
 ### Found by CONTOUR C3 while running its own gate — fixed, and worth knowing
 
-- [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
+- [x] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
       **20 of 960 in both C3 arms and 20 of 960 in the L3 archive** — identical, because it is a
       property of the worlds, not of any lever. Every published ladder figure sits on top of it and
       no wave has ever mentioned it. Somebody should find out what those campaigns are doing.
       **Corrected (THE HEAT PIN AND L5): on L4 (base `7315425`) it is 16 of 960 = 1.67%, not 2.1%
       (RECRUIT 7 / h0 3 / h2 3 / h4 3 / h6 0 / h8 0). The guard now logs WHICH arm fired
       (`STALEMATE-MISSION` / `STALEMATE-RUN`) with the mission, objective and run-turns on the row —
-      L5's README says what the campaigns were doing.**
+      L5's README says what the campaigns were doing: **27/1,920 = 1.41% on L5, ALL on the mission arm
+      (the run arm fired 0 times in 5,440 campaigns); RECRUIT 4.4%, the bot's Escort/Evac finishing line
+      late in a long run (Escort 10, Eliminate 9, Evac 4, Rescue 3, Sabotage 1; missions 3-4 hold 18 of
+      27), plus one sloppy-policy mission-1 Eliminate world (slot 46) that deadlocks at h0, h2 and h4.
+      Ex-stalemate no heat rung moves more than 0.6. Sized and located; the fix is autopilot work.**
 - [x] **`scripts/qa-sweep.sh` had no `exit` statement.** It accumulated `_fail` / `_autofail` and
       ended on an `echo`, so `SWEEP-EXIT` was 0 whatever happened. Every green-sweep claim dated
       before C3 quotes the exit code of an echo. Wired, and `AIIDLETEST` — the one self-test line
@@ -2674,7 +2678,7 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
       mean high-water rung is **1.50** (the old wave arm at rung ≥2 rarely fired anyway).
       This is instrument work, so it must land BEFORE any wave that claims to have priced turtling.
 
-- [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
+- [x] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
       20/960 in both of C3's arms and in L3. It has never been mentioned by any wave. It is not a
       C3 defect; it is a property of the instrument that every ladder in this repository inherits.
       **Corrected (THE HEAT PIN AND L5): 16/960 = 1.67% on L4, split by arm since this wave — see the
@@ -2684,8 +2688,10 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 
 ## PROGRAM CONTOUR — CLOSED. THE COMPOSED-TREE LADDER (L4) AND WHAT IT LEAVES OPEN.
 
-All six waves merged; **L4 is the ladder of record** (`docs/measurements/l4/`, base `7315425`,
-960 campaigns, 48/48 chunks asserted). Read its README before quoting any rung.
+All six waves merged; L4 (`docs/measurements/l4/`, base `7315425`, 960 campaigns, 48/48 chunks
+asserted) was the ladder of record until **L5 superseded it** (`docs/measurements/l5/`, base
+`7180374`, heat PINNED, 16 slot sets, 1,920 campaigns, 96/96 asserted; L5's bridge reproduces L4
+960/960). Read L5's README before quoting any rung; the L4 rows are NOT comparable with L5 at h0/h8.
 
 **What the composition bought.** The flat middle this program opened on is **gone**: steps of
 18.8 / 20.0 / 11.2 / 11.2 / 6.2, monotone, nothing flat, where the pre-CONTOUR tree had `h4→h6` at
@@ -2709,11 +2715,20 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       dialled, and its effect is the largest single term. **One lever, CRN-paired, then re-measure
       the whole ladder** — because L4 is precisely the evidence that levers do not compose the way
       their solo measurements predict.
+      **Re-pointed by L5 (pinned, 16 slot sets, base `7180374`): h6 reads 13.1 and h8 8.1, both IN band;
+      the OUT rungs are now h0 (46.9, on its floor) and h4 (20.0, −2.0, 0.68 cluster-SE). The pin is
+      worth +1.0 pooled and the rest of L4's "collapse" was its slot draw (L4's 8 sets read h8 4.4,
+      the 8 new ones 11.9). `Heat.MidTooth` is still the dial: main effect +7.58 ± 0.96 at h6.**
 
-- [ ] **RESOLVE THE INTERACTION TERM, or stop citing it.** Single-lever removals sum to +3.6
+- [x] **RESOLVE THE INTERACTION TERM, or stop citing it.** Single-lever removals sum to +3.6
       against a joint +9.4. The apparent +5.8 interaction would be the most interesting result of
       the round and it is **not resolved**: chunk-paired t(7)=+2.05, p≈0.08, per-slot deltas
       `+25 +5 −10 +20 0 +25 +10 0`. It needs more slot sets, not more prose.
+      **DONE (THE HEAT PIN AND L5, h6 2^3 factorial, 2,560 campaigns on 16 slot sets): NOT resolved
+      by the pre-registered criterion — Q = +5.94 ± 5.25, t(15)=+1.13, CI [−5.2, +17.1] — and it
+      cannot be, cheaply (~70 clusters). What IS resolved: MIDTOOTH main effect +7.58 ± 0.96 (t=7.9),
+      AIDECLINE and BIOMEMECH main effects zero, no two-way term over |t|=1.8. Stop citing +5.8; quote
+      the averaged terms. `docs/measurements/l5/README.md`.**
 
 - [ ] **The three items C3's and C1's reviews put ahead of everything else still stand**, and two
       of them are instrument work that must land BEFORE the balance round above or it re-inherits
@@ -2795,7 +2810,16 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
 - [x] **Inert with the pin off**, by measurement: base-tree chunk vs this tree with `SIGHTLINE_HEATPIN=0`
       differs in EXACTLY the five new keys at h0-b0 and h4-b10 (`l5/inert.py`); with the pin ON every
       campaign that took no heat-raising arm is identical (38/38, `l5/pincheck.py`).
-- [ ] **L5 — the PINNED ladder of record** (part B): 6 rungs x 16 slot sets, the bridge row, the
-      cluster tool, the stalemate split, the README.
-- [ ] **RESOLVE THE INTERACTION TERM** (part B): the h6 2^3 factorial, chunk-paired on 16 clusters.
+- [x] **L5 — the PINNED ladder of record** (base `7180374`, 6 rungs x 16 slot sets, 1,920 campaigns,
+      96/96 asserted, LEAK-CHECK PASS): RECRUIT 70.9 / h0 46.9 / h2 32.8 / h4 20.0 / h6 13.1 / h8 8.1,
+      monotone, four of six in band (h0 on its floor, h4 −2.0). The bridge (same binary,
+      `SIGHTLINE_HEATPIN=0`, L4's 8 sets) reproduces L4 **960/960**; the pin is +1.0 pooled (z=2.04)
+      and exactly 0.0 at h8. Split-half: L4's 8 sets vs the 8 new ones differ by +15.0 at h0 (t=2.58)
+      and −7.5 at h8 — L4 and L5 are not comparable at those rungs. CLAUDE.md's ladder block is L5.
+- [x] **RESOLVE THE INTERACTION TERM** — see the ticked item under PROGRAM CONTOUR — CLOSED: not
+      resolvable at any affordable n; the averaged effects are, and they say MIDTOOTH and additive.
+- [ ] **The stalemate floor is autopilot work now that it is located**: the Escort/Evac finishing
+      line late in a RECRUIT run (14/320) and the slot-46 sloppy mission-1 Eliminate deadlock.
+- [ ] **h0 and h4 are the OUT rungs on the pinned instrument** (46.9 on the floor; 20.0, −2.0). A
+      base-difficulty lever, one at a time, CRN-paired on 16 slot sets — never 8 again.
 

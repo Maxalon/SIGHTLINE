@@ -12338,3 +12338,85 @@ checked, `runs=20` asserted (`c1/run_chunk.sh`, all three layers). Base tree = `
   `heatRaisingPicks` under the pin says how often it happened.
 * **The stalemate floor is named, not explained** — part B reads the `stalemates[]` rows.
 * **No count written into CLAUDE.md.** The sweep derives its own.
+
+## Part B — L5, the bridge, the split-half, the factorial (base `7180374`, 272 chunks, 5,440 campaigns)
+
+Everything below is in `docs/measurements/l5/README.md` with every table in full; this is the
+account. Snapshot `runbin/L5` from the part-A commit; every chunk through `c1/run_chunk.sh`;
+**272/272 asserted `runs=20`, zero `BAD`** (`L5-chunks.txt`, `L5bridge-chunks.txt`,
+`L5fac-chunks.txt`); `rows.py --check` on all 272: `ROWS-CHECK: PASS`.
+
+### The ladder — pinned, 16 slot sets, n=320 per rung
+
+| rung | L5 % | binom SE | cluster SE | band | verdict |
+|---|---|---|---|---|---|
+| RECRUIT | 70.9 | 2.54 | 2.93 | 67–83 | IN (+3.9) |
+| h0 | 46.9 | 2.79 | 3.41 | 47–63 | OUT −0.1 (0.04 cluster-SE) |
+| h2 | 32.8 | 2.62 | 3.09 | 32–48 | IN (+0.8) |
+| h4 | 20.0 | 2.24 | 2.96 | 22–38 | OUT −2.0 (0.68 cluster-SE) |
+| h6 | 13.1 | 1.89 | 2.32 | 12–28 | IN (+1.1) |
+| h8 | 8.1 | 1.53 | 1.98 | 5–15 | IN (+3.1) |
+
+Monotone at every step (24.1 / 14.1 / 12.8 / 6.9 / 5.0), four of six in band, neither OUT a
+measured breach. `LEAK-CHECK: PASS` — 96/96 chunks pinned, 0 of 6,749 missions off-rung; the bot
+still took a heat-raising arm 144 times (the pin nulls the outcome, not the choice).
+
+### The bridge — L4 reproduced 960/960, and the pin priced
+
+Same binary, `SIGHTLINE_HEATPIN=0`, L4's 8 slot sets: **48/48 chunks and 960/960 (slot, policy)
+outcomes identical to the L4 archive** — RECRUIT 71.9 / h0 53.1 / h2 33.1 / h4 21.9 / h6 10.6 / h8
+4.4 to the decimal. So the CRN chain is intact from `7315425` through PARALLAX P1–P4, SETTINGS
+EVERYWHERE, THE STRIDE, THE MODES GET THE BESTIARY and part A. The leak L4 carried: campaigns raised
+16/17/16/13/12/**0** and missions off-rung 29/30/32/25/18/**0** by rung.
+
+CRN-paired on those 8 bases (160 pairs per rung), pinned minus unpinned: RECRUIT **+2.5** (4 vs 0
+discordant, z=2.00), h0 +1.2, h2 +1.9, h4 −1.2, h6 +1.9 (3 vs 0), **h8 0.0 with zero discordant
+pairs** — heat 8 cannot leak, and the instrument now shows it. Pooled: 32.5% → 33.5%, **+1.04, 17 vs
+7 discordant, McNemar z = +2.04.** A rung's worth of leak is a point or two.
+
+### The split-half — the LEVEL is the slot draw
+
+Both halves pinned: L4's 8 sets vs the 8 new ones read h0 **54.4 vs 39.4** (+15.0, SE 5.8,
+**t = +2.58**) and h8 **4.4 vs 11.9** (−7.5, t = −2.09); RECRUIT +6.9, h2 +4.4, h4 +1.2, h6 −1.2.
+L4's "h0 in band by +6.1" and "h8 under its floor" were one draw of eight clusters each. **The L4
+rows are not comparable with L5 at h0 or h8, and a rung is sixteen slot sets now** — CLAUDE.md's
+ladder block says both. (C2 found the same heterogeneity inside L3's space at h2, p = 0.005.)
+
+### The factorial — Q not resolved; the averaged effects are
+
+h6, MIDTOOTH{0,3} × AIDECLINE{0,1} × BIOMEMECH{0,1}, 8 arms × 16 clusters × 20 = 2,560 campaigns,
+pinned. The composed arm `m3a1b1` (dials set to their defaults explicitly) reproduces the ladder's h6
+chunks **16/16 byte-for-byte minus `harness{}`**. C3's KILLTREADMILL is not a factor: on L4's archive
+its removal changed play (0/8 chunks identical) but not one of 160 outcomes at h6.
+
+* **Q = joint − Σ single removals = +5.94 ± 5.25 (cluster SE), t(15) = +1.13, 95% CI [−5.2, +17.1]
+  → NOT RESOLVED** by the pre-registered criterion (|t| ≥ 2.3 or a CI excluding +5.8). The point
+  estimate reproduces L4's +5.8; the sum of three conditional contrasts carries SE 6.3 by itself, so
+  resolving Q to ±2.5 needs ~70 clusters (~1,400 campaigns per arm).
+* **Resolved:** MIDTOOTH main effect **+7.58 ± 0.96, t = +7.91**, positive in 14/16 clusters and
+  never negative (m0a1b1 = 20.0, L3's h6 to the decimal on a different slot space); AIDECLINE
+  −0.08 ± 1.52 and BIOMEMECH +0.39 ± 1.35; A×B +2.27 ± 1.27 (t 1.78) the largest interaction;
+  M×A +0.70, M×B −0.70, M×A×B −0.70. The composition is additive within ±3 and MIDTOOTH-dominated.
+* L4's single removals reproduce as the conditional contrasts: s_M +6.88 (L4 +6.2), s_A −3.75
+  (L4 −3.8), s_B −1.88 (L4 +1.2), joint +7.19 (L4 +9.4).
+
+ROADMAP's item is ticked as "stop citing it": +5.8 is not wrong, it is unresolvable, and the terms it
+stood in for are resolved.
+
+### The stalemate split — what the floor is
+
+Across all 5,440 campaigns of the round: **the RUN arm fired zero times.** L5: 27/1,920 = 1.41%, all
+`STALEMATE-MISSION`, `runTurns` 51–79 at the stall against a 150 cap; RECRUIT 14/320 = 4.4%, h0 4,
+h2 2, h4 4, h6 1, h8 2; the bridge's 16/960 = 1.67% is L4's 16 exactly. Objectives Escort 10,
+Eliminate 9, Evac 4, Rescue 3, Sabotage 1; missions 3–4 hold 18 of 27. Slot 46 sloppy stalls on
+mission-1 Eliminate at h0, h2 and h4 alike (a deadlock in the sloppy policy on that opener); slot 74
+greedy on m3 Eliminate at h2/h4. Ex-stalemate, no heat rung moves more than 0.6 (RECRUIT ~3).
+
+### Gates and what part B did NOT do
+
+Part B changes no source: docs and `docs/measurements/l5/` only, so the part-A gates stand
+(Release 0/0, `qa-sweep.sh --full` EXIT=0, PAIRTEST PASS). **No lever shipped.** Q is not resolved
+and the README says what it would cost. L4 and L5 are not made comparable at h0/h8 — the bridge
+shows L4's outcomes reproduce, the split-half shows its draw was atypical there; both stand. No
+camping policy, no opener re-tune, no single-policy batch measured. The `/home/user/wt/heat-base`
+worktree used for the inertness chunks was removed at the end of the wave.
