@@ -80,6 +80,7 @@ public static partial class SaveGame
     {
         get
         {
+            if (ExistsPin.HasValue) return ExistsPin.Value;
             try
             {
                 var fi = new FileInfo(FilePath);
@@ -92,6 +93,14 @@ public static partial class SaveGame
             catch { return false; }
         }
     }
+
+    /// THE FRONT DOOR — harness-only PIN for `Exists`. The intro draws CONTINUE RUN off this
+    /// predicate, so a self-test that wants to audit the menu WITH and WITHOUT a save had two
+    /// choices: write a real save.json into the player-data directory (what the SIGHTLINE_INTRO
+    /// screenshot does, behind a stash) or lie to the one reader. This is the lie, and it reaches
+    /// nothing on disk: Load/Save/Delete ignore it, `ActIntro("continue")` still has to Load. Null
+    /// in every normal run; SETTINGSTEST and FITTEST set it and restore null in their finally.
+    public static bool? ExistsPin;
 
     /// Test-only path exposure (MODETEST abandon leg preserves/restores any real save.json,
     /// mirroring MetaPathPublic). Not used by gameplay code.
