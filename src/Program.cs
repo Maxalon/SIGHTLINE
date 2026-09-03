@@ -399,6 +399,16 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_KEYTABLE=1 : THE FRONT DOOR — print README's controls tables (markdown) from
+        // Hud.VerbTable + Hud.KeyTable + Hud.IntroDoors / Game.IntroKeys. HAND-RUN, not a test: it
+        // prints no verdict, and its name deliberately ends in neither TEST nor GATE so the sweep's
+        // COVERAGE GUARD does not count it as an unrun self-test. Paste the output over the block
+        // between the `KEYTABLE:BEGIN` / `KEYTABLE:END` markers in README.md.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYTABLE") == "1")
+        {
+            Console.Write(Hud.KeyTableMarkdown());
+            return;
+        }
         // SIGHTLINE_SETTINGSTEST=1 : SETTINGS EVERYWHERE — the settings card is reachable from the
         // INTRO and the BARRACKS, not just a fight (ROADMAP "Left open by C5"). Draws the intro and
         // the card to publish their rects, so it needs a context + fonts; stashes display.json.
@@ -1184,6 +1194,19 @@ public static class Program
         {
             Display.UiScaleIdx = Math.Clamp(uiIdx, 0, Display.UiScaleLevels.Length - 1);
             Display.ApplyUiScale();
+        }
+        // THE FRONT DOOR (shot only): SIGHTLINE_MOUSEPARK=x,y parks the cursor for the whole shot,
+        // so a hover-driven surface can be photographed AT REST. Xvfb spawns the pointer at the
+        // screen centre, which on the intro is DEPLOY SQUAD, so every menu shot so far photographed
+        // that door's hover caption in the shared slot rather than the resting line. Inert unset.
+        {
+            string park = Environment.GetEnvironmentVariable("SIGHTLINE_MOUSEPARK");
+            if (shot && !string.IsNullOrEmpty(park))
+            {
+                var xy = park.Split(',');
+                if (xy.Length == 2 && int.TryParse(xy[0], out int px) && int.TryParse(xy[1], out int py))
+                    game.DebugMousePark = new System.Numerics.Vector2(px, py);
+            }
         }
         string longMoveEnv = Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE");
         bool longMove = shot && (longMoveEnv == "1" || longMoveEnv == "vault");   // THE STRIDE: =vault films a leap instead

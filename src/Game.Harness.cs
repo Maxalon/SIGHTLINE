@@ -7283,6 +7283,7 @@ public partial class Game
         var seen = new Dictionary<string, string>();     // frame fingerprint -> the screen that drew it
         var clips = new List<string>();                  // strings the renderer ellipsized away
         var floors = new List<string>();                 // shrink-to-fit calls that hit their floor
+        bool savedTrain = Display.TrainingSeen;          // the INTRO cases stage the profile flags
 
         int n = 0;
         foreach (var sc in ScreenCases)
@@ -7359,6 +7360,7 @@ public partial class Game
                 Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.ClipProbe = null; Hud.FloorProbe = null;
                 Hud.AnimPin = -1f; Hud.TimePin = -1.0; Renderer.TimePin = -1.0;
                 Hud.MousePin = new System.Numerics.Vector2(float.NaN, float.NaN);
+                SaveGame.ExistsPin = null; Display.TrainingSeen = savedTrain;
             }
             n++;
 
@@ -7525,7 +7527,15 @@ public partial class Game
 
     static readonly ScreenCase[] ScreenCases =
     {
-        new ScreenCase("INTRO",        g => { }),
+        // THE FRONT DOOR: the menu is PROFILE-DRIVEN (a save adds CONTINUE RUN and widens the primary
+        // pair; a cold profile swaps the resting caption; the DIFFICULTY card's copy follows the dialled
+        // and earned rungs), so one INTRO case audited one state chosen by the machine's .xdg. Pinned:
+        // a returning player with no save, the cold first launch (RECRUIT default + nudge), a save
+        // present, and the card at a mid-rung ceiling.
+        new ScreenCase("INTRO",        g => { SaveGame.ExistsPin = false; Display.TrainingSeen = true; }),
+        new ScreenCase("INTRO-COLD",   g => { SaveGame.ExistsPin = false; Display.TrainingSeen = false; g.FirstTimeProfile = true; g.PendingHeat = Sightline.Heat.Recruit; }),
+        new ScreenCase("INTRO-SAVE",   g => { SaveGame.ExistsPin = true;  Display.TrainingSeen = true; }),
+        new ScreenCase("INTRO-HEAT",   g => { SaveGame.ExistsPin = false; Display.TrainingSeen = true; g.PendingHeat = 3; g.UnlockedHeat = 3; }),
         new ScreenCase("MISSION",      g => { g.StartMission(1); g.BriefLines = null; }),
         new ScreenCase("PAUSE",        g => { g.StartMission(1); g.Paused = true; }),
         // SETTINGS EVERYWHERE (review round 1): the card in its two new homes, plus each home with
@@ -7979,6 +7989,160 @@ public partial class Game
                 g.Update(1f / 60f);
                 if (g.Paused) fails.Add("autoplayUpdateOpenedCard");
             }
+
+            // ---- (E) THE FRONT DOOR — what the first screen SAYS, read at the draw call --------
+            // Five contracts, each at all four shipped text sizes, with and without a save:
+            //  1. no intro door is drawn without a key hint (DEPLOY SQUAD had none while Enter opened
+            //     it — nine chips on the screen and none on the primary verb), and every chip names
+            //     the key Game.IntroKeys dispatches on, read off the plate it was painted on;
+            //  2. no chip paints into its own label and both stay on the plate (the [K]/[U]
+            //     collision C6 recorded at 120% and left), and CONTINUE / DEPLOY do not overlap;
+            //  3. the resting caption on a COLD profile is the TRAINING OP nudge (Hud.ColdNudge),
+            //     on the canvas and clear of the DIFFICULTY card; it yields to the old line once
+            //     the drill is seen or a save exists;
+            //  4. the DIFFICULTY card paints rung 0 as the word STANDARD on RECRUIT's 26px path,
+            //     never as a bare 40px "0", and states the unlock rule (Hud.HeatUnlockRule) in
+            //     place of "MAX UNLOCKED: n" whenever the dialled rung is the earned ceiling;
+            //  5. every string painted inside the card's band ends inside the card — C6's finding
+            //     2 (the level-0 hint ran to x≈1266 against a card edge at 1239 at 120%).
+            {
+                bool savedTrain = Display.TrainingSeen;
+                var ink = new List<(string t, Rectangle box, float size)>();
+                var plates = new List<(string label, Rectangle plate, Rectangle box)>();
+                Rectangle Box(string t) { foreach (var i in ink) if (i.t == t) return i.box; return new Rectangle(0, 0, 0, 0); }
+                bool Painted(string t, float size = -1f)
+                { foreach (var i in ink) if (i.t == t && (size < 0f || MathF.Abs(i.size - size) < 0.5f)) return true; return false; }
+                bool PaintedStarting(string p) { foreach (var i in ink) if (i.t.StartsWith(p)) return true; return false; }
+                static bool Inside(Rectangle b, Rectangle r, float slack)
+                    => b.X >= r.X - slack && b.Y >= r.Y - slack && b.X + b.Width <= r.X + r.Width + slack && b.Y + b.Height <= r.Y + r.Height + slack;
+                static bool SameRect(Rectangle a, Rectangle b)
+                    => MathF.Abs(a.X - b.X) < 0.5f && MathF.Abs(a.Y - b.Y) < 0.5f && MathF.Abs(a.Width - b.Width) < 0.5f && MathF.Abs(a.Height - b.Height) < 0.5f;
+                void Capture(Game g)
+                {
+                    ink.Clear(); plates.Clear();
+                    Cfg.InkProbe = (t, pos, box, size, alpha) =>
+                        { if (!string.IsNullOrEmpty(t) && alpha >= 0.06f) ink.Add((t, new Rectangle(pos.X, pos.Y, box.X, box.Y), size)); };
+                    Hud.PlateProbe = (l, p, b) => plates.Add((l, p, b));
+                    Hud.AnimPin = 1f;                       // the SETTLED frame: every plate at rest
+                    try { Frame(g); }
+                    finally { Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+                }
+                string Chip(Rectangle plate)
+                { foreach (var p in plates) if (SameRect(p.plate, plate) && p.label.StartsWith("[")) return p.label; return null; }
+                // the DIFFICULTY card, as painted for (level, unlocked)
+                void CardReads(string where, int level, int unlocked)
+                {
+                    var card = Hud.HeatCard;
+                    if (card.Width < 100) { fails.Add(where + ":noDifficultyCard"); return; }
+                    if (level == 0)
+                    {
+                        if (!Painted("STANDARD", 26f)) fails.Add(where + ":rung0NotNamedSTANDARD");
+                        if (Painted("0", 40f)) fails.Add(where + ":rung0PaintedAsBareZero");
+                    }
+                    else if (level < 0) { if (!Painted("RECRUIT", 26f)) fails.Add(where + ":recruitNotNamed"); }
+                    else if (!Painted(level.ToString(), 40f)) fails.Add(where + ":rungNumberMissing:" + level);
+                    string rule = Hud.HeatUnlockRule(level, unlocked);
+                    if (rule != null)
+                    {
+                        if (!Painted(rule)) fails.Add(where + ":unlockRuleMissing:'" + rule + "'");
+                        if (PaintedStarting("MAX UNLOCKED")) fails.Add(where + ":maxUnlockedStillPainted");
+                        if (level == 0 && Painted(rule) && Painted("< RECRUIT"))
+                        {
+                            var rb = Box(rule); var lb = Box("< RECRUIT");
+                            if (rb.X + rb.Width + 6f > lb.X) fails.Add(where + ":unlockRuleHitsRecruitPointer:" + (int)(rb.X + rb.Width - lb.X) + "px");
+                        }
+                    }
+                    else if (!Painted($"MAX UNLOCKED: {unlocked}")) fails.Add(where + ":maxUnlockedMissing:" + unlocked);
+                    foreach (var i in ink)
+                    {
+                        if (i.box.X < card.X || i.box.Y < card.Y || i.box.Y >= card.Y + card.Height) continue;
+                        if (i.box.X + i.box.Width > card.X + card.Width - 2f)
+                            fails.Add(where + ":runsOffCard:'" + Short(i.t) + "'by" + (int)(i.box.X + i.box.Width - (card.X + card.Width)) + "px");
+                    }
+                }
+                try
+                {
+                    foreach (bool save in new[] { false, true })
+                        for (int si = 0; si < Display.UiScaleLevels.Length; si++)
+                        {
+                            Display.UiScaleIdx = si; Display.ApplyUiScale();
+                            string where = $"intro{(save ? "+save" : "")}@{(int)(Display.UiScale * 100)}%";
+                            SaveGame.ExistsPin = save; Display.TrainingSeen = false;
+                            var g = new Game { NoPersist = true };
+                            int nullBefore = Hud.IntroNullHintDraws;
+                            Capture(g);
+                            int nullDraws = Hud.IntroNullHintDraws - nullBefore;
+                            if (nullDraws != 0) fails.Add(where + ":doorsWithoutKeyHint:" + nullDraws);
+                            // (1) every chip names its dispatch key, read off the door's own plate
+                            foreach (var (id, key) in Game.IntroKeys)
+                            {
+                                if (id == "continue" && !save) continue;
+                                string chip = Chip(Game.IntroRect(id)), want = "[" + Hud.KeyName(key) + "]";
+                                if (chip != want) fails.Add(where + ":" + id + ":chipReads:" + (chip ?? "nothing") + ":want:" + want);
+                            }
+                            { string chip = Chip(Hud.OverlayBtn); if (chip != "[ENTER]") fails.Add(where + ":deploy:chipReads:" + (chip ?? "nothing")); }
+                            if (save && Overlaps(Hud.OverlayBtn, Hud.OverlayBtn2)) fails.Add(where + ":continueOverlapsDeploy");
+                            // (2) chip vs label on every plate: clear of each other, both on the plate
+                            foreach (var p in plates)
+                            {
+                                if (!p.label.StartsWith("[")) continue;
+                                foreach (var q in plates)
+                                {
+                                    if (q.label.StartsWith("[") || !SameRect(q.plate, p.plate)) continue;
+                                    bool xo = p.box.X < q.box.X + q.box.Width + 2f && p.box.X + p.box.Width + 2f > q.box.X;
+                                    bool yo = p.box.Y < q.box.Y + q.box.Height && p.box.Y + p.box.Height > q.box.Y;
+                                    if (xo && yo) fails.Add(where + ":chipHitsLabel:" + q.label + p.label);
+                                    if (!Inside(q.box, p.plate, 1.5f)) fails.Add(where + ":labelLeavesPlate:" + q.label);
+                                    if (!Inside(p.box, p.plate, 1.5f)) fails.Add(where + ":chipLeavesPlate:" + q.label);
+                                }
+                            }
+                            // (3) the resting caption
+                            if (!save)
+                            {
+                                if (!Painted(Hud.ColdNudge)) fails.Add(where + ":coldNudgeMissing");
+                                else
+                                {
+                                    var nb = Box(Hud.ColdNudge);
+                                    if (nb.X < 20f || nb.X + nb.Width > Cfg.ScreenW - 20f) fails.Add(where + ":coldNudgeOffCanvas:" + (int)nb.Width + "px");
+                                    if (Raylib.CheckCollisionRecs(nb, Hud.HeatCard)) fails.Add(where + ":coldNudgeUnderDifficultyCard");
+                                }
+                                if (Painted("ENDLESS HORDE SURVIVAL")) fails.Add(where + ":restingLineNamesLastStandOnColdProfile");
+                            }
+                            else
+                            {
+                                if (Painted(Hud.ColdNudge)) fails.Add(where + ":coldNudgeWithSavePresent");
+                                if (!Painted("ENDLESS HORDE SURVIVAL")) fails.Add(where + ":restingLineMissing");
+                            }
+                            // (4)+(5) the card at rung 0 / unlocked 0 — the NoPersist default, and the cold profile's
+                            CardReads(where, level: 0, unlocked: 0);
+                        }
+                    // the drill seen, no save: the nudge yields to the old resting line
+                    {
+                        Display.UiScaleIdx = 1; Display.ApplyUiScale();
+                        SaveGame.ExistsPin = false; Display.TrainingSeen = true;
+                        var g = new Game { NoPersist = true };
+                        Capture(g);
+                        if (Painted(Hud.ColdNudge)) fails.Add("intro+seen:coldNudgeAfterTraining");
+                        if (!Painted("ENDLESS HORDE SURVIVAL")) fails.Add("intro+seen:restingLineMissing");
+                    }
+                    // the card at the other rungs: the rule at the ceiling, MAX UNLOCKED below it,
+                    // nothing to earn at the top, and the cold profile's RECRUIT default
+                    foreach (int si in new[] { 1, 3 })
+                        foreach (var (level, unlocked) in new[] { (3, 3), (1, 3), (8, 8), (-1, 0), (-1, 2), (5, 5) })
+                        {
+                            Display.UiScaleIdx = si; Display.ApplyUiScale();
+                            SaveGame.ExistsPin = false; Display.TrainingSeen = true;
+                            var g = new Game { NoPersist = true, PendingHeat = level, UnlockedHeat = unlocked };
+                            Capture(g);
+                            CardReads($"card(h{level}/u{unlocked})@{(int)(Display.UiScale * 100)}%", level, unlocked);
+                        }
+                }
+                finally
+                {
+                    SaveGame.ExistsPin = null; Display.TrainingSeen = savedTrain;
+                    Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
+                }
+            }
         }
         catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
         finally
@@ -8002,7 +8166,12 @@ public partial class Game
               + "there; ARMORY owns Escape only while the shop is open (PROCEED clears it, a stale "
               + "flag cannot swallow Escape); a click on nothing disarms QUIT; the armed sentence "
               + "fits the card in every phase and mode; OnEscape is inert on 7 overlay phases and "
-              + "under AutoPlay)"
+              + "under AutoPlay; FRONT DOOR: every intro door carries a chip naming its dispatch key "
+              + "(DEPLOY [ENTER]), no chip touches its label at any of the 4 text sizes with or "
+              + "without a save, the cold profile's resting line is the TRAINING OP nudge and yields "
+              + "to a seen drill or a save, rung 0 reads STANDARD at 26px and the card states the "
+              + "unlock rule at the ceiling / MAX UNLOCKED below it, and every card line ends inside "
+              + "the card at 120%)"
             : "SETTINGSTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 

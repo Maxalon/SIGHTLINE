@@ -837,6 +837,20 @@ branch point.
   writer, same as in-mission. Hook: `SIGHTLINE_SETTINGSTEST`; screenshots: `SIGHTLINE_SETTINGS=1`
   (alias of `SIGHTLINE_PAUSE=1`) with `SIGHTLINE_INTRO=1` / `SIGHTLINE_SHOP=1`, plus
   `SIGHTLINE_QUITARMED=1` for the armed sentence.
+- **THE FRONT DOOR.** Every main-menu plate draws its label, key chip and hover caption from one
+  table (`Hud.IntroDoors` + `Game.IntroKeys`), so DEPLOY SQUAD carries `[ENTER]` like every other
+  door and the chip can never name a key the dispatch does not read; `Hud.LabelX` slides a label
+  clear of its chip at 110/120% text size. On a cold profile (no drill seen, no save, no LAST STAND
+  best) the resting caption is the TRAINING OP nudge (`Hud.ColdNudge`) instead of "ENDLESS HORDE
+  SURVIVAL". The DIFFICULTY card names rung 0 **STANDARD** (26 px, like RECRUIT) and states the
+  unlock rule (`Hud.HeatUnlockRule`: "WIN AT HEAT n TO UNLOCK HEAT n+1" at the earned ceiling and
+  on a fresh profile's RECRUIT default; "MAX UNLOCKED: n" below it). `SIGHTLINE_KEYTABLE=1`
+  prints README's controls tables from `Hud.VerbTable` + `Hud.KeyTable` + `IntroDoors` (hand-run,
+  markdown only); the FIELD MANUAL's VERBS & KEYS non-verb rows are generated from the same
+  `KeyTable`. Hooks: `SIGHTLINE_SETTINGSTEST` leg (E), `FITTEST` INTRO-COLD / INTRO-SAVE /
+  INTRO-HEAT; screenshots: `SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1 SIGHTLINE_FIRSTRUN=1
+  SIGHTLINE_MOUSEPARK=100,100` (the pointer park keeps the resting caption visible), with
+  `SIGHTLINE_UISCALE=<idx>` and `SIGHTLINE_HEAT=<n>`.
 - **RECRUIT is the DEFAULT on a never-played profile.** `Game.FirstTimeProfile` (from
   `SaveGame.LoadRunTotals`) dials the intro to rung −1 and rewrites level 0's hint; "< RECRUIT"
   names the rung below zero on every profile. A default, not a rung — no measured heat number

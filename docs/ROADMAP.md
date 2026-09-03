@@ -2576,10 +2576,14 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
       it — but the cost lands on the **only player who ever sees all six unowned: the new one**,
       who therefore cannot read what any unlock does. `METATEST` asserts the font size and the hit
       rect, not readability. Now photographable via `SIGHTLINE_COLD=1`.
-- [ ] **The intro screen is not in `FITTEST`'s list and overflows at TEXT SIZE 120%.** The
-      DIFFICULTY panel's body line paints to x≈1266 against a panel edge at x≈1239 — outside its
-      own panel — and the `[K]`/`[U]` chips overlap their labels. The first screen in the game has
-      never been checked at any scale but 100%. This is the natural sixth leg for `FITTEST`.
+- [x] **The intro screen is not in `FITTEST`'s list and overflows at TEXT SIZE 120%.**
+      **CLOSED by wave THE FRONT DOOR** (DEVLOG §THE FRONT DOOR): `FITTEST` audits INTRO / INTRO-COLD /
+      INTRO-SAVE / INTRO-HEAT at every scale, `SETTINGSTEST`'s front-door leg fails on a chip painted
+      into its label or a card line past the card edge (both FAILED pre-fix, verbatim in the DEVLOG),
+      `Hud.LabelX` slides a label clear of its chip, and the level-0 hint fits. The original finding:
+      the DIFFICULTY panel's body line paints to x≈1266 against a panel edge at x≈1239 — outside its
+      own panel — and the `[K]`/`[U]` chips overlap their labels. The first screen in the game had
+      never been checked at any scale but 100%.
 - [ ] **`display.json` load-back cannot be verified headlessly.** `Display.Init` calls `Load()`
       after its `if (!enabled) return`, and every shot/autoplay path passes `false`. Deliberate
       (headless byte-stability), and it means the settings round trip has no coverage past "the
@@ -2823,3 +2827,22 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
 - [ ] **h0 and h4 are the OUT rungs on the pinned instrument** (46.9 on the floor; 20.0, −2.0). A
       base-difficulty lever, one at a time, CRN-paired on 16 slot sets — never 8 again.
 
+### WAVE "THE FRONT DOOR" (2026-09-02, base `fa482ed`, details in DEVLOG §THE FRONT DOOR)
+
+- [x] **DEPLOY SQUAD carries `[ENTER]`.** Every intro chip is drawn from `Hud.IntroDoors` +
+      `Game.IntroKey`, the hover caption from the same table through `Game.IntroHit`;
+      `Hud.IntroNullHintDraws` is asserted unmoved by `SETTINGSTEST` (E), so a door cannot ship
+      hint-less again. `Hud.LabelX` keeps chips out of labels at every text size (CONTINUE/DEPLOY
+      220 → 240, the utility grid 172 → 188 — the widths the 120% row needed, measured).
+- [x] **The cold menu points at the on-ramp.** `Hud.ColdNudge` at rest while `Hud.IntroCold(g)`
+      (no drill seen, no save, no LAST STAND best); the old line returns after any of them.
+- [x] **The DIFFICULTY card names rung 0 STANDARD and states the unlock rule**
+      (`Hud.HeatUnlockRule`): "WIN AT HEAT n TO UNLOCK HEAT n+1" at the earned ceiling and on a
+      fresh profile's RECRUIT default, "MAX UNLOCKED: n" below it; the level-0 hint fits the card.
+- [x] **README's controls are generated** — `SIGHTLINE_KEYTABLE=1` (hand-run, prints markdown from
+      `Hud.VerbTable` + `Hud.KeyTable` + `IntroDoors`); the FIELD MANUAL's VERBS & KEYS tab reads the
+      same `KeyTable`. Class table is five rows, `[6]` is UTILITY ITEM, the layout block lists all of
+      `src/`. Bound-key coverage derived by grep and checked by hand on this commit.
+- [ ] **Rung 0's rule sentence is the short form** ("A WIN UNLOCKS HEAT 1") because it shares a row
+      with "< RECRUIT" on a 320 px card. A card re-layout should give it the "WIN AT HEAT 0" form.
+- [ ] **README bound-key coverage has no runtime gate.** The hook prints; the grep is the check.
