@@ -13608,3 +13608,370 @@ number above is an *upper* bound on the opponent's strength under the lane.
 * The flywheel's missing enemy-overwatch exposure term (ROADMAP, unchanged).
 * `Ai.ChooseLane` re-derives the squad's discs per call. Harmless at 0.4% of acts; if a future wave
   makes the branch common, cache it per enemy turn.
+
+---
+
+# §THE UNVERIFIED — AUDIO AND THE MODES — PROGRAM PARALLAX wave P14 (2026-09-03, `wave/qa-audio`, base `a933cfe`)
+
+Files touched: `src/Audio.cs`, `src/Audio.CueMap.cs`, `src/Anim.cs`, `src/Game.cs`,
+`src/Game.Modes.cs`, `src/Game.Harness.cs`, `src/Mission.cs`, `src/Combat.cs`, `src/Program.cs`,
+`scripts/qa-sweep.sh`, the docs, `docs/screens/p14/`.
+
+## Why this wave exists
+
+An adversarial QA hunt produced 46 findings, each supposed to be adjudicated by two
+refute-by-default verifiers. Two thirds of the verifiers died on a usage limit and the workflow's
+post-processing filed **every unverified finding as "refuted" with an empty reason** — 33 findings
+were dropped without anyone reading them. This wave takes fourteen of them (the audio half and the
+single-mission-modes half) and puts them back through verification, **refute-first**: every item
+below was traced in the source before anything was changed, and the verdict is recorded either way.
+
+**Result: 14 CONFIRMED, 0 refuted outright, 1 half-refuted (14b), 13 fixed, 1 handed to ROADMAP.**
+Every fix ships a test leg shown to FAIL before it and PASS after, verbatim below.
+
+---
+
+## The audio half
+
+### 1. CONFIRMED + fixed — the overwatch reaction announced itself at ENQUEUE
+
+`Game.OnUnitEnteredTile`'s watcher loop popped the `"OVERWATCH"`/`"BRACE"` text and played the
+`OverwatchFires` cue **inside the loop**, i.e. for every watcher on the tile-entry frame, while the
+beat those announce — `ShotAnim.OnStart`'s snap-freeze, the reticle closing on the mover, the flash,
+the flinch, then the tracer — plays one reaction at a time. `ShotAnim`'s reaction `TotalAt` is
+**0.68 s**, so with two watchers the second one's sound was a whole reaction ahead of its picture.
+Second symptom, same cause: a watcher whose queued shot was later purged (the mover died to the
+first, or `ShotAnim.Update`'s dead-attacker guard fired) had **already announced a reaction that
+never happened**.
+
+Both moved into `ShotAnim.OnStart` under `if (Reaction)`, outside the `_windless` block so AutoPlay
+accounting is unchanged. `Fx` never touches `Util.Rng` (both matches in `Fx.cs` are comments saying
+so), so this is gameplay-inert — the seed-pinned table below is the evidence.
+
+### 2 + 3. CONFIRMED + fixed — the census was dead on arrival and could only read x0
+
+`Audio.SourceCensus` counted two literal strings in one file — `Audio.Play("over")` and
+`Audio.Play("reload")` in `src/Game.cs` — against caps of 7 and 3. **THE CUE MAP's own wave had
+deleted every one of those call sites**, so both terms read **x0** and could only ever read x0: the
+drift the caps existed to catch takes the form `Audio.Cue(GameEvent.X)` or a raw play of a
+*different* cue, and neither grep can see either. Measured on the base tree:
+`grep -c 'Audio.Play("over")' src/Game.cs` → **0** (cap 7), `"reload"` → **0** (cap 3).
+
+Finding 3's second clause — "`one meaning, one cue` is already false, `Audio.Play("turn")` fires at
+three unrelated sites" — is **five** sites, not three (`Game.cs` ×3, `Game.Endless.cs`, `Game.Modes.cs`),
+and DEVLOG §THE CUE MAP declares them: "all 'the game advances a stage' confirms". They are one
+meaning class. But `turn` is the right-hand side of `CueFor(GameEvent.Turn)`, so the table was not
+the only route to it, and **the injectivity gate cannot see a raw `Audio.Play` at all**.
+
+The census is rebuilt around the rule the table actually asserts: **THE TABLE OWNS ITS CUES.** Any
+cue in `CueFor`'s right-hand column must be played through `Audio.Cue`/`CueFor` and never through a
+raw `Audio.Play("<that id>")`, **anywhere in `src/`** (not one file). Violating it takes one line,
+which is what a census is for. `Audio.CensusExempt` is the named exception list and is **empty**.
+The two dead caps are replaced by two FLOORS (the table must actually be used: ≥40 `Cue`/`CueFor`
+sites, ≥4 foe sites) so the leg cannot pass by everything disappearing either.
+
+The five `turn` sites are routed through `Audio.Cue(GameEvent.Turn)`. That widens `Turn`'s declared
+meaning to "control passes to the player", which is written into the enum comment — the alternative
+was inventing an eighth cue for a beat **nobody in this sandbox can listen to**, which this wave
+declines to do.
+
+**Pre-fix FAIL (the new census, on the tree as found):**
+```
+CUETEST: census: 3 raw plays of a table-owned cue [Game.Endless.cs:Audio.Play("turn") x1 Game.Modes.cs:Audio.Play("turn") x1 Game.cs:Audio.Play("turn") x3], 78 table users (floor 40), 8 foe sites (floor 4)
+CUETEST: FAIL (inWorldCueOnUiBus(...),census:rawPlayOfMappedCue(Game.Endless.cs:Audio.Play("turn") x1,Game.Modes.cs:Audio.Play("turn") x1,Game.cs:Audio.Play("turn") x3))
+```
+**Post-fix:** `census: 0 raw plays of a table-owned cue, 88 table users (floor 40), 8 foe sites (floor 4)`.
+
+### 4. CONFIRMED + fixed — two loss beats played the REINFORCEMENT ALARM
+
+`Game.cs:3321` (`"VIP DOWN"`) and `Game.cs:3514` (`"SOLDIER DOWN - THEY HOLD FOR n"`) both passed
+`Audio.CueFor(Audio.GameEvent.Reinforce)`, whose entire meaning in the table is *"more of them
+arrive / the pressure clock ticks up / artillery is coming"*. Losing the asset the mission is about,
+announced as an enemy arrival.
+
+A body falling had **no row in the table at all** — it was a raw `Audio.Play("death")` at two sites.
+So `GameEvent.Casualty => "death"` is the new row (no new sound), those two sites route through it,
+and the two banners go **silent** via a new `Audio.SilentCue` sentinel that `ShowBanner` honours:
+the beat already speaks on that exact frame, and the fix is to stop layering a second, *wrong* sound
+on it rather than to invent a third. CUETEST leg (f) asserts exactly one casualty cue and zero alarm.
+
+**Pre-fix FAIL:**
+```
+CUETEST: loss: SOLDIER DOWN banner='alarm' cues=death+alarm
+CUETEST: loss: VIP DOWN banner='alarm' cues=alarm+death
+CUETEST: FAIL (loss:SOLDIER DOWN fires the reinforcement alarm 'alarm',loss:SOLDIER DOWN played the reinforcement alarm,loss:VIP DOWN fires the reinforcement alarm 'alarm',loss:VIP DOWN played the reinforcement alarm)
+```
+**Post-fix:** `loss: SOLDIER DOWN banner='' cues=death` / `loss: VIP DOWN banner='' cues=death`.
+
+### 5. CONFIRMED + fixed — and understated: FOUR unpanned in-world cues, not three
+
+In `src/Anim.cs`, `GrenadeAnim` passes a pan; its three siblings in the same file do not
+(`SmokeAnim` → `Audio.Play("smoke")`, `FlashAnim` → `Audio.Play("flash")`, `IncendiaryAnim` →
+`Audio.Play(CueFor(Explosion), gainDb: -6f)`), nor does `HealAnim`, nor the three `Mend` sites in
+`Game.cs` (STABILIZE / PATCH / REVIVE). All now pan to where the thing happens — the blast tile for
+the ordnance, the patient for the mend — and the incendiary goes through `Audio.Cue` like every
+other Explosion site (`Audio.Cue` gained the same downward-only `gainDb` `Play` already had).
+
+The gate is CUETEST leg (e), which drives the **real** anims (`Effect()` is protected, so this is
+the shipped path) through a new **`Audio.Spy`** — a harness-only cue log in `Audio.Play` that records
+id/pan/foe **before the device check**, because there is no device in this sandbox and a spy that
+only works on the owner's machine is no spy at all.
+
+**Pre-fix FAIL:** `pan: 0/4 in-world cues panned` →
+`pan:unpannedInWorldCue(smoke->'smoke',flash->'flash',incendiary->'boom',heal->'heal')`.
+**Post-fix:** `pan: 4/4 in-world cues panned to where they happen`.
+
+*(Legs d and e in one pre-fix run, with only those hunks reverted:*
+`CUETEST: FAIL (reaction:2cuesAtEnqueueFor2queuedReactions,reaction:2of2reactionsDidNotCueAtOnStart,pan:unpannedInWorldCue(...))` *→ post-fix* `reaction: 2 watchers -> 0 cues at enqueue, 2/2 cued at OnStart`*.)*
+
+### 6. CONFIRMED + fixed — the enum and MappedEvents were an unchecked parallel list
+
+`Audio.GameEvent` and `Audio.MappedEvents` were two hand-written lists with nothing comparing them,
+and **all three CUETEST legs iterate the second one**. A member added to the enum and forgotten in
+`MappedEvents` was invisible to injectivity, to the bus check and to the census — and `CueFor`'s
+`_ => "select"` default meant it **played the menu blip** while the gate stayed green. Fixed on both
+halves: CUETEST leg (a0) asserts `MappedEvents` is the whole `Enum.GetValues`, and the fallback is
+now `"?unmapped"` — deliberately **not** a registered recipe, so an unmapped event trips the
+"is a registered recipe" leg loudly.
+
+### 7. CONFIRMED + fixed — `FoeTelegraphs` claimed the opposite of the truth
+
+The list was headed "the events that are ONLY ever the OPPONENT acting" and included `Explosion` and
+`OverwatchFires`. Every `Explosion` site in the tree is a player grenade / incendiary / barrel /
+siege strike passing `foe:false` (`Anim.cs` ×2, `Game.cs` ×2), and `OverwatchFires` is one shared
+site that fires for whichever side owns the watcher. The **assertion** they carried ("never on the
+UI fader") is right for them; the **stated reason** was not, and a reader checking the contract
+would have concluded the opposite of the truth.
+
+Split into two lists: `FoeTelegraphs` = `{Contact, Reinforce, EnemyTurn}` (what is really only ever
+the opponent) and `NeverUiBus` = the larger set of beats that **happen to** the player rather than
+being their own button answering back. CUETEST runs the fader obligation over `NeverUiBus` — strictly
+more coverage than before — and additionally asserts `FoeTelegraphs ⊆ NeverUiBus`.
+
+Writing that leg surfaced a **judgement call the wave declines to make by assertion**: `over`
+(overwatch SET) and `reload` are `CatOf` category `ui`, so a player at UI-volume-zero loses their
+own overwatch chime and mag change. The line `NeverUiBus` draws is at **agency** — those two, like
+`ability` and `objective`, are confirmations of a click the player just made, which is what a UI
+fader is for, and the asymmetry is already shipped and deliberate (`Turn` is UI, `EnemyTurn` was
+moved off the UI bus by THE CUE MAP). Whether that line is in the right place is a question about
+**sound**, and nobody here can hear it. It is in `docs/ROADMAP.md` as an owner listen.
+
+### 8. CONFIRMED + fixed — a recipe could escape AUDIOGATE, the loader and the audition screen
+
+`_recipes` (what `BuildRecipes` registers), `SfxCueIds` (what the file-first drop-in validation
+walks, what `Audio.OrderedCues` feeds AUDIOGATE, what AUDITIONTEST holds the AUDIO CHECK screen to)
+and AUDIOTEST's own `gameIds` are **three hand-maintained parallel lists**, and every check ran in
+ONE direction — *listed ⇒ registered*. Nothing asserted *registered ⇒ listed*. AUDITIONTEST's stated
+contract ("a cue added to `BuildRecipes` and forgotten here fails loudly instead of quietly becoming
+the one sound nobody ever auditions") was describing an assertion that did not exist.
+
+`Audio.SelfTest` now asserts set-equality both ways, in the file that owns both lists.
+
+**Demonstrated live** with a throwaway `Reg("zzz_fixture", ...)` added to `BuildRecipes` and left out
+of `SfxCueIds`:
+```
+AUDIOGATE:    PASS
+AUDITIONTEST: PASS (36 cues listed + measured, 6 stacks, labels fit at 120%, 39 rows on screen, table scrolls)
+AUDIOTEST:    FAIL recipe 'zzz_fixture' is registered but missing from SfxCueIds — it would be invisible
+              to AUDIOGATE's level band, to the file-first drop-in validation and to the AUDIO CHECK screen
+```
+Read it: the two gates that are *supposed* to cover a cue both pass while the cue is invisible to
+them. Fixture removed; all three PASS.
+
+### What the audio half did NOT do
+
+**Nobody has heard any of it.** There is no audio device in this sandbox. Every claim above is about
+ROUTING (which cue, which bus, which frame, which pan value) or about a REGISTRY. No cue's
+*content* changed, no recipe was added or retuned, and **AUDIOGATE's 36 cues and their level bands
+are untouched**. "Panned to where it happens" means `Audio.Play` received a `panX ≥ 0` derived from
+the event's screen X, asserted by `Audio.Spy` — not that it sounds better.
+
+---
+
+## The modes half — one funnel, not five patches
+
+### The shape of it
+
+P4 THE MODES GET THE BESTIARY threaded a second parameter (`rosterTier`) through `Mission.Build`
+because SKIRMISH and DAILY enter via `Game.SetupMission(1)` and the literal `1` was pinning the
+ARCHETYPE gates to mission 1's teaching tier. **It stopped there.** Findings 9, 11 and 12 are three
+more consumers of "how deep is this fight" still reading that literal 1 at heat 8, so they are one
+defect and get one fix: **`Mission.ModeDepth` / `Mission.DepthFor`**, published at the TOP of
+`SetupMission` (it must be there — the VIP is built ~80 lines above the old `rosterTier` line) and
+`-1` in every other mode, where `DepthFor` is the identity on the mission number.
+`SIGHTLINE_MODEDEPTH=0` restores the pre-P14 modes exactly and is what the new legs were shown to
+fail against. `Mission.ModeTierFor(heat)` is the one formula both P4's `rosterTier` and P14's
+`ModeDepth` read, so they cannot drift — and the two stay **separate levers**, so
+`SIGHTLINE_MODEDEPTH=0` does not undo P4's roster opening.
+
+### The measurement instrument: `SIGHTLINE_MODEFORCEPROBE`
+
+Before P14 the only headless answer to "what force does a skirmish actually field?" was MODETEST's
+one printed headcount. `SIGHTLINE_MODEFORCEPROBE` (a report — `_SWEEP_EXEMPT`, MODETEST does the
+asserting) dumps per heat rung: headcount, pod plan, class histogram, how often the whole force is a
+single pod / a single class / entirely immobile over 40 builds, the escort asset's statline, the
+Decapitate HVT, the MIXED mid-boss and its kit, and one DEFEND wave's composition.
+
+### Force composition, BEFORE (`SIGHTLINE_MODEDEPTH=0`) and AFTER
+
+| | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|
+| **bodies** before | 3 | 4 | 5 | 6 | 7 |
+| **bodies** after | **4** | **5** | **6** | **7** | **8** |
+| pod plan before | `[3]` | `[2+2]` | `[3+2]` | `[3+3]` | `[3+2+2]` |
+| pod plan after | `[2+2]` | `[3+2]` | `[3+3]` | `[3+2+2]` | `[3+3+2]` |
+| **single-pod force** /40 before | **40** | 0 | 0 | 0 | 0 |
+| **single-pod force** /40 after | **0** | 0 | 0 | 0 | 0 |
+| **one-class force** /40 before | **38** | 6 | 0 | 0 | 0 |
+| **one-class force** /40 after | **4** | 2 | 0 | 0 | 0 |
+| **ALL-IMMOBILE force** /40 before | **3** | **2** | 0 | 0 | 0 |
+| **ALL-IMMOBILE force** /40 after | **0** | **0** | 0 | 0 | 0 |
+| VIP before | 16 hp / 0 armor | 16/0 | 16/0 | 16/0 | 16/0 |
+| VIP after | **20/1** | 20/1 | **22/2** | **24/2** | **24/2** |
+| HVT (h0/h2, where it is a real buff) before | +7 → 20 hp | +7 → 22 | — | — | — |
+| HVT after | **+9 → 22 hp** | +9 → 24 | — | — | — |
+| DEFEND wave before | +1 `GRUNT/9hp/61aim` | +1 `GRUNT/9hp/61aim` | +1 `GRUNT/9hp/61aim` | +1 `SAPPER/11hp/57aim` | +1 `SHIELD/15hp/57aim` |
+| DEFEND wave after | **+2** `SCREENER/11 SAPPER/13` | +2 `SCREENER/12 SAPPER/14` | **+3** `SAPPER/15 SCREENER/13 SHIELD/22` | +3 `SHIELD/25 SPOTTER/15 SAPPER/17` | **+3** `SAPPER/19 DRONE/15 SHIELD/27` |
+| MIXED mid-boss | `WARDEN` (siege=False) | | `MARSHAL` | | |
+
+Screens: `docs/screens/p14/skirmish-h0-before.png` / `-after.png` — same seed (4242), same arena (5),
+same objective. The chip reads **3 SYNDICATE** with all three dormant markers in one clump at the
+right edge; after, **4 SYNDICATE** in two two-body pods on opposite flanks.
+
+### 9. CONFIRMED + fixed — the DEFEND wave was heat-blind AND pinned to tier 1
+
+`Game.SpawnReinforcements` read `int n = _run.Mission`, which is 1 in both modes, so
+`Mission.MakeWaveHostile(1, ...)` built every wave body at tier 1 with `bump = 1`. And
+`SpawnDefendWave`'s heat grace read `if (_run.Mission <= 1) waveHeatStat = 0;` — **true for every
+skirmish and every daily**, hard-zeroing the wave's stat bump on all nine rungs. Measured: the h0,
+h2 and h4 waves were the identical body, `GRUNT/9hp/61aim`.
+
+The grace's own comment says it was added to "pre-empt the skirmish-grace owner decision". W9 then
+MADE that decision — a SKIRMISH/DAILY player dialled the rung and gets no grace — and this line was
+never updated. Both now read `Mission.DepthFor`.
+
+### 10. CONFIRMED (worse than reported) + fixed — 40/40 heat-0 skirmishes were ONE pod
+
+Not "can be three SENTRYs": at heat 0 the force was **one pod, 40 builds out of 40**, and under
+W4's `PodUniform` that means **one archetype, 38/40** — with 3/40 (7.5%) entirely immobile SENTRYs,
+a whole mission against turrets that cannot follow you. Two fixes, because one was not enough:
+removing the opener trim (finding 11) breaks the single pod, but two pods can still BOTH roll SENTRY
+(measured 1/40 after that change alone), so a mode-gated guard stands on its own — **in SKIRMISH and
+DAILY the first body, pod 0's lead, may not be immobile**. It is **draw-free**: the roll is
+REMAPPED (`r ± 0.5`), never re-drawn, so the shared `Util.Rng` stream, every CRN pairing and the
+daily's cross-process reproducibility are untouched. Gated on `ModeDepth`, so the campaign — whose
+m3+ Defend/Sabotage forces can also plan as one pod of 3 — is byte-identical.
+
+### 11. CONFIRMED + fixed — the CAMPAIGN cold-opener grace fired in both single-mission modes
+
+`Mission.OpenerTrim` is gated `n <= 2`, and both modes enter at `n == 1`, so every skirmish and every
+daily lost a body at every rung. Now gated on `DepthFor(n)`.
+
+**This moves MODETEST's declared headcount pin, deliberately: 3/5/7 → 4/6/8.** P4's own note
+(quoted in the test) attributes the 4/6/8 → 3/5/7 drop to the pod trim; the second body is
+`OpenerTrim`. So the modes are back on **the headcount they fielded before P4 — a restoration, not
+an escalation** — and the pods-of-3 leg moves off heat 0 (at 4 bodies `PodPlan` deals `{2,2}` and a
+pod of 3 cannot form; it is asserted at heat 4, which is what the leg was ever for).
+
+### 12. CONFIRMED + fixed — the protected asset never scaled with the dial the enemy does
+
+`Mission.MakeVip(1)` → **16 HP / 0 armor from heat 0 to heat 8**, while the force around it grew four
+bodies and four stat points. `Combat.HvtHpBonus(_run.Mission)` → a flat **+7 HP** on every rung.
+Both read `Mission.DepthFor` now (inside `MakeVip` and inside `HvtHpBonus`, so no call site changed).
+
+### 13. CONFIRMED + fixed (the callsign only) — a kitless ELITE wearing a faction's name
+
+`Mission.MakeMidBoss`'s unfactioned fallback is `Mk(n == 3 ? "BREAKER" : "WARDEN")`. A MIXED skirmish
+at heat ≥ 4 has `rosterTier` 4 or 5, so it always took the `"WARDEN"` arm — measured
+`MIXED -> WARDEN hp=25 rage=False shield=False siege=False`: the **Wardens** mid-boss's callsign on a
+body that cannot do the one thing that name means (`ArmSiege`). Renamed to `MARSHAL`.
+*(It is also reachable in the CAMPAIGN, contrary to the finding's "previously campaign-unreachable":
+`Run.GenerateMap` stamps a faction on Combat/Elite nodes only, so a **Supply node at mission 3 or 5**
+is `Faction.None` and takes the same fallback. Renaming is presentation-only — the callsign feeds no
+draw, stat or `Codex` lookup, which the 8/8 identical seed-pinned autoplays below confirm. It also
+removes an accidental collision with the player-side `Perk.Breaker`.)*
+
+**Arming the MIXED mid-boss is NOT shipped** — that is a real force change and belongs in a wave
+that measures it. `docs/ROADMAP.md`.
+
+### 14. CONFIRMED (a) + fixed / REFUTED (b) — the daily's headline contract was printed, not asserted
+
+**(a) CONFIRMED.** MODETEST leg (9) calls `BeginDaily()` twice **in one process**, compares
+`ForceSignature`, and then prints `"(must match across processes)"`. Nobody was comparing it — the
+sweep runs MODETEST once — and a same-process check cannot see anything a fresh process would
+compute differently, which is the entire failure mode a date-seeded challenge has. Leg (11) now runs
+the real thing: a **child process** of the same binary with `SIGHTLINE_DAILYSIGPROBE=1`, which prints
+one line (`stamp|faction|force|board`) and exits. It is the **first hook branch in `RealMain`** on
+purpose, so the child inherits the parent's whole environment — every measurement dial applies to
+both, or the two processes are not the same game — without an inherited `SIGHTLINE_MODETEST`
+preempting it. Unlike SHIPTEST it writes no player data (the probe never leaves `NoPersist`) and is
+bounded at 20 s.
+
+Post-fix: `MODETEST daily cross-process: 20260701|1|523fd7e3|c2a75b4f reproduced in a second process`.
+**Teeth demonstrated live** by a fixture giving the child one different dial:
+`MODETEST: FAIL (dailyCrossProcessForceDiffers(self=20260701|1|523fd7e3|... child=20260701|1|6f60fa30|...))`.
+
+**(b) REFUTED — "`SIGHTLINE_MAP` is silently swallowed on the daily path".** True as stated
+(`BeginDaily` sets `Mission.ForcedLayout = arena` at `Game.Modes.cs:228`, after `Program` may have set
+it from `SIGHTLINE_MAP`) and **correct as designed**: the day's arena is derived from the day's seed
+and is part of the contract the whole mode exists to keep. Honouring `SIGHTLINE_MAP` there would make
+the daily not the daily, and leg (2)'s `BoardSignature` reproducibility would be arena-dependent. Not
+a defect. Pin an arena with `SIGHTLINE_SKIRMISH` instead.
+
+---
+
+## Gates
+
+**Pre-fix FAIL / post-fix PASS, MODETEST** (the pre-fix arm is `SIGHTLINE_MODEDEPTH=0`, which
+reproduces the pre-P14 numbers exactly — `bodies h0=3 h4=5 h8=7`, `pods-of-3 in 50/50`):
+```
+MODETEST: FAIL (skirmishHeadcountMoved(3/5/7, expected 4/6/8),skirmishVipDialInert(h0 16hp/0armor h8 16hp/0armor),
+                skirmishHvtDialInert(h0 +7 h8 +7),skirmishAllImmobileForce(3/80),skirmishSinglePodForce(40/80))
+MODETEST: PASS (... a skirmish fields the full roster, pods of 3 from heat 4 and one mid-boss from heat 4,
+                at a pinned 4/6/8 bodies; the escort asset, the HVT bonus and the DEFEND wave all answer the
+                dial too; no mode force is a single pod or entirely immobile; the depth funnel is the identity
+                in the campaign; and the same daily stamp fields the same force IN A SECOND PROCESS)
+```
+
+**CUETEST, post-fix:**
+```
+CUETEST: reaction: 2 watchers -> 0 cues at enqueue, 2/2 cued at OnStart
+CUETEST: pan: 4/4 in-world cues panned to where they happen
+CUETEST: loss: SOLDIER DOWN banner='' cues=death
+CUETEST: loss: VIP DOWN banner='' cues=death
+CUETEST: PASS (15 events = the whole GameEvent enum -> 15 distinct cues, no in-world cue on the UI bus,
+               ShowBanner(enemy) on the SFX fader, the reaction announces at OnStart,
+               census: 0 raw plays of a table-owned cue, 88 table users (floor 40), 8 foe sites (floor 4))
+```
+
+**THE CAMPAIGN IS BYTE-IDENTICAL.** Seed-pinned autoplay, Release binaries, against a base worktree
+at `a933cfe` — result, mission, **frame count and turn count** all equal on **8 of 8** seeds:
+
+| seed | base `a933cfe` | `wave/qa-audio` |
+|---|---|---|
+| 101 | WIN m6 frame=12199 turns=32 | WIN m6 frame=12199 turns=32 |
+| 202 | LOSE m4 frame=11764 turns=29 | LOSE m4 frame=11764 turns=29 |
+| 303 | WIN m6 frame=5936 turns=16 | WIN m6 frame=5936 turns=16 |
+| 404 | WIN m6 frame=9052 turns=23 | WIN m6 frame=9052 turns=23 |
+| 505 | WIN m6 frame=11762 turns=29 | WIN m6 frame=11762 turns=29 |
+| 606 | LOSE m5 frame=15814 turns=32 | LOSE m5 frame=15814 turns=32 |
+| 707 | WIN m6 frame=10255 turns=28 | WIN m6 frame=10255 turns=28 |
+| 808 | LOSE m3 frame=4981 turns=12 | LOSE m3 frame=4981 turns=12 |
+
+**No balance number was measured or moved.** The only gameplay change is inside SKIRMISH and DAILY,
+which are not on the heat ladder; the campaign inertness is the table above plus PAIRTEST plus
+MODETEST's `depthFunnelNotIdentityInCampaign` leg.
+
+- `dotnet build -c Release` **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` → **SWEEP-EXIT=0**, every line PASS, **no COVERAGE GAP**,
+  derived counts **80 exist / 80 run**, autoplay LOSE / WIN / LOSE, no TIMEOUT.
+
+## New hooks and dials
+
+| name | what |
+|---|---|
+| `SIGHTLINE_MODEFORCEPROBE=1` | report: the SKIRMISH force per heat rung (bodies, pods, roster, VIP, HVT, mid-boss, one DEFEND wave). `_SWEEP_EXEMPT` — MODETEST asserts. |
+| `SIGHTLINE_DAILYSIGPROBE=1` | report: one line, this process's daily signature. The child half of MODETEST leg (11). `_SWEEP_EXEMPT`. |
+| `SIGHTLINE_MODEDEPTH=0` | restore the pre-P14 single-mission modes exactly (`Mission.ModeDepth` never published; the immobility guard off with it). |
+| `Audio.Spy` | harness-only cue log in `Audio.Play` (id / pan / foe, recorded before the device check). Null in play. |
+| `Audio.SilentCue` | `ShowBanner` sentinel: this banner's beat already has a sound on this frame. |

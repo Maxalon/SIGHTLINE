@@ -237,7 +237,7 @@ public partial class Game
             {
                 _shopDone = true;         // never the requisition shop mid-stand (offers only)
                 Phase = Phase.Barracks;
-                Audio.Play("turn");
+                Audio.Cue(Audio.GameEvent.Turn);   // P14: through the table (see Audio.CueMap.cs)
                 return;                   // the Barracks guard spawns the next wave when done
             }
             SpawnEndlessWave(Wave + 1);

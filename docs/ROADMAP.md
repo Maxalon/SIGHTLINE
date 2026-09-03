@@ -2982,3 +2982,45 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       The owner has a device and the AUDIO CHECK screen (THREAT group).
 - [ ] **The AUDIO CHECK scroll has no thumb drag** and no keyboard focus ring — wheel and Up/Down
       only. Fine at 36 cues; revisit if the list grows again.
+
+---
+
+## PROGRAM PARALLAX — wave P14 "THE UNVERIFIED" left these OPEN (2026-09-03, `wave/qa-audio`)
+
+Fourteen findings were re-verified; thirteen were fixed (`docs/DEVLOG.md` §THE UNVERIFIED — AUDIO
+AND THE MODES). These are the ones deliberately NOT fixed, and why.
+
+- [ ] **A MIXED skirmish/daily mid-boss has no signature.** P14 fixed the *callsign* — the
+  unfactioned `Mission.MakeMidBoss` fallback used to field a `WARDEN` with `siege=False`, i.e. the
+  Wardens mid-boss's name on a body that cannot do the thing that name means, and is now a neutral
+  `MARSHAL`. The **kit** is still absent: at heat ≥ 4 a MIXED force's climax is a plain ELITE with
+  two frags, while every named faction gets rage / shield / siege. A draw-free fix exists (deal the
+  kit off `Mission.ModeTierFor` — tier 3 → rage, 4 → shield, 5 → siege, gated on `ModeDepth` so the
+  campaign's own unfactioned mid-boss, reachable on a **Supply node at mission 3 or 5**, is
+  untouched), but arming a mid-boss is a real force change and belongs in a wave that shows the
+  before/after with `SIGHTLINE_MODEFORCEPROBE` rather than one that was re-verifying findings.
+
+- [ ] **OWNER LISTEN: is `over` / `reload` on the UI fader right?** P14's `Audio.NeverUiBus`
+  asserts that no beat which *happens to* the player rides the UI fader. It deliberately EXCLUDES
+  `OverwatchSet` and `Reload` (with `Ability` and `Objective`), on the argument that those four are
+  confirmations of a click the player just made — which is what a UI fader is for — and that the
+  asymmetry is already shipped and deliberate (`Turn` is a UI cue; `EnemyTurn` was moved off the UI
+  bus by THE CUE MAP precisely because it is the opponent). The counter-argument is that a player
+  who pulls UI volume to zero to silence menu chrome also stops hearing their own watch being set
+  and their own magazine going in, which are board events with a position. **This is a question
+  about sound and nobody in the sandbox can hear it.** Decide it on the AUDIO CHECK screen; if the
+  answer is "they are board beats", the change is two entries in `Audio.NeverUiBus` plus two rows
+  in `CatOf`, and CUETEST will hold the new line.
+
+- [ ] **Nothing in the audio suite listens.** P14 added `Audio.Spy`, so a self-test can now assert
+  WHEN a cue fires, with what pan, on which bus — which is how findings 1, 4 and 5 were caught and
+  gated. It still cannot assert that `alert` reads as *alert*. Every audio claim in this repository
+  is a claim about a rendered buffer, a registry, or a routing decision. That gap is structural in
+  this sandbox and is the owner's to close on a real device.
+
+- [ ] **`SIGHTLINE_DECLINEWATCH` / the flywheel's blindness to an enemy lane** (P10) and the
+  pressure clock's depth in the modes: P14's `Mission.DepthFor` also gives SKIRMISH/DAILY
+  anti-turtle pressure waves the mode's depth (they were tier-1 bodies too). That is consistent
+  with the funnel and is reported, but it was never a measured lever — the flywheel does not cover
+  skirmish at all, so no rung has ever included one. If the modes ever want a measured ladder of
+  their own, that is the wave.

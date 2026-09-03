@@ -110,6 +110,12 @@ public static class Program
         // W4 — SIGHTLINE_PODMASS=<n>: enemy formation mass (3 = the FUL-6 pods-of-3 plan).
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_PODMASS"), out int pm) && pm >= 2)
             Mission.PodMass = pm;
+        // P14 THE UNVERIFIED — SIGHTLINE_MODEDEPTH=0 restores the pre-P14 single-mission modes
+        // EXACTLY: Mission.ModeDepth stays -1, so DepthFor is the identity everywhere and the
+        // opener trim / escort asset / HVT bonus / DEFEND waves go back to reading the literal
+        // mission 1 that SKIRMISH and DAILY pass, and the "never an entirely immobile force" guard
+        // is off with it. It is what MODETEST's P14 legs were shown to FAIL against.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MODEDEPTH") == "0") Mission.ModeDepthOn = false;
         // W4 — SIGHTLINE_PODUNIFORM=1: a pod fields one kind of body (comparable targets).
         string uni = Environment.GetEnvironmentVariable("SIGHTLINE_PODUNIFORM");
         if (uni == "1") Mission.PodUniform = true; else if (uni == "0") Mission.PodUniform = false;
@@ -221,6 +227,25 @@ public static class Program
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_ENDLESS"), out int endlessBatchN) && endlessBatchN > 0)
         {
             BalanceBatch(endlessBatchN, endless: true);
+            return;
+        }
+
+        // SIGHTLINE_DAILYSIGPROBE=1 : P14 — print ONE line, this process's DAILY SIGNATURE
+        // (stamp|faction|force|board), and exit. It is the CHILD half of MODETEST leg (11): the
+        // daily's headline contract is "the same stamp fields the same force", and a same-process
+        // check cannot see anything a fresh process would compute differently, which is the entire
+        // failure mode a date-seeded challenge has. A report, not an assertion — MODETEST compares.
+        //
+        // IT IS THE FIRST HOOK BRANCH IN THIS METHOD, DELIBERATELY. The child inherits the parent's
+        // whole environment so that every measurement dial parsed ABOVE this line (MODEDEPTH,
+        // OPENERTRIM, PODUNIFORM, BIOMEMECH, ...) applies to it exactly as it applies to the parent
+        // — the two processes have to be the same game or the comparison means nothing. Being first
+        // is what keeps the inherited SIGHTLINE_MODETEST (or any other hook) from preempting it.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DAILYSIGPROBE") == "1")
+        {
+            Raylib.InitWindow(64, 64, "dailysig");
+            Console.WriteLine("DAILYSIG:" + new Game().DailySignatureLine());
+            Raylib.CloseWindow();
             return;
         }
 
@@ -1153,6 +1178,17 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "modetest");
             Console.WriteLine(new Game().ModeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_MODEFORCEPROBE=1 : P14 — a REPORT of the force a SKIRMISH/DAILY actually fields
+        // per heat rung (headcount, pods, roster, the escort asset, the HVT, the mid-boss kit, one
+        // DEFEND wave). Asserts nothing — MODETEST owns the assertions; this is the before/after
+        // evidence a change to the single-mission modes has to show.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MODEFORCEPROBE") == "1")
+        {
+            Raylib.InitWindow(64, 64, "modeforceprobe");
+            Console.WriteLine(new Game().ModeForceProbe());
             Raylib.CloseWindow();
             return;
         }

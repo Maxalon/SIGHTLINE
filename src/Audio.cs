@@ -885,6 +885,14 @@ public static partial class Audio
     public static void Play(string id, float pitchVar = -1f, float panX = -1f, float gainDb = 0f,
                             bool foe = false)
     {
+        // P14 THE UNVERIFIED — THE SPY. Every claim this project makes about audio is a claim about
+        // a rendered BUFFER (level, band, spectrum) or about a REGISTRY; nothing could see WHEN a
+        // cue fires, and "when" is exactly where the overwatch reaction was broken (the cue fired
+        // for every watcher at ENQUEUE while the picture played one at a time, up to 0.68 s later).
+        // Null in every normal run and set only by a self-test, so this is inert in play — and it
+        // records BEFORE the device check, because the sandbox has no device and a spy that only
+        // works on the owner's machine is no spy at all.
+        Spy?.Add((id, panX, foe));
         if (!_ready || !Enabled) return;
         if (!_voices.TryGetValue(id, out var v) || v.Ring == null) return;
 
@@ -964,6 +972,11 @@ public static partial class Audio
         try { Raylib.DetachAudioMixedProcessor(&MixProcessor); } catch { }
         _limOn = false;
     }
+
+    /// P14 — harness-only cue log (see Play). `Audio.Spy = new List<...>()` starts recording,
+    /// `Audio.Spy = null` stops. Records the cue id, the pan it was given (-1 = unpanned) and the
+    /// foe-bus flag, in call order, whether or not a device exists.
+    public static List<(string id, float panX, bool foe)> Spy;
 
     public static void ToggleMute() { Enabled = !Enabled; }
 
@@ -1083,6 +1096,31 @@ public static partial class Audio
                                  "ui_ok", "ui_no", "turn_enemy" };             // THE CUE MAP
             foreach (var id in gameIds)
                 if (!_recipes.ContainsKey(id)) return $"AUDIOTEST: FAIL missing game cue '{id}'";
+
+            // P14 THE UNVERIFIED — SfxCueIds IS THE REGISTRY OF RECORD, both ways.
+            // `_recipes` (what BuildRecipes registers) and `SfxCueIds` (what the file-first loader
+            // validates, what AUDIOGATE measures via Audio.OrderedCues, and what AUDITIONTEST holds
+            // the audition screen to) were two hand-written lists, and every check ran in ONE
+            // direction: AUDIOTEST's `gameIds` and AUDITIONTEST both assert "listed => registered".
+            // Nothing asserted "registered => listed", so a recipe added to BuildRecipes and left
+            // out of SfxCueIds was silently exempt from the level/role band, from the drop-in
+            // validation, from SIGHTLINE_AUDIOASSETS and from the AUDIO CHECK screen — with every
+            // audio self-test green. AUDITIONTEST's stated contract ("a cue added to BuildRecipes
+            // and forgotten here fails loudly") was describing this assertion, which did not exist.
+            // It exists here, in the file that owns both lists.
+            {
+                var listed = new HashSet<string>(SfxCueIds);
+                foreach (var id in SfxCueIds)
+                    if (!_recipes.ContainsKey(id))
+                        return $"AUDIOTEST: FAIL SfxCueIds lists '{id}', which is not a registered recipe";
+                foreach (var kv in _recipes)
+                    if (!listed.Contains(kv.Key))
+                        return $"AUDIOTEST: FAIL recipe '{kv.Key}' is registered but missing from SfxCueIds "
+                             + "— it would be invisible to AUDIOGATE's level band, to the file-first "
+                             + "drop-in validation and to the AUDIO CHECK screen";
+                if (listed.Count != SfxCueIds.Length)
+                    return "AUDIOTEST: FAIL SfxCueIds contains a duplicate id";
+            }
 
             // build + validate every SFX buffer
             foreach (var kv in _recipes)

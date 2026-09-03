@@ -11284,13 +11284,26 @@ public partial class Game
     //
     //  Device-free; a tiny window is opened by Program only because Game's ctor needs tile math.
     // ══════════════════════════════════════════════════════════════════════════════════════
-    public const int CueOverCap = 7, CueReloadCap = 3;
+    /// P14: the table must be USED. A floor, not a cap — the old census's two caps counted a call
+    /// form the wave that wrote them had already deleted, so both read 0 for ever.
+    public const int CueTableUserFloor = 40, CueFoeSiteFloor = 4;
 
     public string CueSelfTest()
     {
         var fails = new List<string>();
         var sb = new System.Text.StringBuilder();
         Audio.BuildRecipes();
+
+        // ── (a0) P14 — MappedEvents IS THE WHOLE ENUM ──────────────────────────────────────
+        // `Audio.GameEvent` and `Audio.MappedEvents` were two hand-written lists with nothing
+        // comparing them, and every leg below iterates the SECOND one. A member added to the enum
+        // and forgotten here was therefore invisible to injectivity, to the bus check and to the
+        // census — and CueFor's old `_ => "select"` default meant it PLAYED THE MENU BLIP while
+        // all three legs stayed green. This is the leg that makes the other three complete.
+        var declared = new HashSet<Audio.GameEvent>(Audio.MappedEvents);
+        foreach (Audio.GameEvent ev in Enum.GetValues(typeof(Audio.GameEvent)))
+            if (!declared.Contains(ev)) fails.Add($"mappedEventsMissing({ev})");
+        if (declared.Count != Audio.MappedEvents.Length) fails.Add("mappedEventsHasDuplicates");
 
         // ── (a) injectivity over the canonical events ───────────────────────────────────────
         var byCue = new Dictionary<string, List<string>>();
@@ -11307,14 +11320,22 @@ public partial class Game
         shared.Sort();
         if (shared.Count > 0) fails.Add("notInjective(" + string.Join(",", shared) + ")");
 
-        // ── (b) the bus: an opponent's telegraph is never on the UI fader ───────────────────
+        // ── (b) the bus: nothing that happens ON THE BOARD is on the UI fader ──────────────
+        // P14 split the two claims this leg used to make with one list. `FoeTelegraphs` is now the
+        // events that really are only ever the opponent (it used to include Explosion and
+        // OverwatchFires, which are routinely the PLAYER's own action — see Audio.CueMap.cs), and
+        // `NeverUiBus` carries the fader obligation for every in-world beat, which is strictly more
+        // than the old list covered.
         var uiTele = new List<string>();
-        foreach (var ev in Audio.FoeTelegraphs)
+        foreach (var ev in Audio.NeverUiBus)
         {
             string cue = Audio.CueFor(ev);
             if (Audio.CategoryOf(cue) == "ui") uiTele.Add($"{ev}->'{cue}'");
         }
-        if (uiTele.Count > 0) fails.Add("telegraphOnUiBus(" + string.Join(",", uiTele) + ")");
+        if (uiTele.Count > 0) fails.Add("inWorldCueOnUiBus(" + string.Join(",", uiTele) + ")");
+        // and the opponent-only set must be a SUBSET of it (a tell is an in-world beat by definition)
+        foreach (var ev in Audio.FoeTelegraphs)
+            if (Array.IndexOf(Audio.NeverUiBus, ev) < 0) fails.Add($"foeTelegraphNotInNeverUiBus({ev})");
 
         // PlayFoe must move a UI-category cue onto the SFX bus (the mechanism, not the routing).
         if (Audio.BusOf("over", false) != "ui")  fails.Add("busOf:overIsNotUiOnThePlayerBus");
@@ -11329,26 +11350,197 @@ public partial class Game
         if (pbCue == ebCue) fails.Add($"banner:PLAYER TURN and ENEMY TURN are the same cue '{pbCue}'");
         BannerText = null; BannerTimer = 0f;   // leave no banner behind
 
-        // ── (c) the source census ──────────────────────────────────────────────────────────
-        var (haveSrc, nOver, nReload, nFoe) = Audio.SourceCensus();
+        // ── (c) the source census, REBUILT (P14) ───────────────────────────────────────────
+        // Was: two literal greps in one file, against caps of 7 and 3, on a call form the same wave
+        // had deleted — so both terms read x0 for ever and the leg could not fail. Now: THE TABLE
+        // OWNS ITS CUES. Every cue in CueFor's right-hand column must be played through
+        // Audio.Cue/CueFor and never through a raw Audio.Play("<that id>"), anywhere in src/. That
+        // rule is violated by writing one line, which is what a census is for.
+        var cen = Audio.SourceCensus();
         string census;
-        if (!haveSrc) census = "census: n/a (no src/Game.cs next to the working directory)";
+        if (!cen.HaveSrc) census = "census: n/a (no src/ next to the working directory)";
         else
         {
-            census = $"census: Audio.Play(\"over\") x{nOver} (cap {CueOverCap}), "
-                   + $"Audio.Play(\"reload\") x{nReload} (cap {CueReloadCap}), Audio.PlayFoe x{nFoe}";
-            if (nOver   > CueOverCap)   fails.Add($"census:overSites({nOver}>{CueOverCap})");
-            if (nReload > CueReloadCap) fails.Add($"census:reloadSites({nReload}>{CueReloadCap})");
-            if (nFoe < 4)               fails.Add($"census:playFoeSites({nFoe}<4)");
+            census = $"census: {cen.Offenders.Length} raw plays of a table-owned cue"
+                   + (cen.Offenders.Length > 0 ? " [" + string.Join(" ", cen.Offenders) + "]" : "")
+                   + $", {cen.TableUsers} table users (floor {CueTableUserFloor}), "
+                   + $"{cen.FoeSites} foe sites (floor {CueFoeSiteFloor})";
+            if (cen.Offenders.Length > 0)
+                fails.Add("census:rawPlayOfMappedCue(" + string.Join(",", cen.Offenders) + ")");
+            if (cen.TableUsers < CueTableUserFloor)
+                fails.Add($"census:tableUnused({cen.TableUsers}<{CueTableUserFloor})");
+            if (cen.FoeSites < CueFoeSiteFloor)
+                fails.Add($"census:playFoeSites({cen.FoeSites}<{CueFoeSiteFloor})");
         }
+
+        // ── (d) P14 — THE REACTION ANNOUNCES ITSELF WHEN IT PLAYS, NOT WHEN IT IS QUEUED ───
+        // The overwatch reaction used to pop its "OVERWATCH" text and play its cue inside
+        // Game.OnUnitEnteredTile's watcher loop, i.e. for EVERY watcher on the tile-entry frame,
+        // while the beat those announce (the snap-freeze, the reticle on the mover, the tracer)
+        // plays at ShotAnim.OnStart — one reaction at a time, and a reaction's TotalAt is 0.68 s.
+        // No test in this project could see WHEN a cue fires, so `Audio.Spy` was added for this.
+        // Two watchers, one tile entry: zero cues at enqueue, then exactly one per reaction as it
+        // becomes the active anim.
+        string reactCue = Audio.CueFor(Audio.GameEvent.OverwatchFires);
+        try
+        {
+            NoPersist = true;
+            Util.Reseed(2401);
+            Mission.ForcedLayout = 5;
+            ForcedObjective = Objective.Eliminate;
+            StartMission(1);
+            Mission.ForcedLayout = -1; ForcedObjective = null;
+            _anims.Clear();
+            SquadConcealed = false;
+            var mover = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+            var ws = Enemies.Where(e => e.Alive).Take(2).ToList();
+            if (mover == null || ws.Count < 2) fails.Add("reaction:couldNotStageTwoWatchers");
+            else
+            {
+                // put the mover in the open with both watchers adjacent, guns up and watching
+                mover.Hp = mover.MaxHp = 999;      // never predicted dead: both watchers must fire
+                mover.Downed = false; mover.Slipstreaming = false;
+                mover.X = Grid.W / 2; mover.Y = Grid.H / 2; mover.SyncPos();
+                Grid.Tiles[mover.X, mover.Y] = TileType.Floor;
+                int k = 0;
+                foreach (var w in ws)
+                {
+                    w.X = mover.X + (k == 0 ? 1 : -1); w.Y = mover.Y; w.SyncPos();
+                    Grid.Tiles[w.X, w.Y] = TileType.Floor;
+                    w.OnOverwatch = true; w.ReactedThisTurn = false; w.OwFocused = false;
+                    w.OwBrace = false; w.Ammo = Math.Max(1, w.Ammo);
+                    k++;
+                }
+                Audio.Spy = new List<(string, float, bool)>();
+                OnUnitEnteredTile(mover);
+                int atEnqueue = Audio.Spy.Count(c => c.Item1 == reactCue);
+                int queued = _anims.Count(a => a is ShotAnim sa && sa.Reaction);
+                if (queued < 2) fails.Add($"reaction:onlyStaged({queued})reactions");
+                if (atEnqueue != 0)
+                    fails.Add($"reaction:{atEnqueue}cuesAtEnqueueFor{queued}queuedReactions");
+                // now start each queued reaction in turn: one cue each, when it actually plays
+                int seen = 0, bad = 0;
+                foreach (var a in _anims.Where(a => a is ShotAnim sa && sa.Reaction).ToList())
+                {
+                    int before = Audio.Spy.Count(c => c.Item1 == reactCue);
+                    a.Started = true; a.OnStart(this);
+                    int after = Audio.Spy.Count(c => c.Item1 == reactCue);
+                    if (after - before != 1) bad++;
+                    seen++;
+                }
+                if (bad != 0) fails.Add($"reaction:{bad}of{seen}reactionsDidNotCueAtOnStart");
+                // and it is PANNED to the watcher that fired, not centred
+                if (Audio.Spy.Any(c => c.Item1 == reactCue && c.Item2 < 0f))
+                    fails.Add("reaction:cueUnpanned");
+                sb.AppendLine($"CUETEST: reaction: {queued} watchers -> {atEnqueue} cues at enqueue, "
+                            + $"{seen - bad}/{seen} cued at OnStart");
+            }
+
+            // ── (e) P14 — EVERY IN-WORLD CUE IS PANNED TO WHERE IT HAPPENS ──────────────────
+            // GrenadeAnim panned its blast; the three siblings in the same file (SmokeAnim,
+            // FlashAnim, IncendiaryAnim) and HealAnim did not, so a canister landing at the board
+            // edge and a mend across the map both played dead centre. Driven through the real
+            // anims — Effect() is protected, so this is the shipped path, not a copy of it.
+            _anims.Clear();
+            var thrower = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+            var patient = Players.FirstOrDefault(u => u.Alive && u != thrower)
+                       ?? Enemies.FirstOrDefault(e => e.Alive);
+            if (thrower == null || patient == null) fails.Add("pan:couldNotStage");
+            else
+            {
+                int tx = Math.Max(1, Grid.W - 3), ty = Math.Max(1, Grid.H / 2);
+                patient.Hp = Math.Max(1, patient.MaxHp - 3);
+                var staged = new (string what, Anim anim, string cue)[]
+                {
+                    ("smoke",      new SmokeAnim(thrower, tx, ty),      "smoke"),
+                    ("flash",      new FlashAnim(thrower, tx, ty),      "flash"),
+                    ("incendiary", new IncendiaryAnim(thrower, tx, ty), Audio.CueFor(Audio.GameEvent.Explosion)),
+                    ("heal",       new HealAnim(thrower, patient),      Audio.CueFor(Audio.GameEvent.Mend)),
+                };
+                var unpanned = new List<string>();
+                var missing  = new List<string>();
+                foreach (var (what, anim, cue) in staged)
+                {
+                    Audio.Spy = new List<(string, float, bool)>();
+                    anim.Started = true; anim.OnStart(this);
+                    for (int f = 0; f < 400 && !anim.Update(this, 1f / 60f); f++) { }
+                    var hits = Audio.Spy.Where(c => c.Item1 == cue).ToList();
+                    if (hits.Count == 0) missing.Add($"{what}->'{cue}'");
+                    else if (hits.Any(h => h.Item2 < 0f)) unpanned.Add($"{what}->'{cue}'");
+                }
+                if (missing.Count > 0)  fails.Add("pan:cueNeverFired(" + string.Join(",", missing) + ")");
+                if (unpanned.Count > 0) fails.Add("pan:unpannedInWorldCue(" + string.Join(",", unpanned) + ")");
+                sb.AppendLine($"CUETEST: pan: {staged.Length - unpanned.Count - missing.Count}/{staged.Length} "
+                            + "in-world cues panned to where they happen");
+            }
+        }
+        catch (Exception e) { fails.Add("reaction/pan:threw(" + e.GetType().Name + ":" + e.Message + ")"); }
+        finally { Audio.Spy = null; Mission.ForcedLayout = -1; ForcedObjective = null; _anims.Clear(); }
+
+        // ── (f) P14 — YOUR OWN LOSSES DO NOT SOUND LIKE THE ENEMY ARRIVING ─────────────────
+        // "VIP DOWN" and "SOLDIER DOWN - THEY HOLD FOR n" both fired GameEvent.Reinforce, whose
+        // entire meaning in the table is "more of them arrive / the pressure clock ticks / artillery
+        // is coming". Two loss beats announced as an enemy arrival. Driven through the REAL KillUnit
+        // and EnterDowned, reading Game.LastBannerCue and the Spy, not a copy of either body.
+        try
+        {
+            NoPersist = true;
+            Util.Reseed(3301);
+            Mission.ForcedLayout = 5;
+            ForcedObjective = Objective.Escort;      // an Escort mission actually fields the VIP
+            StartMission(1);
+            Mission.ForcedLayout = -1; ForcedObjective = null;
+            _anims.Clear();
+            string alarm = Audio.CueFor(Audio.GameEvent.Reinforce);
+            string fall  = Audio.CueFor(Audio.GameEvent.Casualty);
+
+            var soldier = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+            if (soldier == null) fails.Add("loss:noSoldierStaged");
+            else
+            {
+                soldier.Downed = false; soldier.WasDownedThisMission = false;
+                LastBannerCue = "<none>";
+                Audio.Spy = new List<(string, float, bool)>();
+                EnterDowned(soldier);
+                if (LastBannerCue == alarm)
+                    fails.Add($"loss:SOLDIER DOWN fires the reinforcement alarm '{alarm}'");
+                if (Audio.Spy.Any(c => c.Item1 == alarm))
+                    fails.Add("loss:SOLDIER DOWN played the reinforcement alarm");
+                if (!Audio.Spy.Any(c => c.Item1 == fall))
+                    fails.Add($"loss:SOLDIER DOWN played no casualty cue '{fall}'");
+                sb.AppendLine($"CUETEST: loss: SOLDIER DOWN banner='{LastBannerCue}' cues="
+                            + string.Join("+", Audio.Spy.Select(c => c.Item1)));
+            }
+            if (Vip == null) fails.Add("loss:noVipStaged");
+            else
+            {
+                LastBannerCue = "<none>";
+                Audio.Spy = new List<(string, float, bool)>();
+                KillUnit(Vip);
+                if (LastBannerCue == alarm)
+                    fails.Add($"loss:VIP DOWN fires the reinforcement alarm '{alarm}'");
+                if (Audio.Spy.Any(c => c.Item1 == alarm))
+                    fails.Add("loss:VIP DOWN played the reinforcement alarm");
+                if (!Audio.Spy.Any(c => c.Item1 == fall))
+                    fails.Add($"loss:VIP DOWN played no casualty cue '{fall}'");
+                // and exactly ONE sound for one body — the fix must not layer a second cue on it
+                int falls = Audio.Spy.Count(c => c.Item1 == fall);
+                if (falls != 1) fails.Add($"loss:VIP DOWN played the casualty cue x{falls}");
+                sb.AppendLine($"CUETEST: loss: VIP DOWN banner='{LastBannerCue}' cues="
+                            + string.Join("+", Audio.Spy.Select(c => c.Item1)));
+            }
+        }
+        catch (Exception e) { fails.Add("loss:threw(" + e.GetType().Name + ":" + e.Message + ")"); }
+        finally { Audio.Spy = null; Mission.ForcedLayout = -1; ForcedObjective = null; _anims.Clear(); }
 
         var map = new List<string>();
         foreach (var ev in Audio.MappedEvents) map.Add($"{ev}={Audio.CueFor(ev)}");
         sb.AppendLine("CUETEST: map " + string.Join(" ", map));
         sb.AppendLine("CUETEST: " + census + $"; banner player='{pbCue}' enemy='{ebCue}'/{ebBus}");
         sb.Append(fails.Count == 0
-            ? $"CUETEST: PASS ({Audio.MappedEvents.Length} events -> {byCue.Count} distinct cues, "
-            + "no opponent telegraph on the UI bus, ShowBanner(enemy) on the SFX fader, "
+            ? $"CUETEST: PASS ({Audio.MappedEvents.Length} events = the whole GameEvent enum -> "
+            + $"{byCue.Count} distinct cues, no in-world cue on the UI bus, ShowBanner(enemy) on "
+            + "the SFX fader, the reaction announces at OnStart, "
             + census + ")"
             : "CUETEST: FAIL (" + string.Join(",", fails) + ")");
         return sb.ToString();
