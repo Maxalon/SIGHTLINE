@@ -122,6 +122,12 @@ echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOG
 # has one, it does. (`tail -1` is kept: this test prints two candidate lines and the last is the
 # verdict.)
 echo -n "AIIDLETEST : "; verdict "$(SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1)"
+# THE CUE MAP (wave "cue-map"): one meaning, one cue. Audio.CueFor must be INJECTIVE over the
+# canonical game events, no opponent telegraph may resolve to a UI-bus cue, the real ShowBanner
+# must put an enemy banner on the SFX fader, and the src/Game.cs call-site census must be under
+# its caps. Its (c) leg is a SOURCE SCAN of src/Game.cs relative to the working directory - which
+# is the repo root here; from a published binary it reports `census: n/a` and the other legs stand.
+echo -n "CUETEST    : "; verdict "$(SIGHTLINE_CUETEST=1 run | grep -oE "CUETEST: (PASS|FAIL)" | head -1)"
 # RESONANCE A3: the AUDIO CHECK audition screen's listing/label/measurement contract.
 echo -n "AUDITIONTEST: "; verdict "$(SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1)"
 echo -n "AMBIENTTEST: "; verdict "$(SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1)"

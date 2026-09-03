@@ -62,7 +62,7 @@ public static partial class Hud
         // ---- title ----
         float titleIn = PanelAnim("audTitle", 0.45f);
         string title = "AUDIO CHECK";
-        int tfs = 44;
+        int tfs = AudTitleFs;
         Vector2 tm = Cfg.TitleMeasure(title, tfs, 4f);
         float tx = W / 2f - tm.X / 2f;
         float ty = 20f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 16f;
@@ -91,6 +91,23 @@ public static partial class Hud
 
     // ── the cue table ────────────────────────────────────────────────────────────────────
 
+    /// The cue table's derived vertical layout, as a PURE function of the screen height and the
+    /// registered cue count. The draw uses it and AUDITIONTEST asserts against it, so the fit
+    /// gate measures the real layout instead of a transcription of it.
+    ///   pitch  — row height (clamped 16..21; 16 is the floor that keeps a 13 px chip legible)
+    ///   chipH  — the clickable chip inside a row
+    ///   band   — the visible height between the header rule and the BACK button
+    ///   total  — how tall the whole listing is; > band means the table scrolls
+    public const int AudTitleFs = 44;
+    public static int AudTableY0 => 20 + AudTitleFs + 24 + 21;
+    public static (int pitch, int chipH, int band, int total) AudTableMetrics(int screenH)
+    {
+        int y0 = AudTableY0;
+        int groups = Audio.AuditionGroups.Length, cues = Audio.AuditionCues.Length;
+        int pitch = Math.Clamp((screenH - 58 - y0 - groups * 5) / Math.Max(1, groups + cues), 16, 21);
+        return (pitch, pitch - 3, screenH - 58 - y0, groups * (pitch + 1 + 4) + cues * pitch);
+    }
+
     static void DrawAudCueTable(Game g, int x, int top, int w)
     {
         float in_ = PanelAnim("audCues", 0.4f, 0.08f);
@@ -113,31 +130,54 @@ public static partial class Hud
         Cfg.Text("LEVEL", new Vector2(barX, hy), 11, 1f, Raylib.Fade(Pal.TxtDim, in_));
         Raylib.DrawLine(x, hy + 15, x + w, hy + 15, Raylib.Fade(Pal.PanelBd, in_));
 
-        int y = hy + 21;
+        int y0 = hy + 21;
         // THE BEAT: the row pitch is DERIVED so the table always ends above the BACK button. 23 cues
         // fit at the original 21 px; every cue the game grows (this wave added five) would otherwise
         // walk the last rows into the button. Floor 16 keeps the 13 px chip label inside its chip.
-        int groups = Audio.AuditionGroups.Length, cues = Audio.AuditionCues.Length;
-        int pitch = Math.Clamp((Cfg.ScreenH - 58 - y - groups * 5) / Math.Max(1, groups + cues), 16, 21);
-        int chipH = pitch - 3;
+        //
+        // THE CUE MAP: at 36 cues the derived pitch hit that floor and the table STILL overran the
+        // BACK button by ~70 px — a floor cannot absorb unbounded growth, and crushing the rows
+        // below 16 px would put the role caption under the 12 px small-text floor. So the table
+        // SCROLLS. AudTableH / AudTableTotal are published for the wheel handler and for
+        // AUDITIONTEST's fit assertion; a clipped row publishes a ZERO-SIZE hit rect so the index
+        // space still lines up with Audio.AuditionCues and nothing off-screen is clickable.
+        //
+        // A row outside the band is SKIPPED, not merely scissored. FITTEST audits the DRAW CALLS,
+        // not the pixels: a scissor hides an off-canvas string from the eye and not from the
+        // audit, and the first cut of this table failed FITTEST with 23 `inkOffCanvas` violations
+        // on the last row at three text scales. Clipping has to happen before the Cfg.Text call.
+        var (pitch, chipH, band, total) = AudTableMetrics(Cfg.ScreenH);
+        AudTableTop = y0; AudTableH = band; AudTableTotal = total;
+        g.AudScroll = Util.Clamp(g.AudScroll, 0f, Math.Max(0, AudTableTotal - AudTableH));
+        int y = y0 - (int)g.AudScroll;
+        int clipLo = y0, clipHi = y0 + AudTableH;
+        Raylib.BeginScissorMode(x, clipLo, w, AudTableH);
         var mouse = Raylib.GetMousePosition();
         foreach (var (group, ids) in Audio.AuditionGroups)
         {
-            Cfg.Text(group, new Vector2(btnX, y + 3), 12, 1f, Raylib.Fade(Pal.Accent, 0.85f * in_));
-            float gw = Cfg.Measure(group, 12, 1f).X;
-            Raylib.DrawLine((int)(btnX + gw + 10), y + 9, x + w, y + 9, Raylib.Fade(Pal.PanelBd, 0.7f * in_));
+            if (y >= clipLo && y + pitch <= clipHi)
+            {
+                Cfg.Text(group, new Vector2(btnX, y + 3), 12, 1f, Raylib.Fade(Pal.Accent, 0.85f * in_));
+                float gw = Cfg.Measure(group, 12, 1f).X;
+                Raylib.DrawLine((int)(btnX + gw + 10), y + 9, x + w, y + 9, Raylib.Fade(Pal.PanelBd, 0.7f * in_));
+            }
             y += pitch + 1;
 
             foreach (var id in ids)
             {
+                // a row outside the band publishes an EMPTY rect (same index, unclickable) and
+                // issues NO draw call at all — see the note above about FITTEST auditing draws
+                bool vis = y >= clipLo && y + pitch <= clipHi;
+                var btn = new Rectangle(btnX, y, btnW, chipH);
+                var brt = new Rectangle(burstX, y, burstW, chipH);
+                AudCueBtns.Add(vis ? btn : new Rectangle(0, 0, 0, 0));
+                AudBurstBtns.Add(vis ? brt : new Rectangle(0, 0, 0, 0));
+                if (!vis) { y += pitch; continue; }
+
                 g.AudFlash.TryGetValue(id, out float glow);
                 var row = new Rectangle(x, y - 1, w, pitch - 1);
                 if (glow > 0f)
                     Raylib.DrawRectangleRec(row, Raylib.Fade(Pal.Accent, 0.16f * glow));
-
-                var btn = new Rectangle(btnX, y, btnW, chipH);
-                var brt = new Rectangle(burstX, y, burstW, chipH);
-                AudCueBtns.Add(btn); AudBurstBtns.Add(brt);
 
                 bool hb = Raylib.CheckCollisionPointRec(mouse, btn);
                 bool hr = Raylib.CheckCollisionPointRec(mouse, brt);
@@ -174,7 +214,26 @@ public static partial class Hud
             }
             y += 4;
         }
+        Raylib.EndScissorMode();
+
+        // the scroll affordance: a track + thumb on the panel's right edge, drawn only when the
+        // table is taller than its band (so the screen is unchanged for anyone whose cue count fits)
+        if (AudTableTotal > AudTableH)
+        {
+            int sx = x + w + 8;   // in the gutter between the two panels, clear of the level bars
+            Raylib.DrawRectangle(sx, clipLo, 4, AudTableH, Raylib.Fade(Pal.RGBA(30, 37, 47), in_));
+            float frac = AudTableH / (float)AudTableTotal;
+            int th = Math.Max(24, (int)(AudTableH * frac));
+            int tyy = clipLo + (int)((AudTableH - th) * (g.AudScroll / Math.Max(1f, AudTableTotal - AudTableH)));
+            Raylib.DrawRectangle(sx, tyy, 4, th, Raylib.Fade(Pal.Accent, 0.8f * in_));
+            Cfg.Text("wheel", new Vector2(sx - 40, clipLo + AudTableH - 12), 11, 1f,
+                     Raylib.Fade(Pal.TxtDim, 0.7f * in_));
+        }
     }
+
+    /// The cue table's scroll band, published for Game.HandleAudition's wheel handler and for
+    /// AUDITIONTEST's fit assertion. Set every frame by DrawAudCueTable.
+    public static int AudTableTop, AudTableH, AudTableTotal;
 
     /// A compact clickable chip — the cue table needs a button 18px tall, which is below what
     /// DrawButtonRect/DrawGhostButton are shaped for.
