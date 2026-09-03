@@ -638,6 +638,17 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // THE CUE MAP (wave "cue-map"): SIGHTLINE_CUETEST=1 — the event->cue table is INJECTIVE,
+        // no opponent telegraph resolves to a UI-bus cue, the real ShowBanner puts an enemy banner
+        // on the SFX fader, and the src/Game.cs call-site census is under its caps. Needs a tiny
+        // window (Game's ctor uses tile math); device-free otherwise.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CUETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "cuetest");
+            Console.WriteLine(new Game().CueSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
         {

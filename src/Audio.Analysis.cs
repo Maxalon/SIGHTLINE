@@ -252,6 +252,9 @@ public static partial class Audio
         ("w_shotgun+crit+st_lastkill", new[] { ("w_shotgun", 0f), ("crit", 0f), ("st_lastkill", 0f) }),
         // THE BEAT: a grenade kill — the blast, the collapse and the takedown stinger land together
         ("boom+death+st_kill",         new[] { ("boom", 0f), ("death", 0f), ("st_kill", 0f) }),
+        // THE CUE MAP: a pod wakes ON a shot — a suppress / mark / hack rouses the pod in the same
+        // frame the round lands, so the new threat sting stacks on top of a weapon and an impact.
+        ("w_rifle+hit+alert pod wake", new[] { ("w_rifle", 0f), ("hit", 0f), ("alert", 0.02f) }),
     };
 
     /// Mix a stack at the REAL master volume and report its peak + clipped-sample count.
@@ -426,11 +429,17 @@ public static partial class Audio
         "move" => "move",
         "shoot" or "w_rifle" or "w_shotgun" or "w_sniper" or "w_smg" or "w_lmg" => "weapon",
         "hit" or "miss" or "death" or "react" or "flash" => "impact",   // THE BEAT: a reaction and a flashbang are in-world hits
+        // THE CUE MAP: the threat beats are IN-WORLD, never UI chrome. A player who pulls the UI
+        // fader down is turning off menu blips — they must not thereby lose "you have been seen",
+        // "more of them are coming" and "the trap just sprang".
+        "alert" or "alarm" or "ambush" => "impact",
         "boom" => "blast",                          // THE BEAT: the loudest thing the field does; SFX bus, no detune
-        "heal" or "smoke" => "world",               // THE BEAT: soft in-world verbs — SFX bus, UI-level loudness
+        // `turn_enemy` sits at UI loudness but on the SFX bus for the same reason: whose turn it
+        // is is not chrome.
+        "heal" or "smoke" or "turn_enemy" => "world",   // THE BEAT / THE CUE MAP: SFX bus, UI-level loudness
         "st_kill" or "st_lastkill" or "st_victory" or "st_lose" or "st_squadwipe"
             or "win" or "lose" => "stinger",
-        _ => "ui",                                  // select/reload/hunker/over/turn
+        _ => "ui",                                  // select/move/reload/hunker/over/turn/ability/tick/ui_ok/ui_no
     };
 
     static IEnumerable<CueStats> Concat(IEnumerable<CueStats> a, IEnumerable<CueStats> b)

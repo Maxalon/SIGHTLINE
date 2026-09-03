@@ -70,6 +70,7 @@ public partial class Game
         _audWarm = 0;
         _audHoldFlash = false;
         _audVolTouched = false;
+        AudScroll = 0f;             // THE CUE MAP: the table scrolls; open it at the top every time
         Phase = Phase.AudioCheck;
         Paused = false;
         Audio.Play("select");
@@ -125,9 +126,20 @@ public partial class Game
     // ── per-frame ────────────────────────────────────────────────────────────────────────
 
     /// AUDIO CHECK input + scheduler. Called from Update's phase switch with the clamped frame dt.
+    /// THE CUE MAP: the cue table's scroll offset in px. The table outgrew one screenful at 36
+    /// cues; Hud.DrawAudCueTable clamps this against the real content height every frame.
+    public float AudScroll;
+
     void HandleAudition(float dt)
     {
         AudClock += dt;
+
+        // wheel / arrows scroll the cue table (clamped in the draw, which is the only place that
+        // knows how tall the content is). Held keys, not IsKeyPressed — a list scrolls smoothly.
+        float wheel = Raylib.GetMouseWheelMove();
+        if (wheel != 0f) AudScroll -= wheel * 42f;
+        if (Raylib.IsKeyDown(KeyboardKey.Down)) AudScroll += 480f * dt;
+        if (Raylib.IsKeyDown(KeyboardKey.Up))   AudScroll -= 480f * dt;
 
         // warm the measurement table a few cues at a time (see AudWarmPerFrame)
         for (int k = 0; k < AudWarmPerFrame && _audWarm < Audio.AuditionCues.Length; k++)
@@ -286,6 +298,21 @@ public partial class Game
         }
         finally { Cfg.UiScale = uiWas; }
 
+        // (2b) THE CUE MAP — the VERTICAL fit. Every earlier version of this test measured only
+        // the WIDTH of a row's strings; nothing asserted that the rows fit the screen at all, and
+        // at 36 cues the derived pitch hit its floor and the listing ran ~70 px past the BACK
+        // button. The table scrolls now, so the assertion is that a ROW is still legible and that
+        // a useful number of them are on screen at once — a scroll is not a licence to crush.
+        {
+            var (pitch, chipH, band, total) = Hud.AudTableMetrics(800);
+            Chk(pitch >= 16, $"AUDITION row pitch {pitch}px is under the 16px floor");
+            Chk(chipH >= Hud.AudCueFontSize,
+                $"AUDITION cue chip {chipH}px cannot hold its {Hud.AudCueFontSize}px label");
+            int onScreen = band / Math.Max(1, pitch);
+            Chk(onScreen >= 10, $"AUDITION shows only {onScreen} rows at once ({band}px band / {pitch}px pitch)");
+            Chk(total > 0 && band > 0, "AUDITION table metrics are degenerate");
+        }
+
         // (3) stacks
         Chk(Audio.StackCount > 0, "AUDITION has no concurrent stacks to fire");
         for (int i = 0; i < Audio.StackCount; i++)
@@ -313,7 +340,10 @@ public partial class Game
 
         return fails.Count == 0
             ? "AUDITIONTEST: PASS (" + Audio.AuditionCues.Length + " cues listed + measured, " +
-              Audio.StackCount + " stacks, labels fit at 120%)"
+              Audio.StackCount + " stacks, labels fit at 120%, " +
+              (Hud.AudTableMetrics(800).total > Hud.AudTableMetrics(800).band
+                 ? Hud.AudTableMetrics(800).band / Hud.AudTableMetrics(800).pitch + " rows on screen, table scrolls"
+                 : "whole table on screen") + ")"
             : "AUDITIONTEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 }

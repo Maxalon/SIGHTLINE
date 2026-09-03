@@ -81,11 +81,11 @@ public partial class Game
         if (WarRoom == null || NoPersist) return;
         if (WarRoom.Unlocks.Contains((int)u)) { Audio.Play("select"); return; }   // already owned
         int cost = MetaProg.UnlockCost(u);
-        if (WarRoom.Salvage < cost) { Audio.Play("miss"); return; }               // can't afford
+        if (WarRoom.Salvage < cost) { Audio.Cue(Audio.GameEvent.ShopNo); return; }               // can't afford
         if (SaveGame.SpendSalvage(cost))
         {
             SaveGame.AddUnlock((int)u);
-            Audio.Play("hit");
+            Audio.Cue(Audio.GameEvent.ShopOk);
             WarRoom = LoadWarRoomProfile();   // reflect the spend + new unlock immediately
         }
     }
@@ -132,11 +132,11 @@ public partial class Game
     public void TryRerollDraftPool()
     {
         if (NoPersist || Phase != Phase.Draft) return;
-        if (!SaveGame.SpendSalvage(MetaProg.DraftRerollCost)) { Audio.Play("miss"); return; }
+        if (!SaveGame.SpendSalvage(MetaProg.DraftRerollCost)) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
         DraftPool = BuildDraftPool();
         DraftPicked.Clear();
         DraftSalvage = SaveGame.LoadSalvage();
-        Audio.Play("hit");
+        Audio.Cue(Audio.GameEvent.ShopOk);
     }
 
     /// W9 sink: buy ONE scar off a soldier (their oldest first). A true undo of Run.GrantScar:
@@ -145,7 +145,7 @@ public partial class Game
     public void TryBuyScarRemoval(Unit u)
     {
         if (NoPersist || _run == null || u == null || u.Scars.Count == 0) return;
-        if (AvailableSalvage < MetaProg.ScarRehabCost) { Audio.Play("miss"); return; }
+        if (AvailableSalvage < MetaProg.ScarRehabCost) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
         _pendingSalvage += MetaProg.ScarRehabCost;
         var s = u.Scars[0];
         u.Scars.RemoveAt(0);
@@ -153,7 +153,7 @@ public partial class Game
         if (s == Scar.Vendetta) u.VendettaFaction = Faction.None;
         BarracksSalvage = AvailableSalvage;
         _run.Report.Insert(0, $"{u.Name} rehabilitated - {ScarDef.Name(s)} bought off  (-{MetaProg.ScarRehabCost} salvage)");
-        Audio.Play("hit");
+        Audio.Cue(Audio.GameEvent.ShopOk);
     }
 
     /// W9 sink: re-roll this barracks' requisition slate (cheap + repeatable; each re-roll perturbs
@@ -161,12 +161,12 @@ public partial class Game
     public void TryRerollShopSlate()
     {
         if (NoPersist || _run == null) return;
-        if (AvailableSalvage < MetaProg.ShopRerollCost) { Audio.Play("miss"); return; }
+        if (AvailableSalvage < MetaProg.ShopRerollCost) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
         _pendingSalvage += MetaProg.ShopRerollCost;
         _shopReroll++;
         RefreshShopOffer();
         BarracksSalvage = AvailableSalvage;
-        Audio.Play("hit");
+        Audio.Cue(Audio.GameEvent.ShopOk);
     }
 
     // ---- harness: seed a demo WAR ROOM profile for the SIGHTLINE_WARROOM screenshot ----

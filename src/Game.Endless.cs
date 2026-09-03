@@ -98,7 +98,7 @@ public partial class Game
         // the alive-cap by this one body — the cap is a perf/fairness valve for the horde, and
         // the ending's escalation must never be silently swallowed by a full board.
         if (w > EndlessSaturationWave) SpawnEndlessElite(scaleN);
-        ShowBanner($"WAVE {w}", false);
+        ShowBanner($"WAVE {w}", false, Audio.CueFor(Audio.GameEvent.Reinforce));
         Audio.PlayStinger("kill");   // a short escalation cue as the next wave crashes in
     }
 
