@@ -5189,7 +5189,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             for (int i = 0; i < run.Offers.Count && i < 3; i++)
             {
                 MissionCards[i] = new Rectangle(x + 30 + i * (cw + gap), cy, cw, ch);
-                DrawDeployCard(MissionCards[i], run.Offers[i]);
+                DrawDeployCard(MissionCards[i], run.Offers[i], run.Mission + 1);
             }
         }
     }
@@ -5422,19 +5422,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             }
         }
 
-        // hover tooltip: the chosen op's flavour (mod / objective / force / reward / enemy hint)
+        // hover tooltip: the chosen op's flavour (mod / objective / force / reward / enemy hint).
+        // THE FORK PAYS: every string is composed by the PURE NodeHoverCard below, so FORKTEST can
+        // assert what the fork SAYS on 50 seeds' worth of nodes without a window — and so the
+        // EVENT node's lie (it used to print its sentinel card's "EVENT - ELIMINATE / Standard
+        // force  +0 intel") cannot come back unnoticed.
         if (hovered != null)
         {
             var c = hovered.Card;
-            string l1 = $"{c.ModName}  -  {ObjName(c.Objective)}";
-            // C3: the CLASS is the headline property of a node, so it sits directly under the
-            // name — above force, payout and reward. An EVENT node is not a fight; it gets no
-            // class row (and its Card.Objective is a placeholder that must not be read as one).
-            string lc = hovered.Kind == NodeKind.Event ? null : ObjClassLine(c.Objective);
-            string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
-            string l2 = $"{force}   +{hovered.Intel} intel";   // routing economy: payout shown alongside risk
-            string l3 = c.Reward != RewardKind.None ? "+ " + c.RewardText : null;
-            string l4 = Run.EnemyHint(hovered);   // enemy intel hint (S4-A)
+            var hov = NodeHoverCard(hovered);
+            string l1 = hov.Title, lc = hov.Class, l2 = hov.Body, l3 = hov.Reward, l4 = hov.Hint;
             int tw = Math.Max((int)Cfg.Measure(l1, 13, 1f).X,
                      Math.Max((int)Cfg.Measure(l2, 12, 1f).X,
                      Math.Max(lc != null ? (int)Cfg.Measure(lc, 12, 1f).X + 14 : 0,
@@ -5457,8 +5454,79 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Cfg.Text(l2, new Vector2((int)tx + 10, row), 12, 1f, Pal.TxtDim);
             if (l3 != null) Cfg.Text(l3, new Vector2((int)tx + 10, row + 16), 12, 1f, Pal.Accent);
             int hintY = l3 != null ? row + 32 : row + 16;
-            Cfg.Text(l4, new Vector2((int)tx + 10, hintY), 12, 1f, Pal.Foe);
+            Cfg.Text(l4, new Vector2((int)tx + 10, hintY), 12, 1f, hov.IsEvent ? Pal.Suspect : Pal.Foe);
         }
+    }
+
+    // ── THE FORK PAYS — the campaign-map node hover, AS DATA ─────────────────────────────
+    /// Everything the fork says about one node, composed with no draw call, no mouse read and no
+    /// clock read. Two reasons it is a pure function and not inline strings:
+    ///
+    ///  1. THE EVENT NODE'S HOVER LIED, and nothing could see it. Run.CardForNode gives an Event
+    ///     node a SENTINEL card (Objective = Eliminate, ModName "EVENT") whose only job is to keep
+    ///     generic `node.Card` reads null-safe — and the tooltip printed it verbatim, so the one
+    ///     node on the map that has no fight at all advertised "EVENT - ELIMINATE / Standard force
+    ///     +0 intel". A pixel test cannot catch that; an assertion over these strings can.
+    ///  2. The PITCHED premium has to be PRINTED or it is not a decision (DESIGN.md 3.A: the
+    ///     player must be able to make the choice informed). The premium's arithmetic lives in
+    ///     Run.ClassPremium and is quoted here from the same call the payout uses.
+    public struct NodeHover
+    {
+        public string Title;    // "ELITE  -  ELIMINATE" / "EVENT  -  UNKNOWN SIGNAL"
+        public string Class;    // the PITCHED / TASKED line; null on an Event node (it has no class)
+        public string Body;     // resistance + payout (+ the class premium), or the Event no-fight line
+        public string Reward;   // "+ Full squad heal", or null when the node pays no card reward
+        public string Hint;     // Run.EnemyHint, or the Event's no-contact line
+        public bool IsEvent;
+    }
+
+    /// Pure. `run` is accepted for call-site symmetry with the rest of the map surface (and so a
+    /// later premium can scale with run state) but nothing here reads it.
+    public static NodeHover NodeHoverCard(MissionNode n)
+    {
+        if (n.Kind == NodeKind.Event)
+        {
+            // Name the unknown signal, say there is no fight — and price the column, so "+0 intel"
+            // reads as the TRADE it is rather than as a missing number.
+            int fightPays = Run.BaseIntel(n.Mission);
+            return new NodeHover
+            {
+                Title   = "EVENT  -  UNKNOWN SIGNAL",
+                Class   = null,
+                Body    = $"No fight - so no clear intel  (a battle here pays +{fightPays})",
+                Reward  = "+ Rewards come from the choice you make",
+                Hint    = "NO CONTACT - A SITUATION, NOT A BATTLE",
+                IsEvent = true,
+            };
+        }
+        var c = n.Card;
+        int prem = Run.ClassPremium(n.Kind, c.Objective);
+        string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
+        return new NodeHover
+        {
+            Title   = $"{c.ModName}  -  {ObjName(c.Objective)}",
+            // C3: the CLASS is the headline property of a node, so it sits directly under the
+            // name — above resistance, payout and reward.
+            Class   = ObjClassLine(c.Objective),
+            Body    = prem > 0 ? $"{force}   +{n.Intel} intel  (+{prem} PITCHED)"
+                               : $"{force}   +{n.Intel} intel",
+            Reward  = c.Reward != RewardKind.None ? "+ " + c.RewardText : null,
+            Hint    = Run.EnemyHint(n),
+            IsEvent = false,
+        };
+    }
+
+    /// The same card flattened to the ordered lines the tooltip paints, top to bottom. This is the
+    /// shape FORKTEST asserts against.
+    public static List<string> NodeHoverLines(Run run, MissionNode n)
+    {
+        var h = NodeHoverCard(n);
+        var lines = new List<string> { h.Title };
+        if (h.Class != null) lines.Add(h.Class);
+        lines.Add(h.Body);
+        if (h.Reward != null) lines.Add(h.Reward);
+        lines.Add(h.Hint);
+        return lines;
     }
 
     // ── P1 — REQUISITION / ARMORY ICONS ──────────────────────────────────────────────────
@@ -5871,7 +5939,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
     }
 
-    static void DrawDeployCard(Rectangle r, MissionCard c)
+    static void DrawDeployCard(Rectangle r, MissionCard c, int mission)
     {
         bool hover = Raylib.CheckCollisionPointRec(Mouse(), r);
         Color tint = c.ModName == "RECON" ? Pal.Good : (c.ModName == "ONSLAUGHT" ? Pal.Foe : Pal.Friend);
@@ -5890,8 +5958,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             DrawClassMark(r.X + r.Width - 16 - tagW - 9, r.Y + 40, 4.2f, c.Objective);
             Cfg.Text(tag, new Vector2((int)(r.X + r.Width - 12 - tagW), (int)r.Y + 34), 12, 1f, ObjClassColor(c.Objective));
         }
+        // THE FORK PAYS: the payout and, when the card is PITCHED, the class premium inside it —
+        // the same Run.ClassPremium call Game.EnterBarracks pays out through Run.OfferIntel, so
+        // the card and the bank can never disagree. Shrink-to-fit rather than clip: this row is the
+        // one the player compares between the three cards.
         string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
-        Cfg.Text(force, new Vector2((int)r.X + 12, (int)r.Y + 56), 12, 1f, Pal.TxtDim);
+        int prem = Run.ClassPremium(Run.OfferKind(c), c.Objective);
+        string pay = prem > 0 ? $"{force}   +{Run.OfferIntel(c, mission)} intel  (+{prem} PITCHED)"
+                              : $"{force}   +{Run.OfferIntel(c, mission)} intel";
+        Cfg.Text(pay, new Vector2((int)r.X + 12, (int)r.Y + 56), 12, 1f, Pal.TxtDim);
         if (c.Reward != RewardKind.None)
             Cfg.Text("+ " + c.RewardText, new Vector2((int)r.X + 12, (int)r.Y + 74), 12, 1f, Pal.Accent);
         Cfg.Text("DEPLOY", new Vector2((int)(r.X + r.Width / 2 - (int)Cfg.Measure("DEPLOY", 12, 1f).X / 2), (int)(r.Y + r.Height - 22)), 12, 1f, hover ? tint : Pal.TxtDim);

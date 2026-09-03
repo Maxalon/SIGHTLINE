@@ -945,22 +945,86 @@ public class Run
         Objective.Rescue, Objective.Defend, Objective.Decapitate,
     };
 
-    /// Intel paid for clearing a node (the routing economy). Base tracks the old flat grant's
-    /// depth term (10 + 4*mission) so the overall economy is unchanged on a STANDARD route; SUPPLY
-    /// and ELITE add premiums so the branch pick trades survivability/risk for economy. START/BOSS
-    /// keep the base (the opener + finale aren't economy decisions).
+    // ── THE FORK PAYS (wave fork-pays) — the routing economy's PRICES ────────────────────
+    // The fork used to pay the LIGHTER fight MORE. SUPPLY was EnemyDelta -1 / StatDelta -1 /
+    // full heal AND base+10 intel, against COMBAT's 0/0/none/base: a strictly dominating option,
+    // which DESIGN.md 3.A calls a non-decision. (Measured: Supply 94.4% clear vs Combat 89.2%,
+    // W1; Supply 89.2 / Combat 78.2 / Elite 72.3, C4 addendum.) The heal IS the reward, so SUPPLY
+    // now pays a DISCOUNT: you buy safety with intel.
+    //
+    // And C3's declared-open half: NodeIntel switched on Kind alone and never asked
+    // Run.IsKillObjective, so a PITCHED node (ELIMINATE / DECAPITATE, measured 45.3% clear) paid
+    // exactly what a TASKED sibling (81.8%) paid. The map NAMED the class and gave no reason to
+    // pick the hard one. PitchedPremium is that reason.
+    //
+    // The three constants are ordered so that AT EQUAL DEPTH, for EVERY seed and BOTH classes,
+    //     ELITE (+14 .. +22)  >  COMBAT (+0 .. +8)  >  SUPPLY (-6)
+    // holds strictly — which is why the class premium is paid ONLY by the two FIGHT kinds. A
+    // PITCHED SUPPLY node would otherwise read base+2 and jump COMBAT's TASKED base, putting the
+    // economy stop back above the fight it is supposed to be cheaper than. (The cost of that
+    // choice is stated in the DEVLOG: a PITCHED SUPPLY is harder than a TASKED SUPPLY and pays
+    // the same. It is a known un-priced cell, not an oversight.)
+    public const int SupplyDiscount = -6;   // the heal is the reward; safety costs intel
+    public const int ElitePremium   = 14;   // risk-for-reward: heavier force, the biggest payout
+    public const int PitchedPremium = 8;    // C3's class price, paid on Combat/Elite only
+
+    // THE PRICES ARE A REDISTRIBUTION, NOT A CUT — and this constant is what makes that true.
+    // The depth term was `10 + 4*mission` for as long as the routing economy has existed. Taking
+    // 6 off SUPPLY while adding 8 to a PITCHED fight is not a wash: over the mix of nodes actually
+    // PLAYED it removes 1.88 intel per mission at heat 0 and 2.06 at heat 4 (measured on this
+    // wave's own base arm, `docs/measurements/fork-pays/`, 603 and 536 missions — the old table
+    // paid 3.20 / 3.35 per mission in kind premiums and the new one pays 1.32 / 1.29). Left alone
+    // that is a ~7% campaign-wide intel DEFLATION wearing a routing change's clothes, and round 1
+    // of this wave measured exactly that: heat 0 fell 53.1 -> 46.9 with intel/run 129.0 -> 118.5.
+    // Raising the depth term by 2 hands the mean back — 1.32 + 2 = 3.32 against 3.20, i.e. within
+    // 0.12 intel/mission of the pre-wave LEVEL — so the fork redistributes the same pot: a route
+    // through the economy stops banks less than it used to, a route through the hard fights banks
+    // more, and the campaign as a whole banks what it always did. Anyone re-tuning the two prices
+    // above owes this constant the same arithmetic.
+    public const int DepthBase = 12;        // was 10 before THE FORK PAYS; see the note above
+
+    /// The depth term every non-Event node's payout is built on.
+    public static int BaseIntel(int mission) => DepthBase + 4 * mission;
+
+    /// The PITCHED premium a node's card earns: the class price, paid only by the two kinds
+    /// chosen FOR their fight. Pure; Start / Boss / Supply / Event never pay it (see NodeIntel).
+    public static int ClassPremium(NodeKind kind, Objective obj) =>
+        (kind == NodeKind.Combat || kind == NodeKind.Elite) && IsKillObjective(obj) ? PitchedPremium : 0;
+
+    /// Intel paid for clearing a node (the routing economy). Base is the depth term (DepthBase +
+    /// 4*mission, see the redistribution note above);
+    /// SUPPLY discounts, ELITE pays the top premium, and a PITCHED fight adds the class price.
+    /// START and BOSS keep the bare base: neither is a branch choice, so neither is an economy
+    /// decision (there is nothing to trade against them).
     public static int NodeIntel(MissionNode node)
     {
-        int n = node.Mission;
-        int baseIntel = 10 + 4 * n;
-        return node.Kind switch
+        int baseIntel = BaseIntel(node.Mission);
+        if (node.Kind == NodeKind.Event) return 0;   // an event's rewards come from the choice
+        int kindMod = node.Kind switch
         {
-            NodeKind.Supply => baseIntel + 10,   // economy route: rest + a meaningful intel bonus
-            NodeKind.Elite  => baseIntel + 14,   // risk-for-reward: heavier force, the biggest payout
-            NodeKind.Event  => 0,                // no clear-intel: an event's rewards come from the choice
-            _               => baseIntel,
+            NodeKind.Supply => SupplyDiscount,
+            NodeKind.Elite  => ElitePremium,
+            _               => 0,
         };
+        int cls = node.Card != null ? ClassPremium(node.Kind, node.Card.Objective) : 0;
+        return baseIntel + kindMod + cls;
     }
+
+    /// The legacy deploy-card fork's node kind (RECON/STANDARD/ONSLAUGHT mirror SUPPLY/COMBAT/
+    /// ELITE). One mapping, so the card the player reads and the intel Game.EnterBarracks pays
+    /// can never disagree about whether an offer is PITCHED.
+    public static NodeKind OfferKind(MissionCard c) =>
+        c == null ? NodeKind.Combat
+        : c.ModName == "RECON" || c.ModName == "SUPPLY" ? NodeKind.Supply
+        : c.ModName == "ONSLAUGHT" || c.ModName == "ELITE" ? NodeKind.Elite
+        : NodeKind.Combat;
+
+    /// Intel for the legacy (map-unavailable) deploy-card path: the old flat depth term plus the
+    /// SAME class price the map nodes pay, so DrawDeployCard's "(+8 PITCHED)" note is true there
+    /// too. The kind premiums deliberately do NOT apply here -- ONSLAUGHT already carries its own
+    /// +6 risk bonus in Game.EnterBarracks and RECON's reward is the heal.
+    public static int OfferIntel(MissionCard c, int mission) =>
+        BaseIntel(mission) + ClassPremium(OfferKind(c), c != null ? c.Objective : Objective.Eliminate);
 
     /// Harness jump: walk the map greedily to a node in the target mission's column,
     /// marking the path visited and adopting that node's card (so the post-mission
@@ -1452,7 +1516,16 @@ public class Run
     /// Each rank-up queues a perk choice (PendingPerks) the player resolves in the
     /// barracks; if a soldier already owns every perk it falls back to a stat bump.
     /// Builds the barracks Report; mutates Squad in place.
-    public void DebriefSurvivors()
+    /// THE FORK PAYS: `fullHeal` is the SUPPLY/RECON card's "full squad heal" reward, and it is
+    /// applied HERE rather than before the call. Game.EnterBarracks used to set `u.Hp = u.MaxHp`
+    /// on every survivor BEFORE calling this, and the fresh-wound gauge below reads `u.Hp` -- so
+    /// `sev` was 0 for every soldier on a cleared SUPPLY node and **no soldier who finished a
+    /// SUPPLY mission on their feet could ever be wounded by it.** That was an undocumented second
+    /// subsidy stacked on a node that already paid more intel for a lighter force. The wound is now
+    /// gauged from the HP the mission actually left, and the heal lands after it (and after the
+    /// trait grants, so IronWill's +max HP is in the patch-up -- the same ordering the field-heal
+    /// below has always used).
+    public void DebriefSurvivors(bool fullHeal = false)
     {
         Report.Clear();
         // APEX W8: PRUNE stale offers rather than nuking the lists. An emergency-cadre draftee
@@ -1538,6 +1611,18 @@ public class Run
                 int heal = (int)MathF.Ceiling(u.MaxHp * (harsh ? 0.25f : 0.55f));
                 u.Hp = Math.Min(u.MaxHp, u.Hp + heal);
                 if (u.Hp > before) Report.Add($"{u.Name} patched up  (+{u.Hp - before} HP)");
+            }
+
+            // THE FORK PAYS: the SUPPLY/RECON reward. Deliberately AFTER the wound gauge (so the
+            // mission's damage still costs a wound) and after the trait grants (so IronWill's
+            // raised MaxHp is filled). It fires under HIGH STAKES too -- that contract removes the
+            // FREE field-heal, not a reward the player routed for. A benched soldier is already
+            // full above; this is a no-op for them.
+            if (fullHeal && u.Hp < u.MaxHp)
+            {
+                int before = u.Hp;
+                u.Hp = u.MaxHp;
+                Report.Add($"{u.Name} fully resupplied  (+{u.Hp - before} HP)");
             }
         }
 
