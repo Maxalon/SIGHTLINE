@@ -13896,3 +13896,170 @@ the second arm of C4 (the briefing), recorded above and not claimed.
 - **The `[Q]`-during-a-drag ordering is fixed but only structurally tested.** Leg (F) proves the
   drag owns the card's keys via `KeyPin`; it does not prove the process-exit path, because the test
   cannot let the process exit.
+
+---
+
+# PROGRAM PARALLAX — wave P15 "THE UNVERIFIED: THE INSTRUMENT LIES QUIETLY" (2026-09-03)
+
+Branch `wave/qa-instrument`, base **`a933cfe`**. One developer, seven findings from an adversarial
+QA hunt whose verifiers died on a usage limit — the workflow then filed 33 unverified findings as
+"refuted" with an empty reason. **That failure is the same shape as five of the seven findings
+below: a machine producing a confident-looking answer where no answer existed.** Refute-first was
+the working rule; two findings came back materially different from how they were reported.
+
+**Nothing here is a balance lever. No campaign outcome moved** — proven, not asserted:
+`docs/measurements/p15/inert/`, three rungs, `campaigns[]` / `pairedPolicy` / `runWinRate` /
+`policyGap` / `heatLeak` identical pre and post at every one.
+
+## Verdicts
+
+| # | finding | verdict |
+|---|---|---|
+| 1 | `_HEAT` / `_BASE` fall back silently; the artifact records neither | **CONFIRMED, fixed** |
+| 2 | the chunk runner hard-codes `runs == N*2` | **CONFIRMED — and worse than reported; fixed** |
+| 3 | `runWinRate` reads 0.0 for a batch with no campaign runs | **CONFIRMED, fixed** |
+| 4 | `cluster.py`'s LEAK-CHECK downgrades to a note and exits 0 | **CONFIRMED — two holes, not one; fixed** |
+| 5 | the LAST STAND turn-cap stop is logged as a genuine wipe; no `runTurns` | **CONFIRMED, fixed** |
+| 6 | the checkpoint redeploy ERASES the mission it retries | **CONFIRMED (mechanism located), fixed in `Stats.cs`** |
+| 7 | `AutoStallCheck` force-loses from inside `StartPlayerTurn`, which runs on | **CONFIRMED with a trace, handed back** |
+
+Gate: `SIGHTLINE_INSTRUMENTTEST` (new, `src/Stats.SelfTest.cs`), six legs A-F, each guarded so one
+defect cannot hide the next. Proven to FAIL against a line-for-line reverted pre-fix build and PASS
+here; both outputs in the wave report. Script side: `docs/measurements/p15/regress.sh`, which
+fetches the ACTUAL pre-wave scripts out of git at `a933cfe` for its "before" column.
+
+## 1 — the batch could not name itself
+
+`SIGHTLINE_BALANCE_HEAT` and `_BASE` were bare `int.TryParse`s with a silent fallback, sitting four
+lines from `SIGHTLINE_OBJ` and `SIGHTLINE_PERK`, which have warned loudly on a typo since W2. The
+difference matters: a mis-parsed `OBJ` leaves a probe unset, a mis-parsed `_HEAT` **renames the
+chunk**. A typo'd rung cycled `{0,2,4,6,8}`, was archived under the rung in its file name, and
+passed all three layers of the measurement contract — `runs` correct, file fresh, exit 0.
+
+Fixed in one place. `Stats.ParseBatchEnv` is now the only reader; a non-empty value that does not
+parse is an ERROR and `Program.RefuseBatch` exits **3** having written nothing — W1's display
+refusal (exit 2) one layer down, with a distinct code the runner tells apart. `Stats.Batch` puts
+the request in the artifact as `batch{}`, so a runner can assert the JSON against what it exported
+instead of trusting the file name.
+
+## 2 — the runners, plural
+
+The finding said "the only chunk runner in the repo". **There are fourteen and every one of them
+carries the line** (`w1 w2 w4 w8 x1 x2 l3 c1 c2 c3 c4 tb p10 fork-pays`), including
+`c1/run_chunk.sh`, which produced the L5 ladder of record. A single-policy batch —
+`SIGHTLINE_BALANCE_SLOPPY=1`, the exact shape `campaigns[]` was shipped to enable CRN-pairing for
+— produces N runs and is marked **BAD** by a check that ran perfectly.
+
+`docs/measurements/p15/check_chunk.py` asserts `runs` against the batch's own
+`batch.expectedRuns`, and asserts the rung and slot base in the artifact against what the runner
+exported. `p15/run_chunk.sh` is the runner of record; the archived ones keep their behaviour (they
+are provenance) and carry a one-line SUPERSEDED header.
+
+## 3 — a rate and a refusal sharing a value
+
+`runWinRate = campRuns.Count == 0 ? 0.0 : ...`, two lines above `runWinRateExStalemate`, which
+returns **-1** with a comment saying it does so precisely to keep "no data" from reading as 0%.
+Reachable today: an endless batch has `runs > 0`, so `WriteJson` does not refuse, and writes a
+file saying the squad lost every campaign it never played. Now -1.
+
+`policyGap.greedyWinRate` / `sloppyWinRate` have the same shape and were left: they sit next to
+`greedyRuns` / `sloppyRuns` in the same object, so "no data" is already visible there. Noted in
+ROADMAP rather than changed silently.
+
+## 4 — the leak check that shrugged
+
+Two holes, both of the go-quiet kind:
+
+* `bad` was incremented only for a rung where `pinned == len(chunks)`, so a rung with a MIX of
+  pinned and unpinned chunks was **never leak-checked at all**;
+* the verdict then keyed on `allpinned` over the whole round, so ONE unpinned chunk in 96 replaced
+  PASS/FAIL with a soft note *and still returned `bad == 0`* — exit 0.
+
+Now: every chunk that claims the pin is checked whatever its rung's mix; all-pinned gets
+PASS/FAIL; all-unpinned is the documented bridge arm and is reported as a leak SIZE with
+"NOT PERFORMED" said out loud; **mixed is a FAIL** naming the offending chunks. The fixed script
+re-reads the 96-chunk L5 archive as `LEAK-CHECK: PASS` and reproduces the published ladder to the
+decimal, so the fix is analysis-inert on the round of record.
+
+## 5 — LAST STAND could not tell a stop from a death
+
+`AutoStallCheck` routed the endless arm through `EndEndless()` with no argument, so the harness
+declining to fund a stand wrote the same `"last-stand"` as a genuine wipe — in the one mode whose
+entire metric is depth. `IsStalemate`, the predicate every consumer filters on, was false for it,
+so `instrumentHealth` counted a censored depth as a measured one. And no endless caller ever
+passed `runTurns`, so every endless row in every archive reads -1.
+
+`EndEndless(string cause = "last-stand")` — the default keeps every non-harness caller
+byte-identical — and the autopilot passes the same `STALEMATE-MISSION` / `STALEMATE-RUN` arm the
+campaign side has used since the heat pin. `endless{}` gains `stalemateHits`, `wipes` and
+`depthUncensored`, which is the p90 over the stands nothing censored.
+
+## 6 — the mission that was played, lost, and erased
+
+**Located, not just confirmed.** `Stats.BeginMission` did `_mission = new MissionRec{...}` with no
+check on the open one. `Game.TryReinforcements` (the one-time checkpoint redeploy) calls
+`SetupMission(_run.Mission)` — the SAME mission — so the wiped attempt was overwritten and never
+reached `_run.Missions`. The batch's frame-cap and abort exits are the same defect from the other
+end: `Stats.EndRun` with no `EndMission`.
+
+**Counted, not quoted.** The hunter's `93/93, 170/170, 256/256, 294/294` could not be reproduced as
+stated (those denominators match no file set I could find). The property it describes is true and
+the exact figure is bigger: over **every archived chunk that carries a `campaigns[]` array** —
+`l5` (276 files), `p10` (121), `fork-pays` (24), **421 chunks, 11,320 campaigns, 39,143 missions** —
+mission-level losses (`sum(lossCauses{})`) equal campaign-level losses (`campaigns[]` with
+`win:false`) at **8,252 = 8,252**, i.e. **exactly zero non-terminal mission losses**. On the L5
+ladder of record alone: 96 chunks, 1,920 campaigns, 6,749 missions, 1,306 = 1,306, and the only
+mission loss causes that exist anywhere in it are the four terminal ones (`RUN OVER` 1,132,
+`CAPTIVE LOST` 89, `VIP LOST` 58, `STALEMATE-MISSION` 27). For the pre-`campaigns[]` archives the
+same identity holds to rounding via `byMission` (`l4`, `l3`, `c2`, `c3`, `c4`, `tb`, `w1`,
+`w4-board` all within 0.2 of zero; the older ones run the other way, campaign losses EXCEEDING
+mission losses, which is the frame-cap half of the same defect).
+
+Fixed in `Stats.cs`: `FlushOpenMission(cause)` files the open record as a loss —
+`REDEPLOYED` from `BeginMission`, `UNCLOSED` from `EndRun` (attached to the run that played it,
+before `_run` goes null) — with `MissionsDroppedNoRun` as the alarm for a mission with no run at
+all. `SIGHTLINE_MISSIONFLUSH=0` restores the drop.
+
+**Priced.** `docs/measurements/p15/`, three rungs, CRN-paired: campaign-level identical at every
+one; 9 / 14 / 12 attempts recovered per 20 campaigns; per-mission win rate falls by up to 23 points
+(h4 m4: 91.7 → 68.8) and `meaningfulChoicesPerTurn` by 5-12%. **Missions 1 and 2 do not move at
+any rung** — the valve does not open before mission 3 — which is the internal check that nothing
+else moved.
+
+## 7 — the turn that kept going
+
+`AutoStallCheck` is called from the MIDDLE of `StartPlayerTurn` (`src/Game.cs`), which has ~24
+lines after it and no phase re-check. Traced, on a build instrumented for exactly this:
+
+```
+P15-TRACE: StartPlayerTurn CONTINUES with Phase=Lose title=STALEMATE-RUN
+P15-TRACE: ...and RAN TO THE END. Phase=Lose Selected=VEGA downExpired=0
+P15-TRACE: StartPlayerTurn CONTINUES with Phase=Lose title=STALEMATE-MISSION
+P15-TRACE: ...and RAN TO THE END. Phase=Lose Selected=VEGA downExpired=0
+```
+
+Both arms. It goes on to tick statuses, run the bleed-out countdown, select a soldier and raise
+the PLAYER TURN banner on a run already recorded as over. **Scope, stated honestly:** autoplay-only
+(`AutoStallCheck` is gated on `AutoPlay`), and most of the tail's telemetry is a no-op because
+`_mission` and `_run` are already null. What is NOT a no-op is the batch-global counter family
+(`Stats.RecordDownExpired` / `RecordDownFinished` / `RecordProc` guard on `Enabled` alone, not on
+`_mission`), which a bleed-out in that tail can bump after `EndRun`. The trace above shows
+`downExpired=0` because the staged scenario has no downed soldier — **the mechanism is reachable,
+it was not observed firing**, and it is not claimed as observed.
+
+The honest fix is an early return in `StartPlayerTurn`, which is `Game.cs` and not this wave's
+file. Handed back as an exact patch (wave report). Leg F of `INSTRUMENTTEST` asserts the invariant
+that keeps the tail merely wasteful instead of corrupting: the force-loss leaves exactly ONE
+RunRec, closed, and opens no phantom run.
+
+## What I deliberately did NOT do
+
+* **Did not touch `scripts/qa-sweep.sh`** (another dev held it). The one line to add is in the
+  wave report; until it lands the sweep names `SIGHTLINE_INSTRUMENTTEST` in its COVERAGE GAP,
+  which is the guard working.
+* **Did not edit the archived chunk runners' behaviour.** They are provenance. They get a
+  SUPERSEDED header pointing at `p15/run_chunk.sh`.
+* **Did not fix `policyGap`'s 0.0-on-no-data** (see §3) or make the erased-mission fix
+  default-off. Both are recorded rather than done quietly.
+* **Did not re-measure the ladder.** The one number-moving fix is mission-level and was priced in
+  its own paired round; the campaign-level ladder is provably untouched, so L5 stands.

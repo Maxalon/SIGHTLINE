@@ -281,7 +281,15 @@ public partial class Game
     /// End the LAST STAND run. Record the waves survived, persist the best (append-only meta, gated
     /// by NoPersist), and drop into the shared Lose end card (no campaign side-effects: no save.json
     /// delete, no loss-streak record — endless is separate from the campaign).
-    void EndEndless()
+    /// P15 THE UNVERIFIED — `cause` NAMES WHY THE STAND ENDED, because the caller is the only one
+    /// who knows. There are two callers and they are not the same event: a genuine WIPE (every
+    /// soldier dead, the stand's real ending) and the autopilot's own turn-cap force-stop
+    /// (Game.Autopilot.AutoStallCheck — the harness declining to keep funding a stand, which the
+    /// campaign arm has logged as STALEMATE-MISSION / STALEMATE-RUN since the heat pin). Both used
+    /// to write the single word "last-stand", so `lossCauses` and `instrumentHealth` could not tell
+    /// a measured depth from a censored one — in the one mode whose ENTIRE metric is depth.
+    /// The default keeps every non-harness caller's behaviour byte-identical.
+    void EndEndless(string cause = "last-stand")
     {
         Combat.EndRun();   // clear every mission-scoped combat static (mirrors LoseRun)
         int wavesSurvived = Wave;
@@ -301,8 +309,11 @@ public partial class Game
         Audio.PlayStinger("squadwipe");
         // balance telemetry: close the record (waves survived stands in for missions cleared).
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
-                         Enemies.Count(e => !e.Alive), "last-stand");
-        Stats.EndRun(false, wavesSurvived, "last-stand");
+                         Enemies.Count(e => !e.Alive), cause);
+        // P15: stamp heat and RUN TURNS. No endless caller ever passed them, so every endless row
+        // in every archive reads runTurns = -1 — the one field that says how long a stand took, on
+        // the mode whose whole point is how long you last.
+        Stats.EndRun(false, wavesSurvived, cause, _run != null ? _run.HeatLevel : -1, RunTurns);
     }
 
     /// PROGRAM HORIZON W3 (WAR ROOM): bank endless salvage + enshrine legends + check STAND achievements.

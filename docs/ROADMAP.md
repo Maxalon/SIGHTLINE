@@ -3015,3 +3015,55 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       The owner has a device and the AUDIO CHECK screen (THREAT group).
 - [ ] **The AUDIO CHECK scroll has no thumb drag** and no keyboard focus ring — wheel and Up/Down
       only. Fine at 36 cues; revisit if the list grows again.
+
+---
+
+### PROGRAM PARALLAX — P15 "THE UNVERIFIED" (2026-09-03, details in DEVLOG §THE UNVERIFIED)
+
+Closed: the seven ways the BALANCE INSTRUMENT reported a number where it had none. Six fixed,
+one handed back. Gate `SIGHTLINE_INSTRUMENTTEST` + `docs/measurements/p15/regress.sh`.
+No campaign outcome moved (`docs/measurements/p15/inert/`, three rungs, CRN-paired).
+
+- [x] **The batch validates and records its own request.** `Stats.ParseBatchEnv` is the one reader
+      of `SIGHTLINE_BALANCE` / `_HEAT` / `_BASE`; unparseable = `Program.RefuseBatch`, **exit 3**,
+      nothing written. `batch{}` in the artifact carries `expectedRuns`, `heatRequested`/`heat`,
+      `baseRequested`/`slotBase`, so a chunk's file name is checkable.
+- [x] **`docs/measurements/p15/run_chunk.sh` + `check_chunk.py` replace layer (c).** All fourteen
+      archived runners hard-code `runs == N*2`; the two canonical ones now carry a SUPERSEDED
+      header. Fixtures + `regress.sh` prove accept/reject before and after.
+- [x] **`runWinRate` is -1 on no campaign data.**
+- [x] **`l5/cluster.py`'s LEAK-CHECK is a gate again** — a MIXED pinned/unpinned round FAILs
+      instead of downgrading to a note and exiting 0. Re-reads the 96-chunk L5 archive as PASS and
+      reproduces the published ladder to the decimal.
+- [x] **The LAST STAND harness stop is named** (`EndEndless(cause)`; the autopilot passes the same
+      STALEMATE arm the campaign side does) **and endless runs stamp `runTurns`**. `endless{}`
+      gains `stalemateHits` / `wipes` / `depthUncensored`.
+- [x] **The erased mission is filed, not dropped** (`Stats.FlushOpenMission`; `REDEPLOYED` from
+      the checkpoint redeploy, `UNCLOSED` from the batch's frame-cap/abort exits).
+      `SIGHTLINE_MISSIONFLUSH=0` restores the drop.
+
+Open, handed on:
+
+- [ ] **HANDED BACK — `Game.cs`: `StartPlayerTurn` runs to completion on a run `AutoStallCheck`
+      has already force-lost.** Traced both arms ("StartPlayerTurn CONTINUES with Phase=Lose ...
+      and RAN TO THE END"). Autoplay-only, and most of the tail's telemetry is a no-op because
+      `_mission`/`_run` are null — but the batch-global counters (`Stats.RecordDownExpired` /
+      `RecordDownFinished` / `RecordProc`) guard on `Enabled` alone and a bleed-out in that tail
+      can bump them after `EndRun`. Fix: `if (AutoPlay) { AutoStallCheck(); if (Phase !=
+      Phase.PlayerTurn) return; }`. Exact patch: `docs/measurements/p15/handback-Game.cs.patch` (hunk 2; `git apply --check` clean, validated in a scratch build). Leg F of INSTRUMENTTEST
+      asserts the invariant that keeps the tail merely wasteful (no phantom run) in the meantime.
+- [ ] **OPTIONAL, `Game.cs`: `TryReinforcements` should close its own mission record.** The
+      Stats-side flush is a structural backstop and has to approximate the erased row's `Turns`
+      from `MissionRec.PlayerTurns`, because `Stats` cannot see `Game._turnCount`. One line at the
+      caller makes the row exact — measured to change nothing but `byObjective.avgTurns` on the
+      erased rows. Exact patch: `docs/measurements/p15/handback-Game.cs.patch` (hunk 1).
+- [ ] **`policyGap.greedyWinRate` / `sloppyWinRate` still read 0.0 with no runs** — the same shape
+      as the `runWinRate` defect. Left deliberately: they sit beside `greedyRuns`/`sloppyRuns` in
+      the same object, so "no data" is visible there. Change it with the next artifact-schema wave,
+      not silently.
+- [ ] **Twelve archived chunk runners still carry `runs == N*2`.** Only `w1/` and `c1/` were given
+      the SUPERSEDED header (they are the two CLAUDE.md and `l5/run_ladder.sh` point at). The rest
+      are provenance for closed rounds; head them if a future round reuses one.
+- [ ] **Every per-mission and decision-density figure in the archive is survivorship-biased.**
+      Corrected going forward; the historical tables were NOT recomputed (the erased rows do not
+      exist in those files and cannot be reconstructed). Re-measure before quoting one.
