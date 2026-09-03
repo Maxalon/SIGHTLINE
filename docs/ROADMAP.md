@@ -3017,12 +3017,13 @@ Open, handed on:
       `_mission`/`_run` are null — but the batch-global counters (`Stats.RecordDownExpired` /
       `RecordDownFinished` / `RecordProc`) guard on `Enabled` alone and a bleed-out in that tail
       can bump them after `EndRun`. Fix: `if (AutoPlay) { AutoStallCheck(); if (Phase !=
-      Phase.PlayerTurn) return; }`. Exact patch in the P15 wave report. Leg F of INSTRUMENTTEST
+      Phase.PlayerTurn) return; }`. Exact patch: `docs/measurements/p15/handback-Game.cs.patch` (hunk 2; `git apply --check` clean, validated in a scratch build). Leg F of INSTRUMENTTEST
       asserts the invariant that keeps the tail merely wasteful (no phantom run) in the meantime.
 - [ ] **OPTIONAL, `Game.cs`: `TryReinforcements` should close its own mission record.** The
       Stats-side flush is a structural backstop and has to approximate the erased row's `Turns`
       from `MissionRec.PlayerTurns`, because `Stats` cannot see `Game._turnCount`. One line at the
-      caller makes the row exact. Patch in the P15 wave report.
+      caller makes the row exact — measured to change nothing but `byObjective.avgTurns` on the
+      erased rows. Exact patch: `docs/measurements/p15/handback-Game.cs.patch` (hunk 1).
 - [ ] **`policyGap.greedyWinRate` / `sloppyWinRate` still read 0.0 with no runs** — the same shape
       as the `runWinRate` defect. Left deliberately: they sit beside `greedyRuns`/`sloppyRuns` in
       the same object, so "no data" is visible there. Change it with the next artifact-schema wave,
