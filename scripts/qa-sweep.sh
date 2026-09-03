@@ -56,6 +56,20 @@ FULL=0
 # only the "X: FAIL" token and the reason was lost — a FITTEST flake on the merged P1+P2 tree
 # could not be diagnosed from the sweep that caught it.
 SWEEP_LOGDIR="$(mktemp -d /tmp/sightline-sweep.XXXXXX)"
+# P13 checked this and it HOLDS, but it holds for a reason worth writing down, because the reason
+# is not obvious and the failure would be silent. The hook name comes from `env | head -1`, and the
+# house isolation procedure exports SIGHTLINE_BALANCE_JSON into the same environment — so the
+# question is whether that config var can win the race and name every hook's log after itself.
+# It cannot, because bash places a command's TEMPORARY assignments ahead of the inherited exported
+# environment in `environ`, and every call below is `SIGHTLINE_<HOOK>=1 run` with exactly one such
+# assignment. MEASURED, not assumed: all 78 hooks this script invokes, under a full house-isolated
+# environment, resolve to their own name (P13, 0 misnamed), and one real `SIGHTLINE_DKTEST=1 run`
+# under that environment leaves
+# SIGHTLINE_DKTEST.out, which is what `verdict`'s detail grep goes looking for.
+# TWO THINGS WOULD BREAK IT, both quiet: running this script under a shell that appends temporary
+# assignments instead (with SIGHTLINE_BALANCE_JSON exported, 23 of the 78 names sort ahead of it),
+# and a call site that sets a SECOND SIGHTLINE_ var alongside the hook (order among temporaries is
+# hash order, not written order — verified). Keep the shebang, and keep one var per call.
 run() {
   local hook; hook="$(env | grep -oE '^SIGHTLINE_[A-Z0-9_]+=' | head -1 | tr -d '=')"
   xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug 2>/dev/null | tee "$SWEEP_LOGDIR/${hook:-run}.out"
@@ -189,6 +203,7 @@ echo -n "CHROMETEST : "; verdict "$(SIGHTLINE_CHROMETEST=1 run | grep -oE "CHROM
 # no string on the doctrine / armory / hall-of-fame / draft screens is painted outside its own
 # chrome or into another string's pixels, at EVERY scale - not just at 100%, which is the only
 # scale any self-test in this project had ever run at. SIGHTLINE_OLDFIT=1 makes it fail (40).
+echo -n "KEYTABLEGATE: "; verdict "$(SIGHTLINE_KEYTABLEGATE=1 run | grep -oE "KEYTABLEGATE: (PASS|FAIL)" | head -1)"
 echo -n "FITTEST    : "; verdict "$(SIGHTLINE_FITTEST=1 run | grep -oE "FITTEST: (PASS|FAIL)" | head -1)"
 # W5-FIX: the backdrop registry — no phase may paint a full-screen backdrop from the chrome pass.
 echo -n "BACKDROPTEST: "; verdict "$(SIGHTLINE_BACKDROPTEST=1 run | grep -oE "BACKDROPTEST: (PASS|FAIL)" | head -1)"
@@ -227,6 +242,12 @@ echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLT
 # three arms DO leak with it off), RunRec.HeatEnd/RunTurns + campaigns[] + heatLeak in the JSON, and
 # the STALEMATE guard naming its arm (STALEMATE-MISSION / STALEMATE-RUN).
 echo -n "HEATPINTEST: "; verdict "$(SIGHTLINE_HEATPINTEST=1 run | grep -oE "HEATPINTEST: (PASS|FAIL)" | head -1)"
+# P15 THE UNVERIFIED: the balance INSTRUMENT's own honesty contract - a batch request that cannot
+# be parsed is refused rather than silently defaulted, "no data" reads as -1 rather than 0.0, the
+# mission a checkpoint redeploy retries is FILED rather than erased, and a LAST STAND stopped by the
+# autopilot's turn cap is named as such rather than logged as a wipe. Needs a window (it starts real
+# missions and a real endless stand), like HEATPINTEST above it.
+echo -n "INSTRUMENTTEST: "; verdict "$(SIGHTLINE_INSTRUMENTTEST=1 run | grep -oE "INSTRUMENTTEST: (PASS|FAIL)" | head -1)"
 # C5 THE HARD EDGES: the ENEMY-turn half of the no-deadlock contract (STALLTEST covers the player
 # turn), and the enemy DECISION CENSUS — every branch of the enemy exec chain must be REACHED, at
 # a rate a player could actually meet. AICOVTEST=6 walks 144 campaigns (~25 s; N=2 gave ~2470 acts, below the AiCovMinActs floor that keeps the rate verdict from being a Poisson draw); the effectively-dead
@@ -279,7 +300,12 @@ fi
 # Exempting BY NAME (rather than by leaving them outside the regex) is the point: anything new is
 # named by the guard until someone deliberately adds it here.
 #   SIGHTLINE_BANDPROBE - TRUE BAND's choice-band instrument-DESIGN probe (Game.Autopilot.cs:2277).
-_SWEEP_EXEMPT='SIGHTLINE_BANDPROBE'
+#   SIGHTLINE_MODEFORCEPROBE - P14's SKIRMISH/DAILY force-composition report (Game.Modes.cs): the
+#     before/after evidence a change to the single-mission modes has to show. MODETEST asserts.
+#   SIGHTLINE_DAILYSIGPROBE  - P14's daily-signature line (Program.cs), the CHILD half of
+#     MODETEST leg (11)'s cross-process check. MODETEST launches it and does the comparing, so
+#     running it from here would print one hash and gate on nothing.
+_SWEEP_EXEMPT='SIGHTLINE_BANDPROBE|SIGHTLINE_MODEFORCEPROBE|SIGHTLINE_DAILYSIGPROBE'
 _missing=$(comm -23 \
   <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u | grep -vxE "$_SWEEP_EXEMPT") \
   <(grep -vE '^[[:space:]]*#' "$_SELF" | grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' | sort -u | grep -vxE "$_SWEEP_EXEMPT"))

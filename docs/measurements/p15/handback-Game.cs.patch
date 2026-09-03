@@ -1,0 +1,44 @@
+# P15 THE UNVERIFIED — the two Game.cs changes handed back to the lead.
+# `src/Game.cs` was another developer's file this round, so neither is applied on
+# wave/qa-instrument. Both were built and validated in a scratch copy of this tree:
+#   Release 0 warn / 0 err; INSTRUMENTTEST / HEATPINTEST / STALLTEST / ENEMYSTALLTEST /
+#   DOWNTEST all PASS; autoplay x2 LOSE m6 / LOSE m6, no TIMEOUT.
+# Effect of the TryReinforcements hunk, measured on the same 20 CRN campaigns as
+# docs/measurements/p15/inert/post.json: campaign-level identical, mission count
+# identical (94), missionsRedeployed identical (9), byMission win% identical —
+# the ONLY difference is byObjective.avgTurns on the erased rows
+# (Decapitate 4.7 -> 4.9, Defend 8.8 -> 8.9, Hack 3.6 -> 3.9), which is the point:
+# Stats cannot see Game._turnCount and has to approximate it from PlayerTurns.
+# Apply with:  git apply docs/measurements/p15/handback-Game.cs.patch
+#
+--- a/src/Game.cs
++++ b/src/Game.cs
+@@ -4324,6 +4324,13 @@
+             _run.PromoteEligible(rec);
+         }
+ 
++        // P15: CLOSE THE MISSION THAT WAS JUST LOST before staging its retry. SetupMission calls
++        // Stats.BeginMission on the SAME mission number, which used to overwrite the open record
++        // outright — so the wiped attempt vanished and no non-terminal mission loss existed
++        // anywhere in the archive. Stats.FlushOpenMission is the structural backstop, but only the
++        // caller knows `_turnCount`, so closing it here is what makes the row's turn count exact.
++        Stats.EndMission(false, _turnCount, 0, Enemies.Count(e => !e.Alive), Stats.MissionRedeployed);
++
+         // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
+         // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
+         // MISSION banner, so override it AFTER with the reinforcements telegraph.
+@@ -6728,7 +6735,13 @@
+         ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
+         ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
+         UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
+-        if (AutoPlay) AutoStallCheck();
++        // P15: AutoStallCheck can FORCE-LOSE the run from here (the autopilot's turn caps). Everything
++        // below is start-of-turn bookkeeping for a turn that is no longer going to happen — status
++        // ticks, the bleed-out countdown, soldier selection, the PLAYER TURN banner — and it used to
++        // run to completion on a run already in Phase.Lose. Autoplay-only, but the batch-global
++        // counters (Stats.RecordDownExpired / RecordDownFinished / RecordProc) guard on `Enabled`
++        // alone, so a bleed-out in that tail is recorded against a run that has already ended.
++        if (AutoPlay) { AutoStallCheck(); if (Phase != Phase.PlayerTurn) return; }
+         // APEX W2: deny the caged RESCUE captive its start-of-turn action re-grant (see SetupMission).
+         // FUL-7: the bleed-out countdown ticks HERE — on the squad's clock, where the player
+         // decides. STABILIZE freezes it — but only while a soldier is still standing: with the

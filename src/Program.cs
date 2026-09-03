@@ -110,6 +110,12 @@ public static class Program
         // W4 — SIGHTLINE_PODMASS=<n>: enemy formation mass (3 = the FUL-6 pods-of-3 plan).
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_PODMASS"), out int pm) && pm >= 2)
             Mission.PodMass = pm;
+        // P14 THE UNVERIFIED — SIGHTLINE_MODEDEPTH=0 restores the pre-P14 single-mission modes
+        // EXACTLY: Mission.ModeDepth stays -1, so DepthFor is the identity everywhere and the
+        // opener trim / escort asset / HVT bonus / DEFEND waves go back to reading the literal
+        // mission 1 that SKIRMISH and DAILY pass, and the "never an entirely immobile force" guard
+        // is off with it. It is what MODETEST's P14 legs were shown to FAIL against.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MODEDEPTH") == "0") Mission.ModeDepthOn = false;
         // W4 — SIGHTLINE_PODUNIFORM=1: a pod fields one kind of body (comparable targets).
         string uni = Environment.GetEnvironmentVariable("SIGHTLINE_PODUNIFORM");
         if (uni == "1") Mission.PodUniform = true; else if (uni == "0") Mission.PodUniform = false;
@@ -208,7 +214,14 @@ public static class Program
         // SIGHTLINE_BALANCE=<N> : run N full headless campaigns with the competent AI, aggregate
         // balance telemetry (Stats), and print Stats.Report(). A measurement harness — takes over
         // completely when set; leaves AUTOPLAY/SHOT/the *TEST modes untouched when unset.
-        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE"), out int balanceN) && balanceN > 0)
+        // P15: a NON-EMPTY value that does not parse is a typo, not "off". Falling through to the
+        // interactive game meant the chunk runner's watch loop waited out its whole timeout on a
+        // batch that had never started. Refuse at the door (RefuseBatch: name it, write nothing,
+        // exit 3). An ABSENT/empty value is still "not a batch" and falls through as before.
+        string balanceRaw = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE");
+        if (Stats.ReadIntEnv(balanceRaw, out int balanceN) == Stats.EnvRead.Bad)
+            RefuseBatch($"SIGHTLINE_BALANCE='{balanceRaw}' is not an integer");
+        if (balanceN > 0)
         {
             BalanceBatch(balanceN);
             return;
@@ -218,9 +231,31 @@ public static class Program
         // endless stands (greedy+sloppy paired, heats cycled/pinned exactly like SIGHTLINE_BALANCE)
         // through the existing BeginEndless entry; the report adds wave-depth mean/median/p90.
         // Checked after SIGHTLINE_BALANCE, so a plain campaign batch is unchanged.
-        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_ENDLESS"), out int endlessBatchN) && endlessBatchN > 0)
+        string endlessRaw = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_ENDLESS");
+        if (Stats.ReadIntEnv(endlessRaw, out int endlessBatchN) == Stats.EnvRead.Bad)
+            RefuseBatch($"SIGHTLINE_BALANCE_ENDLESS='{endlessRaw}' is not an integer");
+        if (endlessBatchN > 0)
         {
             BalanceBatch(endlessBatchN, endless: true);
+            return;
+        }
+
+        // SIGHTLINE_DAILYSIGPROBE=1 : P14 — print ONE line, this process's DAILY SIGNATURE
+        // (stamp|faction|force|board), and exit. It is the CHILD half of MODETEST leg (11): the
+        // daily's headline contract is "the same stamp fields the same force", and a same-process
+        // check cannot see anything a fresh process would compute differently, which is the entire
+        // failure mode a date-seeded challenge has. A report, not an assertion — MODETEST compares.
+        //
+        // IT IS THE FIRST HOOK BRANCH IN THIS METHOD, DELIBERATELY. The child inherits the parent's
+        // whole environment so that every measurement dial parsed ABOVE this line (MODEDEPTH,
+        // OPENERTRIM, PODUNIFORM, BIOMEMECH, ...) applies to it exactly as it applies to the parent
+        // — the two processes have to be the same game or the comparison means nothing. Being first
+        // is what keeps the inherited SIGHTLINE_MODETEST (or any other hook) from preempting it.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DAILYSIGPROBE") == "1")
+        {
+            Raylib.InitWindow(64, 64, "dailysig");
+            Console.WriteLine("DAILYSIG:" + new Game().DailySignatureLine());
+            Raylib.CloseWindow();
             return;
         }
 
@@ -470,6 +505,19 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYTABLE") == "1")
         {
             Console.Write(Hud.KeyTableMarkdown());
+            return;
+        }
+        // SIGHTLINE_KEYTABLEGATE=1 : P13 — the generator above had no gate, and the table it reads
+        // from had no gate either. Asserts (a) README's KEYTABLE block is byte-identical to what
+        // the generator prints, and (b) every key src/Game.Audition.cs actually reads is named in
+        // KeyTable's AUDIO CHECK row. Reads the repo's source; run it from the source tree.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYTABLEGATE") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(64, 64, "keytablegate");
+            LoadGameFonts();
+            Console.WriteLine(Game.KeyTableGate());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_SETTINGSTEST=1 : SETTINGS EVERYWHERE — the settings card is reachable from the
@@ -1086,6 +1134,20 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_INSTRUMENTTEST=1 : PARALLAX P15 "THE UNVERIFIED" — the four places the BALANCE
+        // INSTRUMENT reported a number where it had none: a silently-defaulted _HEAT/_BASE (so a
+        // typo'd chunk was archived under a rung it never measured), a `runWinRate` of 0.0 for a
+        // batch with no campaign runs, the checkpoint redeploy ERASING the mission it retries, and
+        // the LAST STAND harness stop logged as a genuine wipe. Needs a window (legs D and E start
+        // real missions / stands), like HEATPINTEST.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_INSTRUMENTTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(64, 64, "instrumenttest");
+            Console.WriteLine(InstrumentTest.SelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_GRAPPLETEST=1 : W9 THE REPAIR — the assault GRAPPLE verb, which had ZERO coverage
         // (its two siblings SHOVE and DRAG were both pinned). Reach-2 pull, the adjacent SLAM, and the
         // invariant that a soldier NEVER takes damage from its own grapple — incl. as a JUGGERNAUT,
@@ -1153,6 +1215,17 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "modetest");
             Console.WriteLine(new Game().ModeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_MODEFORCEPROBE=1 : P14 — a REPORT of the force a SKIRMISH/DAILY actually fields
+        // per heat rung (headcount, pods, roster, the escort asset, the HVT, the mid-boss kit, one
+        // DEFEND wave). Asserts nothing — MODETEST owns the assertions; this is the before/after
+        // evidence a change to the single-mission modes has to show.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MODEFORCEPROBE") == "1")
+        {
+            Raylib.InitWindow(64, 64, "modeforceprobe");
+            Console.WriteLine(new Game().ModeForceProbe());
             Raylib.CloseWindow();
             return;
         }
@@ -1662,6 +1735,23 @@ public static class Program
         Environment.Exit(2);
     }
 
+    // P15 THE UNVERIFIED: the SECOND refusal, one layer under W1's.
+    // W1 made a display-less batch refuse (exit 2) because a batch that measured nothing must not
+    // leave something that looks like an answer. A batch asked for a rung it cannot parse is the
+    // same failure with the file WRITTEN: `SIGHTLINE_BALANCE_HEAT=$H` fell through a bare
+    // `int.TryParse` to "cycle {0,2,4,6,8}" in total silence, so a typo'd chunk was archived under
+    // a rung it did not measure with `runs` correct, the file fresh, the exit code 0, and every
+    // layer of the measurement contract reporting OK. There is no honest recovery from that — the
+    // chunk's whole identity is the value that failed to parse — so refuse the same way, with a
+    // DISTINCT code (3, vs 2 for "no display") the runner can tell apart.
+    static void RefuseBatch(params string[] reasons)
+    {
+        foreach (string r in reasons) Console.Error.WriteLine($"BALANCE: {r}");
+        Console.Error.WriteLine("BALANCE: refusing to run a batch it cannot name. No data written.");
+        Console.Error.Flush();
+        Environment.Exit(3);
+    }
+
     static void BalanceBatch(int runs, bool endless = false)
     {
         // Cumulative telemetry across the whole batch (NOT reset per match).
@@ -1691,11 +1781,37 @@ public static class Program
         // so routine batches measure the mutator rungs (EXPOSED@6 / NO QUARTER@8) instead of only
         // heats 0-4 (6/8 were previously measured only in ad-hoc pinned runs).
         int[] heatCycle = { 0, 2, 4, 6, 8 };
-        bool pinHeat = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_HEAT"), out int fixedHeat);
+
+        // ── P15 THE UNVERIFIED: the batch RECORDS AND VALIDATES ITS OWN REQUEST ───────────
+        // These two used to be bare `int.TryParse`s with a silent fallback, next to two vars
+        // (SIGHTLINE_OBJ / SIGHTLINE_PERK, below) that already warn loudly on a typo — and unlike
+        // those, a mis-parsed _HEAT/_BASE does not merely leave a probe unset, it renames the
+        // chunk. `Stats.ParseBatchEnv` is the one place the request is read and checked, and
+        // `Stats.Batch` puts it in the artifact so a runner can assert the JSON against what it
+        // exported instead of trusting the file name. Anything unparseable REFUSES (exit 3).
+        // The policy reads move up here from further down so the request knows its own shape —
+        // ExpectedRuns = N x legs is the number the chunk runners have been hard-coding as N*2.
+        bool dumb = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DUMB") == "1";
+        bool sloppyOnly = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_SLOPPY") == "1";
+        string policies = dumb ? "dumb" : sloppyOnly ? "sloppy" : "greedy+sloppy";
+        var batch = Stats.ParseBatchEnv(
+            Environment.GetEnvironmentVariable(endless ? "SIGHTLINE_BALANCE_ENDLESS" : "SIGHTLINE_BALANCE"),
+            Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_HEAT"),
+            Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_BASE"),
+            endless ? "endless" : "campaign", policies, (dumb || sloppyOnly) ? 1 : 2,
+            EventCatalog.HeatPinned);
+        if (batch.EnvErrors.Count > 0) RefuseBatch(batch.EnvErrors.ToArray());
+        Stats.Batch = batch;
+        Console.WriteLine($"BALANCE: request n={batch.N} legs={batch.PolicyLegs} ({batch.Policies}) mode={batch.Mode} "
+                        + $"heat={(batch.Heat.HasValue ? batch.Heat.Value.ToString() : "CYCLED " + string.Join(",", heatCycle))} "
+                        + $"base={batch.SlotBase} -> expect runs={batch.ExpectedRuns}");
+
+        bool pinHeat = batch.Heat.HasValue;
+        int fixedHeat = batch.Heat ?? 0;
         // W2: SIGHTLINE_BALANCE_BASE=<n> offsets the slot index, so CHUNKED batches (the 10-min
         // shell ceiling forces N<=10 per invocation) can cover DISJOINT paired worlds — without
         // it, two combined N=10 chunks replay the SAME 10 seeds and halve the effective sample.
-        int slotBase = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_BASE"), out int sb) ? sb : 0;
+        int slotBase = batch.SlotBase;   // P15: parsed + validated above, never a silent fallback
         // W2: whole-run objective pin — SIGHTLINE_OBJ under the batch pins EVERY mission of every
         // run (Game.ForcedObjective, honoured in SetupMission under NoPersist). Null = no pin.
         // Review fix: STRICT parse — a typo'd value must run UNPINNED with a loud warning, never
@@ -1706,7 +1822,7 @@ public static class Program
             Console.WriteLine($"BALANCE: unknown SIGHTLINE_OBJ '{objEnv}' — running unpinned");
         // SIGHTLINE_BALANCE_DUMB=1 runs the smoke-test autopilot instead of the competent AI,
         // so the same batch can produce a baseline to compare the smart AI (and balance changes) against.
-        bool dumb = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DUMB") == "1";
+        // (P15: read above, with SIGHTLINE_BALANCE_SLOPPY, so the batch request knows its own shape.)
         // FUL-1: SIGHTLINE_PERK=<code> — the perk-probe leg of a paired A/B batch: the bot takes
         // this perk whenever a rank-up offers it (ChoosePerk override, draw-count neutral, so the
         // probe leg replays the baseline leg's exact worlds). Strict parse (SIGHTLINE_OBJ
@@ -1749,7 +1865,7 @@ public static class Program
         // and a human-error "sloppy" policy on the SAME heat schedule, so the report can show the
         // optimal-vs-sloppy GAP (difficulty slack). SIGHTLINE_BALANCE_SLOPPY=1 forces sloppy-only;
         // the dumb smoke-test baseline (SIGHTLINE_BALANCE_DUMB) never has a meaningful policy split.
-        bool sloppyOnly = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_SLOPPY") == "1";
+        // (P15: `sloppyOnly` is read up with the batch request so ExpectedRuns can be stamped.)
         bool[] sloppyModes = dumb ? new[] { false }
                             : sloppyOnly ? new[] { true }
                             : new[] { false, true };   // greedy then sloppy

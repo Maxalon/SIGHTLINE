@@ -610,6 +610,36 @@ public static class Mission
     /// restores the pre-X2 opener exactly.
     public static int OpenerTrim = 1;
 
+    // ── P14 THE UNVERIFIED — THE SINGLE-MISSION MODES' DEPTH, IN ONE PLACE ────────────────────
+    //  SKIRMISH and DAILY enter through Game.SetupMission(1), so `missionNum` is the literal 1 for
+    //  every fight they field at every heat rung. P4 THE MODES GET THE BESTIARY threaded a second
+    //  parameter (`rosterTier`) through Mission.Build for the ARCHETYPE gates and stopped there —
+    //  measured on the pre-P14 tree (SIGHTLINE_MODEFORCEPROBE), FOUR other consumers of "how deep
+    //  is this fight" were still reading that literal 1 at heat 8:
+    //    * OpenerTrim below      — the CAMPAIGN cold-opener grace, firing in both modes (-1 body)
+    //    * MakeVip               — the escort asset pinned at 16 HP / 0 armor on every rung
+    //    * Combat.HvtHpBonus     — the Decapitate HVT's bonus pinned at +7 HP on every rung
+    //    * Game.SpawnReinforcements / SpawnDefendWave — DEFEND waves built at tier 1 with the
+    //                              heat stat explicitly zeroed by the m1-2 grace
+    //  `ModeDepth` is that number, published by Game.SetupMission alongside `rosterTier` and -1
+    //  for every other mode, and `DepthFor` is the one read. The CAMPAIGN is inert by
+    //  construction: ModeDepth is -1 there, so DepthFor(n) == n at every call site.
+    public static int ModeDepth = -1;
+
+    /// SIGHTLINE_MODEDEPTH=0 — the pre-P14 modes, exactly (ModeDepth is never published, so every
+    /// read below is the identity on the mission number and the immobility guard is off with it).
+    public static bool ModeDepthOn = true;
+
+    /// The heat-derived tier the single-mission modes stand in for a mission number: 3 (the full
+    /// roster) at heat 0-2, 4 at 3-5, 5 at 6-8 — the campaign's own m3/m4/m5 tiers. P4 introduced
+    /// it for the ARCHETYPE gates (Game.SetupMission's `rosterTier`); P14 publishes the same number
+    /// as ModeDepth. One formula, two readers, so the two can never drift apart.
+    public static int ModeTierFor(int heat) => Math.Clamp(3 + Math.Max(0, heat) / 3, 3, 5);
+
+    /// The depth this fight should be PRICED at: the mode's own dial when a single-mission mode
+    /// published one, otherwise the literal mission number.
+    public static int DepthFor(int missionNum) => ModeDepth > 0 ? ModeDepth : missionNum;
+
     /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). SHIPPED
     /// ON: measured exactly ladder-neutral (32.5% = 32.5% run completion, n=40) for the wave's
     /// biggest single gain on the "which target?" axis (+0.06 target-choices/ARMED) and
@@ -689,8 +719,14 @@ public static class Mission
         // INTEGRATION NOTE: R1's -1 relief floor now makes RECRUIT's m1 stat relief real, so the
         // "its -1 stat is a no-op at m1" clause above is no longer true post-R1 — the OpenerTrim
         // diagnosis and its measurement are unaffected (they turn on the BODY count, not the stat).
-        if (OpenerTrim > 0 && n <= 2)
-            count = Math.Max(3, count - (n == 1 ? OpenerTrim : (OpenerTrim + 1) / 2));
+        // P14: gated on DEPTH, not on the raw mission number. A SKIRMISH/DAILY player DIALLED the
+        // rung (W9's own words, when it took the heat grace away from these modes for exactly this
+        // reason); the cold-opener grace is the same class of relief and was still firing there,
+        // measured at -1 body on every rung. `Mission.ModeDepth` publishes 3-5 for those modes, so
+        // DepthFor is >= 3 and the trim is skipped; the campaign reads DepthFor(n) == n, unchanged.
+        int trimDepth = DepthFor(n);
+        if (OpenerTrim > 0 && trimDepth <= 2)
+            count = Math.Max(3, count - (trimDepth == 1 ? OpenerTrim : (OpenerTrim + 1) / 2));
         // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
         // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
@@ -773,13 +809,22 @@ public static class Mission
         if (podsOf3) count = Math.Max(3, count - 1);
         int[] podOf = null, memberOf = null;
         int[] podAnchor = null, podAnchorX = null;
+        // P14 — A MODE FORCE IS NEVER ENTIRELY IMMOBILE. Measured on the pre-P14 tree
+        // (SIGHTLINE_MODEFORCEPROBE, 40 builds/rung): a heat-0 skirmish was ONE pod 40/40 times and
+        // ONE archetype 38/40, so 3/40 heat-0 fights — 7.5% — were three immobile SENTRYs and
+        // nothing else, a whole mission against turrets that cannot follow you. Restoring the
+        // opener body (above) breaks the single pod, but two pods can still BOTH roll SENTRY
+        // (measured 1/40 after that change alone), so the guard stands on its own: in SKIRMISH and
+        // DAILY the FIRST body — pod 0's lead, whose roll PodUniform then carries to its pod — may
+        // not be immobile. Gated on ModeDepth, so the campaign (whose m3+ Defend/Sabotage forces
+        // also plan as one pod of 3) is byte-identical.
+        int[] plan = podsOf3 ? PodPlan(count) : null;
         // W4 POD UNIFORMITY: the pod lead's archetype roll, reused by its members. Sized for the
         // i/2 pairing too (m1-2), so the teaching tier's pairs field one kind of body as well;
         // the FINALE is excluded (its kit slots are explicit and FUL11PROBE pins their geometry).
         float[] podRoll = new float[count / 2 + 2];
         if (podsOf3)
         {
-            int[] plan = PodPlan(count);
             podOf = new int[count]; memberOf = new int[count];
             podAnchor = new int[plan.Length]; podAnchorX = new int[plan.Length];
             for (int p = 0, idx = 0; p < plan.Length; p++)
@@ -858,6 +903,20 @@ public static class Mission
             if (e == null)
                 e = midBoss ? MakeMidBoss(rosterTier, x, y)
                             : SelectArchetype(rosterTier, r, bump, x, y);   // tier-appropriate rank-and-file
+            // P14 — the MODE force's first body is never immobile. Draw-free: the roll is REMAPPED
+            // (r +/- 0.5), not re-drawn, so the shared Util.Rng stream — and therefore every CRN
+            // pairing and the daily's cross-process reproducibility — is untouched. Only pod 0's
+            // LEAD is remapped; PodUniform then carries the mobile pick to the rest of its pod.
+            if (ModeDepth > 0 && i == 0 && !finalMission && !midBoss && e.Mobility == 0)
+            {
+                float r2 = r >= 0.5f ? r - 0.5f : r + 0.5f;
+                var alt = SelectArchetype(rosterTier, r2, bump, x, y);
+                if (alt.Mobility > 0)
+                {
+                    e = alt; r = r2;
+                    if (PodUniform && podId < podRoll.Length) podRoll[podId] = r2;
+                }
+            }
             // FAIRNESS CAP: at most one SIEGE/BOMBARD per mission. SelectArchetype is stateless, so a
             // second roll could yield another -> demote any extra BOMBARD to a plain GRUNT here.
             // SIGNAL W5: this cap DELIBERATELY keys on Cls (not HasSiege) — a siege-armed BOSS elite
@@ -1247,7 +1306,12 @@ public static class Mission
         // is glass by m6. Scale it (14 + 2*mission: m2~18, m4~22, m6~26) so the asset stays a
         // believable survivor against the late force, while still having no cover-perks, weak aim,
         // and no frags — the squad must still screen for it.
-        int hp = 14 + 2 * Math.Max(1, missionNum);
+        // P14: DepthFor, not the raw mission number. SKIRMISH/DAILY call this with 1 at every heat
+        // rung, so the asset the objective is ABOUT read 16 HP / 0 armor from heat 0 to heat 8
+        // while the force around it grew by four bodies and four stat points (measured, pre-fix:
+        // SIGHTLINE_MODEFORCEPROBE `VIP hp=16 armor=0` on all five rungs). Campaign-inert.
+        int depth = Math.Max(1, DepthFor(missionNum));
+        int hp = 14 + 2 * depth;
         var u = new Unit
         {
             Name = "VIP", Cls = "VIP", Team = Team.Player,
@@ -1260,7 +1324,7 @@ public static class Mission
         // bought plating doesn't help the VIP, so it carries its own): every incoming hit -armor,
         // floored at 1. Paired with the HP scaling + the reduced anti-VIP AI finish-frenzy, this
         // stops the fragile asset getting deleted in one focus-fire volley over a long escort.
-        u.Armor = Math.Max(1, missionNum) / 2;   // m2~1, m4~2, m6~3
+        u.Armor = depth / 2;   // m2~1, m4~2, m6~3 (depth == the mission number outside the modes)
         return u;
     }
 
@@ -1373,7 +1437,12 @@ public static class Mission
             Faction.Legion    => ArmRage(Mk("BREAKER")),    // the rush: burst it down before the frenzy
             Faction.Syndicate => ArmShield(Mk("BULWARK")),  // the wall: flank-or-elevate puzzle
             Faction.Wardens   => ArmSiege(Mk("WARDEN")),    // the clock: relocate under telegraphed fire
-            _                 => Mk(n == 3 ? "BREAKER" : "WARDEN"),
+            // P14 — an UNSTAMPED mid-boss is a plain ELITE with no signature arm, and it used to
+            // wear a FACTION's callsign anyway: a MIXED skirmish at heat >= 4 fielded a "WARDEN"
+            // with `siege=False` (measured, SIGHTLINE_MODEFORCEPROBE) — the Wardens mid-boss's name
+            // on a body that cannot do the one thing that name means. The unfactioned fallback gets
+            // its own callsign. Presentation only: same class, stats, draws and kit as before.
+            _                 => Mk("MARSHAL"),
         };
     }
 

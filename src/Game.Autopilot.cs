@@ -1916,6 +1916,12 @@ public partial class Game
         EndPlayerTurn();
     }
 
+    /// P15 THE UNVERIFIED gate hook: drive ONE player-turn boundary exactly as the update loop
+    /// does. `StartPlayerTurn` is private to Game and the P15 gate (InstrumentTest) lives outside
+    /// it — this is the same call HeatPinSelfTest makes from inside the class, so the LAST STAND
+    /// leg exercises the real AutoStallCheck path rather than a re-implementation of it.
+    public void DebugStartPlayerTurn() => StartPlayerTurn();
+
     void AutoStallCheck()
     {
         // HARD no-TIMEOUT backstop: a match still going at AutoMaxTurns is effectively stalled (normal
@@ -1928,14 +1934,20 @@ public partial class Game
         // never reset by SetupMission, so this arm is the one that makes the comment above true.
         if (_turnCount > AutoMaxTurns || RunTurns > AutoMaxRunTurns)
         {
-            // PROGRAM HORIZON W2: in LAST STAND the "turn cap" just ends the horde run cleanly at the
-            // waves survived so far (route through EndEndless, not the campaign LoseRun).
-            if (Mode == GameMode.Endless) { EndEndless(); return; }
             // THE HEAT PIN: NAME THE ARM. The per-mission cap (the bot cannot finish THIS mission)
             // and W9's run-scoped cap (a long campaign the harness declines to keep funding) are
             // different failures of the instrument and were logged as one word for two programs.
             // Mission-first when both hold: that is the arm the pre-W9 guard would have fired.
             bool missionArm = _turnCount > AutoMaxTurns;
+            // PROGRAM HORIZON W2: in LAST STAND the "turn cap" just ends the horde run cleanly at the
+            // waves survived so far (route through EndEndless, not the campaign LoseRun).
+            // P15 THE UNVERIFIED: ...but NAME IT THE SAME WAY THE CAMPAIGN ARM DOES. This is the
+            // harness stopping a stand, not the horde ending one; logged as the bare "last-stand" it
+            // was indistinguishable from a genuine wipe, so `instrumentHealth` read a censored depth
+            // as a measured one and `IsStalemate` — the predicate every consumer filters on — was
+            // false for it. The depth (`missionsCleared` = waves) is unchanged either way.
+            if (Mode == GameMode.Endless)
+            { EndEndless(missionArm ? Stats.StalemateMission : Stats.StalemateRun); return; }
             LoseRun(missionArm ? Stats.StalemateMission : Stats.StalemateRun,
                     $"Autopilot exceeded the {(missionArm ? "mission" : "run")} turn cap on mission {_run.Mission} ({Objective}): "
                     + $"mission turn {_turnCount}/{AutoMaxTurns}, run turn {RunTurns}/{AutoMaxRunTurns}.");

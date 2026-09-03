@@ -154,7 +154,7 @@ between the two `KEYTABLE` markers. The set of bound keys it must cover is deriv
 | **L** / LAST STAND | LAST STAND - endless horde survival; how many waves can you hold? |
 | **W** / WAR ROOM | WAR ROOM - spend salvage on unlocks; achievements + hall of fame |
 | **K** / FIELD MANUAL | FIELD MANUAL - every enemy, class and rule in one reference |
-| **S** / SKIRMISH | SKIRMISH - one custom fight; pick the objective and the heat |
+| **S** / SKIRMISH | SKIRMISH - one custom fight; pick the objective, the opposition and the heat |
 | **Y** / DAILY | DAILY - today's seeded run, one attempt, ranked by turns |
 | **U** / AUDIO CHECK | AUDIO CHECK - hear every cue, sweep the music, move the mix; measured numbers beside each |
 | **O** / SETTINGS | SETTINGS - text size, colourblind palette, brightness, gamma, animation speed, the mix |
@@ -169,8 +169,8 @@ between the two `KEYTABLE` markers. The set of bound keys it must cover is deriv
 | **BARRACKS: Enter / A / Esc / K** | proceed to deployment / open or close the ARMORY / SETTINGS (or back out of the ARMORY) / FIELD MANUAL |
 | **END CARD: Enter / W / Esc** | new run (after TRAINING OP: run the drill again) / WAR ROOM / main menu |
 | **FIELD MANUAL: Up / Down (W / S), hold Left / Right (A / D), Esc / K** | change tab / scroll / back |
-| **SKIRMISH SETUP: Left / Right (A / D), Up / Down (W / S, + / -), Enter, Esc** | objective / heat / deploy / back |
-| **AUDIO CHECK: Esc or U, M** | back / mute |
+| **SKIRMISH SETUP: Left / Right (A / D), Tab (Shift-Tab reverses), Up / Down (W / S, + / -), Enter, Esc** | objective / opposition / heat / deploy / back |
+| **AUDIO CHECK: Up / Down or Wheel, M, Esc or U** | scroll the cue table / mute / back |
 | **WAR ROOM: Esc** | back |
 <!-- KEYTABLE:END -->
 

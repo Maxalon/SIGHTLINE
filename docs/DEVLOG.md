@@ -13608,3 +13608,1201 @@ number above is an *upper* bound on the opponent's strength under the lane.
 * The flywheel's missing enemy-overwatch exposure term (ROADMAP, unchanged).
 * `Ai.ChooseLane` re-derives the squad's discs per call. Harmless at 0.4% of acts; if a future wave
   makes the branch common, cache it per enemy turn.
+
+---
+
+# PROGRAM PARALLAX — wave P12 "THE CONFIRMED EIGHT" (2026-09-03)
+
+**Branch** `wave/confirmed8` · **base** `a933cfe` (PARALLAX milestone 8: the held lane + the crash
+file). One developer, no measurement round: this is a **defect wave**, not a balance wave.
+
+## The input, and why it is unusual
+
+An adversarial QA hunt over everything PROGRAM PARALLAX had landed produced eight findings, each
+then handed to **two refute-by-default skeptics** who tried to kill it and could not. Six of the
+eight were *reasoned from code and never observed at runtime* — because the thing they describe is
+either process-internal (a stale `Mode` flag), needs a held mouse button, or needs a key press on a
+screen the headless harness has no way to press a key on. That is the shape of the whole wave:
+**every one of these eight sat under a green sweep, and five of them sat under a green sweep of a
+test aimed at the very surface they broke.** `SIGHTLINE_QUITTEST` and `SIGHTLINE_SETTINGSTEST` were
+both PASS while findings 2, 4, 5 and 8 all held.
+
+So the wave's real product is not eight patches. It is **eight assertions that would have caught
+them**, each shown FAILING on the pre-fix tree before the fix landed, plus the two small harness
+seams that made two of them expressible at all.
+
+## The three that were one defect
+
+Findings 2, 4 and 8 are the same shape: **state and clocks that keep running behind a modal card.**
+The lead asked whether one place should own "the game is paused, nothing below this line ticks".
+It should, and there are actually **two** such places, because the card has two different kinds of
+leak:
+
+1. **`Game.Frozen`** — the freeze line. `Paused || Phase == Codex || Phase == AudioCheck`. Read once
+   at the top of `Update` into a local, and gating the four teaching updaters and the kill-cam
+   window. Everything else in `Update` was already correctly frozen: `Fx.Update`, `DecayUnitFx`, the
+   scorch fade and the anim pump all sit BELOW `if (Paused) { HandlePauseMenu(); return; }`. The two
+   that leaked sat above it — and could not simply be moved below, because the `HitStop` return sits
+   between them and the pause gate and its own comment forbids a freeze stretching the kill-cam
+   window. So: a predicate, not a move.
+2. **`Game.Paused` is now a property** — the seam that owns "the card closed". `_volDrag` was
+   written and cleared *only* inside `HandlePauseMenu`, and three exits never reach its release
+   branch. Making the setter release the fader means every close, from anywhere — `OnEscape`,
+   `BeginCodex`, `ExitAudition`, `ActPause("resume")`, `AbandonRun`, a future caller nobody has
+   written yet — passes through one line. This is the guard `Game.Audition.cs` has had on both sides
+   since A3 (`_audVolDrag = -1` on entry, a flush on exit); the pause card had neither.
+
+`Frozen` deliberately does NOT cover `HitStop`, the ambient particle field, the bloom decay or
+`Display.AdvanceTime` — those burn nothing and tick no once-only state. AutoPlay never pauses and
+never enters Codex/AudioCheck, so the whole change is **gameplay-inert for the flywheel by
+construction**, not by measurement.
+
+## The eight, each with the assertion that now covers it
+
+### C1 [major] DEPLOY SQUAD on the main menu launched the TRAINING DRILL
+
+`HandleOverlayClick`'s Win/Lose block had two exits to the main menu and only one cleared `Mode`.
+MAIN MENU [Esc] reset it; WAR ROOM [W] did not, and neither `BeginWarRoom` nor the War Room's own
+BACK does. So a finished TRAINING OP taken out through the War Room landed on `Phase.Intro` with
+`Mode == GameMode.Training` still set — and DEPLOY SQUAD is **the one intro door dispatched outside
+the `ActIntro` table**, so it fell through to the "re-run the drill" branch. Every named door
+(CONTINUE / LAST STAND / SKIRMISH / DAILY / TRAINING / …) was safe because each routes through a
+`Begin*` that calls `ResetModeState`. The plate reads "NEW CAMPAIGN — draft a squad, pick a
+doctrine, survive 6 operations", and the drill's own win card says "now deploy for real."
+
+**Fix.** Both end-card doors and the primary verb are split into named methods — `ActEndWarRoom`,
+`ActEndMainMenu`, `ActPrimary` — the `ActIntro`/`ActPause` shape this project uses everywhere else,
+so a test can press exactly what a click dispatches to. Both doors now call `ClearEndedRunMode()`.
+Belt as well as braces: `ActPrimary`'s drill-restart branch is scoped to `Phase != Phase.Intro`,
+because on the intro that plate is DEPLOY SQUAD and reading a run-mode flag there is the bug.
+
+**Gate.** `SIGHTLINE_MODETEST` leg (10) walks both doors after a real `BeginTraining` +
+`EndTraining(true)`, then presses `ActPrimary`.
+Pre-fix: `MODETEST: FAIL (endCard:warroom:leakedMode(Training),endCard:warroom:introDeployLaunched(Training))`.
+
+### C2 [major] A volume drag survived the pause card closing
+
+`_volDrag` (a bus index, -1 = none) was set on mouse-down and cleared only on mouse-up inside
+`HandlePauseMenu`. Three exits skip that: **ESC** is read one line ABOVE `if (Paused) { … return; }`
+so `OnEscape` toggles the card off and `HandlePauseMenu` is never entered again; **[K]** and **[Q]**
+were read by a key loop that sat ABOVE the drag guard. Consequences: the fader still owned the
+mouse, so the next click anywhere on the re-opened card was eaten re-seating it; and
+`Display.CommitVol` never ran, so the change never reached `display.json`.
+
+**Fix.** Two, and both are needed. The `Paused` property (above) covers every close. And the drag
+guard moves ABOVE the `PauseKeys` loop — the ordering `HandleAudition` has always had — because
+[Q]-[Q] takes the process down *without* closing the card, which is the one exit a setter cannot
+catch.
+
+**Gate.** `SIGHTLINE_SETTINGSTEST` leg (F): three exits × {drag released, value on disk}, plus a
+keyboard-ownership check driven through the new `Game.KeyPin`.
+Pre-fix: `card:escape:dragSurvivedTheCard(bus 1)`, `card:escape:volNeverCommitted(disk 1.000 != 0.340)`,
+same for `manual` and `resume`, and `card:dragDidNotOwnTheKeyboard`.
+
+### C3 [major] `[M]` was a dead key on the AUDIO CHECK screen
+
+`Update`'s GLOBAL key block reads `M` on every phase, and `HandleAudition` read it again, with
+nothing returning between the two on that phase (the pause gate excludes AudioCheck; the anim pump
+skips it by design). `Audio.ToggleMute()` is a pure flip and `IsKeyPressed` is an edge-state read,
+not a queue pop — so both sites saw the same press and the net effect was **zero**. The screen's own
+`MUTE [M]` / `MUTED [M]` chip is drawn from the same field, so it did not even change caption: no
+feedback of any kind, on the one screen in the game built to A/B the mix, with the key advertised in
+three places (the chip, the FIELD MANUAL, the README).
+
+**Fix.** Delete the local read. The global already fires on every phase. `ApplyMasterVolume` was not
+lost with it — it only pushes `Display.VolMaster` and never reads `Audio.Enabled`, so it was
+vestigial there (it is still called by the chip's CLICK handler, which cannot double).
+
+**Gate.** `SIGHTLINE_AUDITIONTEST` leg (5) — and this one needed a new seam to exist at all.
+
+### The seam: `Game.KeyPin`
+
+A harness-only key injection: `public static HashSet<KeyboardKey> KeyPin` plus
+`Game.KeyPressed(k) => KeyPin != null ? KeyPin.Contains(k) : Raylib.IsKeyPressed(k)`. Null in real
+play, so every read is byte-for-byte what it was. Deliberately **narrow** — only three read sites are
+routed through it (Update's global block, the pause card's key table, the AUDIO CHECK screen's own
+keys), because those are the ones a test needs. It exists because two of this wave's defects are a
+key that two handlers both consumed in one frame and a key loop above a drag guard, and **neither is
+expressible in a test that cannot press a key.**
+
+A caution worth recording, because it nearly produced a false green: the first version of leg (5)
+**PASSED on the broken tree.** Routing only the global read through `KeyPressed` meant the audition's
+own read still went to the real (empty) keyboard, so only one toggle fired and the assertion held.
+The leg is only a reproduction of the defect once *both* reads answer from the same pinned press.
+Pre-fix, with both routed: `AUDITIONTEST: FAIL / AUDIO CHECK: [M] is a DEAD KEY — the global mute
+and the screen's own both fire in one frame and cancel`.
+
+### C4 [minor] The teaching layer ran behind the pause card
+
+`UpdateTutorial / UpdateTraining / UpdateFieldTips / UpdateBriefing` are called above the pause
+gate, and neither `TipsAllowed` (`Phase == PlayerTurn && …`) nor `BriefAllowed` carries a `!Paused`
+term — `Paused` is a plain flag that does not change `Phase`. A once-per-profile FIELD TIP is
+**burned at SHOW time** (`Display.MarkTipSeen(pick.Bit)`, right beside `CalloutTimer = 9f`), and the
+card is drawn LAST over a 760×694 plate on an 0.82 scrim. So: pause on a player turn, spend nine
+seconds on BRIGHTNESS or the mix faders — exactly what SETTINGS EVERYWHERE added the in-fight card
+for — and a teaching card is gone from the profile, permanently, unwatched.
+
+**On the reporter's second arm, which the verifier partly refuted and I agree with:** "any click on
+the pause card kills the mission briefing" does not normally happen, because `UpdateBriefing` holds
+the codebase's only `Raylib.GetKeyPressed()` — a consuming queue read — and it dismisses on the very
+Escape press that is about to open the card, one line earlier in the same frame. There is nothing
+left behind the card to destroy. The residue is narrower: `_briefHold` accrues while paused and can
+cross `BriefHoldMax`. The freeze closes that too, but it is not the finding as written, and I am not
+claiming it as one.
+
+**Gate.** `SIGHTLINE_SETTINGSTEST` leg (G), with `SIGHTLINE_TIP=0` staging tip bit 0 deterministically:
+no tip fires in 30 paused frames; it fires within 5 unpaused ones (so the leg is not vacuous); its
+9 s clock does not move in 60 paused frames and does move in 30 live ones.
+Pre-fix: `card:tipFiredBehindTheCard`, `card:tipClockDrainedBehindTheCard(1.00s of 8.4s)`.
+
+### C5 [minor] LAST STAND's barracks detour
+
+`CardInFight` was phase-only. `CheckEndless` parks a live stand on `Phase.Barracks` purely to
+resolve queued perk/spec/boon offers, and that is the **only** assignment that puts endless there —
+so `Barracks + Endless` means a stand is in flight, always. The card read it as "nothing is in
+flight": it hid END STAND, printed BACK and titled itself SETTINGS, while simultaneously printing
+"the stand ends here - its waves are not saved" under QUIT TO DESKTOP. It hid the lossless exit
+(`AbandonRun` → `EndEndless`, which banks the best wave) and left the lossy one. The justification
+written above that line in `DrawPause` is entirely about the CAMPAIGN checkpoint, and endless never
+writes `save.json`.
+
+**Fix.** A second predicate rather than a widened one: `CardCanAbandon = CardInFight || (Barracks &&
+Endless)` drives the abandon row, the first-row verb and the title; `CardInFight` keeps the camera
+legend, which really is a fight's legend.
+
+**Gate.** `SIGHTLINE_SETTINGSTEST` leg (B) runs the existing `CardRoundTrip` a second time with
+`Mode = Endless` (`expectAbandon: true, expectVerb: "RESUME"`), asserts the title, and then re-runs
+the CAMPAIGN barracks as an unchanged control.
+Pre-fix: `barracks-endless:abandonMissing`, `barracks-endless:firstRowReads:BACK`,
+`barracks-endless:cardTitleReads:SETTINGS`.
+
+### C6 [doc] The generated controls table omitted SKIRMISH SETUP's `[TAB]`
+
+THE MODES GET THE BESTIARY added the faction dial, painted it into the screen's legend and blurb,
+and left `Hud.KeyTable` — the single source for the in-game FIELD MANUAL's VERBS & KEYS tab *and*
+for README's generated block — on its pre-wave row. The screen advertised a binding the manual did
+not carry, for a whole program. The intro door's caption was stale the same way.
+
+**Fix.** The legend is now **data** (`Hud.SkirmishLegend`, four `(Key, What, Manual)` rows) and the
+screen paints from it; the KeyTable row and the door caption are corrected; README's block is
+**regenerated** with `SIGHTLINE_KEYTABLE=1` (two lines changed, which is itself evidence the
+generator is otherwise stable).
+
+**Gate.** `SIGHTLINE_MODETEST` leg (11): every legend entry must be named by the KeyTable row for
+that screen, in BOTH halves. The reporter's own proposed check ("the key appears in some KeyTable
+row") would have **passed on the broken tree** — `Tab` is already in an unrelated in-mission row —
+so the gate is scoped to the screen's own row via `Hud.KeyTableRow("SKIRMISH SETUP")`.
+Pre-fix: `keyTable:skirmishSetupRowOmits[TAB]as'Tab'`, `keyTable:skirmishSetupActionOmits'opposition'`.
+
+### C7 [major] `Fx.TextRung` had no screen bound
+
+THE STRIDE's anti-overprint ladder only ever CLIMBED — `-TextPitch * r` for r in 0..7, plus an
+exhausted fallback at `-TextPitch * 8` — and nothing clamped the result, not in `TextRung`, not in
+`PopText`/`Stamp`, not in `DrawText`. `grep ScreenH src/Fx.cs` returns zero hits.
+
+Board row 0 sits at `Cfg.OriginY + Tile/2 = 72`, so a kill there has anchors y = 46 / 62 / 38. The
+number takes rung 0; "KIA" is blocked to rung 3 (−54); the 30px name stamp is blocked to rung 4
+(−72) — **y = −34, a glyph box entirely above the window** — and "KIA" at y = 8 sits under Hud's
+64px opaque top plate. Then they RISE. Row 0 is open floor in every arena template and three of the
+four deployment shapes seat a pod lead there, so it is the ordinary case. It is also a STRIDE
+regression: pre-ladder all three printed at their raw anchors — overprinted, but on screen.
+
+**Fix.** The ladder gets a ceiling, `Fx.TextTopY = 70` (the 64px plate + 6px of air), in board/world
+y, which is screen y at the default camera. The anchor is lifted to the ceiling first and any rung
+that would still breach it is **mirrored downward** — the clearance test then runs on whichever side
+the rung landed, so mirroring cannot re-introduce the overprint the ladder exists to prevent. Inert
+for any anchor below y = 196, which the mid-board control confirms: the kill-trio min separation is
+**42.1px before and after**, to the decimal.
+
+**Gate.** `SIGHTLINE_FEELTEST` leg (c2) — the same three call sites as leg (c), on row 0.
+Pre-fix: `row-0 kill trio: highest ink y=-34.0 ('KIA  DOE')` → `FEELTEST: FAIL (killTextOffTopOfWindow(-34.0px))`.
+Post-fix: `highest ink y=70.0 ('7'), min sep 36.2px, ceiling 70px`.
+
+**On the lead's suggestion of FITTEST:** its screen audit reads ink through `Cfg.InkProbe` during
+`Hud.Draw`, and explicitly **excludes** the board pass — "it paints inside a `Camera2D`, so its ink
+is in world space, not screen space". Floating text is drawn there. FITTEST is structurally the
+wrong home; FEELTEST already owns `Fx.Texts` geometry and stages this exact trio.
+
+### C8 [minor] The kill-cam window drained behind the pause card
+
+`_killCam -= dt * AnimSpeed` and the `_camPulse` relax sit above the pause gate, and ESC is live
+throughout the window because the block that reads it is above the anim pump. `KillUnit`'s
+mission-ending arm sets `HitStop = 0`, so the hit-stop return does not fire; the phase stays
+PlayerTurn/EnemyTurn for the whole 0.45 s (≈1.5 s of real time at `TimeScale = 0.25`). Pause inside
+it and both the window and the HELD zoom-punch were spent behind an opaque card.
+
+**Fix.** The `Frozen` gate (above).
+**Gate.** `SIGHTLINE_FEELTEST` leg (d2). Pre-fix:
+`killcam-paused: armed 0.450s -> 60 paused frames 0.000s (pulse 0.130 -> 0.000)` →
+`FAIL (killCamDrainedBehindTheCard(0.450s->0.000s),zoomPunchSpentBehindTheCard(0.130->0.000))`.
+Post-fix: `armed 0.450s -> 60 paused frames 0.450s (pulse 0.130) -> 60 live frames 0.000s` — held,
+then drained.
+
+## All eight reproduced
+
+None of the eight was refuted on today's tree. Six were reported as reasoned-only; all six are now
+**observed**, each by a test that was seen RED before its fix. The one correction to the input is
+the second arm of C4 (the briefing), recorded above and not claimed.
+
+## Gates
+
+- `dotnet build -c Release` → **0 warning / 0 error**.
+- `bash scripts/qa-sweep.sh --full` → **SWEEP-EXIT-CODE=0**, every line PASS, no COVERAGE GAP,
+  autoplay LOSE / LOSE / WIN, no TIMEOUT. Derived counts **80 exist / 80 ran** — identical to the
+  base commit's (`grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u | wc -l`
+  reads 81 at both `a933cfe` and here, minus the one `_SWEEP_EXEMPT` entry).
+
+## Screenshots
+
+- `docs/p12-kia-row0-before.png` / `docs/p12-kia-row0-after.png` — the same board (seed-pinned
+  `SIGHTLINE_SEED=4242`, STEEL / IRON REACH), a KIA on board row 0. BEFORE: "KIA KRESS "GHOST"" is
+  in the top HUD bar, overprinting MISSION 1/6 and the objective label and clipped by the plate.
+  AFTER: it is on the board at y≈118, clear of the plate, with the "KIA" pop above it.
+- `docs/p12-laststand-card-before.png` / `docs/p12-laststand-card-after.png` — a mid-stand LAST
+  STAND barracks with the card up and QUIT armed. BEFORE: **SETTINGS / BACK, no END STAND**, under
+  an armed quit that reads "the stand ends here - its waves are not saved". AFTER: **PAUSED /
+  RESUME / END STAND**.
+
+## What this wave did NOT do
+
+- **No new `SIGHTLINE_*TEST` hook.** All eight assertions are legs on tests that already own the
+  surface — MODETEST (mode/phase state and the mode screens), SETTINGSTEST (the card), FEELTEST
+  (`Fx` geometry and THE BEAT), AUDITIONTEST (the bench). The sweep's derived counts and its
+  COVERAGE GUARD are therefore unchanged, which is the right outcome: these defects were never a
+  missing hook, they were missing assertions inside the hooks that already ran.
+- **No balance measurement.** Nothing here touches the sim, and the two behavioural changes that
+  could (`Frozen`, the text ladder) are unreachable under AutoPlay / away from the board's top edge
+  respectively. No ladder number is restated.
+- **Did not clamp a text's RISE.** A number spawned near the ceiling still drifts up and off as it
+  dies, at an alpha heading for zero. Bounding the spawn is the defect; pinning risen text to the
+  top of the window would look like a pile-up.
+- **Did not widen `CardInFight`.** Two predicates, because the camera legend and the abandon row are
+  genuinely different questions.
+- **Did not route the whole keymap through `KeyPin`.** Three read sites, named. A general injection
+  layer over every `Raylib.IsKeyPressed` in the project is a different wave and a much larger diff.
+
+## Open, handed on
+
+- **The intro's caption chain has ~35 lines of dead code.** `Hud.DrawIntro` still carries the
+  pre-FRONT-DOOR `else if (CheckCollisionPointRec(introMouse, OverlayBtnN)) caption = "…"` chain, and
+  every branch of it is unconditionally overwritten twenty lines later by
+  `hoverId = … g.IntroHit(introMouse); if (hoverId != null) caption = IntroDoorCaption(hoverId);`.
+  It is not merely dead — it is a **trap**: someone updated the skirmish caption in the dead copy
+  (it already said "the opposition") while the live table stayed stale, which is half of C6. Delete
+  the chain. Recorded in ROADMAP.
+- **`HandleOverlayClick`'s `if (Phase == Phase.Barracks)` is unreachable** — the function is
+  dispatched only for Intro / Win / Lose. Carried into `ActPrimary` unchanged rather than removed in
+  a defect wave; it is harmless and its removal deserves its own check that nothing else calls it.
+- **The `[Q]`-during-a-drag ordering is fixed but only structurally tested.** Leg (F) proves the
+  drag owns the card's keys via `KeyPin`; it does not prove the process-exit path, because the test
+  cannot let the process exit.
+
+---
+
+# PROGRAM PARALLAX — wave P15 "THE UNVERIFIED: THE INSTRUMENT LIES QUIETLY" (2026-09-03)
+
+Branch `wave/qa-instrument`, base **`a933cfe`**. One developer, seven findings from an adversarial
+QA hunt whose verifiers died on a usage limit — the workflow then filed 33 unverified findings as
+"refuted" with an empty reason. **That failure is the same shape as five of the seven findings
+below: a machine producing a confident-looking answer where no answer existed.** Refute-first was
+the working rule; two findings came back materially different from how they were reported.
+
+**Nothing here is a balance lever. No campaign outcome moved** — proven, not asserted:
+`docs/measurements/p15/inert/`, three rungs, `campaigns[]` / `pairedPolicy` / `runWinRate` /
+`policyGap` / `heatLeak` identical pre and post at every one.
+
+## Verdicts
+
+| # | finding | verdict |
+|---|---|---|
+| 1 | `_HEAT` / `_BASE` fall back silently; the artifact records neither | **CONFIRMED, fixed** |
+| 2 | the chunk runner hard-codes `runs == N*2` | **CONFIRMED — and worse than reported; fixed** |
+| 3 | `runWinRate` reads 0.0 for a batch with no campaign runs | **CONFIRMED, fixed** |
+| 4 | `cluster.py`'s LEAK-CHECK downgrades to a note and exits 0 | **CONFIRMED — two holes, not one; fixed** |
+| 5 | the LAST STAND turn-cap stop is logged as a genuine wipe; no `runTurns` | **CONFIRMED, fixed** |
+| 6 | the checkpoint redeploy ERASES the mission it retries | **CONFIRMED (mechanism located), fixed in `Stats.cs`** |
+| 7 | `AutoStallCheck` force-loses from inside `StartPlayerTurn`, which runs on | **CONFIRMED with a trace, handed back** |
+
+Gate: `SIGHTLINE_INSTRUMENTTEST` (new, `src/Stats.SelfTest.cs`), six legs A-F, each guarded so one
+defect cannot hide the next. Proven to FAIL against a line-for-line reverted pre-fix build and PASS
+here; both outputs in the wave report. Script side: `docs/measurements/p15/regress.sh`, which
+fetches the ACTUAL pre-wave scripts out of git at `a933cfe` for its "before" column.
+
+## 1 — the batch could not name itself
+
+`SIGHTLINE_BALANCE_HEAT` and `_BASE` were bare `int.TryParse`s with a silent fallback, sitting four
+lines from `SIGHTLINE_OBJ` and `SIGHTLINE_PERK`, which have warned loudly on a typo since W2. The
+difference matters: a mis-parsed `OBJ` leaves a probe unset, a mis-parsed `_HEAT` **renames the
+chunk**. A typo'd rung cycled `{0,2,4,6,8}`, was archived under the rung in its file name, and
+passed all three layers of the measurement contract — `runs` correct, file fresh, exit 0.
+
+Fixed in one place. `Stats.ParseBatchEnv` is now the only reader; a non-empty value that does not
+parse is an ERROR and `Program.RefuseBatch` exits **3** having written nothing — W1's display
+refusal (exit 2) one layer down, with a distinct code the runner tells apart. `Stats.Batch` puts
+the request in the artifact as `batch{}`, so a runner can assert the JSON against what it exported
+instead of trusting the file name.
+
+## 2 — the runners, plural
+
+The finding said "the only chunk runner in the repo". **There are fourteen and every one of them
+carries the line** (`w1 w2 w4 w8 x1 x2 l3 c1 c2 c3 c4 tb p10 fork-pays`), including
+`c1/run_chunk.sh`, which produced the L5 ladder of record. A single-policy batch —
+`SIGHTLINE_BALANCE_SLOPPY=1`, the exact shape `campaigns[]` was shipped to enable CRN-pairing for
+— produces N runs and is marked **BAD** by a check that ran perfectly.
+
+`docs/measurements/p15/check_chunk.py` asserts `runs` against the batch's own
+`batch.expectedRuns`, and asserts the rung and slot base in the artifact against what the runner
+exported. `p15/run_chunk.sh` is the runner of record; the archived ones keep their behaviour (they
+are provenance) and carry a one-line SUPERSEDED header.
+
+## 3 — a rate and a refusal sharing a value
+
+`runWinRate = campRuns.Count == 0 ? 0.0 : ...`, two lines above `runWinRateExStalemate`, which
+returns **-1** with a comment saying it does so precisely to keep "no data" from reading as 0%.
+Reachable today: an endless batch has `runs > 0`, so `WriteJson` does not refuse, and writes a
+file saying the squad lost every campaign it never played. Now -1.
+
+`policyGap.greedyWinRate` / `sloppyWinRate` have the same shape and were left: they sit next to
+`greedyRuns` / `sloppyRuns` in the same object, so "no data" is already visible there. Noted in
+ROADMAP rather than changed silently.
+
+## 4 — the leak check that shrugged
+
+Two holes, both of the go-quiet kind:
+
+* `bad` was incremented only for a rung where `pinned == len(chunks)`, so a rung with a MIX of
+  pinned and unpinned chunks was **never leak-checked at all**;
+* the verdict then keyed on `allpinned` over the whole round, so ONE unpinned chunk in 96 replaced
+  PASS/FAIL with a soft note *and still returned `bad == 0`* — exit 0.
+
+Now: every chunk that claims the pin is checked whatever its rung's mix; all-pinned gets
+PASS/FAIL; all-unpinned is the documented bridge arm and is reported as a leak SIZE with
+"NOT PERFORMED" said out loud; **mixed is a FAIL** naming the offending chunks. The fixed script
+re-reads the 96-chunk L5 archive as `LEAK-CHECK: PASS` and reproduces the published ladder to the
+decimal, so the fix is analysis-inert on the round of record.
+
+## 5 — LAST STAND could not tell a stop from a death
+
+`AutoStallCheck` routed the endless arm through `EndEndless()` with no argument, so the harness
+declining to fund a stand wrote the same `"last-stand"` as a genuine wipe — in the one mode whose
+entire metric is depth. `IsStalemate`, the predicate every consumer filters on, was false for it,
+so `instrumentHealth` counted a censored depth as a measured one. And no endless caller ever
+passed `runTurns`, so every endless row in every archive reads -1.
+
+`EndEndless(string cause = "last-stand")` — the default keeps every non-harness caller
+byte-identical — and the autopilot passes the same `STALEMATE-MISSION` / `STALEMATE-RUN` arm the
+campaign side has used since the heat pin. `endless{}` gains `stalemateHits`, `wipes` and
+`depthUncensored`, which is the p90 over the stands nothing censored.
+
+## 6 — the mission that was played, lost, and erased
+
+**Located, not just confirmed.** `Stats.BeginMission` did `_mission = new MissionRec{...}` with no
+check on the open one. `Game.TryReinforcements` (the one-time checkpoint redeploy) calls
+`SetupMission(_run.Mission)` — the SAME mission — so the wiped attempt was overwritten and never
+reached `_run.Missions`. The batch's frame-cap and abort exits are the same defect from the other
+end: `Stats.EndRun` with no `EndMission`.
+
+**Counted, not quoted.** The hunter's `93/93, 170/170, 256/256, 294/294` could not be reproduced as
+stated (those denominators match no file set I could find). The property it describes is true and
+the exact figure is bigger: over **every archived chunk that carries a `campaigns[]` array** —
+`l5` (276 files), `p10` (121), `fork-pays` (24), **421 chunks, 11,320 campaigns, 39,143 missions** —
+mission-level losses (`sum(lossCauses{})`) equal campaign-level losses (`campaigns[]` with
+`win:false`) at **8,252 = 8,252**, i.e. **exactly zero non-terminal mission losses**. On the L5
+ladder of record alone: 96 chunks, 1,920 campaigns, 6,749 missions, 1,306 = 1,306, and the only
+mission loss causes that exist anywhere in it are the four terminal ones (`RUN OVER` 1,132,
+`CAPTIVE LOST` 89, `VIP LOST` 58, `STALEMATE-MISSION` 27). For the pre-`campaigns[]` archives the
+same identity holds to rounding via `byMission` (`l4`, `l3`, `c2`, `c3`, `c4`, `tb`, `w1`,
+`w4-board` all within 0.2 of zero; the older ones run the other way, campaign losses EXCEEDING
+mission losses, which is the frame-cap half of the same defect).
+
+Fixed in `Stats.cs`: `FlushOpenMission(cause)` files the open record as a loss —
+`REDEPLOYED` from `BeginMission`, `UNCLOSED` from `EndRun` (attached to the run that played it,
+before `_run` goes null) — with `MissionsDroppedNoRun` as the alarm for a mission with no run at
+all. `SIGHTLINE_MISSIONFLUSH=0` restores the drop.
+
+**Priced.** `docs/measurements/p15/`, three rungs, CRN-paired: campaign-level identical at every
+one; 9 / 14 / 12 attempts recovered per 20 campaigns; per-mission win rate falls by up to 23 points
+(h4 m4: 91.7 → 68.8) and `meaningfulChoicesPerTurn` by 5-12%. **Missions 1 and 2 do not move at
+any rung** — the valve does not open before mission 3 — which is the internal check that nothing
+else moved.
+
+## 7 — the turn that kept going
+
+`AutoStallCheck` is called from the MIDDLE of `StartPlayerTurn` (`src/Game.cs`), which has ~24
+lines after it and no phase re-check. Traced, on a build instrumented for exactly this:
+
+```
+P15-TRACE: StartPlayerTurn CONTINUES with Phase=Lose title=STALEMATE-RUN
+P15-TRACE: ...and RAN TO THE END. Phase=Lose Selected=VEGA downExpired=0
+P15-TRACE: StartPlayerTurn CONTINUES with Phase=Lose title=STALEMATE-MISSION
+P15-TRACE: ...and RAN TO THE END. Phase=Lose Selected=VEGA downExpired=0
+```
+
+Both arms. It goes on to tick statuses, run the bleed-out countdown, select a soldier and raise
+the PLAYER TURN banner on a run already recorded as over. **Scope, stated honestly:** autoplay-only
+(`AutoStallCheck` is gated on `AutoPlay`), and most of the tail's telemetry is a no-op because
+`_mission` and `_run` are already null. What is NOT a no-op is the batch-global counter family
+(`Stats.RecordDownExpired` / `RecordDownFinished` / `RecordProc` guard on `Enabled` alone, not on
+`_mission`), which a bleed-out in that tail can bump after `EndRun`. The trace above shows
+`downExpired=0` because the staged scenario has no downed soldier — **the mechanism is reachable,
+it was not observed firing**, and it is not claimed as observed.
+
+The honest fix is an early return in `StartPlayerTurn`, which is `Game.cs` and not this wave's
+file. Handed back as an exact patch (wave report). Leg F of `INSTRUMENTTEST` asserts the invariant
+that keeps the tail merely wasteful instead of corrupting: the force-loss leaves exactly ONE
+RunRec, closed, and opens no phantom run.
+
+## What I deliberately did NOT do
+
+* **Did not touch `scripts/qa-sweep.sh`** (another dev held it). The one line to add is in the
+  wave report; until it lands the sweep names `SIGHTLINE_INSTRUMENTTEST` in its COVERAGE GAP,
+  which is the guard working.
+* **Did not edit the archived chunk runners' behaviour.** They are provenance. They get a
+  SUPERSEDED header pointing at `p15/run_chunk.sh`.
+* **Did not fix `policyGap`'s 0.0-on-no-data** (see §3) or make the erased-mission fix
+  default-off. Both are recorded rather than done quietly.
+* **Did not re-measure the ladder.** The one number-moving fix is mission-level and was priced in
+  its own paired round; the campaign-level ladder is provably untouched, so L5 stands.
+
+---
+
+# §THE UNVERIFIED — PERSISTENCE AND THE GATE (wave P13, PROGRAM PARALLAX)
+
+**Base commit `a933cfe`, branch `wave/qa-persist`. Sole developer.**
+
+## Why the wave existed
+
+An adversarial QA hunt produced 46 findings. Each was meant to face two refute-by-default
+verifiers before being reported; two thirds of those verifiers died on a usage limit and the
+workflow's post-processing filed **every unverified finding as "refuted" with an empty reason**. 33
+findings were never adjudicated. Twelve of them — the persistence/save-format group and the
+gate/generated-docs group — came to this wave with **their evidence discarded**: titles only.
+
+So the wave's method was **refute first, fix second**. Each item was traced in the source with the
+working assumption that the hunter was wrong. **Three of the twelve did not survive that** and are
+recorded below as refutations with the trace that killed them; that includes the item the lead
+flagged as highest-value.
+
+## Verdicts
+
+| # | Finding | Verdict |
+|---|---|---|
+| 9 | `qa-sweep.sh` names every hook's log after `SIGHTLINE_BALANCE_JSON` | **REFUTED** |
+| 4 | `SaveGame.ExistsPin` is an ungated public static | **REFUTED** |
+| 6 | A forced objective desyncs the mission played from the intel paid | **CONFIRMED, not fixed** (ROADMAP) |
+| 1 | `MapFingerprint` is blind to the map's ECONOMY payload | **CONFIRMED, fixed** |
+| 2+3 | `SETTINGSTEST`'s `display.json` stash can truncate to zero bytes | **CONFIRMED, fixed** |
+| 5 | `FromDto` never bounds-checks `MapPos` against `Mission` | **CONFIRMED, fixed** |
+| 7 | No self-test loads a save this build did not write | **CONFIRMED, fixed** |
+| 8 | CLAUDE.md's "SHIPTEST is the only hook that writes the live dir" | **CONFIRMED, fixed** |
+| 10 | CLAUDE.md's architecture map + program roster are stale | **CONFIRMED, fixed** |
+| 11 | CLAUDE.md's wall-clock-read count is wrong | **CONFIRMED, fixed** |
+| 12 | AUDIO CHECK scrolling never reached `Hud.KeyTable` | **CONFIRMED, fixed** |
+
+---
+
+## REFUTED — 9. The sweep's log naming and `verdict`'s detail line
+
+The claim: `run()` derives a hook's log-file name with
+`env | grep -oE '^SIGHTLINE_[A-Z0-9_]+=' | head -1`, the house isolation procedure exports
+`SIGHTLINE_BALANCE_JSON` into the same environment, so every hook's log lands on one file named
+after the config var and `verdict`'s `SIGHTLINE_"${name}"*.out` detail grep finds nothing.
+
+**It does not hold, and the reason is worth knowing.** Bash places a command's TEMPORARY
+assignments AHEAD of the inherited exported environment in `environ`, and every call site is
+`SIGHTLINE_<HOOK>=1 run` with exactly one such assignment. Measured three ways:
+
+1. Every hook the sweep invokes (**78**), driven through a verbatim copy of `run()`'s derivation
+   under a full house-isolated environment (`XDG_CONFIG_HOME`, `SIGHTLINE_BALANCE_JSON` exported):
+   **78/78 resolve to their own name, 0 misnamed.**
+2. A real `SIGHTLINE_DKTEST=1 run` — verbatim `run()`, real `xvfb-run dotnet run`, isolation
+   exported — leaves exactly `SIGHTLINE_DKTEST.out` in the log directory. Not
+   `SIGHTLINE_BALANCE_JSON.out`.
+3. `verdict`'s detail path, driven over a synthetic `SIGHTLINE_SAVETEST.out`, prints
+   `detail: SAVETEST: FAIL (mapShape s=7 expected ab12 got cd34)` and sets `_fail=1`.
+
+**The finding is not baseless — it is one shell semantic away from being right.** Placing the same
+variable with `env NAME=1` (which APPENDS to `environ`) instead of a bash temporary assignment
+misnames **23 of the 78** hooks, all onto `SIGHTLINE_BALANCE_JSON`. So the correctness rests
+entirely on the shebang and on one variable per call site. Both facts are now recorded in
+`scripts/qa-sweep.sh` above `run()`, with the two things that would break it.
+
+## REFUTED — 4. `SaveGame.ExistsPin`
+
+The claim: an ungated `public static` that overrides the intro's CONTINUE predicate — the one D2
+built a validator for.
+
+**Traced, and it holds up on all three counts.**
+
+* **Inert by default.** `bool?`, null, and `Exists` reads it only under `HasValue`.
+* **Never leaks.** Six assignments, all in `Game.Harness.cs` (the headless-only slice), and every
+  one is cleared to `null` in a `finally` — `Game.Harness.cs:7402` for FITTEST's ScreenCase driver,
+  `:8177` for SETTINGSTEST's front-door loop.
+* **It does not defeat D2.** The pin decides only whether the BUTTON is drawn.
+  `Game.cs:8465` is `case "continue": return SaveGame.Exists && ContinueRun();` — pressing it still
+  runs `Load()`, which is where D2's stash-and-remove lives. Nothing on disk is touched.
+
+And "ungated" indicts the house idiom rather than this field: `Renderer.TimePin`, `Hud.TimePin`,
+`Hud.MousePin`, `Hud.AnimPin`, `Crash.DirOverride` and `Events.HeatPinned` are all `public static`,
+default-inert, restored in a `finally`. `ExistsPin` is the sixth of six.
+
+---
+
+## CONFIRMED, NOT FIXED — 6. A forced objective vs the intel the node pays
+
+**Real, and harness-only.** Trace: `node.Intel` is assigned once, in `Run.GenerateMap`
+(`Run.cs:805`), from `Run.NodeIntel`, which reads `node.Card.Objective` through `ClassPremium`.
+`Game.ForcedObjective` is read in exactly one place — `Game.cs:2008`,
+`if (NoPersist && ForcedObjective.HasValue) Objective = ForcedObjective.Value;` — and assigns the
+played objective without touching any card. The payout at `Game.cs:2678` reads `clearedNode.Intel`.
+So under `SIGHTLINE_OBJ=<x>` the fight is `<x>` and the economy pays whatever the map dealt.
+`DebugForceObjective` rewrites the card, so mission 1 is coherent; **missions 2+ are not**, because
+`ChooseNode` re-adopts the node's card.
+
+**Size, from the constants, not estimated:** `Run.PitchedPremium = 8` against
+`BaseIntel(m) = 12 + 4m` — 16 at m1, 36 at m6. So the pin mis-prices a Combat/Elite node by 8
+intel, **up to a third of its payout**, in whichever direction the deal happens to fall.
+
+**Not reachable by a player.** All 14 assignments of `ForcedObjective` are harness code and every
+one pairs with `NoPersist = true`; the read is `NoPersist`-gated.
+
+**Why this wave did not fix it.** The fix belongs at `Game.cs:2008`, which another developer holds
+this sprint, and it is an **instrument change**: it moves measured intel in every `SIGHTLINE_OBJ`
+batch, which CLAUDE.md's measurement contract says must be paired with a re-measure this wave was
+not scoped to run. Handed to ROADMAP with the one-line fix written out.
+
+---
+
+## CONFIRMED + FIXED
+
+### 1. `SaveGame.MapFingerprint` was blind to everything a load REBUILDS
+
+The hash fed `Col, Row, RowCount, Kind, Faction, Card.Objective` and the edge list. It did not feed
+`node.Intel` — the routing economy — nor `MissionCard.ModName / EnemyDelta / StatDelta / Reward`,
+the card's whole difficulty and reward payload. All of it is regenerated from `MapSeed` on load,
+which is exactly what makes it save format.
+
+**Proven, not asserted.** `git show 1688087 -- src/SaveGame.cs` is EMPTY: THE FORK PAYS moved
+`Run.DepthBase` 10 → 12, gave SUPPLY a −6 discount, ELITE a +14 premium and a PITCHED fight a +8
+class price — every node's payout in the game — and never touched the guard. Reproduced on this
+tree, twice, on the two axes:
+
+```
+PRE-FIX, DepthBase 12 -> 13 (every node re-priced):
+  SAVETEST: PASS (... 3 map-generator fingerprints match ...)
+PRE-FIX, ELITE EnemyDelta 2 -> 3 (card difficulty payload changed):
+  SAVETEST: PASS (... 3 map-generator fingerprints match ...)
+```
+
+The guard was silent when it should have been loud. After widening the hash:
+
+```
+POST-FIX, DepthBase 12 -> 13:
+  SAVETEST: FAIL (mapShape:seed1 (golden 0xB51B0399, actual 0x91927E9A),
+                  mapShape:seed424242 (golden 0x62B48DEA, actual 0xB60226D1),
+                  mapShape:seed31337 (golden 0xC48C84A8, actual 0x208F9919))
+POST-FIX, ELITE EnemyDelta 2 -> 3:
+  SAVETEST: FAIL (mapShape:seed1 (golden 0xB51B0399, actual 0x3E300D72), ...)
+POST-FIX, clean tree:
+  SAVETEST: PASS
+```
+
+**THE GOLDENS MOVED, and the map did not.** `0xC169C99E / 0xEC48647A / 0x5CE96D55` →
+`0xB51B0399 / 0x62B48DEA / 0xC48C84A8` over the same three DAGs, because the hash now feeds more of
+each node. Both numbers are recorded next to `PersistedGenerators`. `RewardText` is deliberately
+NOT fed: it is a display string, and a copy edit is not a save-format change.
+
+### 2 + 3. A self-test that could zero the player's settings file
+
+The most serious pair on the list, and they are one defect. `SettingsSelfTest` held the player's
+`display.json` in a local string and restored it with:
+
+```csharp
+try { hadDisp = File.Exists(dispPath); if (hadDisp) dispStash = File.ReadAllText(dispPath); } catch { }
+...
+if (hadDisp) File.WriteAllText(dispPath, dispStash);
+```
+
+**The `catch { }` and the `if (hadDisp)` disagree.** If `Exists()` succeeds and `ReadAllText` then
+throws — a permission flip, an IO error, or another agent's sweep renaming the file between the two
+calls, which this repo does by design — `hadDisp` is TRUE and `dispStash` is NULL.
+`File.WriteAllText(path, null)` does not throw and does not skip: `StreamWriter` opens the file
+**with truncation** and writes nothing. The player's settings become **zero bytes**, destroyed by
+the suite written to protect them. The happy path is only marginally better: `WriteAllText`
+truncates in place, the exact tear `docs/DISTRIBUTION.md` §5 promises cannot happen.
+
+**Seven self-tests carried it**, not one: SETTINGSTEST, TUTTEST (twice), SAVEEDGETEST, QUITTEST,
+BRIEFTEST and ONRAMPTEST (twice). C6 had built `StashAside`/`UnstashAside`/`WriteAtomic` for
+precisely this and routed only SAVETEST's meta block through them.
+
+**Fix.** `SaveGame.StashForSelfTest` / `RestoreForSelfTest`: rename the file aside, rename it back.
+A rename cannot tear, cannot truncate, and cannot be handed a null; the in-memory copy is
+belt-and-braces only. It is also hermetic in a way the old pattern was not — the test starts with
+the file ABSENT, so it cannot silently read the maintainer's own profile (the C6 defect where
+SAVETEST failed on any machine owning `MetaUnlock` ordinal 1). All seven now use it. SAVETEST's
+three remaining in-file restores and VETTEST's go through `WriteAtomic`.
+
+**The leg** is `SETTINGSTEST (S)`. It drives the harness's own stash/restore over a **scratch
+sentinel file** — never the real `display.json`; a leg that endangers the file to prove it is safe
+is not a fix — with the in-memory read forced to fail (`SaveGame.SelfTestReadFailPin`), i.e. the
+exact state that used to zero it.
+
+```
+PRE-FIX  (StashForSelfTest/RestoreForSelfTest reverted to the pre-P13 semantics):
+  SETTINGSTEST: FAIL (stash:fileNotMovedAside,stash:restoreTruncatedToZeroBytes)
+POST-FIX:
+  SETTINGSTEST: PASS (... and this test's own display.json stash is a rename in both directions —
+  a forced read failure restores the bytes whole instead of truncating the file to zero)
+```
+
+Converted tests, all green after: TUTTEST, SAVEEDGETEST, QUITTEST, BRIEFTEST, ONRAMPTEST.
+
+### 5. `FromDto` bounds-checked `MapPos` against the map's SIZE, never against `Mission`
+
+`r.MapPos = (dto.MapPos >= 0 && dto.MapPos < r.Map.Count) ? dto.MapPos : 0;` — and nothing else.
+The game maintains `Map[MapPos].Mission == Run.Mission` by construction (`Run.Start`;
+`Game.ChooseNode` advances one column while `NextMission` does `_run.Mission + 1`; the Event branch
+assigns `_run.Mission = node.Mission` explicitly to keep the counter in lockstep). **Nothing
+re-established it on load.** `Game.ContinueRun` clamps `Mission` into range and calls
+`SetupMission(n)`; `MapPos` is left wherever it points. So a save whose halves disagree resumed
+**incoherently**: the fight built from `Mission` (force size, heat ramp, objective rotation, the
+`MaxMissions` win gate) and the routing, node kind, faction and intel payout taken from a node
+several columns away — mission 1's rookie force, deployed from a mission-5 node, cleared straight
+into the finale's successors. CLAUDE.md already names "a `MapPos` pointing at another mission" as
+what a generator change does to every save on disk.
+
+**Fix:** re-derive position from the counter (which is what every downstream system reads) via
+`Run.JumpTo`, no-op when the two already agree, with `Mission` clamped the way `ContinueRun` clamps
+it so an out-of-range counter cannot smuggle the desync back in. `dto.Card` still wins over the
+card `JumpTo` adopts.
+
+**Leg:** `SAVEEDGETEST (10)`, a save pointed at a late node with `Mission=1`, asserted at LOAD
+before any play can hide it.
+
+```
+PRE-FIX (leg present, FromDto resync removed):  SAVEEDGETEST: FAIL (mapPosDesynced:node@m6 vs run@m1)
+POST-FIX:                                       SAVEEDGETEST: PASS (12 hostile save shapes ...)
+```
+
+**It caught TWO of the project's own fixtures on the first full sweep**, and that is the finding's
+best evidence: the desync was not hypothetical, it was sitting in the two tests that exist to prove
+the map round-trips.
+
+* `SaveGame.SelfTest` built its round-trip source with `Mission = 4` and `src.JumpTo(3)` — desynced
+  by one column since it was written — and its `mapNode` assertion *pinned the broken state*
+  (`CurrentNode.Mission != 3`). Now `src.JumpTo(src.Mission)`, asserted against `src.Mission`, so it
+  cannot drift apart again.  `SAVETEST: FAIL (mapPos,mapNode)` → PASS.
+* `EventCatalog`'s save-round-trip leg set `sr.MapPos = evNode.Id` and left `Mission` alone, while
+  the real `Game.ChooseNode` assigns `_run.Mission = node.Mission` on an Event node precisely to
+  "keep the mission counter in lockstep with the column". The fixture now does the same.
+  `EVENTTEST: FAIL (postMapPos, postNodeKind)` → PASS.
+
+Both were the shape a real save cannot have — which is the point: the invariant held everywhere in
+the GAME and was enforced nowhere on LOAD, so only the fixtures could violate it, and both did.
+
+### 7. Nothing ever loaded a save this build did not write
+
+Every fixture in the project is either produced by the CURRENT build and then edited
+(`SAVEEDGETEST`) or is a shape that must be REFUSED (`StructureSelfTest`'s `null` / `{}` /
+`noSquad` / `emptySquad`). **Eleven fields across `RunDto` and `UnitDto` carry an "append-only: old
+saves default `<x>`" comment, and every one of those comments was a claim no test could see.**
+
+**Leg:** `SAVEEDGETEST (11)` — two hand-written literals in the DTO shape as it was BEFORE the
+append-only fields, with no `SchemaVersion` at all (reads back as 0, which `Load` must treat as
+"old", never "corrupt"): one with a campaign map and one without. They assert the run is playable
+AND that all eleven promises landed inert.
+
+**All eleven hold today** — that is the result, and it is worth stating plainly rather than
+implying a bug was found. To show the leg BITES rather than passing vacuously, `CheckpointUsed`'s
+handling was inverted (`r.CheckpointUsed = !dto.CheckpointUsed`) — a MEANING change, the exact
+class `SchemaVersion` exists for:
+
+```
+WITH THE INVERSION:  SAVEEDGETEST: FAIL (legacy:noMap:checkpointUsed,legacy:withMap:checkpointUsed)
+WITHOUT:             SAVEEDGETEST: PASS
+```
+
+### 8. "SHIPTEST is the only hook that writes the LIVE player-data directory"
+
+**False as a standalone claim, and the paragraph's own next sentence gives it away** — it tells you
+`<name>.json.selftest-stash` may be left by "a self-test", unqualified.
+
+**Derived, not guessed.** Every writer calls `Directory.CreateDirectory` before writing, so a hook
+that writes leaves the directory behind even after it restores. Each hook was run under its own
+FRESH EMPTY `XDG_CONFIG_HOME` (81 enumerated from `src/`, 4 slow ones skipped, **77 measured**):
+**14** create it
+— BRIEFTEST, CONTRASTTEST, EVENTTEST, HORDETEST, METATEST, MODETEST, ONRAMPTEST, QUITTEST,
+SAVEEDGETEST, SAVETEST, SETTINGSTEST, SHIPTEST, TUTTEST, VETTEST.
+
+**What IS unique to SHIPTEST is the second process**, and that half stands: `Ship.cs:403` holds the
+project's only `Process.Start`. CLAUDE.md now says both things separately, carries the derivation
+command, and names the four writers that still hand-roll a null-guarded truncating restore
+(`Game.Endless.cs`, `Game.Modes.cs`, `Game.Meta.cs`, two `Program.cs` shot paths) — outside this
+wave's files, handed to ROADMAP.
+
+### 10. The architecture map and the program roster
+
+**Ten source files absent**, derived by looping the basenames of `src/*.cs` against the file: 26
+named, 36 exist. Missing were `Mission.cs` — **the one enemy funnel, whose `MakeHostile` CLAUDE.md
+cites three times elsewhere** — plus `Voice.cs`, `Audio.CueMap.cs`, `Audio.Analysis.cs`,
+`Hud.Audition.cs`, `Game.Audition.cs`, `Game.Modes.cs`, `Game.Endless.cs`, `Game.Meta.cs`,
+`Game.Codex.cs`. All ten added with a line each.
+
+**The roster had TWO programs marked "(current)"** — RESONANCE ("the tenth") and CONTOUR ("the
+eleventh") — while PARALLAX, whose waves are the newest merges on `main`, appeared in one unnumbered
+paragraph. A fresh session reading top-down would have concluded CONTOUR was current. Now:
+RESONANCE tenth (closed), CONTOUR eleventh (closed), **PARALLAX (current) the twelfth**.
+
+### 11. The wall-clock-read count
+
+CLAUDE.md read *"57 wall-clock reads (46 in `Renderer.cs` and 11 in `Hud.cs`; counted, the old
+58 / 46 / 12 here was off)"*. **The triple it called off is the correct one.** Derived on the base
+commit `a933cfe`, non-comment lines, excluding the `Now()` definitions:
+
+```
+src/Renderer.cs    46 call sites
+src/Hud.cs         12 call sites
+raw Raylib.GetTime() outside the two Now() definitions: 0
+```
+
+**46 + 12 = 58**, which is what `src/Display.cs`'s own comment has said all along and what CLAUDE.md
+contradicted. Per this file's standing rule against hand-maintained counts, the number is **gone**:
+the passage now carries the one-line derivation, the value at `a933cfe`, and an instruction to
+re-run rather than quote it. (`grep -oc` was rejected in favour of `grep -o … | wc -l` — `-c`
+counts LINES and would under-count a line holding two calls.)
+
+### 12. AUDIO CHECK scrolling never reached `Hud.KeyTable`
+
+`Game.HandleAudition` reads `GetMouseWheelMove`, `KeyboardKey.Up` and `KeyboardKey.Down` to scroll
+the cue table. `Hud.KeyTable`'s row said `"AUDIO CHECK: Esc or U, M" → "back / mute"`. Attributed by
+`git log -S`: the scrolling came in with **THE CUE MAP (`f472d98`)**; the row dates from **THE FRONT
+DOOR (`9b969f3`)**, before it. Since `KeyTable` feeds BOTH the in-game FIELD MANUAL and README's
+generated block, both under-documented the screen by half its controls, for two waves.
+
+Row fixed to `"AUDIO CHECK: Up / Down or Wheel, M, Esc or U" → "scroll the cue table / mute /
+back"`; README regenerated with `SIGHTLINE_KEYTABLE=1` (**one line changed** — the rest of the block
+was already in sync, which confirms the generator is the source of truth).
+
+**New gate `SIGHTLINE_KEYTABLEGATE`**, in the sweep through `verdict`. Two legs, and they close
+different holes — worth stating because they are easy to conflate:
+
+* **(a) DRIFT.** README's block must be byte-identical to what the generator prints. Catches a
+  hand-edited README or a forgotten regeneration. **It would NOT have caught THE CUE MAP.**
+* **(b) COVERAGE.** Every `KeyboardKey.X` and the wheel read that `src/Game.Audition.cs` contains
+  must be named in the AUDIO CHECK row — DERIVED from the source, per CLAUDE.md's standing rule.
+  **This is the leg that would have failed the day THE CUE MAP shipped.**
+
+Demonstrated on the true pre-P13 tree (row AND README both as THE CUE MAP left them — so leg (a)
+was in sync and silent):
+
+```
+PRE-FIX:  KEYTABLEGATE: FAIL (undocumented:AUDIO CHECK reads Down (row: AUDIO CHECK: Esc or U, M),
+                              undocumented:AUDIO CHECK reads Up   (...),
+                              undocumented:AUDIO CHECK reads Wheel (...))
+POST-FIX: KEYTABLEGATE: PASS (README's KEYTABLE block is byte-identical to SIGHTLINE_KEYTABLE's
+          output, and every KeyboardKey + the wheel read by src/Game.Audition.cs is named in
+          KeyTable's AUDIO CHECK row)
+```
+
+With the row reverted but README left at P13's line, BOTH legs fire, which is how the drift leg was
+shown live.
+
+**Leg (b)'s scope is a declared limit, not an oversight.** AUDIO CHECK is the only screen with a
+dedicated input-handler file, so it is the only one whose read-set can be derived without guessing
+which of `Game.cs`'s ~8,600 lines belong to which screen. Every other row is still un-gated —
+ROADMAP carries it.
+
+## Found along the way, not on the list
+
+* **`SaveGame.SelfTest`'s round-trip fixture was itself desynced** (`Mission = 4` / `JumpTo(3)`) and
+  its `mapNode` assertion pinned the broken state. See finding 5.
+* **Four more hand-rolled truncating restores** outside this wave's files
+  (`Game.Endless.cs:535`, `Game.Modes.cs:640/679`, `Game.Meta.cs:612/615`,
+  `Program.cs:1579/2586`). All null-guarded, so none can zero a file; all truncate in place.
+  ROADMAP.
+* **Editing `scripts/qa-sweep.sh` while a sweep is running corrupts that run.** Bash reads a script
+  by byte offset as it executes; a mid-run edit shifted the offsets and the sweep died at line 101
+  with a syntax error on a file that `bash -n` accepts. Not a defect in the script — a working
+  hazard for a repo where several agents share a container. Do docs and script edits BEFORE the
+  sweep, not during.
+
+## What this wave deliberately did NOT do
+
+* **Did not fix finding 6.** Instrument change, `Game.cs`, another developer's file this sprint,
+  and it owes a re-measure. ROADMAP.
+* **Did not "harden" the sweep's hook-name derivation.** It was measured correct 77/77; a
+  speculative change to a shared gate script three agents will merge is more risk than value. The
+  measurement and its two failure modes are recorded in the script instead.
+* **Did not widen `MapFingerprint` to `RewardText`.** A display string; a copy edit is not a
+  save-format break.
+* **Did not convert the four remaining truncating restores.** Not this wave's files, and they carry
+  the null guard that made the SETTINGSTEST one dangerous.
+* **Did not extend `KEYTABLEGATE` leg (b) past AUDIO CHECK.** Every other screen's input handler is
+  interleaved in `Game.cs`; deriving a per-screen read-set there needs a seam that does not exist.
+
+---
+
+# §THE UNVERIFIED — AUDIO AND THE MODES — PROGRAM PARALLAX wave P14 (2026-09-03, `wave/qa-audio`, base `a933cfe`)
+
+Files touched: `src/Audio.cs`, `src/Audio.CueMap.cs`, `src/Anim.cs`, `src/Game.cs`,
+`src/Game.Modes.cs`, `src/Game.Harness.cs`, `src/Mission.cs`, `src/Combat.cs`, `src/Program.cs`,
+`scripts/qa-sweep.sh`, the docs, `docs/screens/p14/`.
+
+## Why this wave exists
+
+An adversarial QA hunt produced 46 findings, each supposed to be adjudicated by two
+refute-by-default verifiers. Two thirds of the verifiers died on a usage limit and the workflow's
+post-processing filed **every unverified finding as "refuted" with an empty reason** — 33 findings
+were dropped without anyone reading them. This wave takes fourteen of them (the audio half and the
+single-mission-modes half) and puts them back through verification, **refute-first**: every item
+below was traced in the source before anything was changed, and the verdict is recorded either way.
+
+**Result: 14 CONFIRMED, 0 refuted outright, 1 half-refuted (14b), 13 fixed, 1 handed to ROADMAP.**
+Every fix ships a test leg shown to FAIL before it and PASS after, verbatim below.
+
+---
+
+## The audio half
+
+### 1. CONFIRMED + fixed — the overwatch reaction announced itself at ENQUEUE
+
+`Game.OnUnitEnteredTile`'s watcher loop popped the `"OVERWATCH"`/`"BRACE"` text and played the
+`OverwatchFires` cue **inside the loop**, i.e. for every watcher on the tile-entry frame, while the
+beat those announce — `ShotAnim.OnStart`'s snap-freeze, the reticle closing on the mover, the flash,
+the flinch, then the tracer — plays one reaction at a time. `ShotAnim`'s reaction `TotalAt` is
+**0.68 s**, so with two watchers the second one's sound was a whole reaction ahead of its picture.
+Second symptom, same cause: a watcher whose queued shot was later purged (the mover died to the
+first, or `ShotAnim.Update`'s dead-attacker guard fired) had **already announced a reaction that
+never happened**.
+
+Both moved into `ShotAnim.OnStart` under `if (Reaction)`, outside the `_windless` block so AutoPlay
+accounting is unchanged. `Fx` never touches `Util.Rng` (both matches in `Fx.cs` are comments saying
+so), so this is gameplay-inert — the seed-pinned table below is the evidence.
+
+### 2 + 3. CONFIRMED + fixed — the census was dead on arrival and could only read x0
+
+`Audio.SourceCensus` counted two literal strings in one file — `Audio.Play("over")` and
+`Audio.Play("reload")` in `src/Game.cs` — against caps of 7 and 3. **THE CUE MAP's own wave had
+deleted every one of those call sites**, so both terms read **x0** and could only ever read x0: the
+drift the caps existed to catch takes the form `Audio.Cue(GameEvent.X)` or a raw play of a
+*different* cue, and neither grep can see either. Measured on the base tree:
+`grep -c 'Audio.Play("over")' src/Game.cs` → **0** (cap 7), `"reload"` → **0** (cap 3).
+
+Finding 3's second clause — "`one meaning, one cue` is already false, `Audio.Play("turn")` fires at
+three unrelated sites" — is **five** sites, not three (`Game.cs` ×3, `Game.Endless.cs`, `Game.Modes.cs`),
+and DEVLOG §THE CUE MAP declares them: "all 'the game advances a stage' confirms". They are one
+meaning class. But `turn` is the right-hand side of `CueFor(GameEvent.Turn)`, so the table was not
+the only route to it, and **the injectivity gate cannot see a raw `Audio.Play` at all**.
+
+The census is rebuilt around the rule the table actually asserts: **THE TABLE OWNS ITS CUES.** Any
+cue in `CueFor`'s right-hand column must be played through `Audio.Cue`/`CueFor` and never through a
+raw `Audio.Play("<that id>")`, **anywhere in `src/`** (not one file). Violating it takes one line,
+which is what a census is for. `Audio.CensusExempt` is the named exception list and is **empty**.
+The two dead caps are replaced by two FLOORS (the table must actually be used: ≥40 `Cue`/`CueFor`
+sites, ≥4 foe sites) so the leg cannot pass by everything disappearing either.
+
+The five `turn` sites are routed through `Audio.Cue(GameEvent.Turn)`. That widens `Turn`'s declared
+meaning to "control passes to the player", which is written into the enum comment — the alternative
+was inventing an eighth cue for a beat **nobody in this sandbox can listen to**, which this wave
+declines to do.
+
+**Pre-fix FAIL (the new census, on the tree as found):**
+```
+CUETEST: census: 3 raw plays of a table-owned cue [Game.Endless.cs:Audio.Play("turn") x1 Game.Modes.cs:Audio.Play("turn") x1 Game.cs:Audio.Play("turn") x3], 78 table users (floor 40), 8 foe sites (floor 4)
+CUETEST: FAIL (inWorldCueOnUiBus(...),census:rawPlayOfMappedCue(Game.Endless.cs:Audio.Play("turn") x1,Game.Modes.cs:Audio.Play("turn") x1,Game.cs:Audio.Play("turn") x3))
+```
+**Post-fix:** `census: 0 raw plays of a table-owned cue, 88 table users (floor 40), 8 foe sites (floor 4)`.
+
+### 4. CONFIRMED + fixed — two loss beats played the REINFORCEMENT ALARM
+
+`Game.cs:3321` (`"VIP DOWN"`) and `Game.cs:3514` (`"SOLDIER DOWN - THEY HOLD FOR n"`) both passed
+`Audio.CueFor(Audio.GameEvent.Reinforce)`, whose entire meaning in the table is *"more of them
+arrive / the pressure clock ticks up / artillery is coming"*. Losing the asset the mission is about,
+announced as an enemy arrival.
+
+A body falling had **no row in the table at all** — it was a raw `Audio.Play("death")` at two sites.
+So `GameEvent.Casualty => "death"` is the new row (no new sound), those two sites route through it,
+and the two banners go **silent** via a new `Audio.SilentCue` sentinel that `ShowBanner` honours:
+the beat already speaks on that exact frame, and the fix is to stop layering a second, *wrong* sound
+on it rather than to invent a third. CUETEST leg (f) asserts exactly one casualty cue and zero alarm.
+
+**Pre-fix FAIL:**
+```
+CUETEST: loss: SOLDIER DOWN banner='alarm' cues=death+alarm
+CUETEST: loss: VIP DOWN banner='alarm' cues=alarm+death
+CUETEST: FAIL (loss:SOLDIER DOWN fires the reinforcement alarm 'alarm',loss:SOLDIER DOWN played the reinforcement alarm,loss:VIP DOWN fires the reinforcement alarm 'alarm',loss:VIP DOWN played the reinforcement alarm)
+```
+**Post-fix:** `loss: SOLDIER DOWN banner='' cues=death` / `loss: VIP DOWN banner='' cues=death`.
+
+### 5. CONFIRMED + fixed — and understated: FOUR unpanned in-world cues, not three
+
+In `src/Anim.cs`, `GrenadeAnim` passes a pan; its three siblings in the same file do not
+(`SmokeAnim` → `Audio.Play("smoke")`, `FlashAnim` → `Audio.Play("flash")`, `IncendiaryAnim` →
+`Audio.Play(CueFor(Explosion), gainDb: -6f)`), nor does `HealAnim`, nor the three `Mend` sites in
+`Game.cs` (STABILIZE / PATCH / REVIVE). All now pan to where the thing happens — the blast tile for
+the ordnance, the patient for the mend — and the incendiary goes through `Audio.Cue` like every
+other Explosion site (`Audio.Cue` gained the same downward-only `gainDb` `Play` already had).
+
+The gate is CUETEST leg (e), which drives the **real** anims (`Effect()` is protected, so this is
+the shipped path) through a new **`Audio.Spy`** — a harness-only cue log in `Audio.Play` that records
+id/pan/foe **before the device check**, because there is no device in this sandbox and a spy that
+only works on the owner's machine is no spy at all.
+
+**Pre-fix FAIL:** `pan: 0/4 in-world cues panned` →
+`pan:unpannedInWorldCue(smoke->'smoke',flash->'flash',incendiary->'boom',heal->'heal')`.
+**Post-fix:** `pan: 4/4 in-world cues panned to where they happen`.
+
+*(Legs d and e in one pre-fix run, with only those hunks reverted:*
+`CUETEST: FAIL (reaction:2cuesAtEnqueueFor2queuedReactions,reaction:2of2reactionsDidNotCueAtOnStart,pan:unpannedInWorldCue(...))` *→ post-fix* `reaction: 2 watchers -> 0 cues at enqueue, 2/2 cued at OnStart`*.)*
+
+### 6. CONFIRMED + fixed — the enum and MappedEvents were an unchecked parallel list
+
+`Audio.GameEvent` and `Audio.MappedEvents` were two hand-written lists with nothing comparing them,
+and **all three CUETEST legs iterate the second one**. A member added to the enum and forgotten in
+`MappedEvents` was invisible to injectivity, to the bus check and to the census — and `CueFor`'s
+`_ => "select"` default meant it **played the menu blip** while the gate stayed green. Fixed on both
+halves: CUETEST leg (a0) asserts `MappedEvents` is the whole `Enum.GetValues`, and the fallback is
+now `"?unmapped"` — deliberately **not** a registered recipe, so an unmapped event trips the
+"is a registered recipe" leg loudly.
+
+### 7. CONFIRMED + fixed — `FoeTelegraphs` claimed the opposite of the truth
+
+The list was headed "the events that are ONLY ever the OPPONENT acting" and included `Explosion` and
+`OverwatchFires`. Every `Explosion` site in the tree is a player grenade / incendiary / barrel /
+siege strike passing `foe:false` (`Anim.cs` ×2, `Game.cs` ×2), and `OverwatchFires` is one shared
+site that fires for whichever side owns the watcher. The **assertion** they carried ("never on the
+UI fader") is right for them; the **stated reason** was not, and a reader checking the contract
+would have concluded the opposite of the truth.
+
+Split into two lists: `FoeTelegraphs` = `{Contact, Reinforce, EnemyTurn}` (what is really only ever
+the opponent) and `NeverUiBus` = the larger set of beats that **happen to** the player rather than
+being their own button answering back. CUETEST runs the fader obligation over `NeverUiBus` — strictly
+more coverage than before — and additionally asserts `FoeTelegraphs ⊆ NeverUiBus`.
+
+Writing that leg surfaced a **judgement call the wave declines to make by assertion**: `over`
+(overwatch SET) and `reload` are `CatOf` category `ui`, so a player at UI-volume-zero loses their
+own overwatch chime and mag change. The line `NeverUiBus` draws is at **agency** — those two, like
+`ability` and `objective`, are confirmations of a click the player just made, which is what a UI
+fader is for, and the asymmetry is already shipped and deliberate (`Turn` is UI, `EnemyTurn` was
+moved off the UI bus by THE CUE MAP). Whether that line is in the right place is a question about
+**sound**, and nobody here can hear it. It is in `docs/ROADMAP.md` as an owner listen.
+
+### 8. CONFIRMED + fixed — a recipe could escape AUDIOGATE, the loader and the audition screen
+
+`_recipes` (what `BuildRecipes` registers), `SfxCueIds` (what the file-first drop-in validation
+walks, what `Audio.OrderedCues` feeds AUDIOGATE, what AUDITIONTEST holds the AUDIO CHECK screen to)
+and AUDIOTEST's own `gameIds` are **three hand-maintained parallel lists**, and every check ran in
+ONE direction — *listed ⇒ registered*. Nothing asserted *registered ⇒ listed*. AUDITIONTEST's stated
+contract ("a cue added to `BuildRecipes` and forgotten here fails loudly instead of quietly becoming
+the one sound nobody ever auditions") was describing an assertion that did not exist.
+
+`Audio.SelfTest` now asserts set-equality both ways, in the file that owns both lists.
+
+**Demonstrated live** with a throwaway `Reg("zzz_fixture", ...)` added to `BuildRecipes` and left out
+of `SfxCueIds`:
+```
+AUDIOGATE:    PASS
+AUDITIONTEST: PASS (36 cues listed + measured, 6 stacks, labels fit at 120%, 39 rows on screen, table scrolls)
+AUDIOTEST:    FAIL recipe 'zzz_fixture' is registered but missing from SfxCueIds — it would be invisible
+              to AUDIOGATE's level band, to the file-first drop-in validation and to the AUDIO CHECK screen
+```
+Read it: the two gates that are *supposed* to cover a cue both pass while the cue is invisible to
+them. Fixture removed; all three PASS.
+
+### What the audio half did NOT do
+
+**Nobody has heard any of it.** There is no audio device in this sandbox. Every claim above is about
+ROUTING (which cue, which bus, which frame, which pan value) or about a REGISTRY. No cue's
+*content* changed, no recipe was added or retuned, and **AUDIOGATE's 36 cues and their level bands
+are untouched**. "Panned to where it happens" means `Audio.Play` received a `panX ≥ 0` derived from
+the event's screen X, asserted by `Audio.Spy` — not that it sounds better.
+
+---
+
+## The modes half — one funnel, not five patches
+
+### The shape of it
+
+P4 THE MODES GET THE BESTIARY threaded a second parameter (`rosterTier`) through `Mission.Build`
+because SKIRMISH and DAILY enter via `Game.SetupMission(1)` and the literal `1` was pinning the
+ARCHETYPE gates to mission 1's teaching tier. **It stopped there.** Findings 9, 11 and 12 are three
+more consumers of "how deep is this fight" still reading that literal 1 at heat 8, so they are one
+defect and get one fix: **`Mission.ModeDepth` / `Mission.DepthFor`**, published at the TOP of
+`SetupMission` (it must be there — the VIP is built ~80 lines above the old `rosterTier` line) and
+`-1` in every other mode, where `DepthFor` is the identity on the mission number.
+`SIGHTLINE_MODEDEPTH=0` restores the pre-P14 modes exactly and is what the new legs were shown to
+fail against. `Mission.ModeTierFor(heat)` is the one formula both P4's `rosterTier` and P14's
+`ModeDepth` read, so they cannot drift — and the two stay **separate levers**, so
+`SIGHTLINE_MODEDEPTH=0` does not undo P4's roster opening.
+
+### The measurement instrument: `SIGHTLINE_MODEFORCEPROBE`
+
+Before P14 the only headless answer to "what force does a skirmish actually field?" was MODETEST's
+one printed headcount. `SIGHTLINE_MODEFORCEPROBE` (a report — `_SWEEP_EXEMPT`, MODETEST does the
+asserting) dumps per heat rung: headcount, pod plan, class histogram, how often the whole force is a
+single pod / a single class / entirely immobile over 40 builds, the escort asset's statline, the
+Decapitate HVT, the MIXED mid-boss and its kit, and one DEFEND wave's composition.
+
+### Force composition, BEFORE (`SIGHTLINE_MODEDEPTH=0`) and AFTER
+
+| | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|
+| **bodies** before | 3 | 4 | 5 | 6 | 7 |
+| **bodies** after | **4** | **5** | **6** | **7** | **8** |
+| pod plan before | `[3]` | `[2+2]` | `[3+2]` | `[3+3]` | `[3+2+2]` |
+| pod plan after | `[2+2]` | `[3+2]` | `[3+3]` | `[3+2+2]` | `[3+3+2]` |
+| **single-pod force** /40 before | **40** | 0 | 0 | 0 | 0 |
+| **single-pod force** /40 after | **0** | 0 | 0 | 0 | 0 |
+| **one-class force** /40 before | **38** | 6 | 0 | 0 | 0 |
+| **one-class force** /40 after | **4** | 2 | 0 | 0 | 0 |
+| **ALL-IMMOBILE force** /40 before | **3** | **2** | 0 | 0 | 0 |
+| **ALL-IMMOBILE force** /40 after | **0** | **0** | 0 | 0 | 0 |
+| VIP before | 16 hp / 0 armor | 16/0 | 16/0 | 16/0 | 16/0 |
+| VIP after | **20/1** | 20/1 | **22/2** | **24/2** | **24/2** |
+| HVT (h0/h2, where it is a real buff) before | +7 → 20 hp | +7 → 22 | — | — | — |
+| HVT after | **+9 → 22 hp** | +9 → 24 | — | — | — |
+| DEFEND wave before | +1 `GRUNT/9hp/61aim` | +1 `GRUNT/9hp/61aim` | +1 `GRUNT/9hp/61aim` | +1 `SAPPER/11hp/57aim` | +1 `SHIELD/15hp/57aim` |
+| DEFEND wave after | **+2** `SCREENER/11 SAPPER/13` | +2 `SCREENER/12 SAPPER/14` | **+3** `SAPPER/15 SCREENER/13 SHIELD/22` | +3 `SHIELD/25 SPOTTER/15 SAPPER/17` | **+3** `SAPPER/19 DRONE/15 SHIELD/27` |
+| MIXED mid-boss | `WARDEN` (siege=False) | | `MARSHAL` | | |
+
+Screens: `docs/screens/p14/skirmish-h0-before.png` / `-after.png` — same seed (4242), same arena (5),
+same objective. The chip reads **3 SYNDICATE** with all three dormant markers in one clump at the
+right edge; after, **4 SYNDICATE** in two two-body pods on opposite flanks.
+
+### 9. CONFIRMED + fixed — the DEFEND wave was heat-blind AND pinned to tier 1
+
+`Game.SpawnReinforcements` read `int n = _run.Mission`, which is 1 in both modes, so
+`Mission.MakeWaveHostile(1, ...)` built every wave body at tier 1 with `bump = 1`. And
+`SpawnDefendWave`'s heat grace read `if (_run.Mission <= 1) waveHeatStat = 0;` — **true for every
+skirmish and every daily**, hard-zeroing the wave's stat bump on all nine rungs. Measured: the h0,
+h2 and h4 waves were the identical body, `GRUNT/9hp/61aim`.
+
+The grace's own comment says it was added to "pre-empt the skirmish-grace owner decision". W9 then
+MADE that decision — a SKIRMISH/DAILY player dialled the rung and gets no grace — and this line was
+never updated. Both now read `Mission.DepthFor`.
+
+### 10. CONFIRMED (worse than reported) + fixed — 40/40 heat-0 skirmishes were ONE pod
+
+Not "can be three SENTRYs": at heat 0 the force was **one pod, 40 builds out of 40**, and under
+W4's `PodUniform` that means **one archetype, 38/40** — with 3/40 (7.5%) entirely immobile SENTRYs,
+a whole mission against turrets that cannot follow you. Two fixes, because one was not enough:
+removing the opener trim (finding 11) breaks the single pod, but two pods can still BOTH roll SENTRY
+(measured 1/40 after that change alone), so a mode-gated guard stands on its own — **in SKIRMISH and
+DAILY the first body, pod 0's lead, may not be immobile**. It is **draw-free**: the roll is
+REMAPPED (`r ± 0.5`), never re-drawn, so the shared `Util.Rng` stream, every CRN pairing and the
+daily's cross-process reproducibility are untouched. Gated on `ModeDepth`, so the campaign — whose
+m3+ Defend/Sabotage forces can also plan as one pod of 3 — is byte-identical.
+
+### 11. CONFIRMED + fixed — the CAMPAIGN cold-opener grace fired in both single-mission modes
+
+`Mission.OpenerTrim` is gated `n <= 2`, and both modes enter at `n == 1`, so every skirmish and every
+daily lost a body at every rung. Now gated on `DepthFor(n)`.
+
+**This moves MODETEST's declared headcount pin, deliberately: 3/5/7 → 4/6/8.** P4's own note
+(quoted in the test) attributes the 4/6/8 → 3/5/7 drop to the pod trim; the second body is
+`OpenerTrim`. So the modes are back on **the headcount they fielded before P4 — a restoration, not
+an escalation** — and the pods-of-3 leg moves off heat 0 (at 4 bodies `PodPlan` deals `{2,2}` and a
+pod of 3 cannot form; it is asserted at heat 4, which is what the leg was ever for).
+
+### 12. CONFIRMED + fixed — the protected asset never scaled with the dial the enemy does
+
+`Mission.MakeVip(1)` → **16 HP / 0 armor from heat 0 to heat 8**, while the force around it grew four
+bodies and four stat points. `Combat.HvtHpBonus(_run.Mission)` → a flat **+7 HP** on every rung.
+Both read `Mission.DepthFor` now (inside `MakeVip` and inside `HvtHpBonus`, so no call site changed).
+
+### 13. CONFIRMED + fixed (the callsign only) — a kitless ELITE wearing a faction's name
+
+`Mission.MakeMidBoss`'s unfactioned fallback is `Mk(n == 3 ? "BREAKER" : "WARDEN")`. A MIXED skirmish
+at heat ≥ 4 has `rosterTier` 4 or 5, so it always took the `"WARDEN"` arm — measured
+`MIXED -> WARDEN hp=25 rage=False shield=False siege=False`: the **Wardens** mid-boss's callsign on a
+body that cannot do the one thing that name means (`ArmSiege`). Renamed to `MARSHAL`.
+*(It is also reachable in the CAMPAIGN, contrary to the finding's "previously campaign-unreachable":
+`Run.GenerateMap` stamps a faction on Combat/Elite nodes only, so a **Supply node at mission 3 or 5**
+is `Faction.None` and takes the same fallback. Renaming is presentation-only — the callsign feeds no
+draw, stat or `Codex` lookup, which the 8/8 identical seed-pinned autoplays below confirm. It also
+removes an accidental collision with the player-side `Perk.Breaker`.)*
+
+**Arming the MIXED mid-boss is NOT shipped** — that is a real force change and belongs in a wave
+that measures it. `docs/ROADMAP.md`.
+
+### 14. CONFIRMED (a) + fixed / REFUTED (b) — the daily's headline contract was printed, not asserted
+
+**(a) CONFIRMED.** MODETEST leg (9) calls `BeginDaily()` twice **in one process**, compares
+`ForceSignature`, and then prints `"(must match across processes)"`. Nobody was comparing it — the
+sweep runs MODETEST once — and a same-process check cannot see anything a fresh process would
+compute differently, which is the entire failure mode a date-seeded challenge has. Leg (11) now runs
+the real thing: a **child process** of the same binary with `SIGHTLINE_DAILYSIGPROBE=1`, which prints
+one line (`stamp|faction|force|board`) and exits. It is the **first hook branch in `RealMain`** on
+purpose, so the child inherits the parent's whole environment — every measurement dial applies to
+both, or the two processes are not the same game — without an inherited `SIGHTLINE_MODETEST`
+preempting it. Unlike SHIPTEST it writes no player data (the probe never leaves `NoPersist`) and is
+bounded at 20 s.
+
+Post-fix: `MODETEST daily cross-process: 20260701|1|523fd7e3|c2a75b4f reproduced in a second process`.
+**Teeth demonstrated live** by a fixture giving the child one different dial:
+`MODETEST: FAIL (dailyCrossProcessForceDiffers(self=20260701|1|523fd7e3|... child=20260701|1|6f60fa30|...))`.
+
+**(b) REFUTED — "`SIGHTLINE_MAP` is silently swallowed on the daily path".** True as stated
+(`BeginDaily` sets `Mission.ForcedLayout = arena` at `Game.Modes.cs:228`, after `Program` may have set
+it from `SIGHTLINE_MAP`) and **correct as designed**: the day's arena is derived from the day's seed
+and is part of the contract the whole mode exists to keep. Honouring `SIGHTLINE_MAP` there would make
+the daily not the daily, and leg (2)'s `BoardSignature` reproducibility would be arena-dependent. Not
+a defect. Pin an arena with `SIGHTLINE_SKIRMISH` instead.
+
+---
+
+## Gates
+
+**Pre-fix FAIL / post-fix PASS, MODETEST** (the pre-fix arm is `SIGHTLINE_MODEDEPTH=0`, which
+reproduces the pre-P14 numbers exactly — `bodies h0=3 h4=5 h8=7`, `pods-of-3 in 50/50`):
+```
+MODETEST: FAIL (skirmishHeadcountMoved(3/5/7, expected 4/6/8),skirmishVipDialInert(h0 16hp/0armor h8 16hp/0armor),
+                skirmishHvtDialInert(h0 +7 h8 +7),skirmishAllImmobileForce(3/80),skirmishSinglePodForce(40/80))
+MODETEST: PASS (... a skirmish fields the full roster, pods of 3 from heat 4 and one mid-boss from heat 4,
+                at a pinned 4/6/8 bodies; the escort asset, the HVT bonus and the DEFEND wave all answer the
+                dial too; no mode force is a single pod or entirely immobile; the depth funnel is the identity
+                in the campaign; and the same daily stamp fields the same force IN A SECOND PROCESS)
+```
+
+**CUETEST, post-fix:**
+```
+CUETEST: reaction: 2 watchers -> 0 cues at enqueue, 2/2 cued at OnStart
+CUETEST: pan: 4/4 in-world cues panned to where they happen
+CUETEST: loss: SOLDIER DOWN banner='' cues=death
+CUETEST: loss: VIP DOWN banner='' cues=death
+CUETEST: PASS (15 events = the whole GameEvent enum -> 15 distinct cues, no in-world cue on the UI bus,
+               ShowBanner(enemy) on the SFX fader, the reaction announces at OnStart,
+               census: 0 raw plays of a table-owned cue, 88 table users (floor 40), 8 foe sites (floor 4))
+```
+
+**THE CAMPAIGN IS BYTE-IDENTICAL.** Seed-pinned autoplay, Release binaries, against a base worktree
+at `a933cfe` — result, mission, **frame count and turn count** all equal on **8 of 8** seeds:
+
+| seed | base `a933cfe` | `wave/qa-audio` |
+|---|---|---|
+| 101 | WIN m6 frame=12199 turns=32 | WIN m6 frame=12199 turns=32 |
+| 202 | LOSE m4 frame=11764 turns=29 | LOSE m4 frame=11764 turns=29 |
+| 303 | WIN m6 frame=5936 turns=16 | WIN m6 frame=5936 turns=16 |
+| 404 | WIN m6 frame=9052 turns=23 | WIN m6 frame=9052 turns=23 |
+| 505 | WIN m6 frame=11762 turns=29 | WIN m6 frame=11762 turns=29 |
+| 606 | LOSE m5 frame=15814 turns=32 | LOSE m5 frame=15814 turns=32 |
+| 707 | WIN m6 frame=10255 turns=28 | WIN m6 frame=10255 turns=28 |
+| 808 | LOSE m3 frame=4981 turns=12 | LOSE m3 frame=4981 turns=12 |
+
+**No balance number was measured or moved.** The only gameplay change is inside SKIRMISH and DAILY,
+which are not on the heat ladder; the campaign inertness is the table above plus PAIRTEST plus
+MODETEST's `depthFunnelNotIdentityInCampaign` leg.
+
+- `dotnet build -c Release` **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` → **SWEEP-EXIT=0**, every line PASS, **no COVERAGE GAP**,
+  derived counts **80 exist / 80 run**, autoplay LOSE / WIN / LOSE, no TIMEOUT.
+
+## New hooks and dials
+
+| name | what |
+|---|---|
+| `SIGHTLINE_MODEFORCEPROBE=1` | report: the SKIRMISH force per heat rung (bodies, pods, roster, VIP, HVT, mid-boss, one DEFEND wave). `_SWEEP_EXEMPT` — MODETEST asserts. |
+| `SIGHTLINE_DAILYSIGPROBE=1` | report: one line, this process's daily signature. The child half of MODETEST leg (11). `_SWEEP_EXEMPT`. |
+| `SIGHTLINE_MODEDEPTH=0` | restore the pre-P14 single-mission modes exactly (`Mission.ModeDepth` never published; the immobility guard off with it). |
+| `Audio.Spy` | harness-only cue log in `Audio.Play` (id / pan / foe, recorded before the device check). Null in play. |
+| `Audio.SilentCue` | `ShowBanner` sentinel: this banner's beat already has a sound on this frame. |

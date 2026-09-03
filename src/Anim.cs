@@ -336,6 +336,23 @@ public class ShotAnim : Anim
         if (dir.LengthSquared() > 0.01f) A.Facing = MathF.Atan2(dir.Y, dir.X);
         _impact = D.Pos;
         _windless = g.AutoPlay;
+        // P14 — THE REACTION ANNOUNCES ITSELF WHEN IT HAPPENS, NOT WHEN IT IS QUEUED.
+        // Game.OnUnitEnteredTile used to pop the "OVERWATCH"/"BRACE" text and play the reaction cue
+        // inside its watcher loop, i.e. for EVERY watcher on the tile-entry frame, while the beat
+        // those announce plays here — one reaction at a time, 0.68 s apart for a reaction. Two
+        // watchers therefore fired two cues on one frame and then two shots over 1.36 s, and a
+        // watcher whose queued shot was later purged (the mover died to the first) had already
+        // announced a reaction the player never saw. It lives here now: same frame as the freeze,
+        // the reticle and the tracer, once per reaction that actually happens, panned to the
+        // watcher. Outside the `_windless` block on purpose — AutoPlay collapses the VISUALS, and
+        // an audio call is a no-op with no device, so the cue accounting stays the same in both.
+        if (Reaction)
+        {
+            g.Fx.PopText(A.Pos + new Vector2(0, -30), Stagger ? "BRACE" : "OVERWATCH",
+                         Stagger ? Pal.Good : Pal.Accent, 18f);
+            Audio.Cue(Audio.GameEvent.OverwatchFires,
+                      panX: Util.Clamp(A.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
+        }
         if (!_windless)
         {
             Color ret = A.Team == Team.Player ? Pal.Friend : Pal.Foe;
@@ -894,7 +911,10 @@ public class SmokeAnim : LobAnim
 
     protected override void Effect(Game g)
     {
-        Audio.Play("smoke");   // THE BEAT: a soft hiss (was the "hunker" thunk)
+        // THE BEAT: a soft hiss (was the "hunker" thunk). P14: PANNED to the canister — the
+        // GrenadeAnim two classes up has always panned its blast and these three siblings did not,
+        // so a smoke landing at the board edge hissed dead centre.
+        Audio.Play("smoke", panX: Util.Clamp(Util.TileCenter(Tx, Ty).X / (float)Cfg.ScreenW, 0f, 1f));
         g.Grid.AddSmoke(Tx, Ty, Radius, Turns);
         for (int x = Tx - Radius; x <= Tx + Radius; x++)
             for (int y = Ty - Radius; y <= Ty + Radius; y++)
@@ -914,7 +934,8 @@ public class FlashAnim : LobAnim
 
     protected override void Effect(Game g)
     {
-        Audio.Play("flash");   // THE BEAT: a flashbang pings, it does not "crit"
+        // THE BEAT: a flashbang pings, it does not "crit". P14: panned to the burst.
+        Audio.Play("flash", panX: Util.Clamp(Util.TileCenter(Tx, Ty).X / (float)Cfg.ScreenW, 0f, 1f));
         g.Fx.AddShake(7f);
         g.AddHitStop(0.04f);
         g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 250, 230), 34, 320f, 0.4f, 5f, true);
@@ -946,7 +967,10 @@ public class IncendiaryAnim : LobAnim
 
     protected override void Effect(Game g)
     {
-        Audio.Play(Audio.CueFor(Audio.GameEvent.Explosion), gainDb: -6f);   // THE BEAT: a smaller explosion (was "crit")
+        // THE BEAT: a smaller explosion (was "crit"). P14: panned, and through Audio.Cue like
+        // every other Explosion site — the gain trim rides along.
+        Audio.Cue(Audio.GameEvent.Explosion,
+                  panX: Util.Clamp(Util.TileCenter(Tx, Ty).X / (float)Cfg.ScreenW, 0f, 1f), gainDb: -6f);
         g.Fx.AddShake(6f);
         g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 160, 70), 30, 300f, 0.5f, 5f, true);
         // lay the fire field. W10 PYROMANIACS boon: a SQUAD-thrown incendiary burns +2 turns
@@ -1008,7 +1032,9 @@ public class HealAnim : Anim
                 int gained = Patient.Hp - before;
                 g.Fx.Burst(Patient.Pos, Pal.Good, 14, 150f, 0.6f, 3.5f, true);
                 g.Fx.PopText(Patient.Pos + new Vector2(0, -26), "+" + gained, Pal.Good, 24f);
-                Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: a mend sounds like a mend (was "reload")
+                // THE BEAT: a mend sounds like a mend (was "reload"). P14: panned to the patient.
+                Audio.Cue(Audio.GameEvent.Mend,
+                          panX: Util.Clamp(Patient.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
             }
         }
         return _t >= Total;

@@ -1980,7 +1980,19 @@ public partial class Game
     public void DebugKia()
     {
         var c = Players.Where(p => !p.IsVip).ToList();
-        if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.WasDownedThisMission = true; /* FUL-7: stage the TRUE death (skip the bleed-out) */ v.Hp = 0; KillUnit(v); }
+        if (c.Count > 1)
+        {
+            var v = c[1];
+            // P12 THE CONFIRMED EIGHT (C7), screenshot only: SIGHTLINE_KIAROW=<row> seats the victim
+            // on a given board row before the kill, so the ladder's TOP-EDGE behaviour can be
+            // photographed. Row 0 used to print the 30px name stamp at y = -34 (entirely above the
+            // window) and "KIA" under the 64px HUD top plate. Inert when unset.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_KIAROW"), out int krow)
+                && krow >= 0 && krow < Cfg.GridH)
+            { v.Y = krow; v.SyncPos(); }
+            v.Nickname = "GHOST"; v.WasDownedThisMission = true; /* FUL-7: stage the TRUE death (skip the bleed-out) */
+            v.Hp = 0; KillUnit(v);
+        }
     }
 
     /// THE BEAT (screenshot/filmstrip only, SIGHTLINE_KILLCAM=<frame>): the last hostile falls to a
@@ -4823,7 +4835,7 @@ public partial class Game
         catch (Exception e) { return "VETTEST: FAIL (exception " + e.Message + ")"; }
         finally
         {
-            if (metaSaved != null) { try { System.IO.File.WriteAllText(SaveGame.MetaPathPublic, metaSaved); } catch { } }
+            if (metaSaved != null) { try { SaveGame.WriteAtomicPublic(SaveGame.MetaPathPublic, metaSaved); } catch { } }   // P13: atomic
             else { try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { } }
         }
         return fails.Count == 0
@@ -6034,8 +6046,8 @@ public partial class Game
 
         // ---- (5) persistence: round-trip + migration + the drill's no-write contract ------------
         string dispPath = Display.SettingsPathPublic;
-        string dispStash = null; bool hadDisp = false;
-        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
         int savedTips = Display.TipsSeen; bool savedTrain = Display.TrainingSeen;
         bool savedShow = Display.ShowAllVerbs, savedBrace = Display.BraceTipSeen, savedTut = Display.TutorialSeen;
         try
@@ -6076,12 +6088,7 @@ public partial class Game
         {
             Display.TipsSeen = savedTips; Display.TrainingSeen = savedTrain;
             Display.ShowAllVerbs = savedShow; Display.BraceTipSeen = savedBrace; Display.TutorialSeen = savedTut;
-            try
-            {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-            }
-            catch { }
+            SaveGame.RestoreForSelfTest(dispStash);
         }
 
         // The drill's NO-WRITE contract: a LIVE (persisting) training op must not create or touch
@@ -6107,12 +6114,7 @@ public partial class Game
             if (!trainBefore)
             {
                 Display.TrainingSeen = false;
-                try
-                {
-                    if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                    else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-                }
-                catch { }
+                SaveGame.RestoreForSelfTest(dispStash);   // idempotent: falls back to the in-memory copy
             }
         }
 
@@ -6825,13 +6827,9 @@ public partial class Game
         var fails = new List<string>();
         var notes = new List<string>();
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
-        bool hadSave = false, hadMeta = false; string saveStash = null, metaStash = null;
-        try
-        {
-            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
-            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
-        }
-        catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var saveStash = SaveGame.StashForSelfTest(sp);
+        var metaStash = SaveGame.StashForSelfTest(mp);
 
         // A real save, written by the game, as the base every shape is edited FROM. Hand-writing
         // the JSON would test a fiction; this is the file the game actually produces.
@@ -6955,25 +6953,148 @@ public partial class Game
                 for (; j < s.Length; j++) { if (s[j] == '[') depth++; else if (s[j] == ']') { depth--; if (depth == 0) break; } }
                 return s.Substring(0, open) + "[null, null]" + s.Substring(j + 1);
             }, true);
+
+            // (10) MAPPOS AND MISSION DISAGREE. Every other shape here is about a save that will
+            //      not LOAD; this one loads perfectly and is INCOHERENT. The game keeps
+            //      `Map[MapPos].Mission == Run.Mission` by construction, and FromDto bounds-checked
+            //      MapPos against `Map.Count` only — the map's SIZE, never the mission counter — so
+            //      a save whose two halves disagree resumed with the fight built from `Mission`
+            //      (force size, heat ramp, objective rotation, the MaxMissions win gate) and the
+            //      routing, node kind, faction and intel payout taken from a node several columns
+            //      away. The board is mission 1; clearing it advances into the finale's successors.
+            //      Not hypothetical: CLAUDE.md names "a MapPos pointing at another mission" as the
+            //      thing a generator change does to every save on disk.
+            {
+                int seedVal = 0;
+                var sm = System.Text.RegularExpressions.Regex.Match(good ?? "", "\"MapSeed\"\\s*:\\s*(-?\\d+)");
+                if (sm.Success) int.TryParse(sm.Groups[1].Value, out seedVal);
+                int lateId = -1, lateMission = 0;
+                if (seedVal != 0)
+                {
+                    var probe = new Run(); probe.GenerateMap(seedVal);
+                    for (int i = probe.Map.Count - 1; i >= 0; i--)
+                        if (probe.Map[i].Mission >= 4) { lateId = i; lateMission = probe.Map[i].Mission; break; }
+                }
+                if (lateId < 0) fails.Add("desync:noLateNodeToPointAt(seed=" + seedVal + ")");
+                else
+                {
+                    string what = "mapPos=" + lateId + "@m" + lateMission + " while Mission=1";
+                    try
+                    {
+                        System.IO.File.WriteAllText(sp, System.Text.RegularExpressions.Regex.Replace(
+                            good, "\"MapPos\"\\s*:\\s*-?\\d+", "\"MapPos\": " + lateId));
+                        var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                        if (!g.ContinueRun()) fails.Add("refusedAResumableSave:" + what);
+                        else if (g.RunState == null) fails.Add("desync:noRun");
+                        else if (g.RunState.CurrentNode == null) fails.Add("desync:noCurrentNode");
+                        else
+                        {
+                            // the invariant, asserted at LOAD — before any play can hide it
+                            if (g.RunState.CurrentNode.Mission != g.RunState.Mission)
+                                fails.Add("mapPosDesynced:node@m" + g.RunState.CurrentNode.Mission
+                                          + " vs run@m" + g.RunState.Mission);
+                            // and the resynced run is still a PLAYABLE mission 1, not a wreck
+                            if (g.Players.Count == 0) fails.Add("resumedWithNoSquad:" + what);
+                            if (g.AlivePlayers().Count == 0) fails.Add("resumedWithNobodyAlive:" + what);
+                            for (int i = 0; i < 300 && g.Phase != Phase.Win && g.Phase != Phase.Lose; i++)
+                                g.Update(1f / 60f);
+                        }
+                    }
+                    catch (Exception ex) { fails.Add("threw:" + what + ":" + ex.GetType().Name); }
+                }
+            }
+
+            // (11) A SAVE THIS BUILD DID NOT WRITE. Every other fixture in this file — and in
+            //      SAVETEST's StructureSelfTest — is either produced by the CURRENT build and then
+            //      edited, or is a shape that must be REFUSED. Nothing anywhere loaded a save from
+            //      an OLDER build and asserted it comes back CORRECT, which is the one thing the
+            //      save format's whole back-compat story rests on: eleven fields across RunDto and
+            //      UnitDto carry an "append-only: old saves default <x>" comment, and every one of
+            //      those comments was a claim no test could see. A field whose meaning changed —
+            //      the case SchemaVersion exists for — round-tripped green, because both ends of
+            //      the round trip were this build.
+            //
+            //      So these two literals are hand-written in the shape the DTOs had BEFORE the
+            //      append-only fields existed, with no SchemaVersion at all (reads back as 0, which
+            //      Load must treat as "old", never as "corrupt"). They assert the resumed run is
+            //      playable AND that every append-only field landed on the inert default its
+            //      comment promises. If you append a field, add it here; if a fixture stops
+            //      parsing, you renamed or repurposed a persisted name and old saves just broke.
+            foreach (var (what, json) in new (string, string)[]
+            {
+                // the oldest shape: no campaign map at all (MapSeed absent -> 0)
+                ("legacy:noMap",
+                 "{\"Mission\":2,\"Intel\":40,\"Squad\":[{\"Name\":\"LEGACY\",\"Cls\":\"ASSAULT\","
+                 + "\"Hp\":5,\"MaxHp\":5,\"Aim\":65,\"Mobility\":6,\"Weapon\":0,\"Kills\":3,\"Rank\":1,"
+                 + "\"Perks\":[],\"Traits\":[],\"Bonds\":[]}],\"Fallen\":[],\"BondTally\":{},"
+                 + "\"Card\":{\"Objective\":0,\"ModName\":\"STANDARD\",\"EnemyDelta\":0,\"StatDelta\":0}}"),
+                // and the same vintage WITH a campaign map, so the regenerate-from-seed path is covered
+                ("legacy:withMap",
+                 "{\"Mission\":1,\"Intel\":12,\"Squad\":[{\"Name\":\"LEGACY2\",\"Cls\":\"SNIPER\","
+                 + "\"Hp\":4,\"MaxHp\":4,\"Aim\":72,\"Mobility\":5,\"Weapon\":1,\"Perks\":[],"
+                 + "\"Traits\":[],\"Bonds\":[]}],\"Fallen\":[],\"BondTally\":{},\"MapSeed\":424242,"
+                 + "\"MapPos\":0,\"Card\":{\"Objective\":0,\"ModName\":\"STANDARD\"}}"),
+            })
+            {
+                try
+                {
+                    System.IO.File.WriteAllText(sp, json);
+                    SaveGame.InvalidateExistsCachePublic();
+                    if (!SaveGame.Exists) { fails.Add(what + ":notOffered"); continue; }
+                    var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                    if (!g.ContinueRun()) { fails.Add(what + ":refused"); continue; }
+                    var r = g.RunState;
+                    if (r == null) { fails.Add(what + ":noRun"); continue; }
+                    if (g.Players.Count == 0 || g.AlivePlayers().Count == 0) fails.Add(what + ":notPlayable");
+                    // the eleven append-only promises, one assertion each
+                    if (r.HeatLevel != 0) fails.Add(what + ":heat=" + r.HeatLevel);
+                    if (r.ActiveBoons.Count != 0) fails.Add(what + ":boons=" + r.ActiveBoons.Count);
+                    if (r.PrepFaction != Faction.None) fails.Add(what + ":prepFaction=" + r.PrepFaction);
+                    if (r.CheckpointUsed) fails.Add(what + ":checkpointUsed");
+                    if (r.Contract != Contract.None) fails.Add(what + ":contract=" + r.Contract);
+                    if (r.PendingSalvageReward != 0) fails.Add(what + ":pendingSalvage=" + r.PendingSalvageReward);
+                    var u = r.Squad[0];
+                    if (u.Name != (what.EndsWith("noMap") ? "LEGACY" : "LEGACY2")) fails.Add(what + ":name=" + u.Name);
+                    if (u.WeaponMods.Count != 0) fails.Add(what + ":weaponMods=" + u.WeaponMods.Count);
+                    if (u.Spec != Spec.None) fails.Add(what + ":spec=" + u.Spec);
+                    if (u.Scars.Count != 0) fails.Add(what + ":scars=" + u.Scars.Count);
+                    if (u.VendettaFaction != Faction.None) fails.Add(what + ":vendetta=" + u.VendettaFaction);
+                    if (u.NearDeathCount != 0) fails.Add(what + ":nearDeath=" + u.NearDeathCount);
+                    // and the map halves stay coherent (P13's FromDto resync must not fire on a mapless save)
+                    if (what.EndsWith("noMap"))
+                    {
+                        if (r.Map.Count != 0) fails.Add(what + ":phantomMap=" + r.Map.Count);
+                        if (r.CurrentNode != null) fails.Add(what + ":phantomNode");
+                    }
+                    else if (r.CurrentNode == null) fails.Add(what + ":noNode");
+                    else if (r.CurrentNode.Mission != r.Mission)
+                        fails.Add(what + ":desync:node@m" + r.CurrentNode.Mission + " vs run@m" + r.Mission);
+                    for (int i = 0; i < 300 && g.Phase != Phase.Win && g.Phase != Phase.Lose; i++)
+                        g.Update(1f / 60f);
+                }
+                catch (Exception ex) { fails.Add("threw:" + what + ":" + ex.GetType().Name + ":" + Short(ex.Message)); }
+            }
         }
         finally
         {
             try
             {
-                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
-                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
                 if (System.IO.File.Exists(sp + ".bak")) System.IO.File.Delete(sp + ".bak");
-                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
-                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+                SaveGame.RestoreForSelfTest(saveStash);
+                SaveGame.RestoreForSelfTest(metaStash);
             }
             catch { }
         }
 
         return fails.Count == 0
-            ? "SAVEEDGETEST: PASS (9 hostile save shapes resume into a PLAYABLE run or are refused "
+            ? "SAVEEDGETEST: PASS (12 hostile save shapes resume into a PLAYABLE run or are refused "
               + "AND STASHED: mission out of range in both directions, a nameless soldier, an "
               + "unknown class, an all-benched roster, a double-length roster, a phantom bond, a "
-              + "truncated file, a null squad member and an all-null squad — none throws, none "
+              + "truncated file, a null squad member, an all-null squad, and a MapPos pointing at "
+              + "another mission than the run counter (resynced on load, not resumed incoherent), and "
+              + "two saves THIS BUILD DID NOT WRITE — the pre-append-only DTO shape with and "
+              + "without a campaign map, no SchemaVersion, every one of the 11 'old saves default "
+              + "<x>' promises asserted — none throws, none "
               + "fields an empty board, and no refusal leaves a CONTINUE button behind it"
               + (notes.Count > 0 ? "; " + string.Join(", ", notes) : "") + ")"
             : "SAVEEDGETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
@@ -7653,6 +7774,101 @@ public partial class Game
         new ScreenCase("SHOP-WORST",    g => { g.DebugShop(); FitStressSquad(g); }),
     };
 
+    // ─── P13 — SIGHTLINE_KEYTABLEGATE: the controls the game reads vs the controls it DOCUMENTS ──
+    /// `Hud.KeyTable` is the single row-set behind BOTH the in-game FIELD MANUAL and README's
+    /// generated controls block, and `SIGHTLINE_KEYTABLE` is the generator that prints the latter.
+    /// Neither had a gate, and the gap showed: THE CUE MAP gave the AUDIO CHECK screen Up / Down
+    /// and mouse-wheel scrolling in `Game.HandleAudition` and never came back to the table, so for
+    /// two waves the manual and the README both told a player the screen had two keys when it had
+    /// four. Nothing could see it — the README was in sync with a KeyTable that was itself wrong.
+    ///
+    /// TWO LEGS, AND THEY CLOSE DIFFERENT HOLES. Say which, because they are easy to conflate:
+    ///
+    ///   (a) DRIFT. README's block between the KEYTABLE markers must be byte-identical to what the
+    ///       generator prints today. Catches a hand-edited README and a KeyTable change that was
+    ///       never regenerated. It would NOT have caught THE CUE MAP: the block was in sync.
+    ///   (b) COVERAGE, for the one screen whose input handler lives in a file of its own. Every
+    ///       `KeyboardKey.X` that `src/Game.Audition.cs` reads, and its wheel read, must be named
+    ///       in KeyTable's AUDIO CHECK row. DERIVED from the source, never remembered — CLAUDE.md's
+    ///       standing rule for exactly this class of list. THIS is the leg that would have failed
+    ///       the day THE CUE MAP shipped.
+    ///
+    /// Leg (b) is scoped to AUDIO CHECK on purpose and the scope is a declared limit, not an
+    /// oversight: it is the only screen with a dedicated handler file, so it is the only one whose
+    /// read-set can be derived without guessing which of Game.cs's ~8600 lines belong to which
+    /// screen. Every other screen's row is still un-gated — docs/ROADMAP.md carries it.
+    ///
+    /// Reads the repo's own source, so it runs from the source tree (the sweep does; publish.sh
+    /// does not run it). A missing file is a FAIL, never a skip.
+    public static string KeyTableGate()
+    {
+        var fails = new List<string>();
+        string root = System.IO.Directory.GetCurrentDirectory();
+        string readme = System.IO.Path.Combine(root, "README.md");
+        string audsrc = System.IO.Path.Combine(root, "src", "Game.Audition.cs");
+
+        // ---- (a) README's generated block is what the generator prints -------------------------
+        const string Begin = "<!-- KEYTABLE:BEGIN";
+        const string End = "<!-- KEYTABLE:END -->";
+        if (!System.IO.File.Exists(readme)) fails.Add("noREADME:" + readme);
+        else
+        {
+            string md = System.IO.File.ReadAllText(readme);
+            int b = md.IndexOf(Begin, StringComparison.Ordinal);
+            int e = md.IndexOf(End, StringComparison.Ordinal);
+            if (b < 0 || e < 0 || e < b) fails.Add("readmeMarkersMissing");
+            else
+            {
+                int bodyStart = md.IndexOf('\n', b);
+                string block = md.Substring(bodyStart + 1, e - bodyStart - 1).Trim('\n');
+                string want = Hud.KeyTableMarkdown().Replace("\r\n", "\n").Trim('\n');
+                if (block.Replace("\r\n", "\n") != want)
+                {
+                    // name the first differing line rather than dumping two tables
+                    var gl = block.Replace("\r\n", "\n").Split('\n');
+                    var wl = want.Split('\n');
+                    int k = 0;
+                    while (k < gl.Length && k < wl.Length && gl[k] == wl[k]) k++;
+                    fails.Add("readmeStale@line" + (k + 1) + ":README=" + Short(k < gl.Length ? gl[k] : "<eof>")
+                              + "|generator=" + Short(k < wl.Length ? wl[k] : "<eof>"));
+                }
+            }
+        }
+
+        // ---- (b) the AUDIO CHECK screen's read-set is documented -------------------------------
+        string audRow = null;
+        foreach (var r in Hud.KeyTable) if (r.Input.StartsWith("AUDIO CHECK", StringComparison.Ordinal)) audRow = r.Input;
+        if (audRow == null) fails.Add("noAudioCheckRow");
+        else if (!System.IO.File.Exists(audsrc)) fails.Add("noAuditionSource:" + audsrc);
+        else
+        {
+            string src = System.IO.File.ReadAllText(audsrc);
+            // the token a player would look for, per KeyboardKey the handler reads
+            string Token(string key) => key switch
+            {
+                "Escape" => "Esc",
+                "Up" => "Up", "Down" => "Down", "Left" => "Left", "Right" => "Right",
+                _ => key,
+            };
+            var seen = new SortedSet<string>();
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(src, @"KeyboardKey\.([A-Za-z][A-Za-z0-9]*)"))
+                seen.Add(Token(m.Groups[1].Value));
+            if (System.Text.RegularExpressions.Regex.IsMatch(src, @"GetMouseWheelMove\s*\(")) seen.Add("Wheel");
+            if (seen.Count == 0) fails.Add("derivedNoKeysFromAuditionSource");
+            foreach (string t in seen)
+                if (!System.Text.RegularExpressions.Regex.IsMatch(audRow, @"\b" + System.Text.RegularExpressions.Regex.Escape(t) + @"\b"))
+                    fails.Add("undocumented:AUDIO CHECK reads " + t + " (row: " + audRow + ")");
+        }
+
+        return fails.Count == 0
+            ? "KEYTABLEGATE: PASS (README's KEYTABLE block is byte-identical to SIGHTLINE_KEYTABLE's "
+              + "output, and every KeyboardKey + the wheel read by src/Game.Audition.cs is named in "
+              + "KeyTable's AUDIO CHECK row)"
+            : "KEYTABLEGATE: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+
     // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
     /// The two ways OUT of a screen that the audit found missing, pinned together because they are
     /// the same problem: a route the player needed and could not find.
@@ -7678,14 +7894,9 @@ public partial class Game
         Util.Reseed(70126);
         var fails = new List<string>();
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
-        bool hadSave = false, hadMeta = false;
-        string saveStash = null, metaStash = null;
-        try
-        {
-            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
-            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
-        }
-        catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var saveStash = SaveGame.StashForSelfTest(sp);
+        var metaStash = SaveGame.StashForSelfTest(mp);
 
         try
         {
@@ -7768,10 +7979,8 @@ public partial class Game
         {
             try
             {
-                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
-                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
-                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
-                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+                SaveGame.RestoreForSelfTest(saveStash);
+                SaveGame.RestoreForSelfTest(metaStash);
             }
             catch { }
         }
@@ -7801,8 +8010,11 @@ public partial class Game
         Util.Reseed(70127);
         var fails = new List<string>();
         string dispPath = Display.SettingsPathPublic;
-        string dispStash = null; bool hadDisp = false;
-        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        // P13: the ONE stash — rename aside, rename back. This test used to hold the player's
+        // display.json in a local string and put it back with File.WriteAllText, which truncates in
+        // place AND writes ZERO BYTES when the read failed but Exists() had said yes. Leg (S) below
+        // proves that cannot happen any more. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
         int savedScale = Display.UiScaleIdx;
         // W5 review: the card's hover fills read the live pointer; pin it off-card so a stray
         // Xvfb pointer can never land on a control mid-test.
@@ -7959,7 +8171,21 @@ public partial class Game
                 CardDetour(g, "barracks", Phase.Barracks, "codex", KeyboardKey.K);
                 CardDetour(g, "barracks", Phase.Barracks, "audio");
                 g.OnEscape(); ArmedFits(g, "barracks"); g.Paused = false;
-                g.Mode = GameMode.Endless; g.OnEscape(); ArmedFits(g, "barracks-endless"); g.Paused = false; g.Mode = GameMode.Campaign;
+                g.Mode = GameMode.Endless; g.OnEscape(); ArmedFits(g, "barracks-endless"); g.Paused = false;
+                // P12 THE CONFIRMED EIGHT (C5) — LAST STAND'S BARRACKS DETOUR IS A LIVE STAND.
+                // CheckEndless parks a stand on Phase.Barracks purely to resolve queued perk/spec/
+                // boon offers, so Barracks+Endless is reachable ONLY mid-stand and a stand is
+                // ALWAYS live there. The card read that pair as "nothing is in flight": it hid
+                // END STAND (the lossless exit, which AbandonRun routes to EndEndless and which
+                // banks the best wave) and printed BACK, while simultaneously printing the armed
+                // sentence "the stand ends here - its waves are not saved" under QUIT TO DESKTOP,
+                // the LOSSY exit. The barracks justification above is entirely about the CAMPAIGN
+                // checkpoint, which endless never writes.
+                CardRoundTrip(g, "barracks-endless", Phase.Barracks, expectAbandon: true, expectVerb: "RESUME");
+                if (Hud.PauseTitle(g) != "PAUSED") fails.Add("barracks-endless:cardTitleReads:" + Hud.PauseTitle(g));
+                g.Mode = GameMode.Campaign;
+                // ...and the CAMPAIGN barracks is unmoved: still a settings card, still no abandon
+                CardRoundTrip(g, "barracks-recheck", Phase.Barracks, expectAbandon: false, expectVerb: "BACK");
                 // the ARMORY owns Escape while it is open (HandleShopClick backs out one level)
                 g.ArmoryMode = true; g.OnEscape();
                 if (g.Paused) fails.Add("barracks:escapeStoleArmoryBack");
@@ -8198,18 +8424,156 @@ public partial class Game
                     Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
                 }
             }
+
+            // ---- (F) P12 THE CONFIRMED EIGHT (C2) — A FADER DRAG NEVER SURVIVES THE CARD -------
+            // `_volDrag` was written and cleared ONLY inside HandlePauseMenu, and three exits from
+            // the card never reach its release branch: ESCAPE (read one line ABOVE Update's
+            // `if (Paused) { HandlePauseMenu(); return; }` gate) and the card's own [K] / [Q],
+            // whose key loop sat ABOVE the drag guard. Abandon a drag through any of them and the
+            // fader still owned the mouse — the next click anywhere on the card was eaten
+            // re-seating it — and `Display.CommitVol` never ran, so the change never reached
+            // display.json. The sibling AUDIO CHECK screen guards this on BOTH sides (it clears its
+            // drag on entry and flushes on exit); the pause card had neither.
+            {
+                Display.CommitVol();                     // a known-good baseline on disk to diff against
+                int bus = 1;                             // SFX — never the master (SetVol(0) drives the device)
+                float baseline = Display.Vol(bus);
+                int k = 0;
+                foreach (var (how, exit) in new (string, Action<Game>)[]
+                         {
+                             ("escape", x => x.OnEscape()),                 // ESC mid-drag
+                             ("manual", x => x.BeginCodex()),               // the card's [K] door
+                             ("resume", x => x.ActPause("resume")),         // the card's own first row
+                         })
+                {
+                    float want = 0.23f + 0.11f * (++k);
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(1);
+                    g.OnEscape();
+                    Frame(g);                            // publishes Hud.PauseVol
+                    if (Hud.PauseVol.Length <= bus || Hud.PauseVol[bus].Width < 20) { fails.Add("card:noMixFader"); break; }
+                    g.BeginVolDrag(bus, want);           // exactly what HandlePauseMenu's mouse-down does
+                    if (g.VolDragBus != bus) fails.Add($"card:{how}:dragDidNotArm");
+                    exit(g);                             // ...and leave the card with the button still held
+                    if (g.VolDragBus >= 0) fails.Add($"card:{how}:dragSurvivedTheCard(bus {g.VolDragBus})");
+                    // ...and the value reached disk through Display's ONE writer
+                    Display.SetVol(bus, baseline);       // clobber the live static so the read is from the FILE
+                    Display.LoadForTest();
+                    if (MathF.Abs(Display.Vol(bus) - want) > 0.002f)
+                        fails.Add($"card:{how}:volNeverCommitted(disk {Display.Vol(bus):0.000} != {want:0.000})");
+                }
+                // ...and while the button is genuinely still DOWN the drag owns the card's keys too,
+                // exactly as HandleAudition's ordering has always made it own theirs.
+                {
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(1);
+                    g.OnEscape();
+                    Frame(g);
+                    g.BeginVolDrag(bus, 0.5f);
+                    Game.KeyPin = new HashSet<KeyboardKey> { KeyboardKey.K };
+                    try { g.HandlePauseMenu(); }
+                    finally { Game.KeyPin = null; }
+                    if (g.Phase == Phase.Codex) fails.Add("card:dragDidNotOwnTheKeyboard");
+                    g.Paused = false;
+                }
+                Display.SetVol(bus, baseline); Display.CommitVol();
+            }
+
+            // ---- (G) P12 THE CONFIRMED EIGHT (C4/C8) — THE CARD FREEZES WHAT IT HIDES ----------
+            // Four teaching updaters and the kill-cam window are called in Update ABOVE the pause
+            // gate, and neither TipsAllowed nor BriefAllowed carries a `!Paused` term. A one-shot
+            // FIELD TIP — burned from the profile the moment it SHOWS — could therefore fire, run
+            // its 9 s clock out and retire while a 760x694 plate over an 0.82 scrim hid it. That is
+            // a verb permanently spent from the profile, unwatched.
+            {
+                Environment.SetEnvironmentVariable("SIGHTLINE_TIP", "0");   // stage tip bit 0 deterministically
+                try
+                {
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(1);
+                    g.BriefLines = null;
+                    g.Paused = true;
+                    for (int f = 0; f < 30; f++) g.Update(1f / 60f);
+                    if (g.CalloutText != null) fails.Add("card:tipFiredBehindTheCard");
+                    g.Paused = false;
+                    for (int f = 0; f < 5; f++) g.Update(1f / 60f);
+                    if (g.CalloutText == null) fails.Add("card:tipNeverFires");   // the leg is not vacuous
+                    else
+                    {
+                        float t0 = g.CalloutTimer;
+                        g.Paused = true;
+                        for (int f = 0; f < 60; f++) g.Update(1f / 60f);
+                        if (g.CalloutTimer < t0 - 0.001f)
+                            fails.Add($"card:tipClockDrainedBehindTheCard({t0 - g.CalloutTimer:0.00}s of {t0:0.0}s)");
+                        g.Paused = false;
+                        for (int f = 0; f < 30; f++) g.Update(1f / 60f);
+                        if (g.CalloutTimer >= t0 - 0.001f) fails.Add("card:tipClockNeverRuns");
+                    }
+                }
+                finally { Environment.SetEnvironmentVariable("SIGHTLINE_TIP", null); }
+            }   // end (G)
+
+            // ── (S) THE STASH: this test may not be able to destroy the file it borrows ────────
+            // P13. This test used to hold the player's display.json in a LOCAL STRING and put it
+            // back with `if (hadDisp) File.WriteAllText(dispPath, dispStash)`. Two states reach
+            // that line with `dispStash == null`: File.Exists said yes and ReadAllText then threw
+            // (a permission flip, an IO error, or — routinely, in this repo — another agent's
+            // sweep renaming the file between the two calls). File.WriteAllText(path, null) does
+            // not throw and does not skip: it opens the file WITH TRUNCATION and writes nothing.
+            // The player's settings become ZERO BYTES, destroyed by the test suite that exists to
+            // protect them.
+            //
+            // The leg drives the harness's own stash/restore over a sentinel file, with the
+            // in-memory copy forced to come back null (SaveGame.SelfTestReadFailPin) — i.e. the
+            // exact state that used to zero it — and asserts the bytes come back whole. It is a
+            // property of the RESTORE MECHANISM, so it is checked on a scratch path, not on the
+            // real display.json: a leg that has to endanger the file to prove it is safe is not a
+            // fix. Both directions are rename(2), so there is no truncating writer left to test.
+            {
+                string probe = dispPath + ".p13stashprobe";
+                const string Sentinel = "{\"UiScaleIdx\":3,\"BrightIdx\":1,\"P13\":\"do not lose me\"}";
+                try
+                {
+                    System.IO.File.WriteAllText(probe, Sentinel);
+                    SaveGame.SelfTestReadFailPin = true;             // ReadAllText "fails"
+                    var st = SaveGame.StashForSelfTest(probe);
+                    if (!st.Had) fails.Add("stash:existenceNotSeen");
+                    if (st.Text != null) fails.Add("stash:readFailPinIgnored");
+                    if (System.IO.File.Exists(probe)) fails.Add("stash:fileNotMovedAside");
+                    System.IO.File.WriteAllText(probe, "{\"UiScaleIdx\":0}");   // the test's own scribble
+                    SaveGame.RestoreForSelfTest(st);
+                    if (!System.IO.File.Exists(probe)) { fails.Add("stash:restoreLostTheFile"); }
+                    else
+                    {
+                        string back = System.IO.File.ReadAllText(probe);
+                        if (back.Length == 0) fails.Add("stash:restoreTruncatedToZeroBytes");
+                        else if (back != Sentinel) fails.Add("stash:restoreChangedBytes:" + back.Length + "B");
+                    }
+                    if (System.IO.File.Exists(probe + ".selftest-stash")) fails.Add("stash:strandedStashFile");
+
+                    // and the absent case: nothing there before, nothing left behind after
+                    try { System.IO.File.Delete(probe); } catch { }
+                    var st2 = SaveGame.StashForSelfTest(probe);
+                    if (st2.Had) fails.Add("stash:phantomExistence");
+                    System.IO.File.WriteAllText(probe, "{}");
+                    SaveGame.RestoreForSelfTest(st2);
+                    if (System.IO.File.Exists(probe)) fails.Add("stash:leftAFileWhereThereWasNone");
+                }
+                catch (Exception ex) { fails.Add("stash:threw:" + ex.GetType().Name); }
+                finally
+                {
+                    SaveGame.SelfTestReadFailPin = false;
+                    try { if (System.IO.File.Exists(probe)) System.IO.File.Delete(probe); } catch { }
+                    try { if (System.IO.File.Exists(probe + ".selftest-stash")) System.IO.File.Delete(probe + ".selftest-stash"); } catch { }
+                }
+            }
         }
         catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
         finally
         {
             Hud.MousePin = new Vector2(float.NaN, float.NaN);
             Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
-            try
-            {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-            }
-            catch { }
+            SaveGame.RestoreForSelfTest(dispStash);
         }
 
         return fails.Count == 0
@@ -8226,7 +8590,13 @@ public partial class Game
               + "without a save, the cold profile's resting line is the TRAINING OP nudge and yields "
               + "to a seen drill or a save, rung 0 reads STANDARD at 26px and the card states the "
               + "unlock rule at the ceiling / MAX UNLOCKED below it, and every card line ends inside "
-              + "the card at 120%)"
+              + "the card at 120%; a mid-stand LAST STAND barracks offers END STAND and reads "
+              + "PAUSED while the campaign barracks still reads BACK; a mix-fader drag never "
+              + "outlives the card by ESC / [K] / RESUME and commits to display.json when it ends, "
+              + "and owns the card's keys while the button is down; the card FREEZES the teaching "
+              + "layer it hides - no one-shot FIELD TIP fires or burns its clock behind it; and "
+              + "this test's own display.json stash is a rename in both directions - a forced "
+              + "read failure restores the bytes whole instead of truncating the file to zero)"
             : "SETTINGSTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
@@ -8309,15 +8679,10 @@ public partial class Game
 
         string dispPath = Display.SettingsPathPublic;
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
-        bool hadDisp = false, hadSave = false, hadMeta = false;
-        string dispStash = null, saveStash = null, metaStash = null;
-        try
-        {
-            hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath);
-            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
-            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
-        }
-        catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
+        var saveStash = SaveGame.StashForSelfTest(sp);
+        var metaStash = SaveGame.StashForSelfTest(mp);
         bool savedTut = Display.TutorialSeen, savedShow = Display.ShowAllVerbs;
         int savedTips = Display.TipsSeen;
 
@@ -8454,12 +8819,9 @@ public partial class Game
             Stats.ClearLog();
             try
             {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
-                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
-                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
-                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+                SaveGame.RestoreForSelfTest(dispStash);
+                SaveGame.RestoreForSelfTest(saveStash);
+                SaveGame.RestoreForSelfTest(metaStash);
             }
             catch { }
         }
@@ -9414,8 +9776,8 @@ public partial class Game
         if (!System.IO.Path.IsPathRooted(dispPath)) fails.Add("displayPathRelative:" + dispPath);
         if (System.IO.Path.GetDirectoryName(dispPath) != SaveGame.ConfigDir)
             fails.Add($"displayDirSplit:{System.IO.Path.GetDirectoryName(dispPath)} vs {SaveGame.ConfigDir}");
-        string dispStash = null; bool hadDisp = false;
-        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
         try
         {
             Display.AnimSpeedIdx = 2; Display.UiScaleIdx = 3; Display.ApplyUiScale();
@@ -9443,8 +9805,7 @@ public partial class Game
         {
             try
             {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+                SaveGame.RestoreForSelfTest(dispStash);
             }
             catch { }
             Display.AnimSpeedIdx = savedAnim; Display.UiScaleIdx = savedScale; Cfg.UiScale = savedCfg;
@@ -9463,11 +9824,11 @@ public partial class Game
         // a real profile does — so it stashes and restores save.json / meta.json.
         {
             string sp2 = SaveGame.SavePathPublic, mp2 = SaveGame.MetaPathPublic;
-            bool hadS = false, hadM = false; string sStash = null, mStash = null;
+            // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+            var sStash = SaveGame.StashForSelfTest(sp2);
+            var mStash = SaveGame.StashForSelfTest(mp2);
             try
             {
-                hadS = System.IO.File.Exists(sp2); if (hadS) sStash = System.IO.File.ReadAllText(sp2);
-                hadM = System.IO.File.Exists(mp2); if (hadM) mStash = System.IO.File.ReadAllText(mp2);
                 if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);   // a never-played profile
 
                 var fresh = new Game { NoPersist = false };
@@ -9490,10 +9851,8 @@ public partial class Game
             {
                 try
                 {
-                    if (hadS) System.IO.File.WriteAllText(sp2, sStash);
-                    else if (System.IO.File.Exists(sp2)) System.IO.File.Delete(sp2);
-                    if (hadM) System.IO.File.WriteAllText(mp2, mStash);
-                    else if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);
+                    SaveGame.RestoreForSelfTest(sStash);
+                    SaveGame.RestoreForSelfTest(mStash);
                 }
                 catch { }
             }
@@ -9702,6 +10061,31 @@ public partial class Game
         if (sC < Fx.TextSep) fails.Add($"twinNumbersOverprint({sC:0.0}px)");
         if (!twinsDiverge) fails.Add("twinNumbersSameArc");
 
+        // ---- (c2) P12 THE CONFIRMED EIGHT (C7): THE RUNG LADDER HAS A CEILING ----
+        // THE STRIDE's ladder only ever CLIMBED and nothing bounded it. Board row 0 sits at
+        // Util.TileCenter(x,0).Y == Cfg.OriginY + Tile/2 == 72, so the kill trio's three anchors
+        // are y = 46 / 62 / 38; the number took rung 0, "KIA" rung 3 (-54px) and the 30px name
+        // stamp rung 4 (-72px) => y = -34, a glyph box entirely ABOVE the window, with "KIA" at
+        // y = 8 buried under Hud's 64px top plate. Row 0 is open floor in every arena template
+        // and three of the four deployment shapes seat a pod lead there, so this is the ordinary
+        // case, not a corner. Same three call sites as leg (c), moved to row 0.
+        {
+            Fx = new Fx();
+            var top = Util.TileCenter(4, 0);
+            Fx.PopText(top + new Vector2(0, -26), "7", num, 32f);                 // ShotAnim: the killing number
+            Fx.PopText(top + new Vector2(0, -10), "KIA", Pal.Foe, 22f);           // Game.KillUnit: the pop
+            Fx.Stamp(top + new Vector2(0, -34), "KIA  DOE", Pal.Foe, 30f, 2.4f);  // Game.KillUnit: the name stamp
+            float highest = float.MaxValue; string highWho = "-";
+            foreach (var t in Fx.Texts) if (t.Pos.Y < highest) { highest = t.Pos.Y; highWho = t.Text; }
+            Fx.Update(1f / 60f);
+            float sep0 = MinSep(Fx.Texts.ToList());
+            detail.Append($"; row-0 kill trio: highest ink y={highest:0.0} ('{highWho}'), min sep {sep0:0.0}px, ceiling {Fx.TextTopY:0}px");
+            if (Fx.Texts.Count != 3) fails.Add($"rowZeroTrioMissing({Fx.Texts.Count})");
+            if (highest < 0f) fails.Add($"killTextOffTopOfWindow({highest:0.0}px)");
+            else if (highest < Fx.TextTopY - 0.01f) fails.Add($"killTextUnderTheTopPlate({highest:0.0}px<{Fx.TextTopY:0}px)");
+            if (sep0 < Fx.TextSep) fails.Add($"rowZeroTrioOverprint({sep0:0.0}px)");
+        }
+
         // ---- (d) THE BEAT: the mission-ending KILL-CAM is slow-mo, not a freeze ----
         // A REAL mission (StartMission: the kill-cam reads the objective and the live roster), the
         // REAL Game.Update stepped at 1/60 with AutoPlay OFF (a human is watching), one death-FX
@@ -9746,6 +10130,35 @@ public partial class Game
             // the window runs at ~KillCamScale of the post-window rate (drag makes it a touch higher)
             if (ratio < 0.18f || ratio > 0.45f) fails.Add($"killcamSlowmoRatio({ratio:0.00})");
             if (peakPulse > 0f && pulsePct < 50f) fails.Add($"killcamZoomSpent({pulsePct:0}%<50%)");
+        }
+
+        // ---- (d2) P12 THE CONFIRMED EIGHT (C8): the window does NOT drain behind the pause card ----
+        // ESC is read ONE LINE above Update's `if (Paused) { HandlePauseMenu(); return; }`, and the
+        // kill-cam tick sits above both — so a player who pauses inside the 0.45 s window spends it
+        // behind an opaque card, and the zoom-punch (HELD only while _killCam > 0) is released with
+        // it. Fx.Update, DecayUnitFx, the scorch fade and the anim pump are all below the return and
+        // correctly freeze; the window was the one clock that was not.
+        {
+            var g = new Game { NoPersist = true, ForcedObjective = Objective.Eliminate };
+            Util.Reseed(70033);
+            g.StartMission(1);
+            g.BriefLines = null;
+            var ff = g.Enemies.Where(e => e.Alive).ToList();
+            for (int i = 0; i < ff.Count - 1; i++) { ff[i].Hp = 0; g.KillUnit(ff[i]); }
+            g.HitStop = 0f;
+            ff[ff.Count - 1].Hp = 0; g.KillUnit(ff[ff.Count - 1]);      // the deciding death arms the window
+            float armed = g.KillCamLeft, armedPulse = g.CamPulse, armedScale = g.TimeScale;
+            g.Paused = true;
+            for (int f = 0; f < 60; f++) g.Update(1f / 60f);            // a full second behind the card
+            float held = g.KillCamLeft, heldPulse = g.CamPulse;
+            g.Paused = false;
+            for (int f = 0; f < 60; f++) g.Update(1f / 60f);            // ...and it drains once resumed
+            detail.Append($"; killcam-paused: armed {armed:0.000}s (x{armedScale:0.00}, pulse {armedPulse:0.000}) -> "
+                        + $"60 paused frames {held:0.000}s (pulse {heldPulse:0.000}) -> 60 live frames {g.KillCamLeft:0.000}s");
+            if (armed <= 0f) fails.Add("killcamPausedNotArmed");
+            if (MathF.Abs(held - armed) > 1e-4f) fails.Add($"killCamDrainedBehindTheCard({armed:0.000}s->{held:0.000}s)");
+            if (MathF.Abs(heldPulse - armedPulse) > 1e-4f) fails.Add($"zoomPunchSpentBehindTheCard({armedPulse:0.000}->{heldPulse:0.000})");
+            if (g.KillCamLeft > 0f) fails.Add($"killCamNeverDrains({g.KillCamLeft:0.000}s)");
         }
 
         // ---- (e) THE BEAT: an overwatch REACTION has its own beat ----
@@ -9801,7 +10214,7 @@ public partial class Game
             ? "FEELTEST: PASS (6-tile walk: mid-path speed never dips under " + MoveStepAnim.FeelMinSpeedRatio.ToString("0.00") +
               "x its max, zero stall frames, one lean kick, 48-frame cadence pinned; VAULT lifts >= " + MoveStepAnim.FeelVaultLiftMin.ToString("0") +
               "px over the cover and lands on the tile centre; stacked floating text keeps >= " + Fx.TextSep.ToString("0") + "px separation and twin numbers arc apart; " +
-              "kill-cam: no still frame in the " + Game.KillCamWindow.ToString("0.00") + "s window, FX at ~x" + Game.KillCamScale.ToString("0.00") + " with the zoom held; " +
+              "kill-cam: no still frame in the " + Game.KillCamWindow.ToString("0.00") + "s window, FX at ~x" + Game.KillCamScale.ToString("0.00") + " with the zoom held, and neither the window nor the held zoom drains behind the pause card; text ladder bounded at y=" + Fx.TextTopY.ToString("0") + " so a row-0 kill stamps on screen; " +
               "a reaction shot winds up ~0.30s with its own hit-stop while a plain shot and the autoplay path are unchanged; react/boom/flash/heal/smoke are registered cues)"
             : "FEELTEST: FAIL (" + string.Join(",", fails) + ")";
     }
@@ -11284,13 +11697,26 @@ public partial class Game
     //
     //  Device-free; a tiny window is opened by Program only because Game's ctor needs tile math.
     // ══════════════════════════════════════════════════════════════════════════════════════
-    public const int CueOverCap = 7, CueReloadCap = 3;
+    /// P14: the table must be USED. A floor, not a cap — the old census's two caps counted a call
+    /// form the wave that wrote them had already deleted, so both read 0 for ever.
+    public const int CueTableUserFloor = 40, CueFoeSiteFloor = 4;
 
     public string CueSelfTest()
     {
         var fails = new List<string>();
         var sb = new System.Text.StringBuilder();
         Audio.BuildRecipes();
+
+        // ── (a0) P14 — MappedEvents IS THE WHOLE ENUM ──────────────────────────────────────
+        // `Audio.GameEvent` and `Audio.MappedEvents` were two hand-written lists with nothing
+        // comparing them, and every leg below iterates the SECOND one. A member added to the enum
+        // and forgotten here was therefore invisible to injectivity, to the bus check and to the
+        // census — and CueFor's old `_ => "select"` default meant it PLAYED THE MENU BLIP while
+        // all three legs stayed green. This is the leg that makes the other three complete.
+        var declared = new HashSet<Audio.GameEvent>(Audio.MappedEvents);
+        foreach (Audio.GameEvent ev in Enum.GetValues(typeof(Audio.GameEvent)))
+            if (!declared.Contains(ev)) fails.Add($"mappedEventsMissing({ev})");
+        if (declared.Count != Audio.MappedEvents.Length) fails.Add("mappedEventsHasDuplicates");
 
         // ── (a) injectivity over the canonical events ───────────────────────────────────────
         var byCue = new Dictionary<string, List<string>>();
@@ -11307,14 +11733,22 @@ public partial class Game
         shared.Sort();
         if (shared.Count > 0) fails.Add("notInjective(" + string.Join(",", shared) + ")");
 
-        // ── (b) the bus: an opponent's telegraph is never on the UI fader ───────────────────
+        // ── (b) the bus: nothing that happens ON THE BOARD is on the UI fader ──────────────
+        // P14 split the two claims this leg used to make with one list. `FoeTelegraphs` is now the
+        // events that really are only ever the opponent (it used to include Explosion and
+        // OverwatchFires, which are routinely the PLAYER's own action — see Audio.CueMap.cs), and
+        // `NeverUiBus` carries the fader obligation for every in-world beat, which is strictly more
+        // than the old list covered.
         var uiTele = new List<string>();
-        foreach (var ev in Audio.FoeTelegraphs)
+        foreach (var ev in Audio.NeverUiBus)
         {
             string cue = Audio.CueFor(ev);
             if (Audio.CategoryOf(cue) == "ui") uiTele.Add($"{ev}->'{cue}'");
         }
-        if (uiTele.Count > 0) fails.Add("telegraphOnUiBus(" + string.Join(",", uiTele) + ")");
+        if (uiTele.Count > 0) fails.Add("inWorldCueOnUiBus(" + string.Join(",", uiTele) + ")");
+        // and the opponent-only set must be a SUBSET of it (a tell is an in-world beat by definition)
+        foreach (var ev in Audio.FoeTelegraphs)
+            if (Array.IndexOf(Audio.NeverUiBus, ev) < 0) fails.Add($"foeTelegraphNotInNeverUiBus({ev})");
 
         // PlayFoe must move a UI-category cue onto the SFX bus (the mechanism, not the routing).
         if (Audio.BusOf("over", false) != "ui")  fails.Add("busOf:overIsNotUiOnThePlayerBus");
@@ -11329,26 +11763,197 @@ public partial class Game
         if (pbCue == ebCue) fails.Add($"banner:PLAYER TURN and ENEMY TURN are the same cue '{pbCue}'");
         BannerText = null; BannerTimer = 0f;   // leave no banner behind
 
-        // ── (c) the source census ──────────────────────────────────────────────────────────
-        var (haveSrc, nOver, nReload, nFoe) = Audio.SourceCensus();
+        // ── (c) the source census, REBUILT (P14) ───────────────────────────────────────────
+        // Was: two literal greps in one file, against caps of 7 and 3, on a call form the same wave
+        // had deleted — so both terms read x0 for ever and the leg could not fail. Now: THE TABLE
+        // OWNS ITS CUES. Every cue in CueFor's right-hand column must be played through
+        // Audio.Cue/CueFor and never through a raw Audio.Play("<that id>"), anywhere in src/. That
+        // rule is violated by writing one line, which is what a census is for.
+        var cen = Audio.SourceCensus();
         string census;
-        if (!haveSrc) census = "census: n/a (no src/Game.cs next to the working directory)";
+        if (!cen.HaveSrc) census = "census: n/a (no src/ next to the working directory)";
         else
         {
-            census = $"census: Audio.Play(\"over\") x{nOver} (cap {CueOverCap}), "
-                   + $"Audio.Play(\"reload\") x{nReload} (cap {CueReloadCap}), Audio.PlayFoe x{nFoe}";
-            if (nOver   > CueOverCap)   fails.Add($"census:overSites({nOver}>{CueOverCap})");
-            if (nReload > CueReloadCap) fails.Add($"census:reloadSites({nReload}>{CueReloadCap})");
-            if (nFoe < 4)               fails.Add($"census:playFoeSites({nFoe}<4)");
+            census = $"census: {cen.Offenders.Length} raw plays of a table-owned cue"
+                   + (cen.Offenders.Length > 0 ? " [" + string.Join(" ", cen.Offenders) + "]" : "")
+                   + $", {cen.TableUsers} table users (floor {CueTableUserFloor}), "
+                   + $"{cen.FoeSites} foe sites (floor {CueFoeSiteFloor})";
+            if (cen.Offenders.Length > 0)
+                fails.Add("census:rawPlayOfMappedCue(" + string.Join(",", cen.Offenders) + ")");
+            if (cen.TableUsers < CueTableUserFloor)
+                fails.Add($"census:tableUnused({cen.TableUsers}<{CueTableUserFloor})");
+            if (cen.FoeSites < CueFoeSiteFloor)
+                fails.Add($"census:playFoeSites({cen.FoeSites}<{CueFoeSiteFloor})");
         }
+
+        // ── (d) P14 — THE REACTION ANNOUNCES ITSELF WHEN IT PLAYS, NOT WHEN IT IS QUEUED ───
+        // The overwatch reaction used to pop its "OVERWATCH" text and play its cue inside
+        // Game.OnUnitEnteredTile's watcher loop, i.e. for EVERY watcher on the tile-entry frame,
+        // while the beat those announce (the snap-freeze, the reticle on the mover, the tracer)
+        // plays at ShotAnim.OnStart — one reaction at a time, and a reaction's TotalAt is 0.68 s.
+        // No test in this project could see WHEN a cue fires, so `Audio.Spy` was added for this.
+        // Two watchers, one tile entry: zero cues at enqueue, then exactly one per reaction as it
+        // becomes the active anim.
+        string reactCue = Audio.CueFor(Audio.GameEvent.OverwatchFires);
+        try
+        {
+            NoPersist = true;
+            Util.Reseed(2401);
+            Mission.ForcedLayout = 5;
+            ForcedObjective = Objective.Eliminate;
+            StartMission(1);
+            Mission.ForcedLayout = -1; ForcedObjective = null;
+            _anims.Clear();
+            SquadConcealed = false;
+            var mover = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+            var ws = Enemies.Where(e => e.Alive).Take(2).ToList();
+            if (mover == null || ws.Count < 2) fails.Add("reaction:couldNotStageTwoWatchers");
+            else
+            {
+                // put the mover in the open with both watchers adjacent, guns up and watching
+                mover.Hp = mover.MaxHp = 999;      // never predicted dead: both watchers must fire
+                mover.Downed = false; mover.Slipstreaming = false;
+                mover.X = Grid.W / 2; mover.Y = Grid.H / 2; mover.SyncPos();
+                Grid.Tiles[mover.X, mover.Y] = TileType.Floor;
+                int k = 0;
+                foreach (var w in ws)
+                {
+                    w.X = mover.X + (k == 0 ? 1 : -1); w.Y = mover.Y; w.SyncPos();
+                    Grid.Tiles[w.X, w.Y] = TileType.Floor;
+                    w.OnOverwatch = true; w.ReactedThisTurn = false; w.OwFocused = false;
+                    w.OwBrace = false; w.Ammo = Math.Max(1, w.Ammo);
+                    k++;
+                }
+                Audio.Spy = new List<(string, float, bool)>();
+                OnUnitEnteredTile(mover);
+                int atEnqueue = Audio.Spy.Count(c => c.Item1 == reactCue);
+                int queued = _anims.Count(a => a is ShotAnim sa && sa.Reaction);
+                if (queued < 2) fails.Add($"reaction:onlyStaged({queued})reactions");
+                if (atEnqueue != 0)
+                    fails.Add($"reaction:{atEnqueue}cuesAtEnqueueFor{queued}queuedReactions");
+                // now start each queued reaction in turn: one cue each, when it actually plays
+                int seen = 0, bad = 0;
+                foreach (var a in _anims.Where(a => a is ShotAnim sa && sa.Reaction).ToList())
+                {
+                    int before = Audio.Spy.Count(c => c.Item1 == reactCue);
+                    a.Started = true; a.OnStart(this);
+                    int after = Audio.Spy.Count(c => c.Item1 == reactCue);
+                    if (after - before != 1) bad++;
+                    seen++;
+                }
+                if (bad != 0) fails.Add($"reaction:{bad}of{seen}reactionsDidNotCueAtOnStart");
+                // and it is PANNED to the watcher that fired, not centred
+                if (Audio.Spy.Any(c => c.Item1 == reactCue && c.Item2 < 0f))
+                    fails.Add("reaction:cueUnpanned");
+                sb.AppendLine($"CUETEST: reaction: {queued} watchers -> {atEnqueue} cues at enqueue, "
+                            + $"{seen - bad}/{seen} cued at OnStart");
+            }
+
+            // ── (e) P14 — EVERY IN-WORLD CUE IS PANNED TO WHERE IT HAPPENS ──────────────────
+            // GrenadeAnim panned its blast; the three siblings in the same file (SmokeAnim,
+            // FlashAnim, IncendiaryAnim) and HealAnim did not, so a canister landing at the board
+            // edge and a mend across the map both played dead centre. Driven through the real
+            // anims — Effect() is protected, so this is the shipped path, not a copy of it.
+            _anims.Clear();
+            var thrower = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+            var patient = Players.FirstOrDefault(u => u.Alive && u != thrower)
+                       ?? Enemies.FirstOrDefault(e => e.Alive);
+            if (thrower == null || patient == null) fails.Add("pan:couldNotStage");
+            else
+            {
+                int tx = Math.Max(1, Grid.W - 3), ty = Math.Max(1, Grid.H / 2);
+                patient.Hp = Math.Max(1, patient.MaxHp - 3);
+                var staged = new (string what, Anim anim, string cue)[]
+                {
+                    ("smoke",      new SmokeAnim(thrower, tx, ty),      "smoke"),
+                    ("flash",      new FlashAnim(thrower, tx, ty),      "flash"),
+                    ("incendiary", new IncendiaryAnim(thrower, tx, ty), Audio.CueFor(Audio.GameEvent.Explosion)),
+                    ("heal",       new HealAnim(thrower, patient),      Audio.CueFor(Audio.GameEvent.Mend)),
+                };
+                var unpanned = new List<string>();
+                var missing  = new List<string>();
+                foreach (var (what, anim, cue) in staged)
+                {
+                    Audio.Spy = new List<(string, float, bool)>();
+                    anim.Started = true; anim.OnStart(this);
+                    for (int f = 0; f < 400 && !anim.Update(this, 1f / 60f); f++) { }
+                    var hits = Audio.Spy.Where(c => c.Item1 == cue).ToList();
+                    if (hits.Count == 0) missing.Add($"{what}->'{cue}'");
+                    else if (hits.Any(h => h.Item2 < 0f)) unpanned.Add($"{what}->'{cue}'");
+                }
+                if (missing.Count > 0)  fails.Add("pan:cueNeverFired(" + string.Join(",", missing) + ")");
+                if (unpanned.Count > 0) fails.Add("pan:unpannedInWorldCue(" + string.Join(",", unpanned) + ")");
+                sb.AppendLine($"CUETEST: pan: {staged.Length - unpanned.Count - missing.Count}/{staged.Length} "
+                            + "in-world cues panned to where they happen");
+            }
+        }
+        catch (Exception e) { fails.Add("reaction/pan:threw(" + e.GetType().Name + ":" + e.Message + ")"); }
+        finally { Audio.Spy = null; Mission.ForcedLayout = -1; ForcedObjective = null; _anims.Clear(); }
+
+        // ── (f) P14 — YOUR OWN LOSSES DO NOT SOUND LIKE THE ENEMY ARRIVING ─────────────────
+        // "VIP DOWN" and "SOLDIER DOWN - THEY HOLD FOR n" both fired GameEvent.Reinforce, whose
+        // entire meaning in the table is "more of them arrive / the pressure clock ticks / artillery
+        // is coming". Two loss beats announced as an enemy arrival. Driven through the REAL KillUnit
+        // and EnterDowned, reading Game.LastBannerCue and the Spy, not a copy of either body.
+        try
+        {
+            NoPersist = true;
+            Util.Reseed(3301);
+            Mission.ForcedLayout = 5;
+            ForcedObjective = Objective.Escort;      // an Escort mission actually fields the VIP
+            StartMission(1);
+            Mission.ForcedLayout = -1; ForcedObjective = null;
+            _anims.Clear();
+            string alarm = Audio.CueFor(Audio.GameEvent.Reinforce);
+            string fall  = Audio.CueFor(Audio.GameEvent.Casualty);
+
+            var soldier = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+            if (soldier == null) fails.Add("loss:noSoldierStaged");
+            else
+            {
+                soldier.Downed = false; soldier.WasDownedThisMission = false;
+                LastBannerCue = "<none>";
+                Audio.Spy = new List<(string, float, bool)>();
+                EnterDowned(soldier);
+                if (LastBannerCue == alarm)
+                    fails.Add($"loss:SOLDIER DOWN fires the reinforcement alarm '{alarm}'");
+                if (Audio.Spy.Any(c => c.Item1 == alarm))
+                    fails.Add("loss:SOLDIER DOWN played the reinforcement alarm");
+                if (!Audio.Spy.Any(c => c.Item1 == fall))
+                    fails.Add($"loss:SOLDIER DOWN played no casualty cue '{fall}'");
+                sb.AppendLine($"CUETEST: loss: SOLDIER DOWN banner='{LastBannerCue}' cues="
+                            + string.Join("+", Audio.Spy.Select(c => c.Item1)));
+            }
+            if (Vip == null) fails.Add("loss:noVipStaged");
+            else
+            {
+                LastBannerCue = "<none>";
+                Audio.Spy = new List<(string, float, bool)>();
+                KillUnit(Vip);
+                if (LastBannerCue == alarm)
+                    fails.Add($"loss:VIP DOWN fires the reinforcement alarm '{alarm}'");
+                if (Audio.Spy.Any(c => c.Item1 == alarm))
+                    fails.Add("loss:VIP DOWN played the reinforcement alarm");
+                if (!Audio.Spy.Any(c => c.Item1 == fall))
+                    fails.Add($"loss:VIP DOWN played no casualty cue '{fall}'");
+                // and exactly ONE sound for one body — the fix must not layer a second cue on it
+                int falls = Audio.Spy.Count(c => c.Item1 == fall);
+                if (falls != 1) fails.Add($"loss:VIP DOWN played the casualty cue x{falls}");
+                sb.AppendLine($"CUETEST: loss: VIP DOWN banner='{LastBannerCue}' cues="
+                            + string.Join("+", Audio.Spy.Select(c => c.Item1)));
+            }
+        }
+        catch (Exception e) { fails.Add("loss:threw(" + e.GetType().Name + ":" + e.Message + ")"); }
+        finally { Audio.Spy = null; Mission.ForcedLayout = -1; ForcedObjective = null; _anims.Clear(); }
 
         var map = new List<string>();
         foreach (var ev in Audio.MappedEvents) map.Add($"{ev}={Audio.CueFor(ev)}");
         sb.AppendLine("CUETEST: map " + string.Join(" ", map));
         sb.AppendLine("CUETEST: " + census + $"; banner player='{pbCue}' enemy='{ebCue}'/{ebBus}");
         sb.Append(fails.Count == 0
-            ? $"CUETEST: PASS ({Audio.MappedEvents.Length} events -> {byCue.Count} distinct cues, "
-            + "no opponent telegraph on the UI bus, ShowBanner(enemy) on the SFX fader, "
+            ? $"CUETEST: PASS ({Audio.MappedEvents.Length} events = the whole GameEvent enum -> "
+            + $"{byCue.Count} distinct cues, no in-world cue on the UI bus, ShowBanner(enemy) on "
+            + "the SFX fader, the reaction announces at OnStart, "
             + census + ")"
             : "CUETEST: FAIL (" + string.Join(",", fails) + ")");
         return sb.ToString();

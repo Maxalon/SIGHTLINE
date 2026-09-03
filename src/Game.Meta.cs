@@ -54,6 +54,10 @@ public partial class Game
         return p;
     }
 
+    /// WAR ROOM BACK: always lands on the intro. Public so MODETEST can walk the end-card ->
+    /// WAR ROOM -> BACK -> main menu path the player walks (P12 C1).
+    public void ExitWarRoom() { WarRoom = null; Phase = Phase.Intro; Audio.Play("select"); }
+
     /// WAR ROOM input: BACK (button/Esc) returns to the intro; an unlock BUY spends salvage.
     void HandleWarRoomClick()
     {
@@ -63,7 +67,7 @@ public partial class Game
         bool back = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                      Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.WarRoomBack))
                     || Raylib.IsKeyPressed(KeyboardKey.Escape);
-        if (back) { WarRoom = null; Phase = Phase.Intro; Audio.Play("select"); return; }
+        if (back) { ExitWarRoom(); return; }
 
         // BUY an unlock (mouse only). The rects are published by Hud.DrawWarRoom.
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))

@@ -150,9 +150,30 @@ export XDG_CONFIG_HOME="$PWD/.xdg"         # return "" and saves land in a relat
 export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
 ```
 
-> **`SIGHTLINE_SHIPTEST` writes the LIVE player-data directory, and from a SECOND PROCESS** (C6).
-> It is the only hook in the project that does, because "quit the game, start it again, your
-> progress is there" cannot be checked inside one process. It stashes and restores on the way out —
+> **FOURTEEN self-tests write the LIVE player-data directory, and `SIGHTLINE_SHIPTEST` also writes
+> it FROM A SECOND PROCESS** (C6). The second process is what is unique to SHIPTEST — "quit the
+> game, start it again, your progress is there" cannot be checked inside one process, and
+> `Ship.cs` holds the project's only `Process.Start`. **The first half is not unique to it and never
+> was**, which is why the isolation below is not optional: measured on this tree (P13, base
+> `a933cfe`, one FRESH empty `XDG_CONFIG_HOME` per hook; 81 hooks enumerated from `src/`, 4 slow
+> ones skipped, **77 measured**) **14 write there** — BRIEFTEST, CONTRASTTEST, EVENTTEST, HORDETEST, METATEST, MODETEST, ONRAMPTEST,
+> QUITTEST, SAVEEDGETEST, SAVETEST, SETTINGSTEST, SHIPTEST, TUTTEST, VETTEST. **Re-derive it, don't
+> quote it** — every writer calls `Directory.CreateDirectory` before it writes, so a hook that
+> writes leaves the directory behind even after it restores:
+> `for h in $(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u); do d=$(mktemp -d); env XDG_CONFIG_HOME=$d $h=1 xvfb-run -a bin/Release/net8.0/Sightline >/dev/null 2>&1; [ -d "$d/Sightline" ] && echo "$h WRITES"; rm -rf $d; done`
+>
+> Each of them moves your files aside and puts them back. **P13 made that restore safe**: the six
+> that hand-rolled it — SETTINGSTEST, TUTTEST, SAVEEDGETEST, QUITTEST, BRIEFTEST, ONRAMPTEST — now
+> go through `SaveGame.StashForSelfTest` / `RestoreForSelfTest` (rename out, rename back), and
+> SAVETEST's three in-file restores go through `WriteAtomic`. The old
+> `if (had) File.WriteAllText(path, stash)` wrote **ZERO BYTES** over the file it was protecting
+> whenever `Exists()` had said yes and the read then threw.
+> `SIGHTLINE_SETTINGSTEST` leg (S) is the gate. **Four writers still hand-roll a null-guarded
+> truncating restore** — HORDETEST (`Game.Endless.cs`), MODETEST (`Game.Modes.cs`), the WAR ROOM
+> leg (`Game.Meta.cs`) and two `Program.cs` shot paths. They cannot zero a file (the null guard is
+> there), but they truncate in place; `docs/ROADMAP.md` carries the conversion.
+>
+> SHIPTEST stashes and restores on the way out —
 > verified byte-identical, including any `.tmp` siblings it had to clobber — and the child is
 > bounded. But a sweep **killed mid-SHIPTEST** can leave `4242` salvage and a `C6_SECOND_LAUNCH`
 > achievement in whatever profile `XDG_CONFIG_HOME` points at. Export the isolation above and it is
@@ -266,7 +287,24 @@ non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Progr
    what makes a missing file mean "no data". **(b) check the process EXIT CODE** — 2 means "no
    display, nothing written", and it is the only signal that cannot be faked by a stale file.
    The `runs`-field assertion stays as a third line of defence (it still catches a short batch).
-   `docs/measurements/w1/run_chunk.sh` does all three.
+   **P15 amended layer (b) and REPLACED layer (c). Copy `docs/measurements/p15/run_chunk.sh`, NOT
+   `w1/`'s or `c1/`'s** (both now carry a SUPERSEDED header; they are kept unchanged as provenance).
+   * **exit 3 is a SECOND refusal**: an unparseable `SIGHTLINE_BALANCE` / `_HEAT` / `_BASE`. The
+     batch prints what it could not read and writes nothing. Before P15 those fell through a bare
+     `int.TryParse` **silently** — a typo'd `-h4` cycled `{0,2,4,6,8}` and was archived under the
+     rung in its FILE NAME with `runs` correct, the file fresh and exit 0.
+   * **layer (c) must not hard-code `runs == N*2`.** All fourteen archived runners do, which marks
+     every legitimate single-policy batch (`SIGHTLINE_BALANCE_SLOPPY` / `_DUMB`) BAD. The artifact
+     now carries a **`batch{}`** block — the request as issued, including `expectedRuns`,
+     `heatRequested`/`heat` and `baseRequested`/`slotBase`. `p15/check_chunk.py` asserts `runs`
+     against `batch.expectedRuns` and the rung/base against what the runner exported, so a chunk's
+     FILE NAME is checkable. An artifact with no `batch{}` is pre-P15 and is `BAD` unless the
+     caller passes `--legacy` explicitly.
+   * `runWinRate` is **-1** for a batch with no campaign runs (it used to read 0.0, i.e. "lost
+     every campaign"), matching `runWinRateExStalemate`'s existing sentinel.
+   * **`l5/cluster.py`'s LEAK-CHECK is a gate again.** It used to downgrade to a note and exit 0 if
+     ONE chunk in a pinned round ran unpinned. A MIXED round is now a FAIL; an all-unpinned round
+     prints `NOT PERFORMED`.
 2. Run the **Release binary directly**, and from a *snapshot* (`runbin/<tag>/`, gitignored) so
    the tree can keep building while a round is in flight.
 3. Two disjoint CRN slot sets (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = 40 campaigns
@@ -277,6 +315,17 @@ non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Progr
    if the tree gained instrumentation, prove logic identity with an `R0diag` chunk first.
 5. Archive every chunk's JSON + log under `docs/measurements/<wave>/` with a README giving the
    exact command lines — **and state the base commit.**
+6. **P15: MISSION-LEVEL tables from before 2026-09-03 are survivorship-biased and are NOT
+   comparable with anything measured since.** `Stats.BeginMission` overwrote the open `MissionRec`,
+   so the mid-run checkpoint redeploy ERASED the attempt it retried: over the 421 archived chunks
+   that carry a `campaigns[]` array (11,320 campaigns, 39,143 missions) there is **not one
+   non-terminal mission loss** — mission losses equal campaign losses exactly, 8,252 = 8,252. The
+   erased attempt is now filed as `REDEPLOYED` (`SIGHTLINE_MISSIONFLUSH=0` restores the drop).
+   Priced CRN-paired at three rungs (`docs/measurements/p15/`): **every campaign-level field is
+   identical** — `campaigns[]`, `pairedPolicy`, `runWinRate`, `policyGap` — so **the L5 ladder of
+   record stands untouched**; but per-mission win rate falls up to 23 points on mid-run missions
+   and `meaningfulChoicesPerTurn` by 5-12%. Missions 1-2 do not move at any rung, because the
+   checkpoint valve does not open before mission 3.
 
 ---
 
@@ -292,6 +341,16 @@ src/
                 (`partial`; slices in Game.*.cs: Autopilot/Harness/Endless/Meta/Modes/Codex)
   Game.Autopilot.cs  SmartStep/AutoStep balance + smoke-test AI (headless-only)
   Game.Harness.cs    every Debug*/*SelfTest env-gated hook (headless-only)
+  Game.Modes.cs      the non-campaign modes' setup/end: SKIRMISH, the seeded DAILY, TRAINING
+  Game.Endless.cs    LAST STAND (endless horde) wave state + its self-test
+  Game.Meta.cs       the WAR ROOM / cross-run profile screen's state + input
+  Game.Codex.cs      the FIELD MANUAL's in-game paging state
+  Game.Audition.cs   the AUDIO CHECK screen's state + input (Game.HandleAudition)
+  Mission.cs    THE ONE ENEMY FUNNEL: Build/SpawnEnemies, MakeHostile (HostileToughness /
+                HostileDamageTrim - see "Combat model"), OpenerTrim, the deployment shapes,
+                pods and the per-objective board furniture. Every hostile in the game is
+                built here; nothing else may construct one.
+  Voice.cs      the squad's radio barks (line pools + the cooldown/priority picker)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
   Terrain.cs    C4: the per-tile biome GROUND layer (VERDANT undergrowth / TUNDRA ice /
                 MAGMA vents). Stamped through Hash3 with ZERO Util.Rng draws (Stamp is
@@ -306,7 +365,12 @@ src/
   Fx.cs         particles, floating combat text, screen shake, ambient atmosphere
   Renderer.cs   board, cover (faux-3D), units/silhouettes, overlays, aim reticle
   Hud.cs        top/bottom bars, action buttons (rects hit-tested by Game), tooltip,
-                banner, intro/win/lose cards, barracks/shop/campaign-map screens
+                banner, intro/win/lose cards, barracks/shop/campaign-map screens.
+                `Hud.KeyTable` + `Hud.VerbTable` are the ONE row-set behind both the in-game
+                FIELD MANUAL and README's controls block (`SIGHTLINE_KEYTABLE=1` regenerates
+                the block between README's KEYTABLE markers - never hand-edit it;
+                `SIGHTLINE_KEYTABLEGATE` is the gate on both)
+  Hud.Audition.cs    the AUDIO CHECK screen's drawing (draw-only; Game.Audition hit-tests it)
   Util.cs       Cfg (layout consts), Pal (palette), Util (math/rng/easing/tile<->px)
   Maps.cs       hand-authored ASCII arena templates (Mission stamps them in)
   Run.cs        persistent campaign run (squad, map, intel, boons, ...)
@@ -315,6 +379,8 @@ src/
   Codex.cs      in-game field-manual content
   SaveGame.cs   run save/load (System.Text.Json, user-data dir)
   Audio.cs      procedural SFX + music (device-free-safe)
+  Audio.CueMap.cs    THE CUE MAP: the injective event->cue table (one meaning, one sound)
+  Audio.Analysis.cs  the measured numbers (peak/RMS/length) the AUDIO CHECK screen prints
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
   Ship.cs       C6: the DISTRIBUTABLE's contract — version stamp (Ship.Version, off the assembly),
@@ -443,17 +509,28 @@ docs/screenshot.png    README image
   reseeds explicitly (`Util.Reseed(50000+slot)`), so **paired measurement** is
   reproducible. **Screenshots are NOT byte-identical** and never were: two
   `SIGHTLINE_SHOT=90` runs measurably differ in ~30% of pixels (measured 303,065 of
-  1,024,000 px), because 57 wall-clock reads drive animation (46 in `Renderer.cs` — C4 added
-  one, shared by `DrawGround`/`DrawVentSteam` — and 11 in
-  `Hud.cs`; counted, the old "58 / 46 / 12" here was off) and `Util.Rng` is clock-seeded by
-  default. Never gate anything on a screenshot
+  1,024,000 px), because dozens of wall-clock reads drive animation and `Util.Rng` is
+  clock-seeded by default. **DO NOT WRITE THE COUNT HERE — DERIVE IT.** The last two attempts
+  were both wrong in the same direction, and the second one dismissed the right answer: this
+  line read "57 (46 + 11), the old 58 / 46 / 12 was off" while the tree measured **46 + 12 =
+  58** — i.e. the triple it called off was the correct one, and `src/Display.cs`'s own comment
+  ("58 Raylib.GetTime() reads") had been right all along. Every clock read routes through
+  `Renderer.Now()` / `Hud.Now()` (measured: ZERO raw `Raylib.GetTime()` call sites outside
+  those two definitions), so the count is one command:
+
+  ```bash
+  for f in src/Renderer.cs src/Hud.cs; do printf "%-18s " "$f"; \
+    grep -vE '^\s*(//|///|\*)' "$f" | grep -v 'double Now() =>' | grep -o '\bNow()' | wc -l; done
+  ```
+
+  (46 / 12 at `a933cfe`; re-run it rather than quoting that.) Never gate anything on a screenshot
   hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real determinism gate**. Keep new
   persistent/random/post-FX work behind the `NoPersist`/Display gates so that stays true.
-  **If you write a test that reads PIXELS, pin the clock**: `Renderer.cs`'s 46 reads all go
+  **If you write a test that reads PIXELS, pin the clock**: `Renderer.cs`'s reads all go
   through `Renderer.Now()`, which returns the real clock unless the harness-only
   `Renderer.TimePin` is set to a fixed t (`SIGHTLINE_BOARDTEST` does; it is the only reason
   that probe prints one number per run). Restore it to `-1` when you are done. **The CHROME has
-  the same pin since C5** — `Hud.TimePin` (the 12 wall-clock reads in `Hud.cs` route through
+  the same pin since C5** — `Hud.TimePin` (the wall-clock reads in `Hud.cs` route through
   `Hud.Now()`) plus `Hud.AnimPin`, which forces panel-entrance progress instead of waiting real
   seconds for a card to slide in. `Hud.MousePin` does the same for the POINTER, which 30 draw sites read live
   (hover fills, hover cards, and the threat card, which anchors itself at the cursor) — an unpinned
@@ -478,7 +555,7 @@ self-tests and must be green; autoplay must never TIMEOUT or throw.
 Nine autonomous programs (through **FULCRUM**, closed 2026-08-28) built and balance-tuned the
 game. The reference heat ladder and goal band of record are in `docs/DEVLOG.md` §FUL-13.
 
-**PROGRAM RESONANCE** (current) is the tenth. Its thesis: the game had been tuned far past the
+**PROGRAM RESONANCE** is the tenth (closed). Its thesis: the game had been tuned far past the
 point where anyone verified how it actually *lands*. It found and fixed several things nine
 win-rate-driven programs could not see — the audio had never been heard by anyone (a one-line
 filter bug meant every weapon was raw white noise), the board's biome identity was erased by a
@@ -784,7 +861,7 @@ lever beat the control on dispersion; read the ladder-of-record entry above in f
 one step from it. The wave was sent back once for exactly that framing. DEVLOG §C1 and §C1-R; raw
 round `docs/measurements/c1/`.
 
-**PROGRAM CONTOUR** (current) is the eleventh. Wave **C2 "THE OPPONENT DECLINES"** closed the
+**PROGRAM CONTOUR** is the eleventh (closed). Wave **C2 "THE OPPONENT DECLINES"** closed the
 CROSSCUT handoff's "single biggest remaining gap in the fight": `Ai.cs` scored any tile with a
 shot at a flat `100 + bestHit` against terrain terms bounded under ~64, so the opponent paid any
 positional price for a line of fire and its overwatch branch fired 20 times in 26841 contested
@@ -851,7 +928,8 @@ resolved at n=160** (DiD t = −1.61); only MAGMA is negative at every rung.
 re-tuned density, so the ladder above is a pre-fix number and C5 owes it a re-measure.
 `SIGHTLINE_BIOMEMECH=0` restores the pre-C4 board exactly. DEVLOG §C4.
 
-**PROGRAM PARALLAX — wave P10 "THE HELD LANE" (2026-09-03, base `4c1ca3a`)** gave the ORDINARY
+**PROGRAM PARALLAX** (current) is the twelfth. Wave **P10 "THE HELD LANE" (2026-09-03, base
+`4c1ca3a`)** gave the ORDINARY
 enemy overwatch a cone (`Ai.ChooseLane` picks one of eight axes by the approach ground it covers;
 the exec arms the player's own `OwFocused` flag set, so the hostile takes the same FOCUS trade —
 `+Combat.FocusOwAim` inside, blind outside). `Game.WatchCovers` is now the ONE predicate for "this
@@ -866,6 +944,26 @@ branch to 10-15% of acts) makes the opponent 5.6-9.0 points WEAKER, p ≤ 0.008 
 ROADMAP's "a real lane would justify a much higher ratio" is refuted, `SIGHTLINE_DECLINEWATCH` is
 a priced-but-unspent dial, and the flywheel still has no term for an ordinary enemy lane (that fix
 is its own wave, per ROADMAP). DEVLOG §THE HELD LANE.
+
+**PROGRAM PARALLAX — wave P12 "THE CONFIRMED EIGHT" (2026-09-03, base `a933cfe`)** fixed eight
+adversarially-found, doubly-verified defects that all sat under a **green `--full` sweep**, five of
+them under a green run of the very test that owns their surface (`QUITTEST` and `SETTINGSTEST` were
+PASS while four of the eight held). Two seams a fresh session should know, because they are the
+answer to "why did nothing catch this":
+**`Game.Frozen`** (`Paused || Phase == Codex || Phase == AudioCheck`) is now THE one line for "a
+modal card owns the frame; nothing below this ticks" — `Fx.Update`, the anim pump and the scorch
+fade were always below `Update`'s pause return and froze; the four teaching updaters and the
+kill-cam window sat above it and did not, so a **one-shot FIELD TIP could be burned from the
+profile behind a card that hid it**. **`Game.Paused` is a property**, so every close (Escape,
+[K]/[Q], RESUME, a future caller) releases an in-flight mix-fader drag — it used to survive the
+card and never reach `display.json`. Also: `Game.KeyPin` (harness key injection, three read sites,
+null in real play) — without it "[M] is dead on AUDIO CHECK because two handlers consume the same
+press" is not expressible in a test; `Fx.TextTopY` bounds THE STRIDE's rung ladder, which only ever
+climbed and printed a row-0 kill's name stamp at **y = −34**, entirely off the window; and
+`Game.CardCanAbandon` separates "is there a fight to end" from "what phase is this", because LAST
+STAND's mid-stand barracks detour is a live stand the card was hiding END STAND from. Every fix
+ships a test leg **shown red first**; no new hook (80 exist / 80 ran, unchanged). Detail
+`docs/DEVLOG.md` §THE CONFIRMED EIGHT; five things found and not fixed in `docs/ROADMAP.md`.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

@@ -187,13 +187,22 @@ public partial class Game
         }
 
         // BACK: Esc, U (toggle out), or the button.
-        if (Raylib.IsKeyPressed(KeyboardKey.Escape) || Raylib.IsKeyPressed(KeyboardKey.U)
+        if (KeyPressed(KeyboardKey.Escape) || KeyPressed(KeyboardKey.U)
             || (Raylib.IsMouseButtonPressed(MouseButton.Left)
                 && Raylib.CheckCollisionPointRec(m, Hud.AudBack)))
         { ExitAudition(); return; }
 
-        // M mirrors the pause menu's mute toggle — the fastest A/B on the screen.
-        if (Raylib.IsKeyPressed(KeyboardKey.M)) { Audio.ToggleMute(); Audio.ApplyMasterVolume(); }
+        // M mirrors the pause menu's mute toggle — the fastest A/B on the screen — and it is read
+        // ONCE, by the GLOBAL key block at the top of Game.Update, which fires on every phase.
+        // P12 THE CONFIRMED EIGHT (C3): this screen used to read it a SECOND time, right here.
+        // Nothing returns between the two reads on this phase (the pause gate excludes AudioCheck
+        // and the anim pump skips it by design), `IsKeyPressed` is an edge-state read rather than a
+        // queue pop, and `Audio.ToggleMute` is a pure flip — so the two calls cancelled and M did
+        // nothing at all on the one screen built to A/B the mix, while the chip below, the FIELD
+        // MANUAL and the README all advertised it. The MUTE chip's own CLICK handler still calls
+        // ApplyMasterVolume; that call is vestigial there too (it pushes Display.VolMaster and
+        // never reads Audio.Enabled) but it is a click, not a key, so it cannot double.
+        // SIGHTLINE_AUDITIONTEST leg (5) presses M through the real Game.Update and is the gate.
 
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
 
@@ -336,6 +345,36 @@ public partial class Game
             Chk(pk <= -1.0f + 0.05f, $"AUDITION reads '{id}' peak {pk:0.0} dBFS — over the -1 dBFS ceiling");
             Chk(rms <= pk + 0.001f, $"AUDITION reads '{id}' rms {rms:0.0} above its peak {pk:0.0}");
             Chk(hi >= 0f && hi <= 1f, $"AUDITION reads '{id}' >1kHz share {hi} outside 0..1");
+        }
+
+        // (5) P12 THE CONFIRMED EIGHT (C3) — [M] IS A LIVE KEY ON THIS SCREEN.
+        // Update's GLOBAL key block reads M on EVERY phase — above the HitStop return, above the
+        // pause gate (which excludes AudioCheck anyway) and above the phase switch — and
+        // HandleAudition read it AGAIN, with nothing returning between the two. `Audio.ToggleMute`
+        // is a pure flip, and `IsKeyPressed` is an edge-state read rather than a queue pop, so both
+        // sites saw the same press and the net effect was ZERO. The screen paints its own
+        // "MUTE [M]" / "MUTED [M]" chip from the same field, so it did not even change caption:
+        // the one screen in the game built to A/B the mix had a dead mute key, advertised in three
+        // places. Pressed here through Game.KeyPin and the REAL Game.Update, not a direct call.
+        {
+            bool wasEnabled = Audio.Enabled;
+            var g = new Game { NoPersist = true };
+            try
+            {
+                g.BeginAudition();
+                Chk(g.Phase == Phase.AudioCheck, "AUDIO CHECK did not open");
+                Game.KeyPin = new HashSet<KeyboardKey> { KeyboardKey.M };
+                bool before = Audio.Enabled;
+                g.Update(1f / 60f);
+                Chk(Audio.Enabled != before,
+                    "AUDIO CHECK: [M] is a DEAD KEY - the global mute and the screen's own both fire in one frame and cancel");
+                bool mid = Audio.Enabled;
+                g.Update(1f / 60f);
+                Chk(Audio.Enabled != mid, "AUDIO CHECK: [M] does not toggle back on a second press");
+                // ...and the screen is still there (M must not be eaten by, or eat, the BACK key)
+                Chk(g.Phase == Phase.AudioCheck, "AUDIO CHECK: [M] left the screen");
+            }
+            finally { Game.KeyPin = null; Audio.Enabled = wasEnabled; Audio.ApplyMasterVolume(); }
         }
 
         return fails.Count == 0

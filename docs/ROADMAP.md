@@ -1035,6 +1035,39 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
 pass, and other waves own parts of that file). The biome signature pass stays floor-tile-only,
 so its emissive cues do not creep around cover bases.
 
+## OPEN — found by PARALLAX P12 "THE CONFIRMED EIGHT" and deliberately NOT fixed
+
+- [ ] **Delete `Hud.DrawIntro`'s dead caption chain (~35 lines).** It still carries the
+      pre-FRONT-DOOR `else if (CheckCollisionPointRec(introMouse, OverlayBtnN)) caption = "…"`
+      ladder, and EVERY branch of it is unconditionally overwritten twenty lines later by
+      `string hoverId = … g.IntroHit(introMouse); if (hoverId != null) caption = IntroDoorCaption(hoverId);`
+      — `IntroHit` resolves any hovered door, so the live string always comes off `IntroDoors`.
+      It is not merely dead, it is a **trap**: someone updated the SKIRMISH caption in the dead
+      copy (it already read "the opposition") while the live table stayed on the pre-P4 text, which
+      is half of P12's C6. Deleting it needs one check — that no branch there says something
+      `IntroDoors` does not (the DAILY branch interpolates `g.TodayDailyForceName`, so its caption
+      is NOT a constant and must move into the table or stay as a special case).
+- [ ] **`HandleOverlayClick`'s `Phase == Phase.Barracks` branch is unreachable** and was carried
+      into `Game.ActPrimary` unchanged. The function is dispatched only for Intro / Win / Lose
+      (`Game.Update`'s phase switch), so `NextMission()` can never be reached from it. Harmless;
+      removing it wants its own pass over who else could ever call `ActPrimary`.
+- [ ] **The pause card's footer line is still keyed on `CardInFight`, not `CardCanAbandon`.** In a
+      mid-stand LAST STAND barracks the card now titles itself PAUSED with a RESUME row, while the
+      footer reads "Every change is saved as you make it - [Esc] back". Both sentences are true
+      (Esc does go back to the offer screen) and the alternative — the camera legend — would be
+      wrong there, so P12 scoped the change deliberately. A third footer string for that one cell
+      would close it.
+- [ ] **`Game.KeyPin` covers three read sites, not the keymap.** P12 added it for two defects that
+      are inexpressible without a key press (a global colliding with a per-screen handler; a key
+      loop above a drag guard). A general injection layer over every `Raylib.IsKeyPressed` in
+      `src/` would make the whole keymap testable — and would have caught the C3 class by
+      construction — but it is a large mechanical diff and belongs in its own wave.
+- [ ] **Nothing bounds a floating text's RISE.** `Fx.TextTopY` bounds where a text is BORN (P12 C7);
+      `Fx.Update`'s `t.Pos.Y -= t.Rise * dt` still carries it off the top of the window as it dies,
+      at an alpha heading for zero. Left alone on purpose: pinning risen text to the ceiling would
+      read as a pile-up. If a future wave wants it, the bound belongs in `Fx.Update`, not the
+      ladder.
+
 ## OPEN / NEXT (post-FULCRUM backlog — seeded at the FUL-13 close)
 
 Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG.md §FUL-13)
@@ -2982,3 +3015,139 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       The owner has a device and the AUDIO CHECK screen (THREAT group).
 - [ ] **The AUDIO CHECK scroll has no thumb drag** and no keyboard focus ring — wheel and Up/Down
       only. Fine at 36 cues; revisit if the list grows again.
+
+---
+
+### PROGRAM PARALLAX — P15 "THE UNVERIFIED" (2026-09-03, details in DEVLOG §THE UNVERIFIED)
+
+Closed: the seven ways the BALANCE INSTRUMENT reported a number where it had none. Six fixed,
+one handed back. Gate `SIGHTLINE_INSTRUMENTTEST` + `docs/measurements/p15/regress.sh`.
+No campaign outcome moved (`docs/measurements/p15/inert/`, three rungs, CRN-paired).
+
+- [x] **The batch validates and records its own request.** `Stats.ParseBatchEnv` is the one reader
+      of `SIGHTLINE_BALANCE` / `_HEAT` / `_BASE`; unparseable = `Program.RefuseBatch`, **exit 3**,
+      nothing written. `batch{}` in the artifact carries `expectedRuns`, `heatRequested`/`heat`,
+      `baseRequested`/`slotBase`, so a chunk's file name is checkable.
+- [x] **`docs/measurements/p15/run_chunk.sh` + `check_chunk.py` replace layer (c).** All fourteen
+      archived runners hard-code `runs == N*2`; the two canonical ones now carry a SUPERSEDED
+      header. Fixtures + `regress.sh` prove accept/reject before and after.
+- [x] **`runWinRate` is -1 on no campaign data.**
+- [x] **`l5/cluster.py`'s LEAK-CHECK is a gate again** — a MIXED pinned/unpinned round FAILs
+      instead of downgrading to a note and exiting 0. Re-reads the 96-chunk L5 archive as PASS and
+      reproduces the published ladder to the decimal.
+- [x] **The LAST STAND harness stop is named** (`EndEndless(cause)`; the autopilot passes the same
+      STALEMATE arm the campaign side does) **and endless runs stamp `runTurns`**. `endless{}`
+      gains `stalemateHits` / `wipes` / `depthUncensored`.
+- [x] **The erased mission is filed, not dropped** (`Stats.FlushOpenMission`; `REDEPLOYED` from
+      the checkpoint redeploy, `UNCLOSED` from the batch's frame-cap/abort exits).
+      `SIGHTLINE_MISSIONFLUSH=0` restores the drop.
+
+Open, handed on:
+
+- [ ] **HANDED BACK — `Game.cs`: `StartPlayerTurn` runs to completion on a run `AutoStallCheck`
+      has already force-lost.** Traced both arms ("StartPlayerTurn CONTINUES with Phase=Lose ...
+      and RAN TO THE END"). Autoplay-only, and most of the tail's telemetry is a no-op because
+      `_mission`/`_run` are null — but the batch-global counters (`Stats.RecordDownExpired` /
+      `RecordDownFinished` / `RecordProc`) guard on `Enabled` alone and a bleed-out in that tail
+      can bump them after `EndRun`. Fix: `if (AutoPlay) { AutoStallCheck(); if (Phase !=
+      Phase.PlayerTurn) return; }`. Exact patch: `docs/measurements/p15/handback-Game.cs.patch` (hunk 2; `git apply --check` clean, validated in a scratch build). Leg F of INSTRUMENTTEST
+      asserts the invariant that keeps the tail merely wasteful (no phantom run) in the meantime.
+- [ ] **OPTIONAL, `Game.cs`: `TryReinforcements` should close its own mission record.** The
+      Stats-side flush is a structural backstop and has to approximate the erased row's `Turns`
+      from `MissionRec.PlayerTurns`, because `Stats` cannot see `Game._turnCount`. One line at the
+      caller makes the row exact — measured to change nothing but `byObjective.avgTurns` on the
+      erased rows. Exact patch: `docs/measurements/p15/handback-Game.cs.patch` (hunk 1).
+- [ ] **`policyGap.greedyWinRate` / `sloppyWinRate` still read 0.0 with no runs** — the same shape
+      as the `runWinRate` defect. Left deliberately: they sit beside `greedyRuns`/`sloppyRuns` in
+      the same object, so "no data" is visible there. Change it with the next artifact-schema wave,
+      not silently.
+- [ ] **Twelve archived chunk runners still carry `runs == N*2`.** Only `w1/` and `c1/` were given
+      the SUPERSEDED header (they are the two CLAUDE.md and `l5/run_ladder.sh` point at). The rest
+      are provenance for closed rounds; head them if a future round reuses one.
+- [ ] **Every per-mission and decision-density figure in the archive is survivorship-biased.**
+      Corrected going forward; the historical tables were NOT recomputed (the erased rows do not
+      exist in those files and cannot be reconstructed). Re-measure before quoting one.
+
+## OPEN — from wave P13 "THE UNVERIFIED — PERSISTENCE AND THE GATE" (base `a933cfe`)
+
+Three real findings this wave confirmed and deliberately did not fix, plus one gate whose scope is
+a declared limit. Detail and traces: `docs/DEVLOG.md` §THE UNVERIFIED.
+
+- [ ] **A forced objective desyncs the mission PLAYED from the intel the node PAYS.**
+      Harness-only, but it biases the flywheel. `node.Intel` is assigned once in `Run.GenerateMap`
+      (`Run.cs:805`) from `Run.NodeIntel`, which reads `node.Card.Objective` through `ClassPremium`.
+      `Game.ForcedObjective` (`SIGHTLINE_OBJ`) is read in exactly one place — `Game.cs:2008` — and
+      sets the objective PLAYED without touching any card, so from **mission 2 onward** (mission 1
+      is fine: `DebugForceObjective` rewrites the card) an objective sweep plays `<x>` while the
+      economy pays whatever the map dealt. Size, from the constants: `Run.PitchedPremium = 8`
+      against `BaseIntel(m) = 12 + 4m` (16 at m1, 36 at m6) — **up to a third of a Combat/Elite
+      node's payout, in either direction**. New since THE FORK PAYS made `NodeIntel`
+      objective-dependent.
+      **The fix is one line** — where `Game.cs:2008` overrides `Objective`, also rewrite
+      `_run.CurrentCard.Objective` and re-derive `CurrentNode.Intel = Run.NodeIntel(CurrentNode)` so
+      the whole world (economy, the PITCHED/TASKED label, the hover and deploy cards) agrees with
+      what is played. **It is an INSTRUMENT change and must be paired with a re-measure**: it moves
+      measured intel in every `SIGHTLINE_OBJ` batch, so it belongs to a wave that can run one.
+
+- [ ] **Four self-tests still hand-roll a truncating restore of a player-data file.**
+      `Game.Endless.cs:535` (HORDETEST), `Game.Modes.cs:640` and `:679` (MODETEST),
+      `Game.Meta.cs:612` and `:615` (the WAR ROOM leg), `Program.cs:1579` and `:2586` (two shot
+      paths). All are `if (x != null) File.WriteAllText(path, x)` — the null guard means **none can
+      zero a file**, which is what made the SETTINGSTEST one dangerous — but every one truncates the
+      target in place, the tear `docs/DISTRIBUTION.md` §5 says cannot happen. Convert to
+      `SaveGame.StashForSelfTest` / `RestoreForSelfTest` (rename out, rename back), as P13 did for
+      SETTINGSTEST / TUTTEST / SAVEEDGETEST / QUITTEST / BRIEFTEST / ONRAMPTEST. Left alone here
+      only because those files belong to other developers this sprint.
+
+- [ ] **`SIGHTLINE_KEYTABLEGATE` leg (b) covers ONE screen.** It derives the keys
+      `src/Game.Audition.cs` reads and asserts each is named in `Hud.KeyTable`'s AUDIO CHECK row —
+      the leg that would have caught THE CUE MAP. AUDIO CHECK is the only screen with a dedicated
+      input-handler file; every other row (FIELD MANUAL, SKIRMISH SETUP, BARRACKS, DRAFT, END CARD,
+      WAR ROOM, MAIN MENU) is documented and **un-derived**, because their handlers are interleaved
+      through `Game.cs`. Closing this needs a seam — a per-screen input dispatch, or a marker
+      convention `Game.cs` handlers opt into — not another regex.
+
+- [ ] **`KeyTable` coverage for the game as a whole is still un-gated.** CLAUDE.md's advice is
+      `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u` before binding anything; nothing
+      asserts the result is a subset of what `KeyTable` documents. A whole-project version of leg
+      (b) needs an exclusion list for harness-only keys first.
+
+## PROGRAM PARALLAX — wave P14 "THE UNVERIFIED" left these OPEN (2026-09-03, `wave/qa-audio`)
+
+Fourteen findings were re-verified; thirteen were fixed (`docs/DEVLOG.md` §THE UNVERIFIED — AUDIO
+AND THE MODES). These are the ones deliberately NOT fixed, and why.
+
+- [ ] **A MIXED skirmish/daily mid-boss has no signature.** P14 fixed the *callsign* — the
+  unfactioned `Mission.MakeMidBoss` fallback used to field a `WARDEN` with `siege=False`, i.e. the
+  Wardens mid-boss's name on a body that cannot do the thing that name means, and is now a neutral
+  `MARSHAL`. The **kit** is still absent: at heat ≥ 4 a MIXED force's climax is a plain ELITE with
+  two frags, while every named faction gets rage / shield / siege. A draw-free fix exists (deal the
+  kit off `Mission.ModeTierFor` — tier 3 → rage, 4 → shield, 5 → siege, gated on `ModeDepth` so the
+  campaign's own unfactioned mid-boss, reachable on a **Supply node at mission 3 or 5**, is
+  untouched), but arming a mid-boss is a real force change and belongs in a wave that shows the
+  before/after with `SIGHTLINE_MODEFORCEPROBE` rather than one that was re-verifying findings.
+
+- [ ] **OWNER LISTEN: is `over` / `reload` on the UI fader right?** P14's `Audio.NeverUiBus`
+  asserts that no beat which *happens to* the player rides the UI fader. It deliberately EXCLUDES
+  `OverwatchSet` and `Reload` (with `Ability` and `Objective`), on the argument that those four are
+  confirmations of a click the player just made — which is what a UI fader is for — and that the
+  asymmetry is already shipped and deliberate (`Turn` is a UI cue; `EnemyTurn` was moved off the UI
+  bus by THE CUE MAP precisely because it is the opponent). The counter-argument is that a player
+  who pulls UI volume to zero to silence menu chrome also stops hearing their own watch being set
+  and their own magazine going in, which are board events with a position. **This is a question
+  about sound and nobody in the sandbox can hear it.** Decide it on the AUDIO CHECK screen; if the
+  answer is "they are board beats", the change is two entries in `Audio.NeverUiBus` plus two rows
+  in `CatOf`, and CUETEST will hold the new line.
+
+- [ ] **Nothing in the audio suite listens.** P14 added `Audio.Spy`, so a self-test can now assert
+  WHEN a cue fires, with what pan, on which bus — which is how findings 1, 4 and 5 were caught and
+  gated. It still cannot assert that `alert` reads as *alert*. Every audio claim in this repository
+  is a claim about a rendered buffer, a registry, or a routing decision. That gap is structural in
+  this sandbox and is the owner's to close on a real device.
+
+- [ ] **`SIGHTLINE_DECLINEWATCH` / the flywheel's blindness to an enemy lane** (P10) and the
+  pressure clock's depth in the modes: P14's `Mission.DepthFor` also gives SKIRMISH/DAILY
+  anti-turtle pressure waves the mode's depth (they were tier-1 bodies too). That is consistent
+  with the funnel and is reported, but it was never a measured lever — the flywheel does not cover
+  skirmish at all, so no rung has ever included one. If the modes ever want a measured ladder of
+  their own, that is the wave.

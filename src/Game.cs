@@ -1319,10 +1319,45 @@ public partial class Game
     public int CurX, CurY;
 
     // pause / settings overlay
-    public bool Paused;
+    bool _paused;
+    /// The pause / settings card. P12 THE CONFIRMED EIGHT (C2): this is a PROPERTY because the card
+    /// has more ways to close than the one that used to clean up after it. `_volDrag` was written
+    /// and cleared only inside HandlePauseMenu, so ESCAPE (read a line above Update's `if (Paused)`
+    /// gate) and the card's own [K]/[Q] each left the fader owning the mouse with the change never
+    /// written to display.json. Every close, from anywhere, now passes through here — which is the
+    /// single seam the AUDIO CHECK screen has always had and this card did not.
+    public bool Paused
+    {
+        get => _paused;
+        set
+        {
+            if (_paused == value) return;
+            _paused = value;
+            ReleaseVolDrag();   // the card never carries a live fader across its own edge
+        }
+    }
+
+    // ── P12 THE CONFIRMED EIGHT — HARNESS KEY INJECTION ────────────────────────────────────────
+    /// Null in real play, and every read below then goes straight to the keyboard exactly as it
+    /// always did. When a self-test SETS it, the reads routed through `KeyPressed` answer from this
+    /// set instead — which is the only way a headless test can press a key on a screen the harness
+    /// cannot otherwise reach. Deliberately NARROW: only the reads a test needs are routed through
+    /// it (Update's GLOBAL key block, the pause card's key table, and the AUDIO CHECK screen's own
+    /// keys). It exists because two of this wave's defects — a key that two handlers both consumed
+    /// in one frame, and a key loop sitting above a drag guard — are invisible to any test that
+    /// cannot press a key. Restore it to null when you are done.
+    public static HashSet<KeyboardKey> KeyPin;
+    public static bool KeyPressed(KeyboardKey k) => KeyPin != null ? KeyPin.Contains(k) : Raylib.IsKeyPressed(k);
     // RESONANCE A2: which mix fader (0..3) the mouse is currently dragging in the pause menu,
     // or -1. Held across frames so a drag keeps tracking once it leaves the row's rect.
     int _volDrag = -1;
+    /// Harness read: which mix bus the pause card's fader drag currently owns (-1 = none).
+    /// SIGHTLINE_SETTINGSTEST leg (F) asserts a drag can never outlive the card.
+    public int VolDragBus => _volDrag;
+
+    /// The card's mix-fader MOUSE-DOWN, split out so a self-test can start exactly the drag the
+    /// mouse starts (P12 C2). `frac` is where along the fader's track the press landed.
+    public void BeginVolDrag(int bus, float frac) { _volDrag = bus; Display.SetVol(bus, frac); }
     // THREAT PREVIEW preference — three-state (RESONANCE T2): 0 OFF / 1 SIMPLE (the pre-T2 minimal
     // "this tile is exposed" tick) / 2 FULL (graded pips + hover card + danger-tinted path). Not
     // persisted (a per-session view pref, like the camera).
@@ -1695,7 +1730,7 @@ public partial class Game
         DraftedSquad = new List<Unit>(DraftPicked);
         DraftBoon = DraftSelectedBoon;
         DraftContract = DraftSelectedContract ?? Contract.None;   // null == STANDARD
-        Audio.Play("turn");
+        Audio.Cue(Audio.GameEvent.Turn);   // P14: through the table (see Audio.CueMap.cs)
         StartMission();   // threads DraftedSquad/DraftBoon/DraftContract into the new Run, then clears them
     }
 
@@ -1972,6 +2007,19 @@ public partial class Game
     void SetupMission(int n)
     {
         _run.Mission = n;
+        // P14 THE UNVERIFIED — PUBLISH THIS FIGHT'S DEPTH FIRST, because four things below read it.
+        // P4 THE MODES GET THE BESTIARY threaded this same dial into Mission.Build as `rosterTier`
+        // (see the roster note further down) for the ARCHETYPE gates and stopped there. Everything
+        // else that asks "how deep is this fight" — Mission.OpenerTrim, Mission.MakeVip (the escort
+        // asset, created ~80 lines below), Combat.HvtHpBonus and the DEFEND waves — was still
+        // reading the literal `1` that SKIRMISH and DAILY pass at every heat rung. Mission.DepthFor
+        // is the one read now; -1 in every other mode, where DepthFor is the identity, so
+        // campaign / endless / training are byte-identical.
+        // IT MUST BE SET HERE AND NOT AT THE rosterTier LINE: the VIP is built before that point,
+        // and a depth published after it would hand MakeVip the PREVIOUS mission's dial.
+        Mission.ModeDepth = Mode == GameMode.Skirmish && Mission.ModeDepthOn
+            ? Mission.ModeTierFor(_run.HeatLevel)
+            : -1;
         // TEMPO wave 4: publish ALL this mission's combat statics in one lifecycle call — the run's
         // boons, the mission faction (read by the spawn roster in Mission.Build below, so it MUST be
         // set first), the bought counter-prep, and a clean PressureAim/AllUnits. Replaces the four
@@ -2136,7 +2184,10 @@ public partial class Game
         // tiers, so nothing here is a new archetype table — and the named mid-boss fields from
         // heat 4 (ELITE CADRE, the rung that also opens Ai.Tier 1). Campaign/endless/training pass
         // n, so the campaign path is byte-identical (PAIRTEST + the inert balance diff are the gate).
-        int rosterTier = Mode == GameMode.Skirmish ? Math.Clamp(3 + Math.Max(0, heat) / 3, 3, 5) : n;
+        // P4's roster tier and P14's depth are the SAME formula (Mission.ModeTierFor) but they are
+        // separate levers: SIGHTLINE_MODEDEPTH=0 must restore P14's four consumers WITHOUT undoing
+        // P4's roster opening, so this line does not read Mission.ModeDepth.
+        int rosterTier = Mode == GameMode.Skirmish ? Mission.ModeTierFor(heat) : n;
         bool modeMidBoss = Mode == GameMode.Skirmish && heat >= 4;
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
@@ -2910,7 +2961,9 @@ public partial class Game
         // player's own turn starting. Named beats (a threat, an alarm, an objective) pass `cue`.
         cue ??= Audio.CueFor(enemy ? Audio.GameEvent.EnemyTurn : Audio.GameEvent.Turn);
         LastBannerCue = cue; LastBannerBus = Audio.BusOf(cue, enemy);
-        Audio.Play(cue, foe: enemy);
+        // P14: Audio.SilentCue means "this beat already has a sound on this frame" — see VIP DOWN /
+        // SOLDIER DOWN, which fire on the same frame as the falling body's own Casualty cue.
+        if (cue != Audio.SilentCue) Audio.Play(cue, foe: enemy);
     }
 
     // ---------------- W11 NEW CONTACT (teach the roster where it's played) ----------------
@@ -3135,10 +3188,14 @@ public partial class Game
             if (brace && res.Hit && !Combat.BraceFullDamage(w)) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
             // FUL-1 PROC: the boon actually waived the halving on a landed brace (no-op unless Stats.Enabled)
             if (brace && res.Hit && Combat.BraceFullDamage(w)) Stats.RecordProc("SHK");
-            Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
-            // THE BEAT: the reaction's OWN cue (a descending snap, panned to the watcher) — it used to
-            // play the same rising "over" as SETTING overwatch, so the two beats were indistinguishable.
-            Audio.Cue(Audio.GameEvent.OverwatchFires, panX: Util.Clamp(w.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
+            // P14 THE UNVERIFIED — the reaction's ANNOUNCE (its "OVERWATCH"/"BRACE" pop and its cue)
+            // used to fire HERE, at ENQUEUE, for every watcher on the same frame, while the beat it
+            // announces — the snap-freeze, the reticle closing on the mover, the flash, the tracer —
+            // plays at ShotAnim.OnStart, one reaction at a time. With two watchers the second one's
+            // sound and picture were a whole reaction apart (ShotAnim's reaction TotalAt = 0.68 s),
+            // and a watcher whose shot was later PURGED (the mover died to the first) had already
+            // announced a reaction that never happened. Both now fire from OnStart, so the announce
+            // is on the same frame as the beat it announces. See ShotAnim.OnStart.
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
             // OnStart runs when this reaction becomes the active anim (Started is false),
             // by which point the mover has settled on the reacted-to tile.
@@ -3298,12 +3355,16 @@ public partial class Game
         // FUL-7 vocabulary honesty: a soldier's true death pops "KIA" (DOWN now means the
         // bleeding-out state); enemies keep the generic "DOWN" (they have no bleed-out).
         Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : (d.Team == Team.Player ? "KIA" : "DOWN"), c, 22f);
-        if (d.IsVip) { ShowBanner("VIP DOWN", true, Audio.CueFor(Audio.GameEvent.Reinforce)); Fx.AddShake(13f); }
+        // P14 THE UNVERIFIED: this banner used to fire `Reinforce` — the REINFORCEMENT ALARM, whose
+        // meaning is "more of them are coming". Losing the asset the mission is about is not that.
+        // It is silent now because the beat it announces already speaks: the Casualty cue fires
+        // four lines below, on this same frame, for this same body.
+        if (d.IsVip) { ShowBanner("VIP DOWN", true, Audio.SilentCue); Fx.AddShake(13f); }
         Fx.AddShake(7f);
         AddHitStop(0.1f);
         AddZoomPunch(0.05f);
         AddBloom(0.1f);
-        Audio.Play("death");
+        Audio.Cue(Audio.GameEvent.Casualty, panX: Util.Clamp(d.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
 
         // KIA feedback (3.11): a fallen soldier gets a prominent stamp with their
         // name/nickname, a red screen-flash, and is logged for the debrief.
@@ -3480,10 +3541,12 @@ public partial class Game
         Fx.Burst(d.Pos, c, 18, 200f, 0.6f, 3.5f, true);
         Fx.AddShake(5f);                         // softer than the kill's 7+9
         AddHitStop(0.08f);
-        Audio.Play("death");
+        Audio.Cue(Audio.GameEvent.Casualty, panX: Util.Clamp(d.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
         // review F3 (honesty): the pill counts 3->2->1 and death lands when it would hit 0, so
         // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
-        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true, Audio.CueFor(Audio.GameEvent.Reinforce));
+        // P14: was `Reinforce`, the reinforcement alarm — see the VIP DOWN note in KillUnit. The
+        // Casualty cue for this same body fired a few lines above; the banner adds no second sound.
+        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true, Audio.SilentCue);
         BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
         // C1 VOICE: the squad has bonds and the game has never once acknowledged one. BondPartnerOf
         // returns null unless a REAL bonded squadmate is on their feet, so a bondless soldier can
@@ -3535,7 +3598,8 @@ public partial class Game
         Fx.PopText(t.Pos + new Vector2(0, -30), "STABILIZED", Pal.Good, 20f);
         Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
-        Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: a mend sounds like a mend (was the "reload" cha-chk)
+        // THE BEAT: a mend sounds like a mend (was the "reload" cha-chk). P14: panned to the patient.
+        Audio.Cue(Audio.GameEvent.Mend, panX: Util.Clamp(t.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
         // C1 VOICE: the clutch save. This is the beat the game most needed words for — 146 soldiers
         // went down across 16 measured campaigns and exactly ONE was revived, in total silence.
         Bark(Voice.Beat.Stabilize, Selected, t);
@@ -4036,30 +4100,40 @@ public partial class Game
         // so it does not collide with UpdatePlayer's set above). SETTINGS EVERYWHERE bound O (the
         // main menu's SETTINGS door). Free letters as of that wave: I J Z — but DERIVE it with the
         // grep above before binding; this line has been stale before.
-        if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
+        if (KeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
         Audio.SetMusicIntensity(MusicIntensity());
-        UpdateTutorial(dt);
-        UpdateTraining(dt);            // T1: the TRAINING OP lesson track (drill mode only)
-        UpdateFieldTips(dt);           // FUL-12 -> T1: once-per-profile JIT tips (never overlap a lesson)
-        UpdateBriefing(dt);            // RESONANCE C1: the mission briefing card's own clock
-        Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
+        // P12 (C4/C8): the TEACHING layer and the kill-cam window are the two clocks that used to
+        // run behind a modal card. See `Frozen` for why they are gated here rather than moved
+        // below the pause return (the HitStop return sits between, and must keep its place).
+        bool frozen = Frozen;
+        if (!frozen)
+        {
+            UpdateTutorial(dt);
+            UpdateTraining(dt);            // T1: the TRAINING OP lesson track (drill mode only)
+            UpdateFieldTips(dt);           // FUL-12 -> T1: once-per-profile JIT tips (never overlap a lesson)
+            UpdateBriefing(dt);            // RESONANCE C1: the mission briefing card's own clock
+        }
+        Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B) — decoration; burns nothing
 
         // THE BEAT kill-cam window: counts down in REAL time (fast-forward shortens it exactly as it
         // shortens the hit-stop); while it runs the zoom-punch is HELD and the presentation clock
         // `t` below is scaled by TimeScale. Ticked before the HitStop return so a freeze inside the
         // window (a chained barrel, say) cannot stretch it.
-        if (_killCam > 0f)
+        if (!frozen)
         {
-            _killCam -= dt * AnimSpeed;
-            if (_killCam <= 0f) { _killCam = 0f; TimeScale = 1f; }
-        }
-        // camera zoom-punch relaxes (outside the kill-cam window); hit-stop freezes the rest of the sim
-        if (_killCam <= 0f)
-        {
-            _camPulse *= MathF.Exp(-dt * 11f);
-            if (_camPulse < 0.001f) _camPulse = 0;
+            if (_killCam > 0f)
+            {
+                _killCam -= dt * AnimSpeed;
+                if (_killCam <= 0f) { _killCam = 0f; TimeScale = 1f; }
+            }
+            // camera zoom-punch relaxes (outside the kill-cam window); hit-stop freezes the rest of the sim
+            if (_killCam <= 0f)
+            {
+                _camPulse *= MathF.Exp(-dt * 11f);
+                if (_camPulse < 0.001f) _camPulse = 0;
+            }
         }
         if (DeathFlash > 0) DeathFlash = MathF.Max(0, DeathFlash - dt * 1.6f);
 
@@ -4323,6 +4397,13 @@ public partial class Game
             _run.Squad.Add(rec);
             _run.PromoteEligible(rec);
         }
+
+        // P15: CLOSE THE MISSION THAT WAS JUST LOST before staging its retry. SetupMission calls
+        // Stats.BeginMission on the SAME mission number, which used to overwrite the open record
+        // outright — so the wiped attempt vanished and no non-terminal mission loss existed
+        // anywhere in the archive. Stats.FlushOpenMission is the structural backstop, but only the
+        // caller knows `_turnCount`, so closing it here is what makes the row's turn count exact.
+        Stats.EndMission(false, _turnCount, 0, Enemies.Count(e => !e.Alive), Stats.MissionRedeployed);
 
         // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
         // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
@@ -5212,11 +5293,41 @@ public partial class Game
     public static bool SettingsCardPhase(Phase p) =>
         p == Phase.PlayerTurn || p == Phase.EnemyTurn || p == Phase.Intro || p == Phase.Barracks;
 
+    /// P12 THE CONFIRMED EIGHT — THE ONE FREEZE LINE. TRUE while a modal card or full-screen
+    /// overlay owns the frame: the pause/settings card, the FIELD MANUAL, the AUDIO CHECK bench.
+    /// Nothing that ticks a CLOCK or burns once-only state may run while this is true.
+    ///
+    /// Three of this wave's eight defects were one shape — state and timers running behind a card
+    /// that hides them — and each had been patched, or not, in its own local place: `Fx.Update`,
+    /// `DecayUnitFx`, the scorch fade and the anim pump all sit BELOW Update's `if (Paused) return`
+    /// and froze correctly, while the four teaching updaters and the kill-cam window sat ABOVE it
+    /// and did not. A one-shot FIELD TIP is BURNED FROM THE PROFILE the moment it shows, so the
+    /// teaching layer running behind a 760x694 plate over an 0.82 scrim spent a verb the player
+    /// never saw; and the 0.45 s kill-cam window (with the zoom-punch it HOLDS) drained behind the
+    /// same card. One predicate, read in one place, rather than three local patches.
+    ///
+    /// It deliberately does NOT cover HitStop (the comment at its own tick forbids stretching a
+    /// freeze) or the pure-decoration clocks that burn nothing — the ambient field, the bloom
+    /// decay, Display's own time. AutoPlay never pauses and never enters Codex/AudioCheck, so this
+    /// is gameplay-inert for the flywheel by construction.
+    public bool Frozen => Paused || Phase == Phase.Codex || Phase == Phase.AudioCheck;
+
     /// TRUE while the card sits over a live fight — the only time it PAUSES anything, the only
     /// time ABANDON is a coherent verb, and the only time the first row reads RESUME. On the intro
     /// and in the barracks the same card is a SETTINGS card: nothing is in flight, so the first
     /// row reads BACK and there is nothing to abandon (see DrawPause for the barracks reasoning).
     public bool CardInFight => Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn;
+
+    /// P12 THE CONFIRMED EIGHT (C5) — TRUE while there is a FIGHT IN FLIGHT for the card to end,
+    /// which is NOT the same question as "what phase is this". LAST STAND enters Phase.Barracks
+    /// mid-stand purely to resolve queued perk/spec/boon offers (Game.Endless.cs is the sole
+    /// assignment, and endless otherwise ends through EndEndless), so Barracks + Endless means a
+    /// stand is live — always. The phase-only predicate read that pair as "nothing is in flight"
+    /// and hid END STAND, the LOSSLESS exit (AbandonRun -> EndEndless banks the best wave), while
+    /// the same card printed "the stand ends here - its waves are not saved" under QUIT TO DESKTOP,
+    /// the lossy one. The barracks reasoning in DrawPause is about the CAMPAIGN checkpoint, and
+    /// endless never writes save.json, so it does not transfer.
+    public bool CardCanAbandon => CardInFight || (Phase == Phase.Barracks && Mode == GameMode.Endless);
 
     /// The honest sentence under an ARMED quit, per phase AND per mode. In a campaign fight the
     /// checkpoint is the mission start (QUITTEST proves the quit path never rewrites it). In the
@@ -5324,26 +5435,38 @@ public partial class Game
     public static readonly KeyboardKey[] PauseKeys = { KeyboardKey.Q, KeyboardKey.K };
     public static string PauseKeyId(KeyboardKey k) => k == KeyboardKey.Q ? "quit" : k == KeyboardKey.K ? "codex" : null;
 
+    /// Release an in-flight mix-fader drag: the live value is already applied (Display.SetVol is
+    /// live), so all this does is hand the mouse back and write display.json ONCE, through
+    /// Display's single writer. Idempotent; a no-op when no drag is in flight.
+    void ReleaseVolDrag()
+    {
+        if (_volDrag < 0) return;
+        _volDrag = -1;
+        Display.CommitVol();
+    }
+
     void HandlePauseMenu()
     {
         var m = Raylib.GetMousePosition();
-        foreach (var k in PauseKeys)
-            if (Raylib.IsKeyPressed(k)) { ActPause(PauseKeyId(k)); return; }
         // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
         // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
+        // P12 (C2): the guard sits ABOVE the key table, which is where HandleAudition has always
+        // put its own. Below it, [Q] (arm, then QUIT TO DESKTOP) took the process down mid-drag
+        // with the fader still held and the value unwritten — the one exit the Paused setter
+        // cannot catch, because it never closes the card.
         if (_volDrag >= 0)
         {
             if (Raylib.IsMouseButtonDown(MouseButton.Left)) { Display.SetVol(_volDrag, VolFrac(Hud.PauseVol[_volDrag], m.X)); return; }
-            Display.CommitVol();
-            _volDrag = -1;
+            ReleaseVolDrag();
             return;
         }
+        foreach (var k in PauseKeys)
+            if (KeyPressed(k)) { ActPause(PauseKeyId(k)); return; }
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         for (int i = 0; i < Hud.PauseVol.Length; i++)
             if (Raylib.CheckCollisionPointRec(m, Hud.PauseVol[i]))
             {
-                _volDrag = i;
-                Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
+                BeginVolDrag(i, VolFrac(Hud.PauseVol[i], m.X));
                 return;
             }
         ActPause(PauseHit(m));
@@ -6467,7 +6590,8 @@ public partial class Game
                     Fx.Flash(ally.Pos, Pal.Good, 22f, 0.16f, 0.5f);
                     Fx.PopText(at, "PATCH", Pal.Good, 16f);
                     ally.Flash = 0.6f;
-                    Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: the medic's own cue (was "reload")
+                    // THE BEAT: the medic's own cue (was "reload"). P14: panned to the patient.
+                    Audio.Cue(Audio.GameEvent.Mend, panX: Util.Clamp(ally.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
                     break;
                 }
                 int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
@@ -6485,7 +6609,8 @@ public partial class Game
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
                 ally.Flash = 0.6f;                          // a brief restorative flash on the patient
-                Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: the medic's own cue (was "reload")
+                // THE BEAT: the medic's own cue (was "reload"). P14: panned to the patient.
+                Audio.Cue(Audio.GameEvent.Mend, panX: Util.Clamp(ally.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
                 break;
         }
         AimMode = false;
@@ -6517,10 +6642,17 @@ public partial class Game
         // initial force (Game.cs SetupMission ramp) — without it a heat-8 SKIRMISH Defend (n=1,
         // grace zeroes every numeric delta) fielded +4-stat waves, contradicting the documented
         // grace contract and pre-empting the skirmish-grace owner decision.
+        // P14: the m1-2 grace is the CAMPAIGN opener's grace (the comment above says so in as many
+        // words: it was added to "pre-empt the skirmish-grace owner decision"). W9 then MADE that
+        // decision — a SKIRMISH/DAILY player dialled the rung and gets no grace — and this line was
+        // not updated, so `_run.Mission == 1` held for every skirmish and every daily and the wave
+        // heat stat was hard-zeroed on all nine rungs. Reading the DEPTH restores the campaign's
+        // behaviour exactly (DepthFor(n) == n there) and gives the modes the dial they asked for.
+        int waveDepth = Mission.DepthFor(_run.Mission);
         int waveHeatStat = Sightline.Heat.StatDelta(_run.HeatLevel);
-        if (_run.Mission <= 1) waveHeatStat = 0;
-        else if (_run.Mission == 2) waveHeatStat /= 2;
-        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true,
+        if (waveDepth <= 1) waveHeatStat = 0;
+        else if (waveDepth == 2) waveHeatStat /= 2;
+        SpawnReinforcements(1 + waveDepth / 2, 12, "WAVE", rich: true, podded: true,
                             heatStat: waveHeatStat);   // FUL-13: waves were heat-blind
     }
 
@@ -6540,7 +6672,10 @@ public partial class Game
     int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false, int heatStat = 0)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
-        int n = _run.Mission;
+        // P14: the wave's tier + stat bump come from the fight's DEPTH. In SKIRMISH/DAILY that was
+        // the literal mission 1 at every rung, so a heat-8 DEFEND wave arrived as a 9 HP / 61 aim
+        // tier-1 body — the same body it arrived as at heat 0 (measured, SIGHTLINE_MODEFORCEPROBE).
+        int n = Mission.DepthFor(_run.Mission);
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
         var waveClasses = new List<string>();   // harness-only composition echo (AutoPlay)
@@ -6728,7 +6863,13 @@ public partial class Game
         ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
         ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
         UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
-        if (AutoPlay) AutoStallCheck();
+        // P15: AutoStallCheck can FORCE-LOSE the run from here (the autopilot's turn caps). Everything
+        // below is start-of-turn bookkeeping for a turn that is no longer going to happen — status
+        // ticks, the bleed-out countdown, soldier selection, the PLAYER TURN banner — and it used to
+        // run to completion on a run already in Phase.Lose. Autoplay-only, but the batch-global
+        // counters (Stats.RecordDownExpired / RecordDownFinished / RecordProc) guard on `Enabled`
+        // alone, so a bleed-out in that tail is recorded against a run that has already ended.
+        if (AutoPlay) { AutoStallCheck(); if (Phase != Phase.PlayerTurn) return; }
         // APEX W2: deny the caged RESCUE captive its start-of-turn action re-grant (see SetupMission).
         // FUL-7: the bleed-out countdown ticks HERE — on the squad's clock, where the player
         // decides. STABILIZE freezes it — but only while a soldier is still standing: with the
@@ -7957,7 +8098,7 @@ public partial class Game
     /// requisition once ShopDone, so a still-set ArmoryMode was invisible — and OnEscape, which
     /// yields Escape to an open armory, kept yielding it for the rest of the barracks visit. Public
     /// so SETTINGSTEST can leave the shop the way the player does.
-    public void ProceedFromShop() { _shopDone = true; ArmoryMode = false; ArmorySoldier = null; Audio.Play("turn"); }
+    public void ProceedFromShop() { _shopDone = true; ArmoryMode = false; ArmorySoldier = null; Audio.Cue(Audio.GameEvent.Turn); }
 
     void HandleShopClick()
     {
@@ -8339,7 +8480,7 @@ public partial class Game
                            || _run.Squad.Exists(u => !rosterBefore.Contains(u))
                            || _run.Deployed.Count != deployedBefore;
         if (rosterMoved) _run.ReconcileDeployment(rosterBefore);
-        Audio.Play("turn");
+        Audio.Cue(Audio.GameEvent.Turn);   // P14: through the table (see Audio.CueMap.cs)
         _activeEvent = null; _eventNode = null;
         // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its
         // outgoing edges -> the player picks the next real node (the same barracks pass surfaces any
@@ -8529,40 +8670,74 @@ public partial class Game
             bool war = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.EndWarRoomBtn))
                        || Raylib.IsKeyPressed(KeyboardKey.W);
-            if (war)
-            {
-                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);   // no stale rect into the next screen
-                BeginWarRoom();
-                return;
-            }
+            if (war) { ActEndWarRoom(); return; }
             bool menu = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn2))
                         || Raylib.IsKeyPressed(KeyboardKey.Escape);
-            if (menu)
-            {
-                Mode = GameMode.Campaign;
-                DailyMode = false;
-                if (!NoPersist) Mission.ForcedLayout = -1;
-                // zero the rect BEFORE entering the intro: the intro's CONTINUE branch reads the
-                // same OverlayBtn2, so a stale end-card rect could otherwise turn a second click
-                // at this position into an accidental CONTINUE before the next Draw republishes it.
-                Hud.OverlayBtn2 = new Rectangle(0, 0, 0, 0);
-                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);
-                Phase = Phase.Intro;
-                Audio.Play("select");
-                return;
-            }
+            if (menu) { ActEndMainMenu(); return; }
         }
 
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                      Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn);
         bool enter = Raylib.IsKeyPressed(KeyboardKey.Enter);
         if (!click && !enter) return;
+        ActPrimary();
+    }
 
-        if (Phase == Phase.Barracks) NextMission();   // deploy to next mission
-        // RESONANCE T1: a finished TRAINING OP re-runs the drill on its primary button (MAIN MENU,
-        // handled above, is the way out) — restartable is half the point of a low-cost drill.
-        else if (Mode == GameMode.Training) BeginTraining();
+    /// P12 THE CONFIRMED EIGHT (C1). The END CARD's three doors and the PRIMARY verb, split out of
+    /// HandleOverlayClick's inline booleans so a self-test can press exactly what the player presses
+    /// (the ActIntro / ActPause shape this project already uses everywhere else). The split is what
+    /// makes the defect visible: TWO of these doors leave an ended run's screen for the main menu,
+    /// and only one of them used to clear the run's MODE.
+    ///
+    /// A finished TRAINING OP's end card is the reachable case. Its WAR ROOM door landed on
+    /// Phase.Intro with `Mode == GameMode.Training` still set, and the intro's DEPLOY SQUAD plate is
+    /// the one door dispatched OUTSIDE the ActIntro table — so it fell through to ActPrimary's
+    /// "re-run the drill" branch and the primary verb on the main menu silently launched the drill
+    /// instead of a campaign. Every NAMED intro door was safe because each routes through a Begin*
+    /// that calls ResetModeState.
+    void ClearEndedRunMode()
+    {
+        Mode = GameMode.Campaign;
+        DailyMode = false;
+        if (!NoPersist) Mission.ForcedLayout = -1;
+    }
+
+    /// End card -> WAR ROOM [W]. The run is over, so the mode dies with it here exactly as it does
+    /// on MAIN MENU: the War Room's own BACK lands on the intro, which is the screen that reads the
+    /// flag. Public so MODETEST can take the door.
+    public void ActEndWarRoom()
+    {
+        Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);   // no stale rect into the next screen
+        ClearEndedRunMode();
+        BeginWarRoom();
+    }
+
+    /// W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without
+    /// founding a new run and WITHOUT touching the campaign checkpoint. Public so MODETEST can take
+    /// the door.
+    public void ActEndMainMenu()
+    {
+        ClearEndedRunMode();
+        // zero the rect BEFORE entering the intro: the intro's CONTINUE branch reads the
+        // same OverlayBtn2, so a stale end-card rect could otherwise turn a second click
+        // at this position into an accidental CONTINUE before the next Draw republishes it.
+        Hud.OverlayBtn2 = new Rectangle(0, 0, 0, 0);
+        Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);
+        Phase = Phase.Intro;
+        Audio.Play("select");
+    }
+
+    /// The PRIMARY verb — the big plate and [Enter] — on whichever overlay screen owns the frame.
+    /// Public so MODETEST can press the intro's DEPLOY SQUAD, which is the ONE door not in IntroKeys.
+    public void ActPrimary()
+    {
+        if (Phase == Phase.Barracks) { NextMission(); return; }   // deploy to next mission
+        // RESONANCE T1: a finished TRAINING OP re-runs the drill on its primary button (MAIN MENU
+        // is the way out) — restartable is half the point of a low-cost drill. P12 (C1): scoped to
+        // an END CARD. On the INTRO this plate is DEPLOY SQUAD, and reading a stale Mode there is
+        // how the main menu's primary verb came to launch the drill.
+        if (Phase != Phase.Intro && Mode == GameMode.Training) { BeginTraining(); return; }
         // intro / win / lose -> new run. INTERACTIVELY this opens the run-opening DRAFT (pick a
         // founding squad + starting boon). The harness NEVER reaches here (it calls StartMission
         // DIRECTLY, bypassing the intro), but gate on !NoPersist defensively so the smoke test /
@@ -8570,7 +8745,8 @@ public partial class Game
         // PROGRAM HORIZON W2/W4: NEW RUN after a LAST STAND / SKIRMISH / DAILY returns to the CAMPAIGN —
         // reset the mode so the fresh run isn't left in a single-mission mode. Also clear any daily-forced
         // arena so the campaign picks arenas normally (interactive only — the harness keeps SIGHTLINE_MAP).
-        else { Mode = GameMode.Campaign; DailyMode = false; if (!NoPersist) Mission.ForcedLayout = -1; if (!NoPersist) BeginDraft(); else StartMission(); }
+        ClearEndedRunMode();
+        if (!NoPersist) BeginDraft(); else StartMission();
     }
 
     // ---------------- draw ----------------

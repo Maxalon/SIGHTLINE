@@ -376,6 +376,13 @@ public class Fx
     /// anchor (SIGHTLINE_FEELTEST asserts it on the kill trio, the BRACE pair and twin numbers).
     public const float TextSep = 14f;
     const float TextPitch = 18f, TextLateral = 18f;   // the ladder: one rung up per blocked slot; odd rungs sit to one side
+    /// P12 THE CONFIRMED EIGHT (C7) — THE LADDER'S CEILING, in board/world y (== screen y at the
+    /// default camera; the board draws inside a Camera2D whose Target == Offset at zoom 1).
+    /// Hud paints a 64px opaque plate across the top of the window AFTER the board, so anything
+    /// above this line is either occluded by chrome or off the window entirely. `TextRung` never
+    /// places a text above it: with no room to climb, the ladder climbs DOWNWARD instead.
+    /// SIGHTLINE_FEELTEST leg (c2) is the gate.
+    public const float TextTopY = 70f;
     int _textSerial;   // a plain counter (NOT Util.Rng): salts the arc hash so a repeated number does not always arc the same way
 
     static float EstTextW(string text, float size) => 0.6f * size * (text?.Length ?? 0);   // NotoMono advance ~0.6 em (no font needed headless)
@@ -388,9 +395,19 @@ public class Fx
     int TextRung(Vector2 at, string text, float size, float side, out Vector2 pos)
     {
         float w = EstTextW(text, size);
+        // P12 (C7): the ladder is BOUNDED ABOVE. The anchor itself is lifted to the ceiling first,
+        // then each rung that would still breach it is MIRRORED downward — so a kill on the board's
+        // top row stacks its trio DOWN the screen instead of walking off the top of the window. The
+        // rung's clearance test is unchanged and runs on whichever side of the anchor the rung
+        // landed, so mirroring cannot re-introduce the overprint the ladder exists to prevent.
+        // Inert away from the top edge: with at.Y - TextPitch*7 >= TextTopY (any anchor below
+        // y=196) every rung is exactly where it was.
+        float baseY = MathF.Max(at.Y, TextTopY);
         for (int r = 0; r < 8; r++)
         {
-            pos = at + new Vector2((r & 1) == 1 ? side * TextLateral : 0f, -TextPitch * r);
+            float lat = (r & 1) == 1 ? side * TextLateral : 0f;
+            float up = baseY - TextPitch * r;
+            pos = new Vector2(at.X + lat, up < TextTopY ? baseY + TextPitch * r : up);
             bool clear = true;
             foreach (var t in Texts)
             {
@@ -402,7 +419,8 @@ public class Fx
             }
             if (clear) return r;
         }
-        pos = at + new Vector2(0f, -TextPitch * 8);
+        float up8 = baseY - TextPitch * 8;
+        pos = new Vector2(at.X, up8 < TextTopY ? baseY + TextPitch * 8 : up8);
         return 8;
     }
 

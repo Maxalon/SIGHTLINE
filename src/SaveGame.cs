@@ -72,6 +72,11 @@ public static partial class SaveGame
     /// by the stale answer.
     static void InvalidateExistsCache() { _existsTicks = _existsLen = -1; }
 
+    /// HARNESS ONLY. A self-test that hand-writes a save.json behind Save()'s back has to drop the
+    /// memoised verdict itself, or `Exists` answers about the file it replaced. (P13's legacy-save
+    /// fixtures are the only callers.)
+    public static void InvalidateExistsCachePublic() => InvalidateExistsCache();
+
     /// True only when a save exists AND is structurally usable. A structurally-VALID-but-empty
     /// save ({}, null, or one whose Squad key was renamed) used to leave CONTINUE drawn forever
     /// over a run that could never load; validating here routes it through Load's stash-and-remove
@@ -165,6 +170,76 @@ public static partial class SaveGame
         }
         catch { }
     }
+
+    // ---- P13: THE ONE STASH EVERY SELF-TEST USES ------------------------------------------
+    // C6 built StashAside/UnstashAside/WriteAtomic and routed SAVETEST's meta block through them.
+    // SEVEN OTHER self-tests never got the memo and kept the pattern C6 removed:
+    //
+    //     try { had = File.Exists(p); if (had) stash = File.ReadAllText(p); } catch { }
+    //     ...
+    //     if (had) File.WriteAllText(p, stash);          // <- the bug
+    //
+    // Two things are wrong with that last line, and the second one destroys data.
+    //   (1) WriteAllText TRUNCATES IN PLACE. A crash between the truncate and the write leaves the
+    //       player a half-written display.json / save.json / meta.json — the exact tear
+    //       docs/DISTRIBUTION.md §5 promises cannot happen, reintroduced by the tests that police it.
+    //   (2) THE `catch { }` AND THE `if (had)` DISAGREE. If Exists() succeeds and ReadAllText then
+    //       throws (a permission flip, an IO error, another agent renaming the file mid-sweep — this
+    //       repo runs several agents against one container by design), `had` is TRUE and `stash` is
+    //       NULL. File.WriteAllText(path, null) does not throw and does not no-op: StreamWriter
+    //       opens the file with truncation and writes nothing. THE PLAYER'S FILE BECOMES ZERO BYTES.
+    //       A self-test that can zero the settings file is worse than any bug it was written to catch.
+    //
+    // So every self-test now moves the file aside by rename and moves it back by rename, with the
+    // in-memory copy as belt-and-braces only. A rename cannot tear, cannot truncate, and cannot be
+    // fed a null. A process killed mid-test leaves <name>.selftest-stash, whole (CLAUDE.md says how
+    // to put it back). It is also HERMETIC in a way the old pattern was not: the test starts with
+    // the file ABSENT, so it cannot silently read the maintainer's own profile — the class of defect
+    // C6 found when SAVETEST failed on any machine whose profile owned MetaUnlock ordinal 1.
+    internal struct FileStash
+    {
+        internal string Path;    // the player-data file that was moved aside
+        internal string Stash;   // <path>.selftest-stash, or null if there was nothing to move
+        internal string Text;    // belt-and-braces in-memory copy; may be null if the read failed
+        internal bool Had;       // did the file exist when we started?
+    }
+
+    /// Move a player-data file aside for the duration of a self-test. Always paired with
+    /// RestoreForSelfTest in a `finally`.
+    internal static FileStash StashForSelfTest(string path)
+    {
+        var s = new FileStash { Path = path };
+        try { s.Had = File.Exists(path); } catch { }
+        if (s.Had && !SelfTestReadFailPin)
+            try { s.Text = File.ReadAllText(path); } catch { }
+        s.Stash = StashAside(path);
+        return s;
+    }
+
+    /// Put it back exactly as it was — by rename where the stash survives, by an ATOMIC write from
+    /// the in-memory copy where it does not, and by deleting whatever the test left behind when
+    /// there was no file to begin with.
+    internal static void RestoreForSelfTest(FileStash s)
+    {
+        if (s.Path == null) return;
+        if (!s.Had)
+        {
+            try { if (s.Stash != null && File.Exists(s.Stash)) File.Delete(s.Stash); } catch { }
+            try { if (File.Exists(s.Path)) File.Delete(s.Path); } catch { }
+            return;
+        }
+        UnstashAside(s.Path, s.Stash, s.Text);
+    }
+
+    /// HARNESS ONLY. Forces StashForSelfTest's in-memory read to come back null, reproducing the
+    /// "Exists() said yes, ReadAllText() then threw" state that used to reach
+    /// File.WriteAllText(path, null) and zero the player's file. SIGHTLINE_SETTINGSTEST sets it for
+    /// one leg and clears it in a finally; nothing else in the project may set it.
+    internal static bool SelfTestReadFailPin = false;
+
+    /// HARNESS ONLY: `WriteAtomic` for the self-tests that live outside this file and restore a
+    /// player-data file by hand. Same contract — .tmp then rename, never a truncate in place.
+    public static void WriteAtomicPublic(string path, string text) => WriteAtomic(path, text);
 
     internal static void WriteAtomic(string path, string text)
     {
@@ -781,6 +856,35 @@ public static partial class SaveGame
             r.MapSeed = dto.MapSeed;
             r.GenerateMap(dto.MapSeed);
             r.MapPos = (dto.MapPos >= 0 && dto.MapPos < r.Map.Count) ? dto.MapPos : 0;
+            // P13 — THE TWO HALVES OF "WHERE AM I" MUST AGREE.
+            // The bound above is the only thing that was ever checked, and it is the wrong
+            // question: `MapPos` was validated against the map's SIZE and never against
+            // `Mission`. The game maintains `Map[MapPos].Mission == Run.Mission` by construction
+            // (Run.Start sets MapPos 0 / Mission 1 on a Col-0 node; Game.ChooseNode advances
+            // MapPos one column and NextMission does `_run.Mission + 1`; the Event branch assigns
+            // `_run.Mission = node.Mission` explicitly to keep the counter in lockstep with the
+            // column). Nothing re-established that on LOAD, so a save whose two halves disagree —
+            // a hand edit, a truncated writer, a build in which the generator moved and re-pointed
+            // MapPos (the hazard MapFingerprint exists for) — resumed happily and INCOHERENTLY:
+            // `SetupMission` builds the fight from `Mission` (force size, heat ramp, objective
+            // rotation, the MaxMissions win gate) while `CurrentNode` drives routing, the node
+            // kind's modifiers, the faction and the intel payout. Mission 1's rookie force on
+            // mission 1's difficulty, deployed from a mission-5 node, and cleared straight into
+            // the finale's successors.
+            //
+            // Neither half is more trustworthy than the other, so we re-derive position from the
+            // counter, which is what every downstream system actually reads: JumpTo walks the map
+            // to the matching column (marking the route Visited, as having reached it implies) and
+            // is a no-op when the two already agree. `Mission` is clamped the same way
+            // Game.ContinueRun clamps it, so an out-of-range Mission cannot smuggle the desync
+            // back in through the target column.
+            int missionForPos = Util.Clamp(r.Mission < 1 ? 1 : r.Mission, 1, Run.MaxMissions);
+            if (r.CurrentNode == null || r.CurrentNode.Mission != missionForPos)
+            {
+                var cardBeforeJump = r.CurrentCard;   // JumpTo adopts the node's card; dto.Card wins
+                r.JumpTo(missionForPos);
+                r.CurrentCard = cardBeforeJump;
+            }
             if (r.CurrentNode != null) r.CurrentNode.Visited = true;
         }
         // installed weapon mods are re-baked BEFORE ammo seeding inside FromUnitDto so an EXTENDED MAG
@@ -905,7 +1009,13 @@ public static partial class SaveGame
             src.BondTally[Run.BondKey("VEGA", "NOX")] = 3;
             src.GenerateMap(424242);
             src.MapSeed = 424242;
-            src.JumpTo(3);   // advance the map position a few columns
+            // P13: JUMP TO THE RUN'S OWN MISSION. This read `JumpTo(3)` against a fixture built
+            // with `Mission = 4` — the round-trip's own source run was DESYNCED by one column, and
+            // had been since it was written. That is the exact incoherence FromDto now repairs on
+            // load (Map[MapPos].Mission must equal Run.Mission; see the note there), so a fixture
+            // that violates it is asserting the old broken behaviour. Derived from src.Mission so
+            // it cannot drift apart again.
+            src.JumpTo(src.Mission);
             int srcPos = src.MapPos;
             src.CurrentCard = new MissionCard { Objective = Objective.Hack, ModName = "ONSLAUGHT", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
 
@@ -954,7 +1064,7 @@ public static partial class SaveGame
             if (got.MapSeed != 424242) fails.Add("mapSeed");
             if (got.Map.Count == 0) fails.Add("mapRegen");
             if (got.MapPos != srcPos) fails.Add("mapPos");
-            if (got.CurrentNode == null || got.CurrentNode.Mission != 3) fails.Add("mapNode");
+            if (got.CurrentNode == null || got.CurrentNode.Mission != src.Mission) fails.Add("mapNode");
             if (got.HeatLevel != 5) fails.Add("heatLevel");
             if (got.PrepFaction != Faction.Legion) fails.Add("prepFaction");
             if (!got.CheckpointUsed) fails.Add("checkpointUsed");
@@ -1107,8 +1217,9 @@ public static partial class SaveGame
       + "paste the actual hash above into SaveGame.PersistedEnums. If you did anything else, undo it."
       + "\n  >> A mapShape: line means Run.GenerateMap's DRAW ORDER moved. A save stores only "
       + "MapSeed and rebuilds the DAG from it, so every existing save now reloads a different "
-      + "campaign — different node kinds, factions, edges, and a MapPos pointing at another "
-      + "mission. If the map change was deliberate, paste the actual hashes into "
+      + "campaign — different node kinds, factions, edges, intel payouts or card deltas, and a "
+      + "MapPos pointing at another mission. If the map change was deliberate, paste the actual "
+      + "hashes into "
       + "SaveGame.PersistedGenerators. If it was an accidental extra rng draw, undo it.";
 
     static void EnumShapeFails(List<string> fails)
@@ -1132,9 +1243,12 @@ public static partial class SaveGame
     // re-points MapPos at a different mission. The enum guard cannot see that — it only knows
     // about types. This does for the generator what EnumFingerprint does for the enums.
     //
-    // It is a hash of the SHAPE, not of the draw sequence, so it is also the natural place a
-    // legitimate map-generator change announces itself: if you meant to change the map, run
-    // SAVETEST and paste the printed "actual" hashes in. If you did not, you just broke saves.
+    // It is a hash of the REGENERATED CAMPAIGN, not of the draw sequence, so it is also the
+    // natural place a legitimate map-generator change announces itself: if you meant to change the
+    // map, run SAVETEST and paste the printed "actual" hashes in. If you did not, you just broke
+    // saves. P13 widened "the campaign" from the DAG's shape to everything a load rebuilds from
+    // MapSeed — the routing economy (node.Intel) and the card's difficulty/reward payload — after
+    // THE FORK PAYS re-priced every node in the game with all three goldens green.
     static uint MapFingerprint(int seed)
     {
         var r = new Run();
@@ -1145,6 +1259,18 @@ public static partial class SaveGame
         {
             Feed(n.Col + "," + n.Row + "," + n.RowCount + "," + (int)n.Kind + "," + (int)n.Faction
                  + "," + (n.Card != null ? (int)n.Card.Objective : -1) + ":");
+            // P13: the node's REGENERATED PAYLOAD, not just its shape. See the note above — a save
+            // stores MapSeed and rebuilds Intel and the whole MissionCard from it, so a change to
+            // either re-prices or re-difficulties every campaign already on disk. Both were invisible
+            // here until P13: THE FORK PAYS moved Run.DepthBase 10 -> 12, gave SUPPLY a -6 discount,
+            // ELITE a +14 premium and a PITCHED fight a +8 class price — every node's payout — and
+            // all three goldens below passed unchanged, because this hash fed only Objective.
+            // RewardText is deliberately NOT fed: it is a display string, and a copy edit is not a
+            // save-format change.
+            Feed((n.Card != null
+                    ? n.Card.ModName + "," + n.Card.EnemyDelta + "," + n.Card.StatDelta
+                      + "," + (int)n.Card.Reward
+                    : "-") + "," + n.Intel + ":");
             foreach (int e in n.Next) Feed(e + "|");
             Feed(";");
         }
@@ -1156,9 +1282,12 @@ public static partial class SaveGame
     /// mid column) or when the event/anchor/escort placement collides.
     static readonly (int Seed, uint Golden)[] PersistedGenerators =
     {
-        (1,       0xC169C99Eu),
-        (424242,  0xEC48647Au),
-        (31337,   0x5CE96D55u),
+        // P13 re-goldened: the hash was widened to feed each node's Intel and its MissionCard's
+        // ModName/EnemyDelta/StatDelta/Reward (see MapFingerprint). The MAP ITSELF did not move —
+        // the pre-P13 hashes were 0xC169C99E / 0xEC48647A / 0x5CE96D55 over the same three DAGs.
+        (1,       0xB51B0399u),
+        (424242,  0x62B48DEAu),
+        (31337,   0xC48C84A8u),
     };
 
     static void MapShapeFails(List<string> fails)
@@ -1249,9 +1378,9 @@ public static partial class SaveGame
         catch (Exception e) { return "structureException:" + e.GetType().Name; }
         finally
         {
-            if (saved != null) { try { File.WriteAllText(FilePath, saved); } catch { } }
+            if (saved != null) { try { WriteAtomic(FilePath, saved); } catch { } }   // P13: atomic, like every other write here
             else { try { if (File.Exists(FilePath)) File.Delete(FilePath); } catch { } }
-            if (bakSaved != null) { try { File.WriteAllText(bakPath, bakSaved); } catch { } }
+            if (bakSaved != null) { try { WriteAtomic(bakPath, bakSaved); } catch { } }   // P13: atomic
             else { try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { } }
             InvalidateExistsCache();
         }
@@ -1339,9 +1468,9 @@ public static partial class SaveGame
         finally
         {
             _metaEvidenceStashed = stashSaved;
-            if (metaSaved != null) { try { File.WriteAllText(MetaPath, metaSaved); } catch { } }
+            if (metaSaved != null) { try { WriteAtomic(MetaPath, metaSaved); } catch { } }   // P13: atomic
             else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
-            if (bakSaved != null) { try { File.WriteAllText(bakPath, bakSaved); } catch { } }
+            if (bakSaved != null) { try { WriteAtomic(bakPath, bakSaved); } catch { } }   // P13: atomic
             else { try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { } }
         }
     }
@@ -1376,9 +1505,9 @@ public static partial class SaveGame
         finally
         {
             _metaEvidenceStashed = stashSaved;
-            if (metaSaved != null) { try { File.WriteAllText(MetaPath, metaSaved); } catch { } }
+            if (metaSaved != null) { try { WriteAtomic(MetaPath, metaSaved); } catch { } }   // P13: atomic
             else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
-            if (bakSaved != null) { try { File.WriteAllText(bakPath, bakSaved); } catch { } }
+            if (bakSaved != null) { try { WriteAtomic(bakPath, bakSaved); } catch { } }   // P13: atomic
             else { try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { } }
             try { if (File.Exists(MetaPath + ".tmp")) File.Delete(MetaPath + ".tmp"); } catch { }
         }
