@@ -87,9 +87,29 @@ def ladder(prefix, data):
 
 
 def leak(prefix, data):
+    """P15 THE UNVERIFIED — THE LEAK-CHECK IS A CHECK AGAIN.
+
+    As shipped, this function had two holes and both made it go QUIET rather than loud:
+
+      * `bad` was only incremented for a rung where `pinned == len(chunks)`. A rung with a MIX of
+        pinned and unpinned chunks was therefore never leak-checked AT ALL — the leak in its
+        unpinned chunk could not raise `bad`.
+      * the verdict line then keyed on `allpinned` over the WHOLE round, so a single unpinned chunk
+        among 96 replaced the PASS/FAIL line with the soft note "(unpinned prefix — the numbers
+        above are the size of the leak, not a check)" ... and still returned `bad == 0`, i.e.
+        **exit 0**. The heat pin exists because an unpinned rung is not the rung it claims to be;
+        a check that shrugs at that is worse than no check.
+
+    Now: every chunk that CLAIMS to be pinned is leak-checked, whatever its rung's mix; an
+    ALL-pinned round gets PASS/FAIL; an ALL-unpinned round is the documented bridge arm and is
+    reported as a leak SIZE with no check performed (and says so); and a MIXED round is a FAIL
+    that names the offending chunks, because nobody can say what such a round measured.
+    """
     print(f"\n===== {prefix} — HEAT LEAK (does 'heat N' mean heat N?) =====")
     print(f"  {'rung':<6}{'chunks':>7}{'pinned':>7}{'picks':>7}{'raised':>7}{'offRung':>8}{'missions':>9}  worst chunk")
     bad = 0
+    leaky_pinned = []     # (rung, base) chunks that claim the pin and leaked anyway
+    unpinned = []         # (rung, base) chunks that did not claim the pin
     for h in RUNGS:
         chunks = data[h]
         if not chunks:
@@ -100,15 +120,38 @@ def leak(prefix, data):
         off = sum(j["heatLeak"]["missionsAbovePin"] for _, j in chunks)
         mis = sum(j["missions"] for _, j in chunks)
         worst = max(chunks, key=lambda c: c[1]["heatLeak"]["missionsAbovePin"])
-        if pinned == len(chunks) and (raised or off):
+        # per CHUNK, not per rung: a mixed rung used to be exempt from the check entirely.
+        for b, j in chunks:
+            hl = j["heatLeak"]
+            if not hl["pinned"]:
+                unpinned.append((h, b))
+            elif hl["campaignsRaised"] or hl["missionsAbovePin"]:
+                leaky_pinned.append((h, b, hl["campaignsRaised"], hl["missionsAbovePin"]))
+        if any(j["heatLeak"]["pinned"] and (j["heatLeak"]["campaignsRaised"] or j["heatLeak"]["missionsAbovePin"])
+               for _, j in chunks):
             bad += 1
         print(f"  h{h:<5}{len(chunks):>7}{pinned:>7}{picks:>7}{raised:>7}{off:>8}{mis:>9}  b{worst[0]} offRung={worst[1]['heatLeak']['missionsAbovePin']}")
-    allpinned = all(j["heatLeak"]["pinned"] for h in RUNGS for _, j in data[h])
-    if allpinned:
-        print("  LEAK-CHECK:", "PASS (every chunk pinned; campaignsRaised = missionsAbovePin = 0 on all of them)" if bad == 0 else "FAIL")
+
+    total = sum(len(data[h]) for h in RUNGS)
+    ok = True
+    if leaky_pinned:
+        ok = False
+        print(f"  LEAK-CHECK: FAIL — {len(leaky_pinned)} chunk(s) claim the pin and leaked anyway:")
+        for h, b, r, o in leaky_pinned[:12]:
+            print(f"              h{h} b{b}: campaignsRaised={r} missionsAbovePin={o}")
+    if not unpinned:
+        if ok:
+            print(f"  LEAK-CHECK: PASS (all {total} chunks pinned; campaignsRaised = missionsAbovePin = 0 on every one)")
+    elif len(unpinned) == total:
+        print(f"  LEAK-CHECK: NOT PERFORMED — all {total} chunks ran with SIGHTLINE_HEATPIN=0 (the bridge arm).")
+        print("              The numbers above are the SIZE of the leak this round carries, not a check on it.")
     else:
-        print("  (unpinned prefix — the numbers above are the size of the leak, not a check)")
-    return bad == 0
+        ok = False
+        print(f"  LEAK-CHECK: FAIL — the round is MIXED: {total - len(unpinned)} of {total} chunks pinned, "
+              f"{len(unpinned)} not. A rung whose chunks did not all play the same instrument is not a rung.")
+        print("              unpinned: " + " ".join(f"h{h}-b{b}" for h, b in unpinned[:20])
+              + (" ..." if len(unpinned) > 20 else ""))
+    return ok
 
 
 def stalemates(prefix, data):

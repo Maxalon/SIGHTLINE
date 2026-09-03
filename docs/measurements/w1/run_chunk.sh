@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#
+# ⚠ SUPERSEDED (P15 THE UNVERIFIED, 2026-09-03) — COPY docs/measurements/p15/run_chunk.sh INSTEAD.
+# Layer (c) below hard-codes `runs == N*2`, which marks every legitimate SINGLE-POLICY batch
+# (SIGHTLINE_BALANCE_SLOPPY / _DUMB — the shape `campaigns[]` was shipped to enable) BAD, and it
+# never looks at the RUNG or the SLOT BASE at all, so a chunk archived under a rung it did not
+# measure passed it with `runs` correct and exit 0. p15/check_chunk.py asserts `runs` against the
+# artifact's own `batch.expectedRuns` and the rung/base against what the runner exported.
+# This file is kept UNCHANGED as provenance: it is how its own round was actually run.
+#
 # W1 (TRUE INSTRUMENT) measurement chunk runner — the X2 run_chunk.sh pattern, re-pointed at
 # docs/measurements/w1 and at a caller-supplied binary SNAPSHOT so the tree can keep building
 # while a chunk is in flight.

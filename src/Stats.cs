@@ -171,6 +171,106 @@ public static class Stats
     static MissionRec _mission;
     public static readonly List<RunRec> Runs = new();
 
+    // ─── P15 THE UNVERIFIED: THE BATCH REQUEST, RECORDED ─────────────────────────────────
+    // A chunk is archived under a NAME ("L5-h4-b80") and every layer of the measurement contract
+    // then trusts that name. Nothing in the artifact ever said what the batch was ASKED for:
+    // `SIGHTLINE_BALANCE_HEAT` and `_BASE` went through a bare `int.TryParse`, so a typo fell back
+    // to "cycle {0,2,4,6,8}" / "slot base 0" in silence, and the chunk was filed under a rung it
+    // never measured with `runs` correct, the file fresh, and the exit code 0. This block is the
+    // request itself, echoed into the JSON so the runner can assert the artifact against what it
+    // set — and `EnvErrors`, which the batch REFUSES to run on (Program.BalanceBatch, exit 3).
+    //
+    // `ExpectedRuns` is the second half of the same hole: every chunk runner in this repository
+    // hard-codes `runs == N*2` for the greedy+sloppy default, which marks a legitimate
+    // single-policy batch (SIGHTLINE_BALANCE_SLOPPY / _DUMB — the shape `campaigns[]` was shipped
+    // to enable) BAD. The batch knows its own shape; the script should not have to guess it.
+    public sealed class BatchEnv
+    {
+        public int N;                       // SIGHTLINE_BALANCE / _ENDLESS — campaigns (slots) requested
+        public string Mode = "campaign";    // "campaign" | "endless"
+        public string Policies = "";        // "greedy+sloppy" | "sloppy" | "dumb"
+        public int PolicyLegs = 1;          // legs run per slot; ExpectedRuns = N * PolicyLegs
+        public string HeatRequested;        // the RAW env string, null when the var was absent
+        public int? Heat;                   // the parsed rung; null = "cycle the default set"
+        public string BaseRequested;        // the RAW env string, null when absent
+        public int SlotBase;
+        public bool HeatPinned = true;
+        public readonly List<string> EnvErrors = new();
+        public int ExpectedRuns => N * Math.Max(1, PolicyLegs);
+    }
+
+    /// The batch request for THIS process, or null outside a SIGHTLINE_BALANCE batch. Emitted as
+    /// the JSON's `batch{}` block. Cleared by Reset() so a self-test can never leak one.
+    public static BatchEnv Batch;
+
+    /// Tri-state integer env parse. ABSENT (null/empty/whitespace) is not an error — it is the
+    /// documented "no pin" default. A NON-EMPTY value that does not parse is an ERROR, never a
+    /// fallback: the whole point of `_HEAT`/`_BASE` is the chunk's identity.
+    public enum EnvRead { Absent, Ok, Bad }
+    public static EnvRead ReadIntEnv(string raw, out int val)
+    {
+        val = 0;
+        if (string.IsNullOrWhiteSpace(raw)) return EnvRead.Absent;
+        return int.TryParse(raw, out val) ? EnvRead.Ok : EnvRead.Bad;
+    }
+
+    /// Build (and validate) the batch request. PURE — no env reads, no side effects — so the gate
+    /// can drive it with garbage. A non-empty EnvErrors means the batch must not run.
+    public static BatchEnv ParseBatchEnv(string balanceRaw, string heatRaw, string baseRaw,
+                                         string mode, string policies, int policyLegs, bool heatPinned)
+    {
+        var b = new BatchEnv { Mode = mode, Policies = policies, PolicyLegs = policyLegs, HeatPinned = heatPinned };
+        if (ReadIntEnv(balanceRaw, out int n) == EnvRead.Bad)
+            b.EnvErrors.Add($"SIGHTLINE_BALANCE='{balanceRaw}' is not an integer");
+        else b.N = n;
+
+        b.HeatRequested = string.IsNullOrWhiteSpace(heatRaw) ? null : heatRaw;
+        switch (ReadIntEnv(heatRaw, out int h))
+        {
+            case EnvRead.Ok: b.Heat = h; break;
+            case EnvRead.Bad: b.EnvErrors.Add($"SIGHTLINE_BALANCE_HEAT='{heatRaw}' is not an integer"); break;
+        }
+
+        b.BaseRequested = string.IsNullOrWhiteSpace(baseRaw) ? null : baseRaw;
+        switch (ReadIntEnv(baseRaw, out int sb))
+        {
+            case EnvRead.Ok: b.SlotBase = sb; break;
+            case EnvRead.Bad: b.EnvErrors.Add($"SIGHTLINE_BALANCE_BASE='{baseRaw}' is not an integer"); break;
+        }
+        return b;
+    }
+
+    // ─── P15: THE MISSION THAT WAS PLAYED AND LOST BUT NEVER CLOSED ──────────────────────
+    // `BeginMission` used to overwrite `_mission` outright. Two live paths reach it with a mission
+    // still open, and both DESTROYED the record instead of filing it:
+    //   * the one-time checkpoint redeploy (Game.TryReinforcements) — a squad WIPE that the run
+    //     survives. It calls SetupMission on the SAME mission, so the attempt that was lost simply
+    //     vanished. That is why no non-terminal mission loss exists anywhere in this repository's
+    //     archive (verified: 19,090 L5 missions, mission losses == campaign losses exactly), and
+    //     why every per-mission table in every published round is survivorship-biased toward wins.
+    //   * the batch's frame-cap / abort exits (Program.cs) — `Stats.EndRun` with no `EndMission`.
+    // Now the open record is CLOSED as a loss with the cause that erased it, and attached to the
+    // run it belongs to. SIGHTLINE_MISSIONFLUSH=0 restores the pre-P15 drop for an A/B.
+    public const string MissionRedeployed = "REDEPLOYED";   // wiped, retried from the checkpoint
+    public const string MissionUnclosed  = "UNCLOSED";      // the run ended without closing it
+    public static bool FlushOpenMissions = Environment.GetEnvironmentVariable("SIGHTLINE_MISSIONFLUSH") != "0";
+    /// Missions the flush had NO run to attach to. Should always read 0; a non-zero reading means a
+    /// mission was recorded outside any run, which is a defect in the caller, not in the game.
+    public static int MissionsDroppedNoRun;
+
+    static void FlushOpenMission(string cause)
+    {
+        if (_mission == null) return;
+        if (!FlushOpenMissions) { _mission = null; return; }   // pre-P15 behaviour, for the A/B
+        _mission.Win = false;
+        // Stats never sees Game's `_turnCount`; PlayerTurns is the turn count this module OWNS.
+        if (_mission.Turns == 0) _mission.Turns = _mission.PlayerTurns;
+        _mission.SquadSurvived = 0;
+        _mission.LossCause = cause;
+        if (_run != null) _run.Missions.Add(_mission); else MissionsDroppedNoRun++;
+        _mission = null;
+    }
+
     // W2 CRN pairing: the batch runner stamps the current slot here before constructing each
     // Game; BeginRun copies it onto the RunRec. -1 outside a paired batch (the default).
     public static int Slot = -1;
@@ -421,11 +521,16 @@ public static class Stats
         _enemyReactions = 0;
         _batchStartUtc = DateTime.UtcNow; _loadAtStart = ReadLoadAvg();                    // W1
         Slot = -1;
+        Batch = null; MissionsDroppedNoRun = 0;                                            // P15
     }
 
     public static void BeginRun(int heat, string policy = "greedy", string mode = "campaign")
     {
         if (!Enabled) return;
+        // P15: belt-and-braces. EndRun already flushes, so this should never have anything to do;
+        // if a future exit closes a RUN without EndRun, the open mission still lands on the run it
+        // was played in rather than on the one about to start.
+        FlushOpenMission(MissionUnclosed);
         _run = new RunRec
         {
             Heat = heat, HeatEnd = heat,
@@ -443,6 +548,9 @@ public static class Stats
                                     string biome = "", int groundTiles = 0)
     {
         if (!Enabled) return;
+        // P15: the mission still open here was PLAYED and LOST — the checkpoint redeploy is
+        // re-staging the same mission number. File it before overwriting it (see FlushOpenMission).
+        FlushOpenMission(MissionRedeployed);
         if (_run == null) BeginRun(heat);
         _mission = new MissionRec
         {
@@ -574,6 +682,9 @@ public static class Stats
     public static void EndRun(bool win, int missionsCleared, string lossCause, int heatEnd = -1, int runTurns = -1)
     {
         if (!Enabled || _run == null) return;
+        // P15: the batch's frame-cap and abort exits close the RUN without ever closing the
+        // mission in flight. Attach it to the run that played it, before `_run` goes null.
+        FlushOpenMission(MissionUnclosed);
         _run.Win = win;
         _run.MissionsCleared = missionsCleared;
         _run.LossCause = lossCause ?? "";
@@ -1373,12 +1484,36 @@ public static class Stats
             // on any `choices*` field, so a comparison script must refuse a diff across them —
             // which is why this is emitted as data instead of trusted to a doc banner.
             instrument = Game.InstrumentTag,
+            // P15 THE UNVERIFIED: what this batch was ASKED for (see BatchEnv). null outside a
+            // SIGHTLINE_BALANCE batch — an older archive has no `batch` key at all, which is how a
+            // consumer tells "pre-P15" from "not a batch".
+            batch = Batch == null ? null : (object)new
+            {
+                n = Batch.N,
+                mode = Batch.Mode,
+                policies = Batch.Policies,
+                policyLegs = Batch.PolicyLegs,
+                // THE ONE FIELD A CHUNK RUNNER SHOULD ASSERT `runs` AGAINST. Hard-coding N*2 marks
+                // every legitimate single-policy batch BAD; this is the batch's own arithmetic.
+                expectedRuns = Batch.ExpectedRuns,
+                heatRequested = Batch.HeatRequested,   // the raw env string, null when absent
+                heat = Batch.Heat,                     // null = the default heat set was CYCLED
+                baseRequested = Batch.BaseRequested,
+                slotBase = Batch.SlotBase,
+                heatPinned = Batch.HeatPinned,
+                envErrors = Batch.EnvErrors            // non-empty is unreachable: the batch refuses
+            },
             runs = Runs.Count,
             // APEX W4: run counts by mode, so a consumer can see at a glance what the batch mixed.
             runsByMode = Runs.GroupBy(r => r.Mode).OrderBy(g => g.Key).ToDictionary(g => g.Key, g => g.Count()),
             missions = allMissions.Count,
-            // campaign-only (endless "missions cleared" are waves — a different unit entirely)
-            runWinRate = campRuns.Count == 0 ? 0.0 : Math.Round(100.0 * campRuns.Count(r => r.Win) / campRuns.Count, 1),
+            // campaign-only (endless "missions cleared" are waves — a different unit entirely).
+            // P15: **-1.0 when there are NO campaign runs to divide by** — the same sentinel
+            // `runWinRateExStalemate` two lines down has carried since the heat pin, and for the
+            // same reason. This used to read 0.0, i.e. "the squad lost every campaign", for a batch
+            // (an endless one, say) that never played a campaign at all. A rate and a refusal must
+            // not share a value.
+            runWinRate = campRuns.Count == 0 ? -1.0 : Math.Round(100.0 * campRuns.Count(r => r.Win) / campRuns.Count, 1),
             // W1 TRUE INSTRUMENT: the same rate with the AUTOPILOT'S OWN FAILURES taken out of the
             // denominator. Game.Autopilot.AutoStallCheck force-loses any match still going at the
             // turn cap with LossCause "STALEMATE" — that is the bot failing to find a finishing
@@ -1445,7 +1580,16 @@ public static class Stats
                 byHeat = endlessRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key)
                     .Select(g => new { heat = g.Key, depth = DepthStats(g.ToList()) }).ToList(),
                 waveCapHits = endlessRuns.Count(r => r.LossCause == "wave-cap"),
-                frameCapHits = endlessRuns.Count(r => r.LossCause == "frame-cap")
+                frameCapHits = endlessRuns.Count(r => r.LossCause == "frame-cap"),
+                // P15: the stands the HARNESS stopped. `wave-cap` and `frame-cap` were already
+                // declared right-censors; the autopilot's own turn cap was not — it routed through
+                // EndEndless as the bare "last-stand", identical to a genuine wipe, so a censored
+                // depth entered the p90 as a measured one. `wipes` is what is left: the real ones.
+                stalemateHits = endlessRuns.Count(r => IsStalemate(r.LossCause)),
+                wipes = endlessRuns.Count(r => r.LossCause == "last-stand"),
+                // ...and the depth distribution over the UNCENSORED stands only. If this differs
+                // from `depth` the p90 above is partly a measurement of the harness.
+                depthUncensored = DepthStats(endlessRuns.Where(r => r.LossCause == "last-stand").ToList())
             },
             decisionRichness = new
             {
@@ -1784,6 +1928,14 @@ public static class Stats
             }).ToList(),
             frameCapLosses = frameCap,
             abortedRuns = aborted,
+            // P15: MISSIONS the run played and LOST without the run ending. Before this wave they
+            // did not exist in any archive — `BeginMission` overwrote the open record. A non-zero
+            // `missionsRedeployed` is the one-time checkpoint doing its job; `missionsUnclosed` is
+            // the harness closing a run mid-mission (frame-cap / abort); `missionsDroppedNoRun`
+            // must read 0 — anything else is a mission recorded outside a run.
+            missionsRedeployed = campRuns.Sum(r => r.Missions.Count(m => m.LossCause == MissionRedeployed)),
+            missionsUnclosed = campRuns.Sum(r => r.Missions.Count(m => m.LossCause == MissionUnclosed)),
+            missionsDroppedNoRun = MissionsDroppedNoRun,
             // The one number to read: everything the batch counted as a loss that the GAME did
             // not actually cause. Anything above a couple of points makes the rung suspect.
             harnessLossPct = campRuns.Count == 0 ? 0.0

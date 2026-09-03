@@ -266,7 +266,24 @@ non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Progr
    what makes a missing file mean "no data". **(b) check the process EXIT CODE** — 2 means "no
    display, nothing written", and it is the only signal that cannot be faked by a stale file.
    The `runs`-field assertion stays as a third line of defence (it still catches a short batch).
-   `docs/measurements/w1/run_chunk.sh` does all three.
+   **P15 amended layer (b) and REPLACED layer (c). Copy `docs/measurements/p15/run_chunk.sh`, NOT
+   `w1/`'s or `c1/`'s** (both now carry a SUPERSEDED header; they are kept unchanged as provenance).
+   * **exit 3 is a SECOND refusal**: an unparseable `SIGHTLINE_BALANCE` / `_HEAT` / `_BASE`. The
+     batch prints what it could not read and writes nothing. Before P15 those fell through a bare
+     `int.TryParse` **silently** — a typo'd `-h4` cycled `{0,2,4,6,8}` and was archived under the
+     rung in its FILE NAME with `runs` correct, the file fresh and exit 0.
+   * **layer (c) must not hard-code `runs == N*2`.** All fourteen archived runners do, which marks
+     every legitimate single-policy batch (`SIGHTLINE_BALANCE_SLOPPY` / `_DUMB`) BAD. The artifact
+     now carries a **`batch{}`** block — the request as issued, including `expectedRuns`,
+     `heatRequested`/`heat` and `baseRequested`/`slotBase`. `p15/check_chunk.py` asserts `runs`
+     against `batch.expectedRuns` and the rung/base against what the runner exported, so a chunk's
+     FILE NAME is checkable. An artifact with no `batch{}` is pre-P15 and is `BAD` unless the
+     caller passes `--legacy` explicitly.
+   * `runWinRate` is **-1** for a batch with no campaign runs (it used to read 0.0, i.e. "lost
+     every campaign"), matching `runWinRateExStalemate`'s existing sentinel.
+   * **`l5/cluster.py`'s LEAK-CHECK is a gate again.** It used to downgrade to a note and exit 0 if
+     ONE chunk in a pinned round ran unpinned. A MIXED round is now a FAIL; an all-unpinned round
+     prints `NOT PERFORMED`.
 2. Run the **Release binary directly**, and from a *snapshot* (`runbin/<tag>/`, gitignored) so
    the tree can keep building while a round is in flight.
 3. Two disjoint CRN slot sets (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = 40 campaigns
@@ -277,6 +294,17 @@ non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Progr
    if the tree gained instrumentation, prove logic identity with an `R0diag` chunk first.
 5. Archive every chunk's JSON + log under `docs/measurements/<wave>/` with a README giving the
    exact command lines — **and state the base commit.**
+6. **P15: MISSION-LEVEL tables from before 2026-09-03 are survivorship-biased and are NOT
+   comparable with anything measured since.** `Stats.BeginMission` overwrote the open `MissionRec`,
+   so the mid-run checkpoint redeploy ERASED the attempt it retried: over the 421 archived chunks
+   that carry a `campaigns[]` array (11,320 campaigns, 39,143 missions) there is **not one
+   non-terminal mission loss** — mission losses equal campaign losses exactly, 8,252 = 8,252. The
+   erased attempt is now filed as `REDEPLOYED` (`SIGHTLINE_MISSIONFLUSH=0` restores the drop).
+   Priced CRN-paired at three rungs (`docs/measurements/p15/`): **every campaign-level field is
+   identical** — `campaigns[]`, `pairedPolicy`, `runWinRate`, `policyGap` — so **the L5 ladder of
+   record stands untouched**; but per-mission win rate falls up to 23 points on mid-run missions
+   and `meaningfulChoicesPerTurn` by 5-12%. Missions 1-2 do not move at any rung, because the
+   checkpoint valve does not open before mission 3.
 
 ---
 
