@@ -827,10 +827,10 @@ keep both arms, because their win conditions do not count bodies. That closed 6.
 
 - **The gap is still 36.5 points.** This section records a *position*, not a repair. A
   fork between a 45%-node and an 82%-node is only defensible once it is legible AND
-  priced, and **the pricing is not built**: `MissionNode.Intel` is depth- and kind-scaled
-  and blind to the class, so a PITCHED node pays a TASKED node's rate. Until that lands,
-  the map tells the player which game they are choosing and still offers no reason to
-  choose the hard one. **That is the open half of this decision.**
+  priced. **AMENDED 2026-09-03 by wave THE FORK PAYS — the pricing half is now built; see
+  §5.3.** As C3 left it, `MissionNode.Intel` was depth- and kind-scaled and blind to the
+  class, so a PITCHED node paid a TASKED node's rate, and the map told the player which
+  game they were choosing while offering no reason to choose the hard one.
 - **The anti-turtle clock is weaker on ELIMINATE, and turtling is not merely unmeasured — it is
   UNMEASURABLE with the current instrument.** The flywheel's two policies are `greedy` and
   `sloppy`; `sloppy` is an *error* model, not a *passivity* model, and neither camps, so **no
@@ -843,6 +843,76 @@ keep both arms, because their win conditions do not count bodies. That closed 6.
 - **"You may decline the fight" is now printed on the map.** If a later wave decides the
   encounter should not be declinable, this line becomes a promise the game stops keeping,
   and it has to come off the tooltip in the same wave.
+
+---
+
+## 5.3 What the ROUTE costs (decided 2026-09-03, wave "THE FORK PAYS")
+
+Same contract as §5 and §5.2: on the record, with the alternatives named and the cost of the
+one we chose stated. **This section closes the open half of §5.2 and adds a second finding
+§5.2 did not know about.**
+
+**The finding, in §3.A's own words.** *"A decision is interesting only if no option dominates,
+the options are asymmetric, and the player can make it informed."* The campaign fork failed
+all three clauses at once:
+
+1. **SUPPLY strictly dominated COMBAT.** A SUPPLY node fields a lighter force (`EnemyDelta -1
+   / StatDelta -1`), heals the squad — and paid **more intel** (base+10 against COMBAT's base).
+   It is the definition of a dominant option: safer *and* richer. Measured clear rates back it
+   (Supply 94.4% vs Combat 89.2%, W1). ELITE's entire premium over SUPPLY was **+4 intel** for
+   +3 bodies and +2 stat, which is not a risk/reward curve, it is a rounding error.
+2. **And it dominated a second time, invisibly.** The full heal was applied *before*
+   `Run.DebriefSurvivors`, whose fresh-wound gauge reads current HP — so a cleared SUPPLY node
+   also erased the attrition the mission had caused. Nothing in the game said so. A hidden
+   subsidy is worse than a stated one: it is §3.A's *false choice*, where the options' real
+   difference is not the one the player can see.
+3. **The PITCHED node was not priced** — §5.2's declared-open half, unchanged for two programs.
+
+**The options considered for (1):**
+
+- **(a) Make SUPPLY's fight heavier.** Rejected: SUPPLY's identity IS the light fight. This
+  deletes the node kind rather than pricing it.
+- **(b) Take the heal away.** Rejected for the same reason, and it makes the map a flat
+  sequence of fights — §3.F wants runs to differ by combinations.
+- **(c) Price the safety in intel.** Chosen. The heal *is* the reward, so SUPPLY pays a
+  discount (−6) and the fight pays the base. Nothing about the node changes except what it
+  costs you to take it.
+- **(d) Print the wound immunity instead of removing it.** Rejected on §3.A: an immunity you
+  *print* is still a dominant option, only an honest one. §3.A objects to a dominant line
+  **existing**, not to it being hidden — that is the same reasoning §5.2 used to justify
+  printing PITCHED/TASKED, applied in the other direction, because there the dominant line is
+  a *player policy* (decline the fight) and here it is a *reward the game hands out*.
+
+**The decision.** SUPPLY −6, COMBAT +0, ELITE +14, and **+8 for a PITCHED Combat/Elite node**
+(`Run.SupplyDiscount` / `ElitePremium` / `PitchedPremium`); the heal moves after the wound
+gauge. The ordering `ELITE > COMBAT > SUPPLY` is an invariant at every depth and in both
+classes, not a set of numbers that happen to sort, and `SIGHTLINE_FORKTEST` asserts it.
+
+**What this decision costs, stated plainly.**
+
+- **A PITCHED SUPPLY node is harder than a TASKED SUPPLY node and pays the same.** The class
+  premium is deliberately restricted to the two FIGHT kinds, because a PITCHED SUPPLY at base+2
+  would jump a TASKED COMBAT at base and put the economy stop back above the fight it exists to
+  be cheaper than. The ordering invariant is worth more than that cell (19 of 603 played
+  missions at heat 0), but it is a real un-priced cell and not an oversight.
+- **The prices are a REDISTRIBUTION and that had to be paid for.** Over the played node mix the
+  new table pays 1.88-2.06 intel/mission less than the old one — a ~7% campaign-wide deflation,
+  which round 1 of the wave measured as heat 0 falling 53.1 → 46.9. `Run.DepthBase` moved 10 →
+  12 to hand the mean back (within 0.12 intel/mission of the pre-wave level). **A pricing change
+  that quietly moves the LEVEL is a balance change pretending to be an information change**, and
+  this project has been burned by exactly that shape before.
+- **Nobody has measured whether +8 is the RIGHT price, and with today's instrument nobody can.**
+  The flywheel's route picker (`Game.Autopilot.PickAutoNode`) takes `nn[0]` — it reads neither
+  the payout nor the class — so the bot eats the discount without choosing it and walks past the
+  premium without seeing it. The wave's 640-campaign CRN round is a *not-a-regression* check
+  (heat 0 −3.1 ± 3.59, heat 4 +6.2 ± 4.39, neither resolved) and says so everywhere it is
+  quoted. **A valuing route policy in the flywheel is the prerequisite for tuning these three
+  constants**, and it sits beside §5.2's camping policy: a design question that is
+  *unmeasurable*, not merely unmeasured.
+- **"An EVENT node has no fight" is now printed on the map**, along with what a battle in that
+  column would have paid. If a later wave gives event nodes a combat arm, that line becomes a
+  promise the game stops keeping and has to come off the tooltip in the same wave — the same
+  standing obligation §5.2 took on for "you may decline the fight".
 
 ---
 

@@ -702,6 +702,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FORKTEST=1 : THE FORK PAYS — the campaign fork's ECONOMY gate (kind ordering,
+        // the PITCHED class premium and its printing, the Event hover's honesty, and the SUPPLY
+        // heal no longer eating the fresh-wound gauge). Window-free: bare Run maps + pure Hud
+        // string composition, no GL context and no mission build.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FORKTEST") == "1")
+        {
+            Console.WriteLine(Game.ForkSelfTest());
+            return;
+        }
         // SIGHTLINE_ROUTETEST=1 : W1 — measure the AUTOPILOT'S ROUTE through the campaign DAG (the
         // sampling frame every published balance number was drawn through). Window-free.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_ROUTETEST") == "1")
@@ -1298,7 +1307,10 @@ public static class Program
             Display.ChromaIntensity = 0.6f;
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
-        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAPHOVER"), out int mapHover);   // C3: hover map choice k
+        string mapHoverSel = Environment.GetEnvironmentVariable("SIGHTLINE_MAPHOVER") ?? "";
+        int.TryParse(mapHoverSel, out int mapHover);   // C3: hover map choice k (1-based)
+        bool mapHoverNamed = mapHover <= 0 && mapHoverSel.Length > 0;
+        bool mapHoverSaid = false;
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
         // THE BEAT: SIGHTLINE_KILLCAM=<frame> — at that frame (before Update) the last hostile falls
         // by Game.DebugKillCam, arming the LIVE kill-cam window (AutoPlay off, so it is the slow-mo a
@@ -1356,10 +1368,30 @@ public static class Program
             // can be photographed. The rects come from Hud.NodeBtns, which the map publishes as it
             // DRAWS, so this necessarily lags one frame; a shot at frame 90 has ~89 to settle.
             // Pair with SIGHTLINE_CAMPAIGN=1 + SIGHTLINE_SHOT. Shot-only, so nothing measured moves.
-            if (shot && mapHover > 0 && Hud.NodeBtns.Count >= mapHover)
+            // THE FORK PAYS adds the by-NAME forms, so the three economy screenshots (an economy
+            // stop, a PITCHED fight, an unknown signal) are reproducible without hunting for the
+            // index a particular seed happens to deal:
+            //   SIGHTLINE_MAPHOVER=supply|combat|elite|event|boss|start  first reachable node of that KIND
+            //   SIGHTLINE_MAPHOVER=pitched|tasked                        first reachable node of that CLASS
+            // Unresolvable (this fork deals no such node) parks nothing and says so once — a
+            // silently un-hovered shot is how a staging bug becomes a published screenshot.
+            if (shot && (mapHover > 0 || mapHoverNamed) && Hud.NodeBtns.Count > 0)
             {
-                var hr = Hud.NodeBtns[mapHover - 1].Rect;
-                Raylib.SetMousePosition((int)(hr.X + hr.Width / 2), (int)(hr.Y + hr.Height / 2));
+                int hi = mapHover > 0 ? mapHover - 1 : ResolveMapHover(game, mapHoverSel);
+                if (hi >= 0 && hi < Hud.NodeBtns.Count)
+                {
+                    var hr = Hud.NodeBtns[hi].Rect;
+                    Raylib.SetMousePosition((int)(hr.X + hr.Width / 2), (int)(hr.Y + hr.Height / 2));
+                    if (mapHoverNamed && !mapHoverSaid)
+                    {
+                        var hn = game.RunState.Map[Hud.NodeBtns[hi].Id];
+                        Console.WriteLine($"MAPHOVER: '{mapHoverSel}' -> btn {hi + 1}/{Hud.NodeBtns.Count} "
+                                        + $"kind={hn.Kind} obj={(hn.Card != null ? hn.Card.Objective.ToString() : "-")} intel={hn.Intel}");
+                        mapHoverSaid = true;
+                    }
+                }
+                else if (mapHoverNamed && !mapHoverSaid)
+                { Console.WriteLine($"MAPHOVER: '{mapHoverSel}' -> NO MATCH among {Hud.NodeBtns.Count} reachable nodes"); mapHoverSaid = true; }
             }
             if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
                                                                // delta from the Xvfb pointer clears it otherwise)
@@ -1474,6 +1506,37 @@ public static class Program
     // semantics are preserved exactly and the swap is dropped.
     // SIGHTLINE_BALANCE_DRAW=1 restores the old path verbatim for an A/B.
     static readonly bool BatchDraw = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DRAW") == "1";
+    /// THE FORK PAYS (shot staging only): resolve a NAMED SIGHTLINE_MAPHOVER selector to an index
+    /// into Hud.NodeBtns. Pure lookup over the run's own map — no draw, no RNG, and only ever
+    /// reached on a screenshot frame.
+    static int ResolveMapHover(Game game, string sel)
+    {
+        var run = game.RunState;
+        if (run == null) return -1;
+        sel = sel.Trim().ToLowerInvariant();
+        for (int i = 0; i < Hud.NodeBtns.Count; i++)
+        {
+            int id = Hud.NodeBtns[i].Id;
+            if (id < 0 || id >= run.Map.Count) continue;
+            var n = run.Map[id];
+            bool kill = n.Kind != NodeKind.Event && n.Card != null && Run.IsKillObjective(n.Card.Objective);
+            bool hit = sel switch
+            {
+                "supply"  => n.Kind == NodeKind.Supply,
+                "combat"  => n.Kind == NodeKind.Combat,
+                "elite"   => n.Kind == NodeKind.Elite,
+                "event"   => n.Kind == NodeKind.Event,
+                "boss"    => n.Kind == NodeKind.Boss,
+                "start"   => n.Kind == NodeKind.Start,
+                "pitched" => kill,
+                "tasked"  => n.Kind != NodeKind.Event && !kill,
+                _         => false,
+            };
+            if (hit) return i;
+        }
+        return -1;
+    }
+
     static void BatchPump()
     {
         if (BatchDraw) Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));

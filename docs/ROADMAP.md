@@ -2215,16 +2215,40 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       disincentive, at a measured mean high-water rung of 1.50 (below the rung 2 at which the wave
       arm fired). **Until a camping policy exists, no wave can price that, C3's included.**
 
-- [ ] **OPEN, left by C3 — the class gap is 36.5 points, and the reward is still not priced.**
-      Two named follow-ons, in order:
-      1. **Price the PITCHED node.** `MissionNode.Intel` is depth- and kind-scaled and blind to the
-         objective class, so a node that is 36.5 points harder pays the same rate. `docs/DESIGN.md`
-         §3.A wants the fork to trade off; C3 made it legible and did not make it a bargain.
-      2. **DECAPITATE's half of the class is untouched.** C3 kept off it deliberately so the round
+- [ ] **OPEN, left by C3 — the class gap is 36.5 points. The PRICING half is DONE; the rest is not.**
+      1. [x] **Price the PITCHED node.** DONE by wave THE FORK PAYS (2026-09-03, DEVLOG
+         §"THE FORK PAYS"). `Run.ClassPremium` pays **+8** on a Combat/Elite node whose card is a
+         kill objective, and the hover, the node label surface and the deploy card PRINT it
+         (`+32 intel  (+8 PITCHED)`). `SIGHTLINE_FORKTEST` leg B is the gate and fails on the
+         pre-change tree with `B:seed6 c4 Combat pitched30-tasked30`. **The wave could not measure
+         whether the price is the RIGHT price** — see the new instrument item below.
+      2. [ ] **DECAPITATE's half of the class is untouched.** C3 kept off it deliberately so the round
          had a within-class control. The mechanism is still W8/L3's: `Mission.Build` de-stacks the
          FINALE by 3-4 bodies and resets `bump`, and no mid-run Decapitate gets that.
       Also unbuilt: a bot dial that forces engagement on non-kill objectives, which is the only way
       to separate "the design lets you decline" from "`Game.SmartStep` chooses to".
+
+- [x] **SUPPLY strictly dominated COMBAT — closed by wave THE FORK PAYS (2026-09-03).** The lighter
+      fight also paid MORE (`NodeIntel`: SUPPLY base+10 against COMBAT's base; measured Supply 94.4%
+      vs Combat 89.2% clear, W1), and `Game.EnterBarracks` applied the SUPPLY full heal BEFORE
+      `Run.DebriefSurvivors`, whose fresh-wound gauge reads `u.Hp` — so **no soldier who finished a
+      SUPPLY clear on their feet could ever be wounded by it.** SUPPLY now pays `Run.SupplyDiscount`
+      (**−6**, the heal IS the reward), ELITE keeps its +14 top premium, and the heal is passed into
+      `DebriefSurvivors(bool fullHeal)` and applied AFTER the gauge. `Run.DepthBase` moved 10 → 12 in
+      the same wave so the two price changes REDISTRIBUTE the routing economy instead of deflating it
+      by ~7% (round 1 measured that deflation at h0: 53.1 → 46.9; DEVLOG has the arithmetic).
+
+- [ ] **NEW INSTRUMENT GAP, opened by THE FORK PAYS: the flywheel's route picker cannot price a
+      fork.** `Game.Autopilot.PickAutoNode`'s shipped policy is *"prefer an Event node, else take
+      `nn[0]`"* — the lowest row of the next column — and `SIGHTLINE_ROUTE=hash`, its only
+      alternative, is a UNIFORM deal. **Neither reads `MissionNode.Intel` or the objective class**,
+      so the bot walks past a PITCHED premium without seeing it and eats a SUPPLY discount without
+      choosing it. THE FORK PAYS' 640-campaign round is therefore a not-a-regression check
+      (h0 −3.1 ± 3.59, h4 +6.2 ± 4.39, both unresolved) and **explicitly not a price for the fork.**
+      A VALUING policy (`SIGHTLINE_ROUTE=greedy-intel` / `safe`, plus a run-level "intel banked"
+      readout already in `intelByHeat`) is the prerequisite for anyone tuning the three constants
+      `Run.SupplyDiscount` / `ElitePremium` / `PitchedPremium`. **This sits beside C3's camping
+      policy: both are design questions that are UNMEASURABLE rather than unmeasured.**
 
 ### Handed on from C2's review (not C2's code, recorded so it is not lost)
 

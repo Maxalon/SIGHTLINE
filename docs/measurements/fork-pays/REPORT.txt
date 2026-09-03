@@ -1,0 +1,27 @@
+==============================================================================
+THE FORK PAYS — CRN-paired round.  2 arms x 2 rungs x 4 slot bases x 40 campaigns
+==============================================================================
+
+--- heat 0 --------------------------------------------------------------
+  base  win%  53.1  n=160  binomSE 3.95  clusterSE 1.20  chunks ['55', '50', '55', '52']
+        intel earned/run  129.0  spent/run  110.9  avgMissionsCleared 4.44  earned/MISSION 29.06
+  new   win%  50.0  n=160  binomSE 3.95  clusterSE 3.68  chunks ['42', '48', '60', '50']
+        intel earned/run  134.7  spent/run  116.9  avgMissionsCleared 4.58  earned/MISSION 29.37
+  DELTA (new - base), chunk-paired: -3.1 +/- 3.59  t(3)=-0.87   per-chunk ['-12', '-2', '+5', '-2']
+  CRN pairs 160: identical outcome on 115 (71.9%); discordant 45  (new-only 20 / base-only 25)  McNemar z=-0.75
+  worlds whose missionsCleared differs: 59/160 (36.9%) — a 0 here would mean the lever never reached gameplay
+  byNodeKind (pooled over the 4 slot sets, mission win% at the node):
+    base  Boss 85.9% (n=99)   Combat 84.9% (n=179)   Elite 78.6% (n=70)   Start 94.4% (n=160)   Supply 89.5% (n=95)
+    new   Boss 73.4% (n=109)   Combat 87.8% (n=188)   Elite 81.9% (n=72)   Start 94.4% (n=160)   Supply 93.9% (n=98)
+
+--- heat 4 --------------------------------------------------------------
+  base  win%  22.5  n=160  binomSE 3.30  clusterSE 3.06  chunks ['20', '15', '28', '28']
+        intel earned/run  156.7  spent/run  137.9  avgMissionsCleared 3.60  earned/MISSION 43.52
+  new   win%  28.8  n=160  binomSE 3.58  clusterSE 1.61  chunks ['32', '30', '28', '25']
+        intel earned/run  162.2  spent/run  143.9  avgMissionsCleared 3.82  earned/MISSION 42.48
+  DELTA (new - base), chunk-paired: +6.2 +/- 4.39  t(3)=+1.42   per-chunk ['+12', '+15', '+0', '-2']
+  CRN pairs 160: identical outcome on 124 (77.5%); discordant 36  (new-only 23 / base-only 13)  McNemar z=+1.67
+  worlds whose missionsCleared differs: 54/160 (33.8%) — a 0 here would mean the lever never reached gameplay
+  byNodeKind (pooled over the 4 slot sets, mission win% at the node):
+    base  Boss 53.0% (n=68)   Combat 71.0% (n=155)   Elite 65.2% (n=66)   Start 93.1% (n=160)   Supply 85.1% (n=87)
+    new   Boss 62.2% (n=74)   Combat 73.0% (n=163)   Elite 74.6% (n=67)   Start 93.1% (n=160)   Supply 84.5% (n=90)

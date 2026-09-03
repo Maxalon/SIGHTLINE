@@ -12718,3 +12718,266 @@ and caught the first `react` caption at 212 px in a 206 px column.
   full speed. Frames kept under the session scratchpad (`scratchpad/film/`); not committed.
   The first cut of the hook used `ActivatePod` on the dormant last hostile and the reveal-scatter
   queued AHEAD of the shot (seq_24 still showed it running); the hook sets `Alert` directly now.
+
+---
+
+# WAVE "THE FORK PAYS" — THE ROUTE CHOICE BECOMES A DECISION (2026-09-03, dev on `wave/fork-pays`, base `0e7c019`)
+
+**Thesis.** SIGHTLINE's campaign map presents a fork before every mission, and for the two
+programs since the routing economy shipped, **that fork was not a decision.** `docs/DESIGN.md`
+§3.A: *"a decision is interesting only if no option dominates, the options are asymmetric, and the
+player can make it informed."* The fork failed all three clauses at once, in three separate ways —
+one option strictly dominated, one option was mispriced by the exact amount C3 declared open, and
+one option's tooltip described a fight that does not exist.
+
+## What was wrong (three findings, all reproduced before they were fixed)
+
+**(1) SUPPLY strictly dominated COMBAT — twice over.** `Run.CardForNode` gives a SUPPLY node
+`EnemyDelta -1 / StatDelta -1 / RewardKind.Heal`; a COMBAT node gets `0 / 0 / none`. And
+`Run.NodeIntel` then paid SUPPLY **base + 10** against COMBAT's **base**. The lighter fight also
+paid more. Measured across three earlier waves: Supply 94.4% vs Combat 89.2% (W1); Supply 89.2 /
+Combat 78.2 / Elite 72.3 (C4 addendum). ELITE's whole premium over SUPPLY was **+4 intel** in
+exchange for +3 bodies and +2 stat.
+
+The second subsidy was undocumented and nothing in the game said it. `Game.EnterBarracks` applied
+the heal (`foreach (var u in _run.Squad) u.Hp = u.MaxHp;`) **before** calling
+`Run.DebriefSurvivors`, and the debrief's fresh-wound gauge reads `u.Hp`
+(`int sev = u.Hp <= u.MaxHp / 4 ? 2 : (u.Hp <= u.MaxHp / 2 ? 1 : 0);`). So **no soldier who
+finished a SUPPLY clear on their feet could ever be wounded by it** — the rest stop did not just
+pay more for a lighter fight, it also deleted the attrition the mission had actually caused.
+
+**(2) The PITCHED node was not priced** — C3's declared-open half, verbatim from
+`docs/DESIGN.md` §5.2: *"`MissionNode.Intel` is depth- and kind-scaled and blind to the class, so
+a PITCHED node pays a TASKED node's rate. Until that lands, the map tells the player which game
+they are choosing and still offers no reason to choose the hard one."* `NodeIntel` switched on
+`node.Kind` and never called `Run.IsKillObjective`. A 45.3%-clear node paid what an 81.8%-clear
+sibling paid.
+
+**(3) The EVENT node's hover lied.** `CardForNode`'s Event case returns a **sentinel** card
+(`Objective = Eliminate`, `ModName = "EVENT"`) whose only job is to keep generic `node.Card` reads
+null-safe. The tooltip printed it verbatim, so the one node on the map that has no fight at all
+advertised `EVENT - ELIMINATE / Standard force  +0 intel`.
+
+## What shipped
+
+| | before | after |
+|---|---|---|
+| depth base | `10 + 4*mission` | **`Run.DepthBase (12) + 4*mission`** — see "the redistribution" below |
+| SUPPLY | base **+10** | base **−6** (`Run.SupplyDiscount`) — the heal IS the reward |
+| COMBAT | base | base |
+| ELITE | base **+14** | base **+14** (`Run.ElitePremium`) — unchanged, still the top payer |
+| PITCHED (Combat/Elite only) | — | **+8** (`Run.PitchedPremium`), printed on the hover and the deploy card |
+| START / BOSS | base | base (neither is a branch choice) |
+| EVENT | 0 | 0 |
+| the SUPPLY heal | applied **before** `DebriefSurvivors` | passed **into** it (`DebriefSurvivors(bool fullHeal)`) and applied after the wound gauge and the trait grants |
+
+**The ordering is a hard invariant, not a set of numbers that happen to sort.** At equal depth, for
+every seed and BOTH classes: `ELITE (+14..+22) > COMBAT (+0..+8) > SUPPLY (−6)`. That is *why* the
+class premium is paid by the two FIGHT kinds only — a PITCHED SUPPLY would read base+2 and jump a
+TASKED COMBAT's base, putting the economy stop back on top of the fight it is meant to be cheaper
+than. **The cost of that choice, stated: a PITCHED SUPPLY node is harder than a TASKED SUPPLY node
+and pays the same.** It is a known un-priced cell, not an oversight; it is also the smallest cell on
+the map (19 of 603 played missions at h0).
+
+**The heal decision, and why that side and not the other.** The brief allowed either moving the
+heal after `DebriefSurvivors` or stating the wound immunity on the node hover. Moving it wins on
+§3.A and §5's own terms: an immunity you *print* is still a dominant option, just an honest one, and
+`docs/DESIGN.md` §3.A objects to a dominant line **existing**. The reward is unchanged in
+magnitude — a SUPPLY clear still ends with every survivor at full HP — it simply no longer erases
+the wound the mission caused, so a soldier who limps out of a SUPPLY node carries a wound into the
+next one exactly as they would from any other node. The heal deliberately still fires under
+CONTRACT `HighStakes`: that contract removes the FREE field-heal, not a reward the player routed for.
+
+**The EVENT hover** now reads `EVENT - UNKNOWN SIGNAL / No fight - so no clear intel (a battle here
+pays +24) / + Rewards come from the choice you make / NO CONTACT - A SITUATION, NOT A BATTLE`. It
+names the signal, says there is no fight, **prices the column it is declining** so `+0` reads as a
+trade rather than a missing number, and says where the rewards do come from.
+
+**`Hud.NodeHoverCard` / `Hud.NodeHoverLines(Run, MissionNode)`** are the new pure composition of
+every string the fork says about a node — no draw call, no mouse read, no clock read. That is what
+makes finding (3) *assertable*: a pixel test cannot see that a tooltip is describing a fight that
+does not exist, and an assertion over these strings can.
+
+**`SIGHTLINE_MAPHOVER` gained named selectors** (`supply|combat|elite|event|boss|start|pitched|
+tasked`) alongside C3's 1-based index, and says on stderr which node it resolved to — so the three
+screenshots below are reproducible without hunting for the index a particular seed deals, and an
+unresolvable selector announces itself instead of quietly photographing an un-hovered map.
+
+## THE REDISTRIBUTION — why `DepthBase` moved from 10 to 12
+
+**This is the wave's one genuinely surprising result and it changed what shipped.**
+
+Taking 6 off SUPPLY while adding 8 to a PITCHED fight is *not* a wash. Over the mix of nodes
+actually PLAYED (this wave's own base arm, 603 missions at h0 / 536 at h4), the old kind premiums
+paid **3.20 / 3.35** intel per mission and the new table pays **1.32 / 1.29** — a loss of
+**1.88 / 2.06 per mission**, i.e. a ~7% campaign-wide intel DEFLATION wearing a routing change's
+clothes.
+
+**Round 1 measured exactly that, which is why it is archived rather than hidden:**
+
+| round 1 (base `10 + 4n`) | heat 0 | heat 4 |
+|---|---|---|
+| base win% | 53.1 | 22.5 |
+| branch win% | **46.9** | **19.4** |
+| chunk-paired delta | **−6.2 ± 2.98**, t(3)=−2.10 | −3.1 ± 2.77, t(3)=−1.13 |
+| McNemar z (160 CRN pairs) | −1.71 | −1.09 |
+| intel earned / MISSION | 29.06 → **27.47** | — |
+
+Neither rung is *resolved* at n=160, but the sign is consistent, the mechanism is arithmetic, and
+the size of the mechanism was predictable from the played node mix before the batch ran. A level
+change nobody asked for is the thing this project's whole measurement contract exists to catch, and
+shipping it would have handed the next ladder an unexplained −6 at h0.
+
+So `Run.DepthBase` went 10 → 12, which hands the mean back: **1.32 + 2 = 3.32 against 3.20, within
+0.12 intel/mission of the pre-wave LEVEL.** The fork now *redistributes* the same pot — a route
+through the economy stops banks less than it used to, a route through the hard fights banks more,
+and the campaign as a whole banks what it always did. **Anyone re-tuning `SupplyDiscount`,
+`ElitePremium` or `PitchedPremium` owes `DepthBase` the same arithmetic**; the constant's comment
+block in `src/Run.cs` carries it.
+
+## THE MEASURED ROUND (shipped tree) — and what it can and cannot say
+
+**Base commit `0e7c019`** (the working branch at `Merge the-beat`), heat pin ON (default),
+CRN-paired base-vs-branch, **2 rungs × 4 CRN slot bases (0/10/20/30) × greedy+sloppy × 20 slots =
+160 campaigns per rung per arm, 640 campaigns**, every chunk asserted `runs=40`, zero `BAD`. Runner
+`docs/measurements/fork-pays/run_chunk.sh` (a copy of C1's, all three layers of W1's contract
+intact); analysis `report.py`; raw JSON + logs + `REPORT.txt` archived.
+
+| shipped round | heat 0 | heat 4 |
+|---|---|---|
+| **base** win% (n=160) | **53.1** (binom SE 3.95, cluster SE 1.20) | **22.5** (3.30 / 3.06) |
+| **branch** win% (n=160) | **50.0** (3.95 / 3.68) | **28.8** (3.58 / 1.61) |
+| chunk-paired delta | **−3.1 ± 3.59, t(3) = −0.87** | **+6.2 ± 4.39, t(3) = +1.42** |
+| McNemar, 160 CRN pairs | 45 discordant (20/25), **z = −0.75** | 36 discordant (23/13), **z = +1.67** |
+| intel earned / run | 129.0 → 134.7 | 156.7 → 162.2 |
+| intel earned / MISSION | 29.06 → **29.37** (+1.1%) | 43.52 → **42.48** (−2.4%) |
+| avg missions cleared | 4.44 → 4.58 | 3.60 → 3.82 |
+| worlds whose `missionsCleared` differs | 59/160 (36.9%) | 54/160 (33.8%) |
+
+**Read it as: the two rungs move in OPPOSITE directions, neither is resolved, and the economy LEVEL
+is back where it started.** |t| < 1.5 and |z| < 1.7 on both rungs; the per-chunk deltas at h0 are
+{−12, −2, +5, −2} and at h4 {+12, +15, 0, −2}. **This is a not-a-regression check that passes. It
+is NOT a measurement of the fork as a decision, and the reason is structural:**
+
+> **THE FLYWHEEL'S ROUTE PICKER CANNOT PRICE A FORK.** `Game.Autopilot.PickAutoNode`'s shipped
+> policy is *"prefer an Event node, else take `nn[0]`"* — the lowest row of the next column,
+> because `Run.NextNodes()` walks the `Next` list, which was appended in row order. It reads
+> neither `MissionNode.Intel` nor the objective class. `SIGHTLINE_ROUTE=hash` is the only
+> alternative and it is a *uniform* deal, not a *valuing* one. **So the bot walks past the premium
+> without seeing it and eats the discount without choosing it.** The round therefore measures the
+> CONSEQUENCES of the reprice (what the shop can afford; whether a SUPPLY clear now leaves a
+> wound) on a route sampled blind — not whether the fork is now a good decision. It does prove the
+> lever REACHES gameplay: 34-37% of paired worlds diverge in missions cleared, so the arms are
+> emphatically not inert.
+>
+> **Pricing the fork as a decision needs a VALUING route policy in the flywheel** (e.g.
+> `SIGHTLINE_ROUTE=greedy-intel` / `safe`), which this wave did not build. It joins C3's camping
+> policy on the list of instrument gaps that make a whole class of design question unmeasurable
+> rather than unmeasured. See ROADMAP.
+
+Two further caveats stated straight: **(a) four slot sets is the project's minimum for a rung and
+this round has exactly four**, so a cluster SE over 4 clusters carries 3 degrees of freedom and the
+h0 cluster SE (1.20 base vs 3.68 branch) differs threefold between arms — read the McNemar row, not
+the t. **(b) `byNodeKind` moved on Boss in opposite directions at the two rungs** (h0 85.9→73.4,
+h4 53.0→62.2, n≈65-110 each) with no mechanism connecting the lever to the finale; that is noise
+and is not reported as an effect.
+
+## The gate — `SIGHTLINE_FORKTEST`, four legs, each PROVEN to fail pre-change
+
+A new hook rather than an extension of `CLASSTEST`/`ROUTETEST`: leg C is about attrition and legs
+A/B/D about the economy, and the wave's gate reads better as one coherent block than as three
+grafts. It is window-free (bare `Run` maps + the pure `Hud` composition), runs in **0.12 s**, and is
+wired through `qa-sweep.sh`'s `verdict`. 250 maps: 2,042 cross-kind column pairs, 42 PITCHED/TASKED
+same-column siblings, 249 premium-paying nodes, 489 events, 3,000 hovers composed — each of those
+counts has a vacuity floor, so a generator that stopped dealing SUPPLY nodes would fail the leg
+rather than pass it silently.
+
+**Each defect was restored in the shipped tree, one at a time, and the FAIL lines captured verbatim:**
+
+*(A) the ordering — `Run.NodeIntel` restored to the pre-wave table:*
+
+```
+  A1:m1 combMin14<=suppMax24
+  A1:m1 supply24>=base14
+  A1:m2 combMin18<=suppMax28
+  A1:m2 supply28>=base18
+  A1:m3 combMin22<=suppMax32
+  A1:m3 supply32>=base22
+  A1:m4 combMin26<=suppMax36
+  A1:m4 supply36>=base26
+FORKTEST: FAIL A1:m1 combMin14<=suppMax24, A1:m1 supply24>=base14, ...
+```
+
+*(B) the class premium — `Run.ClassPremium` restored to `0` (i.e. `NodeIntel` never consulting
+`Run.IsKillObjective`, exactly as C3 left it). Every line is a PITCHED node paying its TASKED
+sibling to the point:*
+
+```
+  B:seed6 c4 Combat pitched30-tasked30
+  B:seed10 c2 Combat pitched22-tasked22
+  B:seed17 c4 Combat pitched30-tasked30
+  B:seed27 c1 Combat pitched18-tasked18
+  B:seed31 c3 Combat pitched26-tasked26
+  B:seed37 c3 Elite pitched40-tasked40
+  B:seed38 c2 Combat pitched22-tasked22
+  B:seed43 c1 Combat pitched18-tasked18
+FORKTEST: FAIL B:seed6 c4 Combat pitched30-tasked30, ...
+```
+
+*(C) the subsidy — the full heal moved back ahead of the fresh-wound gauge:*
+
+```
+  supply clear at 1 HP -> wound 0, hp 8/8   | pre-wave ordering -> wound 0
+  C:supplyWound=0 (want >=2 — the subsidy is back)
+FORKTEST: FAIL C:supplyWound=0 (want >=2 — the subsidy is back)
+```
+
+*(D) the honesty — the Event hover restored to printing its sentinel card:*
+
+```
+  D:objName 'ELIMINATE' seed1 [EVENT  -  ELIMINATE | Standard force   +0 intel | UNKNOWN SIGNAL]
+  D:force seed1 [EVENT  -  ELIMINATE | Standard force   +0 intel | UNKNOWN SIGNAL]
+  D:noIntelClause seed1
+  D:premiumPrint paidTrue printedFalse seed1
+```
+
+Leg C additionally keeps the defect **live** as a third arm: `Clear(heal:true, healFirst:true)`
+reproduces the pre-wave ordering inside the test and asserts it still reads `wound 0`. If a future
+refactor makes that arm read a wound, the leg fails as **vacuous** rather than passing on nothing —
+the fail-open shape this project has been bitten by twice.
+
+## Gates
+
+`dotnet build -c Release` **0 warn / 0 err**. `bash scripts/qa-sweep.sh --full` green,
+**SWEEP-EXIT=0**, 76 hooks exist / 76 ran, COVERAGE GUARD clean, autoplay ×3 no TIMEOUT.
+**`SIGHTLINE_SAVETEST: PASS`** — and that is a load-bearing PASS here, because `NodeIntel` is
+arithmetic over an already-dealt node and takes **zero** `rng` draws, so `Run.GenerateMap`'s draw
+order is untouched and all three `PersistedGenerators` map fingerprints are unchanged.
+`MissionNode.Intel` is not persisted (it is regenerated from `MapSeed` on load) and
+`SaveGame.MapFingerprint` hashes col/row/rowCount/kind/faction/objective/edges — not intel — so a
+save written before this wave loads and re-prices itself correctly. `SIGHTLINE_PAIRTEST: PASS`
+(byte-identity determinism intact). The append-only enums are untouched.
+
+## Screenshots
+
+`shots/hover-supply.png` (seed 8, col 2) — `SUPPLY - DEFEND / TASKED / Light resistance +18 intel /
++ Full squad heal`. `shots/hover-pitched.png` (seed 7, col 2) — `STANDARD - DECAPITATE / PITCHED /
+Standard force +32 intel  (+8 PITCHED)`. `shots/hover-event.png` (same fork) — the honest EVENT
+card. All three reproduce with `SIGHTLINE_SEED=<s> SIGHTLINE_CAMPAIGN=1 SIGHTLINE_MAPCOL=2
+SIGHTLINE_MAPHOVER=<sel> SIGHTLINE_SHOT=120`.
+
+## What I did NOT do
+
+- **No valuing route policy in the flywheel.** Stated above and in ROADMAP; it is the single thing
+  standing between this wave and an actual price for the fork. The round here is a regression check
+  and is labelled as one everywhere it appears.
+- **The PITCHED SUPPLY cell is un-priced** (see the ordering invariant above). Deliberate.
+- **DECAPITATE's half of the class gap is still untouched** — C3 kept off it for a within-class
+  control and this wave did not reopen it. Still ROADMAP item 2 under C3's open block.
+- **No ladder re-measure.** Two rungs at n=160 is a lever check, not a ladder; L5 remains the ladder
+  of record and this wave does not restate it. A wave that wants to move the level should re-run L5's
+  6×16 shape, not extend these four slot sets.
+- **The legacy deploy-card path** (`Hud.DrawDeployCard`, reachable only when the campaign map is
+  unavailable) now prints the same premium and is paid through the same `Run.OfferIntel`, so card
+  and bank cannot disagree — but that path is not exercised in normal campaign play and is
+  therefore not covered by a screenshot.

@@ -1,0 +1,17 @@
+==============================================================================
+THE FORK PAYS — CRN-paired round.  2 arms x 2 rungs x 4 slot bases x 40 campaigns
+==============================================================================
+
+--- heat 0 --------------------------------------------------------------
+  base  win%  53.1  n=160  binomSE 3.95  clusterSE 1.20  chunks ['55', '50', '55', '52']
+        intel earned/run  129.0  spent/run  110.9  avgMissionsCleared 4.44  earned/MISSION 29.06
+  r1    win%  46.9  n=160  binomSE 3.95  clusterSE 3.12  chunks ['45', '48', '55', '40']
+        intel earned/run  118.5  spent/run  100.7  avgMissionsCleared 4.31  earned/MISSION 27.47
+Traceback (most recent call last):
+  File "/home/user/wt/fork-pays/docs/measurements/fork-pays/report.py", line 50, in <module>
+    dif = [rows["new"]["chunk"][i] - rows["base"]["chunk"][i] for i in range(len(BASES))]
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/wt/fork-pays/docs/measurements/fork-pays/report.py", line 50, in <listcomp>
+    dif = [rows["new"]["chunk"][i] - rows["base"]["chunk"][i] for i in range(len(BASES))]
+           ~~~~^^^^^^^
+KeyError: 'new'
