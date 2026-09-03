@@ -170,7 +170,7 @@ between the two `KEYTABLE` markers. The set of bound keys it must cover is deriv
 | **END CARD: Enter / W / Esc** | new run (after TRAINING OP: run the drill again) / WAR ROOM / main menu |
 | **FIELD MANUAL: Up / Down (W / S), hold Left / Right (A / D), Esc / K** | change tab / scroll / back |
 | **SKIRMISH SETUP: Left / Right (A / D), Up / Down (W / S, + / -), Enter, Esc** | objective / heat / deploy / back |
-| **AUDIO CHECK: Esc or U, M** | back / mute |
+| **AUDIO CHECK: Up / Down or Wheel, M, Esc or U** | scroll the cue table / mute / back |
 | **WAR ROOM: Esc** | back |
 <!-- KEYTABLE:END -->
 

@@ -4823,7 +4823,7 @@ public partial class Game
         catch (Exception e) { return "VETTEST: FAIL (exception " + e.Message + ")"; }
         finally
         {
-            if (metaSaved != null) { try { System.IO.File.WriteAllText(SaveGame.MetaPathPublic, metaSaved); } catch { } }
+            if (metaSaved != null) { try { SaveGame.WriteAtomicPublic(SaveGame.MetaPathPublic, metaSaved); } catch { } }   // P13: atomic
             else { try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { } }
         }
         return fails.Count == 0
@@ -6034,8 +6034,8 @@ public partial class Game
 
         // ---- (5) persistence: round-trip + migration + the drill's no-write contract ------------
         string dispPath = Display.SettingsPathPublic;
-        string dispStash = null; bool hadDisp = false;
-        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
         int savedTips = Display.TipsSeen; bool savedTrain = Display.TrainingSeen;
         bool savedShow = Display.ShowAllVerbs, savedBrace = Display.BraceTipSeen, savedTut = Display.TutorialSeen;
         try
@@ -6076,12 +6076,7 @@ public partial class Game
         {
             Display.TipsSeen = savedTips; Display.TrainingSeen = savedTrain;
             Display.ShowAllVerbs = savedShow; Display.BraceTipSeen = savedBrace; Display.TutorialSeen = savedTut;
-            try
-            {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-            }
-            catch { }
+            SaveGame.RestoreForSelfTest(dispStash);
         }
 
         // The drill's NO-WRITE contract: a LIVE (persisting) training op must not create or touch
@@ -6107,12 +6102,7 @@ public partial class Game
             if (!trainBefore)
             {
                 Display.TrainingSeen = false;
-                try
-                {
-                    if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                    else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-                }
-                catch { }
+                SaveGame.RestoreForSelfTest(dispStash);   // idempotent: falls back to the in-memory copy
             }
         }
 
@@ -6825,13 +6815,9 @@ public partial class Game
         var fails = new List<string>();
         var notes = new List<string>();
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
-        bool hadSave = false, hadMeta = false; string saveStash = null, metaStash = null;
-        try
-        {
-            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
-            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
-        }
-        catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var saveStash = SaveGame.StashForSelfTest(sp);
+        var metaStash = SaveGame.StashForSelfTest(mp);
 
         // A real save, written by the game, as the base every shape is edited FROM. Hand-writing
         // the JSON would test a fiction; this is the file the game actually produces.
@@ -6955,25 +6941,148 @@ public partial class Game
                 for (; j < s.Length; j++) { if (s[j] == '[') depth++; else if (s[j] == ']') { depth--; if (depth == 0) break; } }
                 return s.Substring(0, open) + "[null, null]" + s.Substring(j + 1);
             }, true);
+
+            // (10) MAPPOS AND MISSION DISAGREE. Every other shape here is about a save that will
+            //      not LOAD; this one loads perfectly and is INCOHERENT. The game keeps
+            //      `Map[MapPos].Mission == Run.Mission` by construction, and FromDto bounds-checked
+            //      MapPos against `Map.Count` only — the map's SIZE, never the mission counter — so
+            //      a save whose two halves disagree resumed with the fight built from `Mission`
+            //      (force size, heat ramp, objective rotation, the MaxMissions win gate) and the
+            //      routing, node kind, faction and intel payout taken from a node several columns
+            //      away. The board is mission 1; clearing it advances into the finale's successors.
+            //      Not hypothetical: CLAUDE.md names "a MapPos pointing at another mission" as the
+            //      thing a generator change does to every save on disk.
+            {
+                int seedVal = 0;
+                var sm = System.Text.RegularExpressions.Regex.Match(good ?? "", "\"MapSeed\"\\s*:\\s*(-?\\d+)");
+                if (sm.Success) int.TryParse(sm.Groups[1].Value, out seedVal);
+                int lateId = -1, lateMission = 0;
+                if (seedVal != 0)
+                {
+                    var probe = new Run(); probe.GenerateMap(seedVal);
+                    for (int i = probe.Map.Count - 1; i >= 0; i--)
+                        if (probe.Map[i].Mission >= 4) { lateId = i; lateMission = probe.Map[i].Mission; break; }
+                }
+                if (lateId < 0) fails.Add("desync:noLateNodeToPointAt(seed=" + seedVal + ")");
+                else
+                {
+                    string what = "mapPos=" + lateId + "@m" + lateMission + " while Mission=1";
+                    try
+                    {
+                        System.IO.File.WriteAllText(sp, System.Text.RegularExpressions.Regex.Replace(
+                            good, "\"MapPos\"\\s*:\\s*-?\\d+", "\"MapPos\": " + lateId));
+                        var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                        if (!g.ContinueRun()) fails.Add("refusedAResumableSave:" + what);
+                        else if (g.RunState == null) fails.Add("desync:noRun");
+                        else if (g.RunState.CurrentNode == null) fails.Add("desync:noCurrentNode");
+                        else
+                        {
+                            // the invariant, asserted at LOAD — before any play can hide it
+                            if (g.RunState.CurrentNode.Mission != g.RunState.Mission)
+                                fails.Add("mapPosDesynced:node@m" + g.RunState.CurrentNode.Mission
+                                          + " vs run@m" + g.RunState.Mission);
+                            // and the resynced run is still a PLAYABLE mission 1, not a wreck
+                            if (g.Players.Count == 0) fails.Add("resumedWithNoSquad:" + what);
+                            if (g.AlivePlayers().Count == 0) fails.Add("resumedWithNobodyAlive:" + what);
+                            for (int i = 0; i < 300 && g.Phase != Phase.Win && g.Phase != Phase.Lose; i++)
+                                g.Update(1f / 60f);
+                        }
+                    }
+                    catch (Exception ex) { fails.Add("threw:" + what + ":" + ex.GetType().Name); }
+                }
+            }
+
+            // (11) A SAVE THIS BUILD DID NOT WRITE. Every other fixture in this file — and in
+            //      SAVETEST's StructureSelfTest — is either produced by the CURRENT build and then
+            //      edited, or is a shape that must be REFUSED. Nothing anywhere loaded a save from
+            //      an OLDER build and asserted it comes back CORRECT, which is the one thing the
+            //      save format's whole back-compat story rests on: eleven fields across RunDto and
+            //      UnitDto carry an "append-only: old saves default <x>" comment, and every one of
+            //      those comments was a claim no test could see. A field whose meaning changed —
+            //      the case SchemaVersion exists for — round-tripped green, because both ends of
+            //      the round trip were this build.
+            //
+            //      So these two literals are hand-written in the shape the DTOs had BEFORE the
+            //      append-only fields existed, with no SchemaVersion at all (reads back as 0, which
+            //      Load must treat as "old", never as "corrupt"). They assert the resumed run is
+            //      playable AND that every append-only field landed on the inert default its
+            //      comment promises. If you append a field, add it here; if a fixture stops
+            //      parsing, you renamed or repurposed a persisted name and old saves just broke.
+            foreach (var (what, json) in new (string, string)[]
+            {
+                // the oldest shape: no campaign map at all (MapSeed absent -> 0)
+                ("legacy:noMap",
+                 "{\"Mission\":2,\"Intel\":40,\"Squad\":[{\"Name\":\"LEGACY\",\"Cls\":\"ASSAULT\","
+                 + "\"Hp\":5,\"MaxHp\":5,\"Aim\":65,\"Mobility\":6,\"Weapon\":0,\"Kills\":3,\"Rank\":1,"
+                 + "\"Perks\":[],\"Traits\":[],\"Bonds\":[]}],\"Fallen\":[],\"BondTally\":{},"
+                 + "\"Card\":{\"Objective\":0,\"ModName\":\"STANDARD\",\"EnemyDelta\":0,\"StatDelta\":0}}"),
+                // and the same vintage WITH a campaign map, so the regenerate-from-seed path is covered
+                ("legacy:withMap",
+                 "{\"Mission\":1,\"Intel\":12,\"Squad\":[{\"Name\":\"LEGACY2\",\"Cls\":\"SNIPER\","
+                 + "\"Hp\":4,\"MaxHp\":4,\"Aim\":72,\"Mobility\":5,\"Weapon\":1,\"Perks\":[],"
+                 + "\"Traits\":[],\"Bonds\":[]}],\"Fallen\":[],\"BondTally\":{},\"MapSeed\":424242,"
+                 + "\"MapPos\":0,\"Card\":{\"Objective\":0,\"ModName\":\"STANDARD\"}}"),
+            })
+            {
+                try
+                {
+                    System.IO.File.WriteAllText(sp, json);
+                    SaveGame.InvalidateExistsCachePublic();
+                    if (!SaveGame.Exists) { fails.Add(what + ":notOffered"); continue; }
+                    var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                    if (!g.ContinueRun()) { fails.Add(what + ":refused"); continue; }
+                    var r = g.RunState;
+                    if (r == null) { fails.Add(what + ":noRun"); continue; }
+                    if (g.Players.Count == 0 || g.AlivePlayers().Count == 0) fails.Add(what + ":notPlayable");
+                    // the eleven append-only promises, one assertion each
+                    if (r.HeatLevel != 0) fails.Add(what + ":heat=" + r.HeatLevel);
+                    if (r.ActiveBoons.Count != 0) fails.Add(what + ":boons=" + r.ActiveBoons.Count);
+                    if (r.PrepFaction != Faction.None) fails.Add(what + ":prepFaction=" + r.PrepFaction);
+                    if (r.CheckpointUsed) fails.Add(what + ":checkpointUsed");
+                    if (r.Contract != Contract.None) fails.Add(what + ":contract=" + r.Contract);
+                    if (r.PendingSalvageReward != 0) fails.Add(what + ":pendingSalvage=" + r.PendingSalvageReward);
+                    var u = r.Squad[0];
+                    if (u.Name != (what.EndsWith("noMap") ? "LEGACY" : "LEGACY2")) fails.Add(what + ":name=" + u.Name);
+                    if (u.WeaponMods.Count != 0) fails.Add(what + ":weaponMods=" + u.WeaponMods.Count);
+                    if (u.Spec != Spec.None) fails.Add(what + ":spec=" + u.Spec);
+                    if (u.Scars.Count != 0) fails.Add(what + ":scars=" + u.Scars.Count);
+                    if (u.VendettaFaction != Faction.None) fails.Add(what + ":vendetta=" + u.VendettaFaction);
+                    if (u.NearDeathCount != 0) fails.Add(what + ":nearDeath=" + u.NearDeathCount);
+                    // and the map halves stay coherent (P13's FromDto resync must not fire on a mapless save)
+                    if (what.EndsWith("noMap"))
+                    {
+                        if (r.Map.Count != 0) fails.Add(what + ":phantomMap=" + r.Map.Count);
+                        if (r.CurrentNode != null) fails.Add(what + ":phantomNode");
+                    }
+                    else if (r.CurrentNode == null) fails.Add(what + ":noNode");
+                    else if (r.CurrentNode.Mission != r.Mission)
+                        fails.Add(what + ":desync:node@m" + r.CurrentNode.Mission + " vs run@m" + r.Mission);
+                    for (int i = 0; i < 300 && g.Phase != Phase.Win && g.Phase != Phase.Lose; i++)
+                        g.Update(1f / 60f);
+                }
+                catch (Exception ex) { fails.Add("threw:" + what + ":" + ex.GetType().Name + ":" + Short(ex.Message)); }
+            }
         }
         finally
         {
             try
             {
-                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
-                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
                 if (System.IO.File.Exists(sp + ".bak")) System.IO.File.Delete(sp + ".bak");
-                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
-                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+                SaveGame.RestoreForSelfTest(saveStash);
+                SaveGame.RestoreForSelfTest(metaStash);
             }
             catch { }
         }
 
         return fails.Count == 0
-            ? "SAVEEDGETEST: PASS (9 hostile save shapes resume into a PLAYABLE run or are refused "
+            ? "SAVEEDGETEST: PASS (12 hostile save shapes resume into a PLAYABLE run or are refused "
               + "AND STASHED: mission out of range in both directions, a nameless soldier, an "
               + "unknown class, an all-benched roster, a double-length roster, a phantom bond, a "
-              + "truncated file, a null squad member and an all-null squad — none throws, none "
+              + "truncated file, a null squad member, an all-null squad, and a MapPos pointing at "
+              + "another mission than the run counter (resynced on load, not resumed incoherent), and "
+              + "two saves THIS BUILD DID NOT WRITE — the pre-append-only DTO shape with and "
+              + "without a campaign map, no SchemaVersion, every one of the 11 'old saves default "
+              + "<x>' promises asserted — none throws, none "
               + "fields an empty board, and no refusal leaves a CONTINUE button behind it"
               + (notes.Count > 0 ? "; " + string.Join(", ", notes) : "") + ")"
             : "SAVEEDGETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
@@ -7653,6 +7762,101 @@ public partial class Game
         new ScreenCase("SHOP-WORST",    g => { g.DebugShop(); FitStressSquad(g); }),
     };
 
+    // ─── P13 — SIGHTLINE_KEYTABLEGATE: the controls the game reads vs the controls it DOCUMENTS ──
+    /// `Hud.KeyTable` is the single row-set behind BOTH the in-game FIELD MANUAL and README's
+    /// generated controls block, and `SIGHTLINE_KEYTABLE` is the generator that prints the latter.
+    /// Neither had a gate, and the gap showed: THE CUE MAP gave the AUDIO CHECK screen Up / Down
+    /// and mouse-wheel scrolling in `Game.HandleAudition` and never came back to the table, so for
+    /// two waves the manual and the README both told a player the screen had two keys when it had
+    /// four. Nothing could see it — the README was in sync with a KeyTable that was itself wrong.
+    ///
+    /// TWO LEGS, AND THEY CLOSE DIFFERENT HOLES. Say which, because they are easy to conflate:
+    ///
+    ///   (a) DRIFT. README's block between the KEYTABLE markers must be byte-identical to what the
+    ///       generator prints today. Catches a hand-edited README and a KeyTable change that was
+    ///       never regenerated. It would NOT have caught THE CUE MAP: the block was in sync.
+    ///   (b) COVERAGE, for the one screen whose input handler lives in a file of its own. Every
+    ///       `KeyboardKey.X` that `src/Game.Audition.cs` reads, and its wheel read, must be named
+    ///       in KeyTable's AUDIO CHECK row. DERIVED from the source, never remembered — CLAUDE.md's
+    ///       standing rule for exactly this class of list. THIS is the leg that would have failed
+    ///       the day THE CUE MAP shipped.
+    ///
+    /// Leg (b) is scoped to AUDIO CHECK on purpose and the scope is a declared limit, not an
+    /// oversight: it is the only screen with a dedicated handler file, so it is the only one whose
+    /// read-set can be derived without guessing which of Game.cs's ~8600 lines belong to which
+    /// screen. Every other screen's row is still un-gated — docs/ROADMAP.md carries it.
+    ///
+    /// Reads the repo's own source, so it runs from the source tree (the sweep does; publish.sh
+    /// does not run it). A missing file is a FAIL, never a skip.
+    public static string KeyTableGate()
+    {
+        var fails = new List<string>();
+        string root = System.IO.Directory.GetCurrentDirectory();
+        string readme = System.IO.Path.Combine(root, "README.md");
+        string audsrc = System.IO.Path.Combine(root, "src", "Game.Audition.cs");
+
+        // ---- (a) README's generated block is what the generator prints -------------------------
+        const string Begin = "<!-- KEYTABLE:BEGIN";
+        const string End = "<!-- KEYTABLE:END -->";
+        if (!System.IO.File.Exists(readme)) fails.Add("noREADME:" + readme);
+        else
+        {
+            string md = System.IO.File.ReadAllText(readme);
+            int b = md.IndexOf(Begin, StringComparison.Ordinal);
+            int e = md.IndexOf(End, StringComparison.Ordinal);
+            if (b < 0 || e < 0 || e < b) fails.Add("readmeMarkersMissing");
+            else
+            {
+                int bodyStart = md.IndexOf('\n', b);
+                string block = md.Substring(bodyStart + 1, e - bodyStart - 1).Trim('\n');
+                string want = Hud.KeyTableMarkdown().Replace("\r\n", "\n").Trim('\n');
+                if (block.Replace("\r\n", "\n") != want)
+                {
+                    // name the first differing line rather than dumping two tables
+                    var gl = block.Replace("\r\n", "\n").Split('\n');
+                    var wl = want.Split('\n');
+                    int k = 0;
+                    while (k < gl.Length && k < wl.Length && gl[k] == wl[k]) k++;
+                    fails.Add("readmeStale@line" + (k + 1) + ":README=" + Short(k < gl.Length ? gl[k] : "<eof>")
+                              + "|generator=" + Short(k < wl.Length ? wl[k] : "<eof>"));
+                }
+            }
+        }
+
+        // ---- (b) the AUDIO CHECK screen's read-set is documented -------------------------------
+        string audRow = null;
+        foreach (var r in Hud.KeyTable) if (r.Input.StartsWith("AUDIO CHECK", StringComparison.Ordinal)) audRow = r.Input;
+        if (audRow == null) fails.Add("noAudioCheckRow");
+        else if (!System.IO.File.Exists(audsrc)) fails.Add("noAuditionSource:" + audsrc);
+        else
+        {
+            string src = System.IO.File.ReadAllText(audsrc);
+            // the token a player would look for, per KeyboardKey the handler reads
+            string Token(string key) => key switch
+            {
+                "Escape" => "Esc",
+                "Up" => "Up", "Down" => "Down", "Left" => "Left", "Right" => "Right",
+                _ => key,
+            };
+            var seen = new SortedSet<string>();
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(src, @"KeyboardKey\.([A-Za-z][A-Za-z0-9]*)"))
+                seen.Add(Token(m.Groups[1].Value));
+            if (System.Text.RegularExpressions.Regex.IsMatch(src, @"GetMouseWheelMove\s*\(")) seen.Add("Wheel");
+            if (seen.Count == 0) fails.Add("derivedNoKeysFromAuditionSource");
+            foreach (string t in seen)
+                if (!System.Text.RegularExpressions.Regex.IsMatch(audRow, @"\b" + System.Text.RegularExpressions.Regex.Escape(t) + @"\b"))
+                    fails.Add("undocumented:AUDIO CHECK reads " + t + " (row: " + audRow + ")");
+        }
+
+        return fails.Count == 0
+            ? "KEYTABLEGATE: PASS (README's KEYTABLE block is byte-identical to SIGHTLINE_KEYTABLE's "
+              + "output, and every KeyboardKey + the wheel read by src/Game.Audition.cs is named in "
+              + "KeyTable's AUDIO CHECK row)"
+            : "KEYTABLEGATE: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+
     // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
     /// The two ways OUT of a screen that the audit found missing, pinned together because they are
     /// the same problem: a route the player needed and could not find.
@@ -7678,14 +7882,9 @@ public partial class Game
         Util.Reseed(70126);
         var fails = new List<string>();
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
-        bool hadSave = false, hadMeta = false;
-        string saveStash = null, metaStash = null;
-        try
-        {
-            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
-            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
-        }
-        catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var saveStash = SaveGame.StashForSelfTest(sp);
+        var metaStash = SaveGame.StashForSelfTest(mp);
 
         try
         {
@@ -7768,10 +7967,8 @@ public partial class Game
         {
             try
             {
-                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
-                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
-                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
-                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+                SaveGame.RestoreForSelfTest(saveStash);
+                SaveGame.RestoreForSelfTest(metaStash);
             }
             catch { }
         }
@@ -7801,8 +7998,11 @@ public partial class Game
         Util.Reseed(70127);
         var fails = new List<string>();
         string dispPath = Display.SettingsPathPublic;
-        string dispStash = null; bool hadDisp = false;
-        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        // P13: the ONE stash — rename aside, rename back. This test used to hold the player's
+        // display.json in a local string and put it back with File.WriteAllText, which truncates in
+        // place AND writes ZERO BYTES when the read failed but Exists() had said yes. Leg (S) below
+        // proves that cannot happen any more. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
         int savedScale = Display.UiScaleIdx;
         // W5 review: the card's hover fills read the live pointer; pin it off-card so a stray
         // Xvfb pointer can never land on a control mid-test.
@@ -8198,18 +8398,68 @@ public partial class Game
                     Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
                 }
             }
+
+            // ── (S) THE STASH: this test may not be able to destroy the file it borrows ────────
+            // P13. This test used to hold the player's display.json in a LOCAL STRING and put it
+            // back with `if (hadDisp) File.WriteAllText(dispPath, dispStash)`. Two states reach
+            // that line with `dispStash == null`: File.Exists said yes and ReadAllText then threw
+            // (a permission flip, an IO error, or — routinely, in this repo — another agent's
+            // sweep renaming the file between the two calls). File.WriteAllText(path, null) does
+            // not throw and does not skip: it opens the file WITH TRUNCATION and writes nothing.
+            // The player's settings become ZERO BYTES, destroyed by the test suite that exists to
+            // protect them.
+            //
+            // The leg drives the harness's own stash/restore over a sentinel file, with the
+            // in-memory copy forced to come back null (SaveGame.SelfTestReadFailPin) — i.e. the
+            // exact state that used to zero it — and asserts the bytes come back whole. It is a
+            // property of the RESTORE MECHANISM, so it is checked on a scratch path, not on the
+            // real display.json: a leg that has to endanger the file to prove it is safe is not a
+            // fix. Both directions are rename(2), so there is no truncating writer left to test.
+            {
+                string probe = dispPath + ".p13stashprobe";
+                const string Sentinel = "{\"UiScaleIdx\":3,\"BrightIdx\":1,\"P13\":\"do not lose me\"}";
+                try
+                {
+                    System.IO.File.WriteAllText(probe, Sentinel);
+                    SaveGame.SelfTestReadFailPin = true;             // ReadAllText "fails"
+                    var st = SaveGame.StashForSelfTest(probe);
+                    if (!st.Had) fails.Add("stash:existenceNotSeen");
+                    if (st.Text != null) fails.Add("stash:readFailPinIgnored");
+                    if (System.IO.File.Exists(probe)) fails.Add("stash:fileNotMovedAside");
+                    System.IO.File.WriteAllText(probe, "{\"UiScaleIdx\":0}");   // the test's own scribble
+                    SaveGame.RestoreForSelfTest(st);
+                    if (!System.IO.File.Exists(probe)) { fails.Add("stash:restoreLostTheFile"); }
+                    else
+                    {
+                        string back = System.IO.File.ReadAllText(probe);
+                        if (back.Length == 0) fails.Add("stash:restoreTruncatedToZeroBytes");
+                        else if (back != Sentinel) fails.Add("stash:restoreChangedBytes:" + back.Length + "B");
+                    }
+                    if (System.IO.File.Exists(probe + ".selftest-stash")) fails.Add("stash:strandedStashFile");
+
+                    // and the absent case: nothing there before, nothing left behind after
+                    try { System.IO.File.Delete(probe); } catch { }
+                    var st2 = SaveGame.StashForSelfTest(probe);
+                    if (st2.Had) fails.Add("stash:phantomExistence");
+                    System.IO.File.WriteAllText(probe, "{}");
+                    SaveGame.RestoreForSelfTest(st2);
+                    if (System.IO.File.Exists(probe)) fails.Add("stash:leftAFileWhereThereWasNone");
+                }
+                catch (Exception ex) { fails.Add("stash:threw:" + ex.GetType().Name); }
+                finally
+                {
+                    SaveGame.SelfTestReadFailPin = false;
+                    try { if (System.IO.File.Exists(probe)) System.IO.File.Delete(probe); } catch { }
+                    try { if (System.IO.File.Exists(probe + ".selftest-stash")) System.IO.File.Delete(probe + ".selftest-stash"); } catch { }
+                }
+            }
         }
         catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
         finally
         {
             Hud.MousePin = new Vector2(float.NaN, float.NaN);
             Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
-            try
-            {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-            }
-            catch { }
+            SaveGame.RestoreForSelfTest(dispStash);
         }
 
         return fails.Count == 0
@@ -8226,7 +8476,9 @@ public partial class Game
               + "without a save, the cold profile's resting line is the TRAINING OP nudge and yields "
               + "to a seen drill or a save, rung 0 reads STANDARD at 26px and the card states the "
               + "unlock rule at the ceiling / MAX UNLOCKED below it, and every card line ends inside "
-              + "the card at 120%)"
+              + "the card at 120%; and this test's own display.json stash is a rename in both "
+              + "directions — a forced read failure restores the bytes whole instead of "
+              + "truncating the file to zero)"
             : "SETTINGSTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
@@ -8309,15 +8561,10 @@ public partial class Game
 
         string dispPath = Display.SettingsPathPublic;
         string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
-        bool hadDisp = false, hadSave = false, hadMeta = false;
-        string dispStash = null, saveStash = null, metaStash = null;
-        try
-        {
-            hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath);
-            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
-            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
-        }
-        catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
+        var saveStash = SaveGame.StashForSelfTest(sp);
+        var metaStash = SaveGame.StashForSelfTest(mp);
         bool savedTut = Display.TutorialSeen, savedShow = Display.ShowAllVerbs;
         int savedTips = Display.TipsSeen;
 
@@ -8454,12 +8701,9 @@ public partial class Game
             Stats.ClearLog();
             try
             {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
-                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
-                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
-                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
-                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+                SaveGame.RestoreForSelfTest(dispStash);
+                SaveGame.RestoreForSelfTest(saveStash);
+                SaveGame.RestoreForSelfTest(metaStash);
             }
             catch { }
         }
@@ -9414,8 +9658,8 @@ public partial class Game
         if (!System.IO.Path.IsPathRooted(dispPath)) fails.Add("displayPathRelative:" + dispPath);
         if (System.IO.Path.GetDirectoryName(dispPath) != SaveGame.ConfigDir)
             fails.Add($"displayDirSplit:{System.IO.Path.GetDirectoryName(dispPath)} vs {SaveGame.ConfigDir}");
-        string dispStash = null; bool hadDisp = false;
-        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+        var dispStash = SaveGame.StashForSelfTest(dispPath);
         try
         {
             Display.AnimSpeedIdx = 2; Display.UiScaleIdx = 3; Display.ApplyUiScale();
@@ -9443,8 +9687,7 @@ public partial class Game
         {
             try
             {
-                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
-                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+                SaveGame.RestoreForSelfTest(dispStash);
             }
             catch { }
             Display.AnimSpeedIdx = savedAnim; Display.UiScaleIdx = savedScale; Cfg.UiScale = savedCfg;
@@ -9463,11 +9706,11 @@ public partial class Game
         // a real profile does — so it stashes and restores save.json / meta.json.
         {
             string sp2 = SaveGame.SavePathPublic, mp2 = SaveGame.MetaPathPublic;
-            bool hadS = false, hadM = false; string sStash = null, mStash = null;
+            // P13: the ONE stash — rename aside, rename back. See SaveGame.StashForSelfTest.
+            var sStash = SaveGame.StashForSelfTest(sp2);
+            var mStash = SaveGame.StashForSelfTest(mp2);
             try
             {
-                hadS = System.IO.File.Exists(sp2); if (hadS) sStash = System.IO.File.ReadAllText(sp2);
-                hadM = System.IO.File.Exists(mp2); if (hadM) mStash = System.IO.File.ReadAllText(mp2);
                 if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);   // a never-played profile
 
                 var fresh = new Game { NoPersist = false };
@@ -9490,10 +9733,8 @@ public partial class Game
             {
                 try
                 {
-                    if (hadS) System.IO.File.WriteAllText(sp2, sStash);
-                    else if (System.IO.File.Exists(sp2)) System.IO.File.Delete(sp2);
-                    if (hadM) System.IO.File.WriteAllText(mp2, mStash);
-                    else if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);
+                    SaveGame.RestoreForSelfTest(sStash);
+                    SaveGame.RestoreForSelfTest(mStash);
                 }
                 catch { }
             }

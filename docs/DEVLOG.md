@@ -13608,3 +13608,379 @@ number above is an *upper* bound on the opponent's strength under the lane.
 * The flywheel's missing enemy-overwatch exposure term (ROADMAP, unchanged).
 * `Ai.ChooseLane` re-derives the squad's discs per call. Harmless at 0.4% of acts; if a future wave
   makes the branch common, cache it per enemy turn.
+
+---
+
+# §THE UNVERIFIED — PERSISTENCE AND THE GATE (wave P13, PROGRAM PARALLAX)
+
+**Base commit `a933cfe`, branch `wave/qa-persist`. Sole developer.**
+
+## Why the wave existed
+
+An adversarial QA hunt produced 46 findings. Each was meant to face two refute-by-default
+verifiers before being reported; two thirds of those verifiers died on a usage limit and the
+workflow's post-processing filed **every unverified finding as "refuted" with an empty reason**. 33
+findings were never adjudicated. Twelve of them — the persistence/save-format group and the
+gate/generated-docs group — came to this wave with **their evidence discarded**: titles only.
+
+So the wave's method was **refute first, fix second**. Each item was traced in the source with the
+working assumption that the hunter was wrong. **Three of the twelve did not survive that** and are
+recorded below as refutations with the trace that killed them; that includes the item the lead
+flagged as highest-value.
+
+## Verdicts
+
+| # | Finding | Verdict |
+|---|---|---|
+| 9 | `qa-sweep.sh` names every hook's log after `SIGHTLINE_BALANCE_JSON` | **REFUTED** |
+| 4 | `SaveGame.ExistsPin` is an ungated public static | **REFUTED** |
+| 6 | A forced objective desyncs the mission played from the intel paid | **CONFIRMED, not fixed** (ROADMAP) |
+| 1 | `MapFingerprint` is blind to the map's ECONOMY payload | **CONFIRMED, fixed** |
+| 2+3 | `SETTINGSTEST`'s `display.json` stash can truncate to zero bytes | **CONFIRMED, fixed** |
+| 5 | `FromDto` never bounds-checks `MapPos` against `Mission` | **CONFIRMED, fixed** |
+| 7 | No self-test loads a save this build did not write | **CONFIRMED, fixed** |
+| 8 | CLAUDE.md's "SHIPTEST is the only hook that writes the live dir" | **CONFIRMED, fixed** |
+| 10 | CLAUDE.md's architecture map + program roster are stale | **CONFIRMED, fixed** |
+| 11 | CLAUDE.md's wall-clock-read count is wrong | **CONFIRMED, fixed** |
+| 12 | AUDIO CHECK scrolling never reached `Hud.KeyTable` | **CONFIRMED, fixed** |
+
+---
+
+## REFUTED — 9. The sweep's log naming and `verdict`'s detail line
+
+The claim: `run()` derives a hook's log-file name with
+`env | grep -oE '^SIGHTLINE_[A-Z0-9_]+=' | head -1`, the house isolation procedure exports
+`SIGHTLINE_BALANCE_JSON` into the same environment, so every hook's log lands on one file named
+after the config var and `verdict`'s `SIGHTLINE_"${name}"*.out` detail grep finds nothing.
+
+**It does not hold, and the reason is worth knowing.** Bash places a command's TEMPORARY
+assignments AHEAD of the inherited exported environment in `environ`, and every call site is
+`SIGHTLINE_<HOOK>=1 run` with exactly one such assignment. Measured three ways:
+
+1. Every hook the sweep invokes (**78**), driven through a verbatim copy of `run()`'s derivation
+   under a full house-isolated environment (`XDG_CONFIG_HOME`, `SIGHTLINE_BALANCE_JSON` exported):
+   **78/78 resolve to their own name, 0 misnamed.**
+2. A real `SIGHTLINE_DKTEST=1 run` — verbatim `run()`, real `xvfb-run dotnet run`, isolation
+   exported — leaves exactly `SIGHTLINE_DKTEST.out` in the log directory. Not
+   `SIGHTLINE_BALANCE_JSON.out`.
+3. `verdict`'s detail path, driven over a synthetic `SIGHTLINE_SAVETEST.out`, prints
+   `detail: SAVETEST: FAIL (mapShape s=7 expected ab12 got cd34)` and sets `_fail=1`.
+
+**The finding is not baseless — it is one shell semantic away from being right.** Placing the same
+variable with `env NAME=1` (which APPENDS to `environ`) instead of a bash temporary assignment
+misnames **23 of the 78** hooks, all onto `SIGHTLINE_BALANCE_JSON`. So the correctness rests
+entirely on the shebang and on one variable per call site. Both facts are now recorded in
+`scripts/qa-sweep.sh` above `run()`, with the two things that would break it.
+
+## REFUTED — 4. `SaveGame.ExistsPin`
+
+The claim: an ungated `public static` that overrides the intro's CONTINUE predicate — the one D2
+built a validator for.
+
+**Traced, and it holds up on all three counts.**
+
+* **Inert by default.** `bool?`, null, and `Exists` reads it only under `HasValue`.
+* **Never leaks.** Six assignments, all in `Game.Harness.cs` (the headless-only slice), and every
+  one is cleared to `null` in a `finally` — `Game.Harness.cs:7402` for FITTEST's ScreenCase driver,
+  `:8177` for SETTINGSTEST's front-door loop.
+* **It does not defeat D2.** The pin decides only whether the BUTTON is drawn.
+  `Game.cs:8465` is `case "continue": return SaveGame.Exists && ContinueRun();` — pressing it still
+  runs `Load()`, which is where D2's stash-and-remove lives. Nothing on disk is touched.
+
+And "ungated" indicts the house idiom rather than this field: `Renderer.TimePin`, `Hud.TimePin`,
+`Hud.MousePin`, `Hud.AnimPin`, `Crash.DirOverride` and `Events.HeatPinned` are all `public static`,
+default-inert, restored in a `finally`. `ExistsPin` is the sixth of six.
+
+---
+
+## CONFIRMED, NOT FIXED — 6. A forced objective vs the intel the node pays
+
+**Real, and harness-only.** Trace: `node.Intel` is assigned once, in `Run.GenerateMap`
+(`Run.cs:805`), from `Run.NodeIntel`, which reads `node.Card.Objective` through `ClassPremium`.
+`Game.ForcedObjective` is read in exactly one place — `Game.cs:2008`,
+`if (NoPersist && ForcedObjective.HasValue) Objective = ForcedObjective.Value;` — and assigns the
+played objective without touching any card. The payout at `Game.cs:2678` reads `clearedNode.Intel`.
+So under `SIGHTLINE_OBJ=<x>` the fight is `<x>` and the economy pays whatever the map dealt.
+`DebugForceObjective` rewrites the card, so mission 1 is coherent; **missions 2+ are not**, because
+`ChooseNode` re-adopts the node's card.
+
+**Size, from the constants, not estimated:** `Run.PitchedPremium = 8` against
+`BaseIntel(m) = 12 + 4m` — 16 at m1, 36 at m6. So the pin mis-prices a Combat/Elite node by 8
+intel, **up to a third of its payout**, in whichever direction the deal happens to fall.
+
+**Not reachable by a player.** All 14 assignments of `ForcedObjective` are harness code and every
+one pairs with `NoPersist = true`; the read is `NoPersist`-gated.
+
+**Why this wave did not fix it.** The fix belongs at `Game.cs:2008`, which another developer holds
+this sprint, and it is an **instrument change**: it moves measured intel in every `SIGHTLINE_OBJ`
+batch, which CLAUDE.md's measurement contract says must be paired with a re-measure this wave was
+not scoped to run. Handed to ROADMAP with the one-line fix written out.
+
+---
+
+## CONFIRMED + FIXED
+
+### 1. `SaveGame.MapFingerprint` was blind to everything a load REBUILDS
+
+The hash fed `Col, Row, RowCount, Kind, Faction, Card.Objective` and the edge list. It did not feed
+`node.Intel` — the routing economy — nor `MissionCard.ModName / EnemyDelta / StatDelta / Reward`,
+the card's whole difficulty and reward payload. All of it is regenerated from `MapSeed` on load,
+which is exactly what makes it save format.
+
+**Proven, not asserted.** `git show 1688087 -- src/SaveGame.cs` is EMPTY: THE FORK PAYS moved
+`Run.DepthBase` 10 → 12, gave SUPPLY a −6 discount, ELITE a +14 premium and a PITCHED fight a +8
+class price — every node's payout in the game — and never touched the guard. Reproduced on this
+tree, twice, on the two axes:
+
+```
+PRE-FIX, DepthBase 12 -> 13 (every node re-priced):
+  SAVETEST: PASS (... 3 map-generator fingerprints match ...)
+PRE-FIX, ELITE EnemyDelta 2 -> 3 (card difficulty payload changed):
+  SAVETEST: PASS (... 3 map-generator fingerprints match ...)
+```
+
+The guard was silent when it should have been loud. After widening the hash:
+
+```
+POST-FIX, DepthBase 12 -> 13:
+  SAVETEST: FAIL (mapShape:seed1 (golden 0xB51B0399, actual 0x91927E9A),
+                  mapShape:seed424242 (golden 0x62B48DEA, actual 0xB60226D1),
+                  mapShape:seed31337 (golden 0xC48C84A8, actual 0x208F9919))
+POST-FIX, ELITE EnemyDelta 2 -> 3:
+  SAVETEST: FAIL (mapShape:seed1 (golden 0xB51B0399, actual 0x3E300D72), ...)
+POST-FIX, clean tree:
+  SAVETEST: PASS
+```
+
+**THE GOLDENS MOVED, and the map did not.** `0xC169C99E / 0xEC48647A / 0x5CE96D55` →
+`0xB51B0399 / 0x62B48DEA / 0xC48C84A8` over the same three DAGs, because the hash now feeds more of
+each node. Both numbers are recorded next to `PersistedGenerators`. `RewardText` is deliberately
+NOT fed: it is a display string, and a copy edit is not a save-format change.
+
+### 2 + 3. A self-test that could zero the player's settings file
+
+The most serious pair on the list, and they are one defect. `SettingsSelfTest` held the player's
+`display.json` in a local string and restored it with:
+
+```csharp
+try { hadDisp = File.Exists(dispPath); if (hadDisp) dispStash = File.ReadAllText(dispPath); } catch { }
+...
+if (hadDisp) File.WriteAllText(dispPath, dispStash);
+```
+
+**The `catch { }` and the `if (hadDisp)` disagree.** If `Exists()` succeeds and `ReadAllText` then
+throws — a permission flip, an IO error, or another agent's sweep renaming the file between the two
+calls, which this repo does by design — `hadDisp` is TRUE and `dispStash` is NULL.
+`File.WriteAllText(path, null)` does not throw and does not skip: `StreamWriter` opens the file
+**with truncation** and writes nothing. The player's settings become **zero bytes**, destroyed by
+the suite written to protect them. The happy path is only marginally better: `WriteAllText`
+truncates in place, the exact tear `docs/DISTRIBUTION.md` §5 promises cannot happen.
+
+**Seven self-tests carried it**, not one: SETTINGSTEST, TUTTEST (twice), SAVEEDGETEST, QUITTEST,
+BRIEFTEST and ONRAMPTEST (twice). C6 had built `StashAside`/`UnstashAside`/`WriteAtomic` for
+precisely this and routed only SAVETEST's meta block through them.
+
+**Fix.** `SaveGame.StashForSelfTest` / `RestoreForSelfTest`: rename the file aside, rename it back.
+A rename cannot tear, cannot truncate, and cannot be handed a null; the in-memory copy is
+belt-and-braces only. It is also hermetic in a way the old pattern was not — the test starts with
+the file ABSENT, so it cannot silently read the maintainer's own profile (the C6 defect where
+SAVETEST failed on any machine owning `MetaUnlock` ordinal 1). All seven now use it. SAVETEST's
+three remaining in-file restores and VETTEST's go through `WriteAtomic`.
+
+**The leg** is `SETTINGSTEST (S)`. It drives the harness's own stash/restore over a **scratch
+sentinel file** — never the real `display.json`; a leg that endangers the file to prove it is safe
+is not a fix — with the in-memory read forced to fail (`SaveGame.SelfTestReadFailPin`), i.e. the
+exact state that used to zero it.
+
+```
+PRE-FIX  (StashForSelfTest/RestoreForSelfTest reverted to the pre-P13 semantics):
+  SETTINGSTEST: FAIL (stash:fileNotMovedAside,stash:restoreTruncatedToZeroBytes)
+POST-FIX:
+  SETTINGSTEST: PASS (... and this test's own display.json stash is a rename in both directions —
+  a forced read failure restores the bytes whole instead of truncating the file to zero)
+```
+
+Converted tests, all green after: TUTTEST, SAVEEDGETEST, QUITTEST, BRIEFTEST, ONRAMPTEST.
+
+### 5. `FromDto` bounds-checked `MapPos` against the map's SIZE, never against `Mission`
+
+`r.MapPos = (dto.MapPos >= 0 && dto.MapPos < r.Map.Count) ? dto.MapPos : 0;` — and nothing else.
+The game maintains `Map[MapPos].Mission == Run.Mission` by construction (`Run.Start`;
+`Game.ChooseNode` advances one column while `NextMission` does `_run.Mission + 1`; the Event branch
+assigns `_run.Mission = node.Mission` explicitly to keep the counter in lockstep). **Nothing
+re-established it on load.** `Game.ContinueRun` clamps `Mission` into range and calls
+`SetupMission(n)`; `MapPos` is left wherever it points. So a save whose halves disagree resumed
+**incoherently**: the fight built from `Mission` (force size, heat ramp, objective rotation, the
+`MaxMissions` win gate) and the routing, node kind, faction and intel payout taken from a node
+several columns away — mission 1's rookie force, deployed from a mission-5 node, cleared straight
+into the finale's successors. CLAUDE.md already names "a `MapPos` pointing at another mission" as
+what a generator change does to every save on disk.
+
+**Fix:** re-derive position from the counter (which is what every downstream system reads) via
+`Run.JumpTo`, no-op when the two already agree, with `Mission` clamped the way `ContinueRun` clamps
+it so an out-of-range counter cannot smuggle the desync back in. `dto.Card` still wins over the
+card `JumpTo` adopts.
+
+**Leg:** `SAVEEDGETEST (10)`, a save pointed at a late node with `Mission=1`, asserted at LOAD
+before any play can hide it.
+
+```
+PRE-FIX (leg present, FromDto resync removed):  SAVEEDGETEST: FAIL (mapPosDesynced:node@m6 vs run@m1)
+POST-FIX:                                       SAVEEDGETEST: PASS (12 hostile save shapes ...)
+```
+
+**It caught TWO of the project's own fixtures on the first full sweep**, and that is the finding's
+best evidence: the desync was not hypothetical, it was sitting in the two tests that exist to prove
+the map round-trips.
+
+* `SaveGame.SelfTest` built its round-trip source with `Mission = 4` and `src.JumpTo(3)` — desynced
+  by one column since it was written — and its `mapNode` assertion *pinned the broken state*
+  (`CurrentNode.Mission != 3`). Now `src.JumpTo(src.Mission)`, asserted against `src.Mission`, so it
+  cannot drift apart again.  `SAVETEST: FAIL (mapPos,mapNode)` → PASS.
+* `EventCatalog`'s save-round-trip leg set `sr.MapPos = evNode.Id` and left `Mission` alone, while
+  the real `Game.ChooseNode` assigns `_run.Mission = node.Mission` on an Event node precisely to
+  "keep the mission counter in lockstep with the column". The fixture now does the same.
+  `EVENTTEST: FAIL (postMapPos, postNodeKind)` → PASS.
+
+Both were the shape a real save cannot have — which is the point: the invariant held everywhere in
+the GAME and was enforced nowhere on LOAD, so only the fixtures could violate it, and both did.
+
+### 7. Nothing ever loaded a save this build did not write
+
+Every fixture in the project is either produced by the CURRENT build and then edited
+(`SAVEEDGETEST`) or is a shape that must be REFUSED (`StructureSelfTest`'s `null` / `{}` /
+`noSquad` / `emptySquad`). **Eleven fields across `RunDto` and `UnitDto` carry an "append-only: old
+saves default `<x>`" comment, and every one of those comments was a claim no test could see.**
+
+**Leg:** `SAVEEDGETEST (11)` — two hand-written literals in the DTO shape as it was BEFORE the
+append-only fields, with no `SchemaVersion` at all (reads back as 0, which `Load` must treat as
+"old", never "corrupt"): one with a campaign map and one without. They assert the run is playable
+AND that all eleven promises landed inert.
+
+**All eleven hold today** — that is the result, and it is worth stating plainly rather than
+implying a bug was found. To show the leg BITES rather than passing vacuously, `CheckpointUsed`'s
+handling was inverted (`r.CheckpointUsed = !dto.CheckpointUsed`) — a MEANING change, the exact
+class `SchemaVersion` exists for:
+
+```
+WITH THE INVERSION:  SAVEEDGETEST: FAIL (legacy:noMap:checkpointUsed,legacy:withMap:checkpointUsed)
+WITHOUT:             SAVEEDGETEST: PASS
+```
+
+### 8. "SHIPTEST is the only hook that writes the LIVE player-data directory"
+
+**False as a standalone claim, and the paragraph's own next sentence gives it away** — it tells you
+`<name>.json.selftest-stash` may be left by "a self-test", unqualified.
+
+**Derived, not guessed.** Every writer calls `Directory.CreateDirectory` before writing, so a hook
+that writes leaves the directory behind even after it restores. Each hook was run under its own
+FRESH EMPTY `XDG_CONFIG_HOME` (81 enumerated from `src/`, 4 slow ones skipped, **77 measured**):
+**14** create it
+— BRIEFTEST, CONTRASTTEST, EVENTTEST, HORDETEST, METATEST, MODETEST, ONRAMPTEST, QUITTEST,
+SAVEEDGETEST, SAVETEST, SETTINGSTEST, SHIPTEST, TUTTEST, VETTEST.
+
+**What IS unique to SHIPTEST is the second process**, and that half stands: `Ship.cs:403` holds the
+project's only `Process.Start`. CLAUDE.md now says both things separately, carries the derivation
+command, and names the four writers that still hand-roll a null-guarded truncating restore
+(`Game.Endless.cs`, `Game.Modes.cs`, `Game.Meta.cs`, two `Program.cs` shot paths) — outside this
+wave's files, handed to ROADMAP.
+
+### 10. The architecture map and the program roster
+
+**Ten source files absent**, derived by looping the basenames of `src/*.cs` against the file: 26
+named, 36 exist. Missing were `Mission.cs` — **the one enemy funnel, whose `MakeHostile` CLAUDE.md
+cites three times elsewhere** — plus `Voice.cs`, `Audio.CueMap.cs`, `Audio.Analysis.cs`,
+`Hud.Audition.cs`, `Game.Audition.cs`, `Game.Modes.cs`, `Game.Endless.cs`, `Game.Meta.cs`,
+`Game.Codex.cs`. All ten added with a line each.
+
+**The roster had TWO programs marked "(current)"** — RESONANCE ("the tenth") and CONTOUR ("the
+eleventh") — while PARALLAX, whose waves are the newest merges on `main`, appeared in one unnumbered
+paragraph. A fresh session reading top-down would have concluded CONTOUR was current. Now:
+RESONANCE tenth (closed), CONTOUR eleventh (closed), **PARALLAX (current) the twelfth**.
+
+### 11. The wall-clock-read count
+
+CLAUDE.md read *"57 wall-clock reads (46 in `Renderer.cs` and 11 in `Hud.cs`; counted, the old
+58 / 46 / 12 here was off)"*. **The triple it called off is the correct one.** Derived on the base
+commit `a933cfe`, non-comment lines, excluding the `Now()` definitions:
+
+```
+src/Renderer.cs    46 call sites
+src/Hud.cs         12 call sites
+raw Raylib.GetTime() outside the two Now() definitions: 0
+```
+
+**46 + 12 = 58**, which is what `src/Display.cs`'s own comment has said all along and what CLAUDE.md
+contradicted. Per this file's standing rule against hand-maintained counts, the number is **gone**:
+the passage now carries the one-line derivation, the value at `a933cfe`, and an instruction to
+re-run rather than quote it. (`grep -oc` was rejected in favour of `grep -o … | wc -l` — `-c`
+counts LINES and would under-count a line holding two calls.)
+
+### 12. AUDIO CHECK scrolling never reached `Hud.KeyTable`
+
+`Game.HandleAudition` reads `GetMouseWheelMove`, `KeyboardKey.Up` and `KeyboardKey.Down` to scroll
+the cue table. `Hud.KeyTable`'s row said `"AUDIO CHECK: Esc or U, M" → "back / mute"`. Attributed by
+`git log -S`: the scrolling came in with **THE CUE MAP (`f472d98`)**; the row dates from **THE FRONT
+DOOR (`9b969f3`)**, before it. Since `KeyTable` feeds BOTH the in-game FIELD MANUAL and README's
+generated block, both under-documented the screen by half its controls, for two waves.
+
+Row fixed to `"AUDIO CHECK: Up / Down or Wheel, M, Esc or U" → "scroll the cue table / mute /
+back"`; README regenerated with `SIGHTLINE_KEYTABLE=1` (**one line changed** — the rest of the block
+was already in sync, which confirms the generator is the source of truth).
+
+**New gate `SIGHTLINE_KEYTABLEGATE`**, in the sweep through `verdict`. Two legs, and they close
+different holes — worth stating because they are easy to conflate:
+
+* **(a) DRIFT.** README's block must be byte-identical to what the generator prints. Catches a
+  hand-edited README or a forgotten regeneration. **It would NOT have caught THE CUE MAP.**
+* **(b) COVERAGE.** Every `KeyboardKey.X` and the wheel read that `src/Game.Audition.cs` contains
+  must be named in the AUDIO CHECK row — DERIVED from the source, per CLAUDE.md's standing rule.
+  **This is the leg that would have failed the day THE CUE MAP shipped.**
+
+Demonstrated on the true pre-P13 tree (row AND README both as THE CUE MAP left them — so leg (a)
+was in sync and silent):
+
+```
+PRE-FIX:  KEYTABLEGATE: FAIL (undocumented:AUDIO CHECK reads Down (row: AUDIO CHECK: Esc or U, M),
+                              undocumented:AUDIO CHECK reads Up   (...),
+                              undocumented:AUDIO CHECK reads Wheel (...))
+POST-FIX: KEYTABLEGATE: PASS (README's KEYTABLE block is byte-identical to SIGHTLINE_KEYTABLE's
+          output, and every KeyboardKey + the wheel read by src/Game.Audition.cs is named in
+          KeyTable's AUDIO CHECK row)
+```
+
+With the row reverted but README left at P13's line, BOTH legs fire, which is how the drift leg was
+shown live.
+
+**Leg (b)'s scope is a declared limit, not an oversight.** AUDIO CHECK is the only screen with a
+dedicated input-handler file, so it is the only one whose read-set can be derived without guessing
+which of `Game.cs`'s ~8,600 lines belong to which screen. Every other row is still un-gated —
+ROADMAP carries it.
+
+## Found along the way, not on the list
+
+* **`SaveGame.SelfTest`'s round-trip fixture was itself desynced** (`Mission = 4` / `JumpTo(3)`) and
+  its `mapNode` assertion pinned the broken state. See finding 5.
+* **Four more hand-rolled truncating restores** outside this wave's files
+  (`Game.Endless.cs:535`, `Game.Modes.cs:640/679`, `Game.Meta.cs:612/615`,
+  `Program.cs:1579/2586`). All null-guarded, so none can zero a file; all truncate in place.
+  ROADMAP.
+* **Editing `scripts/qa-sweep.sh` while a sweep is running corrupts that run.** Bash reads a script
+  by byte offset as it executes; a mid-run edit shifted the offsets and the sweep died at line 101
+  with a syntax error on a file that `bash -n` accepts. Not a defect in the script — a working
+  hazard for a repo where several agents share a container. Do docs and script edits BEFORE the
+  sweep, not during.
+
+## What this wave deliberately did NOT do
+
+* **Did not fix finding 6.** Instrument change, `Game.cs`, another developer's file this sprint,
+  and it owes a re-measure. ROADMAP.
+* **Did not "harden" the sweep's hook-name derivation.** It was measured correct 77/77; a
+  speculative change to a shared gate script three agents will merge is more risk than value. The
+  measurement and its two failure modes are recorded in the script instead.
+* **Did not widen `MapFingerprint` to `RewardText`.** A display string; a copy edit is not a
+  save-format break.
+* **Did not convert the four remaining truncating restores.** Not this wave's files, and they carry
+  the null guard that made the SETTINGSTEST one dangerous.
+* **Did not extend `KEYTABLEGATE` leg (b) past AUDIO CHECK.** Every other screen's input handler is
+  interleaved in `Game.cs`; deriving a per-screen read-set there needs a seam that does not exist.

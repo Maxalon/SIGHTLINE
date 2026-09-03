@@ -472,6 +472,19 @@ public static class Program
             Console.Write(Hud.KeyTableMarkdown());
             return;
         }
+        // SIGHTLINE_KEYTABLEGATE=1 : P13 — the generator above had no gate, and the table it reads
+        // from had no gate either. Asserts (a) README's KEYTABLE block is byte-identical to what
+        // the generator prints, and (b) every key src/Game.Audition.cs actually reads is named in
+        // KeyTable's AUDIO CHECK row. Reads the repo's source; run it from the source tree.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYTABLEGATE") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(64, 64, "keytablegate");
+            LoadGameFonts();
+            Console.WriteLine(Game.KeyTableGate());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_SETTINGSTEST=1 : SETTINGS EVERYWHERE — the settings card is reachable from the
         // INTRO and the BARRACKS, not just a fight (ROADMAP "Left open by C5"). Draws the intro and
         // the card to publish their rects, so it needs a context + fonts; stashes display.json.

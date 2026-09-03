@@ -845,6 +845,12 @@ public static class EventCatalog
         StampEventsForTest(sr);
         var evNode = sr.Map.Find(n => n.Kind == NodeKind.Event);
         sr.MapPos = evNode.Id; evNode.Visited = true;     // advance position == resolved-once
+        // P13: and the MISSION COUNTER moves with it, exactly as Game.ChooseNode does for an Event
+        // node (`_run.Mission = node.Mission`, "keep the mission counter in lockstep with the
+        // column"). This fixture set MapPos alone, so it was a save whose two halves disagreed —
+        // the shape SaveGame.FromDto now repairs on load. A real event save can never look like
+        // this; only the fixture could.
+        sr.Mission = evNode.Mission;
         Apply(sr, new EventOutcome { Kind = EventOutcomeKind.Intel, Amount = 30 });
         Apply(sr, new EventOutcome { Kind = EventOutcomeKind.GrantWeaponMod, Mod = WeaponMod.HollowPoint });
         Apply(sr, new EventOutcome { Kind = EventOutcomeKind.Recruit, Veteran = true });

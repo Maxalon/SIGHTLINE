@@ -1471,7 +1471,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         ("OTHER SCREENS", "END CARD: Enter / W / Esc", "new run (after TRAINING OP: run the drill again) / WAR ROOM / main menu"),
         ("OTHER SCREENS", "FIELD MANUAL: Up / Down (W / S), hold Left / Right (A / D), Esc / K", "change tab / scroll / back"),
         ("OTHER SCREENS", "SKIRMISH SETUP: Left / Right (A / D), Up / Down (W / S, + / -), Enter, Esc", "objective / heat / deploy / back"),
-        ("OTHER SCREENS", "AUDIO CHECK: Esc or U, M", "back / mute"),
+        // P13: the scroll half was missing. THE CUE MAP gave the cue table Up/Down and the wheel
+        // (Game.HandleAudition) and did not come back here, so both the in-game FIELD MANUAL and
+        // the generated README block told a player the screen had two keys when it has four.
+        ("OTHER SCREENS", "AUDIO CHECK: Up / Down or Wheel, M, Esc or U", "scroll the cue table / mute / back"),
         ("OTHER SCREENS", "WAR ROOM: Esc", "back"),
     };
 
