@@ -1,0 +1,34 @@
+===== L5bridge — THE LADDER (k clusters of 20 per rung; band = goal band of record) =====
+  rung    k    n   win% binomSE clustSE ratio jack min jack max    band   verdict
+  hR      8  160   71.9    3.55    3.65  1.03     69.3     73.6  67-83    IN  (+4.9 over floor 67; 1.33 clusterSE clear)
+  h0      8  160   53.1    3.95    3.53  0.89     50.7     55.0  47-63    IN  (+6.1 over floor 47; 1.74 clusterSE clear)
+  h2      8  160   33.1    3.72    4.72  1.27     30.7     36.4  32-48    IN  (+1.1 over floor 32; 0.24 clusterSE clear)
+  h4      8  160   21.9    3.27    4.11  1.26     19.3     24.3  22-38    OUT -0.1 (floor 22; 0.03 clusterSE under)
+  h6      8  160   10.6    2.44    2.20  0.90      9.3     12.1  12-28    OUT -1.4 (floor 12; 0.62 clusterSE under)
+  h8      8  160    4.4    1.62    1.48  0.91      3.6      5.0   5-15    OUT -0.6 (floor 5; 0.42 clusterSE under)
+  steps: hR->h0 +18.8  h0->h2 +20.0  h2->h4 +11.2  h4->h6 +11.2  h6->h8 +6.2
+  MONOTONE: yes, at every step
+  IN BAND: 3 of 6
+
+===== L5bridge — HEAT LEAK (does 'heat N' mean heat N?) =====
+  rung   chunks pinned  picks raised offRung missions  worst chunk
+  hR          8      0     16     16      29      695  b70 offRung=8
+  h0          8      0     17     17      30      613  b30 offRung=9
+  h2          8      0     16     16      32      576  b30 offRung=10
+  h4          8      0     13     13      25      545  b30 offRung=8
+  h6          8      0     12     12      18      499  b30 offRung=6
+  h8          8      0     14      0       0      449  b0 offRung=0
+  (unpinned prefix — the numbers above are the size of the leak, not a check)
+
+===== L5bridge — STALEMATES by arm (harness-forced losses) =====
+  rung      n mission  run share%  where
+  hR      160       7    0   4.38  [s15s m4 Escort rt64] [s49s m4 Escort rt72] [s59g m3 Escort rt63] [s60s m3 Evac rt60] [s62g m3 Escort rt59] [s65g m5 Escort rt68] [s66s m4 Escort rt64]
+  h0      160       3    0   1.88  [s29g m4 Eliminate rt67] [s46s m1 Eliminate rt51] [s59s m3 Escort rt64]
+  h2      160       3    0   1.88  [s46s m1 Eliminate rt51] [s74g m3 Eliminate rt52] [s79s m4 Escort rt58]
+  h4      160       3    0   1.88  [s46s m1 Eliminate rt51] [s74g m3 Eliminate rt52] [s79s m4 Escort rt58]
+  h6      160       0    0   0.00  
+  h8      160       0    0   0.00  
+  TOTAL 960 campaigns: mission-arm 16, run-arm 0, share 1.67%
+
+===== L5bridge vs L4 (/home/user/wt/heat-pin/docs/measurements/l5/../l4) — chunk-for-chunk on pairedPolicy.slots =====
+  chunks identical on every (slot, policy) outcome: 48/48; legs identical 960/960

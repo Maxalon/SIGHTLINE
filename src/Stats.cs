@@ -134,6 +134,13 @@ public static class Stats
         public int Heat, MissionsCleared;
         public bool Win;
         public string LossCause = "";
+        // THE HEAT PIN: `Heat` is stamped ONCE at BeginRun and is the rung the batch pinned; it was
+        // never updated when a field event raised the run's HeatLevel, so the archive could not say
+        // how many campaigns had leaked. HeatEnd is the run's HeatLevel at EndRun (== Heat unless a
+        // leak happened, or the caller did not stamp it); RunTurns is Game.RunTurns at EndRun (-1
+        // when the caller did not stamp it); EndMissionNo / EndObjective are the LAST mission the
+        // run played (derived from Missions), so a STALEMATE row says WHERE the bot stalled.
+        public int HeatEnd = -1, RunTurns = -1;
         // "greedy" (optimal smart policy) or "sloppy" (smart policy + human-like error).
         // Lets the report split win-rate by policy and surface the optimal-vs-sloppy GAP.
         public string Policy = "greedy";
@@ -421,7 +428,7 @@ public static class Stats
         if (!Enabled) return;
         _run = new RunRec
         {
-            Heat = heat,
+            Heat = heat, HeatEnd = heat,
             Policy = string.IsNullOrEmpty(policy) ? "greedy" : policy,
             Mode = string.IsNullOrEmpty(mode) ? "campaign" : mode,
             Slot = Slot
@@ -561,14 +568,30 @@ public static class Stats
     // indirectly — we reset here to keep swings scoped to one match).
     public static void ResetLeadTracker() { _haveLead = false; _lastLead = 0; }
 
-    public static void EndRun(bool win, int missionsCleared, string lossCause)
+    // THE HEAT PIN: heatEnd / runTurns are optional so the mode seams (endless, skirmish, daily)
+    // and the batch's defensive frame-cap closes need not change; a caller that has them (the
+    // campaign's three exits in Game.cs, the batch's caps in Program.cs) passes them.
+    public static void EndRun(bool win, int missionsCleared, string lossCause, int heatEnd = -1, int runTurns = -1)
     {
         if (!Enabled || _run == null) return;
         _run.Win = win;
         _run.MissionsCleared = missionsCleared;
         _run.LossCause = lossCause ?? "";
+        if (heatEnd >= 0) _run.HeatEnd = heatEnd;
+        if (runTurns >= 0) _run.RunTurns = runTurns;
         _run = null;
     }
+
+    /// The last mission a run played, or null. Where a STALEMATE row stalled; what a leaked run
+    /// was doing when its heat rose.
+    static MissionRec LastMission(RunRec r) => r.Missions.Count == 0 ? null : r.Missions[r.Missions.Count - 1];
+    static int HeatRaisingPicks(RunRec r)
+    {
+        int n = 0;
+        foreach (var e in r.EventChoices) if (HeatArms.Contains(e)) n++;
+        return n;
+    }
+    static readonly HashSet<string> HeatArms = new(EventCatalog.HeatRaisingArms());
 
     // ── aggregate report ─────────────────────────────────────────────────────
     static string Pct(int num, int den) => den == 0 ? "  -  " : $"{100.0 * num / den,4:0}%";
@@ -768,6 +791,14 @@ public static class Stats
             sb.AppendLine("\nRUN COMPLETION BY HEAT (full-campaign clears):");
             foreach (var g in campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key))
                 sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}{Se(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
+            // THE HEAT PIN: does "heat N" mean heat N in this batch?
+            int raised = campRuns.Count(r => r.HeatEnd > r.Heat);
+            int offRung = campRuns.Sum(r => r.Missions.Count(m => m.Heat != r.Heat));
+            sb.AppendLine($"  HEAT LEAK: pinned={(EventCatalog.HeatPinned ? "yes" : "NO")}  heat-raising picks={campRuns.Sum(HeatRaisingPicks)}  campaigns raised={raised}  missions off-rung={offRung}/{campRuns.Sum(r => r.Missions.Count)}");
+            int stM = campRuns.Count(r => r.LossCause == StalemateMission), stR = campRuns.Count(r => r.LossCause == StalemateRun);
+            if (stM + stR > 0)
+                sb.AppendLine($"  STALEMATES: mission-cap {stM}  run-cap {stR}   "
+                              + string.Join("  ", campRuns.Where(r => IsStalemate(r.LossCause)).Select(r => $"[slot {r.Slot} {r.Policy[0]} m{LastMission(r)?.Mission} {LastMission(r)?.Objective} {(r.LossCause == StalemateRun ? "run" : "mis")} rt={r.RunTurns}]")));
         }
 
         // ── FUL-13: INTEL ECONOMY BY HEAT ────────────────────────────────────────────
@@ -1356,6 +1387,34 @@ public static class Stats
             // by more than a point or two the ladder is partly a measurement of the harness.
             runWinRateExStalemate = ExStalemateRate(campRuns),
             instrumentHealth = InstrumentHealth(campRuns),
+            // THE HEAT PIN: how much of this batch was played at a heat other than the one it
+            // claims. `pinned` says whether EventCatalog.HeatPinned held for the batch;
+            // `heatRaisingPicks` counts the arms the bot took (they are still taken under the pin —
+            // the pin nulls the OUTCOME, not the choice, so the event economy is unchanged);
+            // `campaignsRaised` is runs whose HeatEnd > Heat and `missionsAbovePin` the missions
+            // those runs played off-rung. Under the pin the last two MUST read 0 — l5/cluster.py
+            // asserts it per chunk.
+            heatLeak = new
+            {
+                pinned = EventCatalog.HeatPinned,
+                heatRaisingPicks = campRuns.Sum(HeatRaisingPicks),
+                campaignsRaised = campRuns.Count(r => r.HeatEnd > r.Heat),
+                missionsAbovePin = campRuns.Sum(r => r.Missions.Count(m => m.Heat != r.Heat)),
+                maxHeatEnd = campRuns.Count == 0 ? 0 : campRuns.Max(r => r.HeatEnd)
+            },
+            // THE HEAT PIN: one row per RunRec, every mode. pairedPolicy.slots keeps a (slot, heat)
+            // only when it has exactly one greedy AND one sloppy leg, so a single-policy batch
+            // (SIGHTLINE_BALANCE_SLOPPY=1, or a future camping policy) left NO per-slot rows and
+            // could not be CRN-paired against anything. These rows can: l5/rows.py pairs two
+            // chunks by (slot, policy, heat) from this array and reproduces the pairedPolicy table
+            // from a greedy+sloppy chunk exactly.
+            campaigns = Runs.Select(r => new
+            {
+                slot = r.Slot, policy = r.Policy, mode = r.Mode, heat = r.Heat, heatEnd = r.HeatEnd,
+                win = r.Win, missionsCleared = r.MissionsCleared, lossCause = r.LossCause,
+                runTurns = r.RunTurns, endMission = LastMission(r)?.Mission ?? 0,
+                endObjective = LastMission(r)?.Objective ?? "", heatRaisingPicks = HeatRaisingPicks(r)
+            }).ToList(),
             // W1: the machine the batch actually ran on (see ReadLoadAvg). Excluded from any
             // before/after byte-diff by construction — it is the one block that MUST vary.
             harness = new
@@ -1677,13 +1736,24 @@ public static class Stats
     /// The autopilot's own turn-cap force-loss (Game.Autopilot.AutoStallCheck -> LoseRun("STALEMATE")).
     /// It is a HARNESS failure wearing a campaign loss's clothes.
     public const string StalemateCause = "STALEMATE";
+    /// THE HEAT PIN: the guard's two arms, NAMED. Game.Autopilot.AutoStallCheck fires on EITHER
+    /// `_turnCount > AutoMaxTurns` (one mission dragging — the bot cannot find a finishing line)
+    /// OR `RunTurns > AutoMaxRunTurns` (a whole campaign that is long but not stuck — W9's
+    /// backstop), and both used to be logged as the one word "STALEMATE". A 2.1% harness-loss
+    /// floor nobody owned could not be split into "the bot's Escort finishing line" and "the
+    /// run-budget arm censoring long campaigns" until the loss cause said which. Every consumer
+    /// matches on the PREFIX (IsStalemate), so a reader of an older archive still works.
+    public const string StalemateMission = "STALEMATE-MISSION";
+    public const string StalemateRun = "STALEMATE-RUN";
+    public static bool IsStalemate(string cause)
+        => cause != null && cause.StartsWith(StalemateCause, StringComparison.Ordinal);
 
     /// Run win-rate with STALEMATE runs removed from the DENOMINATOR entirely (they are neither
     /// a win nor evidence of a loss). Returns -1.0 when nothing is left to divide by, so a
     /// consumer can tell "no data" from "0%".
     static double ExStalemateRate(List<RunRec> campRuns)
     {
-        var clean = campRuns.Where(r => r.LossCause != StalemateCause).ToList();
+        var clean = campRuns.Where(r => !IsStalemate(r.LossCause)).ToList();
         return clean.Count == 0 ? -1.0 : Math.Round(100.0 * clean.Count(r => r.Win) / clean.Count, 1);
     }
 
@@ -1691,7 +1761,9 @@ public static class Stats
     /// the flywheel scored as a campaign LOSS without a player ever being beaten.
     static object InstrumentHealth(List<RunRec> campRuns)
     {
-        int stale = campRuns.Count(r => r.LossCause == StalemateCause);
+        int stale = campRuns.Count(r => IsStalemate(r.LossCause));
+        int staleMission = campRuns.Count(r => r.LossCause == StalemateMission);
+        int staleRun = campRuns.Count(r => r.LossCause == StalemateRun);
         int frameCap = campRuns.Count(r => r.LossCause == "frame-cap");
         int aborted = campRuns.Count(r => r.LossCause == "aborted");
         return new
@@ -1699,6 +1771,17 @@ public static class Stats
             campaignRuns = campRuns.Count,
             stalemateLosses = stale,
             stalematePct = campRuns.Count == 0 ? 0.0 : Math.Round(100.0 * stale / campRuns.Count, 1),
+            // THE HEAT PIN: the split (see StalemateMission / StalemateRun). An older archive
+            // reads 0 / 0 here with stalemateLosses > 0 — that is "unsplit", not "neither".
+            stalemateMissionLosses = staleMission,
+            stalemateRunLosses = staleRun,
+            // ...and WHERE each one stalled, so the README can say what the split showed.
+            stalemates = campRuns.Where(r => IsStalemate(r.LossCause)).Select(r => new
+            {
+                slot = r.Slot, policy = r.Policy, heat = r.Heat, arm = r.LossCause,
+                mission = LastMission(r)?.Mission ?? 0, objective = LastMission(r)?.Objective ?? "",
+                missionTurns = LastMission(r)?.Turns ?? 0, runTurns = r.RunTurns
+            }).ToList(),
             frameCapLosses = frameCap,
             abortedRuns = aborted,
             // The one number to read: everything the batch counted as a loss that the GAME did

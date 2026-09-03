@@ -491,10 +491,60 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
 >
 >
-> ### ⚠ THE LADDER OF RECORD IS **L4**, ON THE COMPOSED TREE. THE C1 TABLE BELOW IS SUPERSEDED.
+> ### ⚠ THE LADDER OF RECORD IS **L5**, ON THE PINNED INSTRUMENT. THE L4 AND C1 TABLES BELOW ARE PROVENANCE.
 >
-> **L4 — base commit `7315425` (all six CONTOUR waves merged), 6 rungs x 8 CRN slot bases,
-> n=160/rung, 960 campaigns, 48/48 chunks `runs=20` asserted. Raw round: `docs/measurements/l4/`.**
+> **L5 — base commit `7180374` (wave THE HEAT PIN AND L5 part A on `178464a`), heat PINNED
+> (`EventCatalog.HeatPinned` — a rung means the rung), 6 rungs x **16** CRN slot bases (0..150),
+> n=320/rung, 1,920 campaigns, 96/96 chunks `runs=20` asserted, `LEAK-CHECK PASS` (0 of 6,749
+> missions off-rung). Raw round: `docs/measurements/l5/` (README has every table below in full).**
+>
+> | rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+> |---|---|---|---|---|---|---|
+> | **win%** | **70.9** | **46.9** | **32.8** | **20.0** | **13.1** | **8.1** |
+> | binomial SE | 2.54 | 2.79 | 2.62 | 2.24 | 1.89 | 1.53 |
+> | **cluster SE** | 2.93 | 3.41 | 3.09 | 2.96 | 2.32 | 1.98 |
+> | band | 67-83 | 47-63 | 32-48 | 22-38 | 12-28 | 5-15 |
+> | verdict | IN (+3.9) | **OUT -0.1** | IN (+0.8) | **OUT -2.0** | IN (+1.1) | IN (+3.1) |
+>
+> **Monotone at every step; four of six in band.** Steps 24.1 / 14.1 / 12.8 / 6.9 / 5.0. h0 sits ON
+> its floor (0.04 cluster-SE under) and h4 is 0.68 cluster-SE under — neither is a measured breach,
+> and no IN is a robustness claim (h0's jackknife range 45.3-48.3 straddles the floor).
+>
+> **THE BRIDGE: L4 REPRODUCED TO THE CAMPAIGN.** The same binary with `SIGHTLINE_HEATPIN=0` on L4's
+> 8 slot sets gives L4's 960 outcomes **960/960, 48/48 chunks** — the CRN chain is intact from
+> `7315425` through every PARALLAX merge and part A. **The pin is worth +1.0 pooled** (960 CRN pairs,
+> 17 vs 7 discordant, z=+2.04): +2.5 / +1.2 / +1.9 / -1.2 / +1.9 / **0.0** by rung — **heat 8 has
+> ZERO discordant pairs because it cannot leak**, the prediction the pin was built on, observed.
+>
+> **THE LEVEL IS A SLOT-SPACE QUESTION.** Both halves pinned, L4's 8 slot sets read h0 **54.4** and
+> the 8 NEW sets **39.4** (+15.0, t=+2.58); h8 goes the other way (4.4 vs 11.9, t=-2.09). L4's "h0 in
+> band by +6.1" and "h8 under floor" were each one draw of eight clusters. **The L4 rows are NOT
+> comparable with L5 at h0 or h8 — do not subtract them — and a rung is sixteen slot sets now.**
+>
+> **THE INTERACTION TERM IS NOT RESOLVED, AND THE FACTORIAL SAYS WHY IT CANNOT BE, CHEAPLY.** h6,
+> 2^3 factorial MIDTOOTH{0,3} x AIDECLINE{0,1} x BIOMEMECH{0,1}, 8 arms x 16 clusters x 20 = 2,560
+> campaigns, chunk-paired (the composed arm reproduces the ladder's h6 chunks 16/16 byte-for-byte):
+> L4's quantity **Q = +5.94 ± 5.25, t(15)=+1.13, 95% CI [-5.2, +17.1]** — the point estimate
+> reproduces +5.8, the CI includes it and zero, and its SE is structural (the sum of three
+> conditional contrasts carries 6.3 on its own; ~70 clusters would be needed). What IS resolved:
+> **the MIDTOOTH main effect +7.58 ± 0.96 (t=+7.9)**; AIDECLINE -0.08 ± 1.52 and BIOMEMECH +0.39 ±
+> 1.35 are zero; no two-way term exceeds |t|=1.8 (AxB +2.27 ± 1.27 the largest). **Stop citing +5.8;
+> quote the averaged terms. `Heat.MidTooth` is the term and the composition is additive within ±3.**
+>
+> **STALEMATES: 27/1,920 = 1.41%, ALL on the MISSION arm; the RUN arm fired 0 times in 5,440
+> campaigns** (runTurns at the stall 51-79 against 150). RECRUIT carries 4.4% (14/320) — the bot's
+> finishing line on Escort/Evac late in a long run, not a ladder effect; ex-stalemate no heat rung
+> moves more than 0.6.
+>
+> **No corrective lever was shipped.** Two rungs under floor is a finding to publish, not to repair
+> inside a measurement round.
+>
+> ---
+>
+> **SUPERSEDED (kept for provenance) — L4, THE COMPOSED-TREE LADDER: base commit `7315425` (all six
+> CONTOUR waves merged), 6 rungs x 8 CRN slot bases, n=160/rung, 960 campaigns, 48/48 chunks
+> `runs=20` asserted. Raw round: `docs/measurements/l4/`. Reproduced outcome-for-outcome by L5's
+> bridge; INCOMPARABLE with L5 at h0/h8 for the slot-space reason above.**
 >
 > | rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
 > |---|---|---|---|---|---|---|
@@ -520,7 +570,7 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > Sum of single removals is +3.6 against a joint +9.4, but that apparent +5.8 interaction is
 > **chunk-paired t(7)=+2.05, p≈0.08 — NOT resolved. Do not quote it as measured.**
 >
-> **No corrective lever was shipped.** Three rungs under floor is a finding to publish, not to
+> **No corrective lever was shipped (L4).** Three rungs under floor was a finding to publish, not to
 > repair inside a measurement round.
 >
 > ---
@@ -756,6 +806,14 @@ ROADMAP order: the opener overshot and must be backed out with a re-measured lad
 has no camping policy, so turtling is UNMEASURABLE rather than unmeasured; and the reward is still
 not priced (`MissionNode.Intel` is blind to the class, so a PITCHED node pays a TASKED node's
 rate).** Rationale and its cost: `docs/DESIGN.md` §5.2; detail `docs/DEVLOG.md` §C3.
+
+**WAVE "THE HEAT PIN AND L5" (2026-09-03, base `178464a`)** closed the instrument seam every
+ladder had: three field-event arms raised a campaign's heat mid-run (4.0% of L4's missions played
+above their rung, 0% at the clamped h8, so the leak compressed the top). `EventCatalog.HeatPinned`
+(every `SIGHTLINE_BALANCE` batch; `SIGHTLINE_HEATPIN=0` restores the leak), `heatLeak{}` +
+`campaigns[]` (one row per campaign — a single-policy batch is CRN-pairable now) + the STALEMATE arm
+named (`STALEMATE-MISSION` / `STALEMATE-RUN`) in the JSON, `SIGHTLINE_HEATPINTEST` in the sweep.
+Then **L5**, the ladder of record above, on 16 slot sets. DEVLOG §THE HEAT PIN AND L5.
 
 **PROGRAM CONTOUR — wave C4 "EIGHT BIOMES ARE PAINT" (2026-08-30)** ended the standing gap that
 `grep -ci biome` returned **0** in `Combat.cs`/`Ai.cs`/`Grid.cs`/`Unit.cs`. `src/Terrain.cs` adds a

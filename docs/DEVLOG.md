@@ -12205,3 +12205,218 @@ expression. Measured anyway:
 5. **Nothing on the ladder re-measured** — the campaign is byte-identical, so there is nothing to
    re-measure; the L4 ladder of record stands.
 6. **The PARALLAX docket's status cell** for P4 is the lead's to flip.
+
+# WAVE "THE HEAT PIN AND L5" (2026-09-03, dev on `wave/heat-pin`, base `178464a`)
+
+## Thesis — the instrument, not the game
+
+Every ladder this project has published was measured on an instrument with three seams nobody
+had closed, all in the same place: what a `SIGHTLINE_BALANCE` chunk *records* about a campaign.
+
+1. **A "heat-N rung" was not a fixed rung.** Three field-event arms (`relic:0` "Claim it",
+   `informant:1` "Turn them in", `reservecall:1` "Keep the roster") carry an `AddHeat` outcome, so a
+   campaign pinned at heat N could play its later missions at N+1 — and this is the BOT'S PREFERENCE,
+   not exploration: `Game.EventOutcomeValue` prices `AddHeat` at −4 against 0.3 per intel, so "Turn
+   them in" (+20 intel) is the value-best arm of FACTION INFORMANT. Heat 8 is clamped and cannot leak,
+   so the contamination is upward at every rung below it and the instrument compresses exactly the
+   region L4 found collapsed. **Re-counted on the L4 archive** (base `7315425`, 960 campaigns, 3,377
+   missions — `eventChoicePicks` and `byHeat` per chunk): **88 heat-raising picks; 134 missions
+   (4.0%) played above their rung** — RECRUIT 29/695 (4.2%), h0 30/613 (4.9%), h2 32/576 (5.6%),
+   h4 25/545 (4.6%), h6 18/499 (3.6%), **h8 0/449**. The `RunRec.Heat` field was stamped once at
+   `BeginRun` and never updated, so the archive itself could not say which campaigns had leaked.
+2. **STALEMATE was one word for two arms.** `Game.Autopilot.AutoStallCheck` fires on EITHER
+   `_turnCount > AutoMaxTurns` (one mission the bot cannot finish) OR `RunTurns > AutoMaxRunTurns`
+   (W9's run-scoped backstop — a long campaign the harness declines to keep funding), and both logged
+   `LoseRun("STALEMATE", ...)`. ROADMAP carries the figure twice as "a 2.1% harness-forced-loss floor
+   nobody owns" — that is L3's 20/960; **on L4 it is 16/960 = 1.67%** (RECRUIT 7, h0 3, h2 3, h4 3,
+   h6 0, h8 0), and until this wave nothing on the row said where the bot stalled or which cap fired.
+3. **A single-policy batch could not be paired.** `pairedPolicy.slots` keeps a (slot, heat) only when
+   it has exactly one greedy AND one sloppy leg, so `SIGHTLINE_BALANCE_SLOPPY=1` (or the camping policy
+   ROADMAP asks for) leaves no per-slot rows at all — CRN pairing, the project's whole measurement
+   method, was unavailable to it.
+
+Part A closes the three seams and proves the closure inert. Part B re-measures the ladder on the
+pinned instrument (L5) and runs the factorial ROADMAP asked for on the +5.8 interaction claim.
+
+## What shipped — part A, the instrument
+
+* **`EventCatalog.HeatPinned`** (`src/Events.cs`, default `false`). When set, the `AddHeat` case in
+  `EventCatalog.Apply` returns `EventCatalog.HeatPinnedLine` = `"Heat pinned (harness)"` before it
+  touches `run.HeatLevel`; the branch sits ABOVE the clamp and replaces nothing else, so the arm's
+  other outcomes (INFORMANT's +20 intel, RELIC's boon) still land. **No `Util.Rng` draw either way**, so
+  a campaign that never takes a heat-raising arm is byte-identical with the pin on or off — which is
+  the acceptance criterion below. `Program.BalanceBatch` sets it unless `SIGHTLINE_HEATPIN=0` and
+  prints a `BALANCE: heat PINNED …` / `heat NOT pinned …` line. Nothing in real play sets it and
+  `EVENTTEST` leaves it off: the leak is a design cost in the shipped game, not an instrument defect.
+  `EventCatalog.HeatRaisingArms()` / `RaisesHeat` enumerate the set (exactly three today; the test
+  pins the count so a fourth cannot arrive unnoticed).
+* **`RunRec.HeatEnd` / `RunRec.RunTurns`** (`src/Stats.cs`), stamped through two new optional
+  parameters on `Stats.EndRun` at the three campaign exits in `Game.cs` (win, loss, abandon) and the
+  batch's two defensive closes in `Program.cs` (frame-cap, aborted). `BuildSummary` gains
+  **`heatLeak { pinned, heatRaisingPicks, campaignsRaised, missionsAbovePin, maxHeatEnd }`** and the
+  text report a `HEAT LEAK:` line under RUN COMPLETION BY HEAT. The pin nulls the OUTCOME, not the
+  choice: `heatRaisingPicks` still counts under the pin, which is how a reader can see the event
+  economy did not move.
+* **`STALEMATE-MISSION` / `STALEMATE-RUN`** (`Stats.StalemateMission` / `StalemateRun`) at the
+  guard, mission-first when both hold (the arm the pre-W9 guard would have fired), with the
+  mission number, objective and both counters in the reason string. `Stats.IsStalemate` is a PREFIX
+  match, so `runWinRateExStalemate` and `instrumentHealth` count both arms and an older archive
+  still reads. `instrumentHealth` gains `stalemateMissionLosses`, `stalemateRunLosses` and a
+  `stalemates[]` row per forced loss (slot, policy, heat, arm, mission, objective, missionTurns,
+  runTurns); the text report a `STALEMATES:` line.
+* **`campaigns[]`** in `BuildSummary` — one row per `RunRec`, every mode: slot, policy, mode, heat,
+  heatEnd, win, missionsCleared, lossCause, runTurns, endMission, endObjective, heatRaisingPicks.
+* **Tools** under `docs/measurements/l5/`: `rows.py` (a rung table from `campaigns[]`, the CRN-paired
+  comparison of two prefixes on (slot, policy, heat), and `--check`, which rebuilds
+  `pairedPolicy.slots` and its five tallies from the rows and asserts equality field for field);
+  `inert.py` (the key-exact inertness diff — names every key the commit added and diffs what is left,
+  folding the two STALEMATE arms back onto the old word); `pincheck.py` (the per-campaign contract of
+  the pin).
+* **`SIGHTLINE_HEATPINTEST`** (`Game.HeatPinSelfTest` + `EventCatalog.HeatPinProbe`), routed through
+  `qa-sweep.sh`'s `verdict`. Derived counts: `exist=76 run=76`.
+
+## The test — and it FAILS on the pre-fix tree, verbatim
+
+Two mutations of the shipped tree, each restored and the restore diffed against a backup:
+
+```
+# (A) the pin does nothing:   if (false && HeatPinned) return HeatPinnedLine;
+HEATPINTEST: FAIL probe:relic:0:pinnedHeat=3,relic:0:noPinLine[claimed the RAPID DEPLOY boon; Heat rises to 3],informant:1:pinnedHeat=3,informant:1:noPinLine[gained 20 intel; Heat rises to 3],reservecall:1:pinnedHeat=3,reservecall:1:noPinLine[Heat rises to 3]
+
+# (B) the guard logs the one word again:   LoseRun(Stats.StalemateCause, ...)
+HEATPINTEST: FAIL runArmTitle=STALEMATE,missionArmTitle=STALEMATE,stalemateCauses=STALEMATE/STALEMATE,instrumentHealth:{"campaignRuns":2,"stalemateLosses":2,"stalematePct":100,"stalemateMissionLosses":0,"stalemateRunLosses":0,"stalemates":[{"slot":1,"policy":"greedy","heat":0,"arm":"STALEMATE","mission":1,"objective":"Eliminate","missionTurns":2,"runTurns":151},…
+```
+
+Mutation A also shows the leak is REAL on this tree (`Heat rises to 3` on every arm with the pin
+inert) — the half a "watch it fail" reading needs. On the shipped tree:
+
+```
+HEATPINTEST: PASS (3 heat-raising arms pinned; HeatEnd/RunTurns/campaigns[]/heatLeak in the JSON; STALEMATE-MISSION + STALEMATE-RUN named)
+```
+
+The (C) leg starts a real mission and fires the guard both ways from `DebugSetRunTurns` /
+`DebugSetTurn` (STALLTEST's hooks): the run arm at `RunTurns = AutoMaxRunTurns + 1` with the mission
+counter at 1, the mission arm at `_turnCount = AutoMaxTurns + 1` with the run counter at 5.
+
+## Inertness — the acceptance criteria, measured
+
+Release binaries under `xvfb-run`, XDG pinned per worktree, target JSON `rm -f`'d first, exit code
+checked, `runs=20` asserted (`c1/run_chunk.sh`, all three layers). Base tree = `178464a` built in
+`/home/user/wt/heat-base`; this tree from the snapshot `runbin/INERT`.
+
+| chunk | base `178464a` | this tree, `SIGHTLINE_HEATPIN=0` | this tree, pinned |
+|---|---|---|---|
+| `SIGHTLINE_BALANCE=10 BASE=0 HEAT=0` | `INERT-base` | `INERT-pinoff` | `INERT-pinon` |
+| `SIGHTLINE_BALANCE=10 BASE=10 HEAT=4` | `INERT-base-h4` | `INERT-pinoff-h4` | `INERT-pinon-h4` |
+
+* **Base vs pin-off** (`l5/inert.py`): the diff is **EXACTLY the five new keys** — `heatLeak`,
+  `campaigns`, `instrumentHealth.stalemateMissionLosses`, `instrumentHealth.stalemateRunLosses`,
+  `instrumentHealth.stalemates` — and nothing else, at h0-b0 and at h4-b10 (`REMAINING DIFF: 0
+  path(s)` on both; `w1/inert_diff.sh … harness heatLeak campaigns instrumentHealth lossCauses` →
+  `(empty diff — IDENTICAL)`). `lossCauses` is in that list only because the pin tree spells the
+  STALEMATE arm; neither chunk had one.
+* **Pin-off vs pin-on** (`l5/pincheck.py`): h0-b0 had **2 campaigns take a heat-raising arm**
+  (`campaignsRaised=2`, `missionsAbovePin=4` of 84 with the pin off; `0 / 0` of 86 with it on) and
+  both came out differently, as they may; **every campaign with no heat-raising pick is identical
+  across the pin — 18/18 at h0-b0, 20/20 at h4-b10, 38/38.** `PINCHECK: PASS`.
+* **`rows.py --check`** on all four pin chunks: rows-derived `pairedPolicy.slots` `==` the chunk's own
+  block (10 vs 10) and all five tallies equal. `ROWS-CHECK: PASS`.
+* `SIGHTLINE_PAIRTEST=1` → `h0 slot0 … MATCH`, `h4 slot1 … MATCH`, **PASS**.
+* Release build 0 warnings / 0 errors. `bash scripts/qa-sweep.sh --full > sweep2.log`:
+  **`EXIT=0`**, `75 self-tests exist in src/; this sweep ran 75` (the derived formula with the
+  FUL11PROBE +1 convention reads `exist=76 run=76`), zero FAIL lines, no COVERAGE GAP block, HEATPINTEST
+  and PAIRTEST PASS inside it, autoplay ×3 `LOSE m2 frame=5054 / LOSE m2 frame=2575 / WIN m6 frame=6812`,
+  no TIMEOUT.
+
+## What part A did NOT do
+
+* **No balance lever, no gameplay change.** The pin is harness-only; a player's field event still
+  raises heat and EVENTTEST still asserts it.
+* **The pinned batch plays a slightly different EVENT ECONOMY from real play**, stated plainly: the
+  bot still takes "Turn them in" and still banks its +20 intel, without the heat cost a player would
+  pay. That is the correct trade for a rung measurement (the rung is the thing being measured) and
+  `heatRaisingPicks` under the pin says how often it happened.
+* **The stalemate floor is named, not explained** — part B reads the `stalemates[]` rows.
+* **No count written into CLAUDE.md.** The sweep derives its own.
+
+## Part B — L5, the bridge, the split-half, the factorial (base `7180374`, 272 chunks, 5,440 campaigns)
+
+Everything below is in `docs/measurements/l5/README.md` with every table in full; this is the
+account. Snapshot `runbin/L5` from the part-A commit; every chunk through `c1/run_chunk.sh`;
+**272/272 asserted `runs=20`, zero `BAD`** (`L5-chunks.txt`, `L5bridge-chunks.txt`,
+`L5fac-chunks.txt`); `rows.py --check` on all 272: `ROWS-CHECK: PASS`.
+
+### The ladder — pinned, 16 slot sets, n=320 per rung
+
+| rung | L5 % | binom SE | cluster SE | band | verdict |
+|---|---|---|---|---|---|
+| RECRUIT | 70.9 | 2.54 | 2.93 | 67–83 | IN (+3.9) |
+| h0 | 46.9 | 2.79 | 3.41 | 47–63 | OUT −0.1 (0.04 cluster-SE) |
+| h2 | 32.8 | 2.62 | 3.09 | 32–48 | IN (+0.8) |
+| h4 | 20.0 | 2.24 | 2.96 | 22–38 | OUT −2.0 (0.68 cluster-SE) |
+| h6 | 13.1 | 1.89 | 2.32 | 12–28 | IN (+1.1) |
+| h8 | 8.1 | 1.53 | 1.98 | 5–15 | IN (+3.1) |
+
+Monotone at every step (24.1 / 14.1 / 12.8 / 6.9 / 5.0), four of six in band, neither OUT a
+measured breach. `LEAK-CHECK: PASS` — 96/96 chunks pinned, 0 of 6,749 missions off-rung; the bot
+still took a heat-raising arm 144 times (the pin nulls the outcome, not the choice).
+
+### The bridge — L4 reproduced 960/960, and the pin priced
+
+Same binary, `SIGHTLINE_HEATPIN=0`, L4's 8 slot sets: **48/48 chunks and 960/960 (slot, policy)
+outcomes identical to the L4 archive** — RECRUIT 71.9 / h0 53.1 / h2 33.1 / h4 21.9 / h6 10.6 / h8
+4.4 to the decimal. So the CRN chain is intact from `7315425` through PARALLAX P1–P4, SETTINGS
+EVERYWHERE, THE STRIDE, THE MODES GET THE BESTIARY and part A. The leak L4 carried: campaigns raised
+16/17/16/13/12/**0** and missions off-rung 29/30/32/25/18/**0** by rung.
+
+CRN-paired on those 8 bases (160 pairs per rung), pinned minus unpinned: RECRUIT **+2.5** (4 vs 0
+discordant, z=2.00), h0 +1.2, h2 +1.9, h4 −1.2, h6 +1.9 (3 vs 0), **h8 0.0 with zero discordant
+pairs** — heat 8 cannot leak, and the instrument now shows it. Pooled: 32.5% → 33.5%, **+1.04, 17 vs
+7 discordant, McNemar z = +2.04.** A rung's worth of leak is a point or two.
+
+### The split-half — the LEVEL is the slot draw
+
+Both halves pinned: L4's 8 sets vs the 8 new ones read h0 **54.4 vs 39.4** (+15.0, SE 5.8,
+**t = +2.58**) and h8 **4.4 vs 11.9** (−7.5, t = −2.09); RECRUIT +6.9, h2 +4.4, h4 +1.2, h6 −1.2.
+L4's "h0 in band by +6.1" and "h8 under its floor" were one draw of eight clusters each. **The L4
+rows are not comparable with L5 at h0 or h8, and a rung is sixteen slot sets now** — CLAUDE.md's
+ladder block says both. (C2 found the same heterogeneity inside L3's space at h2, p = 0.005.)
+
+### The factorial — Q not resolved; the averaged effects are
+
+h6, MIDTOOTH{0,3} × AIDECLINE{0,1} × BIOMEMECH{0,1}, 8 arms × 16 clusters × 20 = 2,560 campaigns,
+pinned. The composed arm `m3a1b1` (dials set to their defaults explicitly) reproduces the ladder's h6
+chunks **16/16 byte-for-byte minus `harness{}`**. C3's KILLTREADMILL is not a factor: on L4's archive
+its removal changed play (0/8 chunks identical) but not one of 160 outcomes at h6.
+
+* **Q = joint − Σ single removals = +5.94 ± 5.25 (cluster SE), t(15) = +1.13, 95% CI [−5.2, +17.1]
+  → NOT RESOLVED** by the pre-registered criterion (|t| ≥ 2.3 or a CI excluding +5.8). The point
+  estimate reproduces L4's +5.8; the sum of three conditional contrasts carries SE 6.3 by itself, so
+  resolving Q to ±2.5 needs ~70 clusters (~1,400 campaigns per arm).
+* **Resolved:** MIDTOOTH main effect **+7.58 ± 0.96, t = +7.91**, positive in 14/16 clusters and
+  never negative (m0a1b1 = 20.0, L3's h6 to the decimal on a different slot space); AIDECLINE
+  −0.08 ± 1.52 and BIOMEMECH +0.39 ± 1.35; A×B +2.27 ± 1.27 (t 1.78) the largest interaction;
+  M×A +0.70, M×B −0.70, M×A×B −0.70. The composition is additive within ±3 and MIDTOOTH-dominated.
+* L4's single removals reproduce as the conditional contrasts: s_M +6.88 (L4 +6.2), s_A −3.75
+  (L4 −3.8), s_B −1.88 (L4 +1.2), joint +7.19 (L4 +9.4).
+
+ROADMAP's item is ticked as "stop citing it": +5.8 is not wrong, it is unresolvable, and the terms it
+stood in for are resolved.
+
+### The stalemate split — what the floor is
+
+Across all 5,440 campaigns of the round: **the RUN arm fired zero times.** L5: 27/1,920 = 1.41%, all
+`STALEMATE-MISSION`, `runTurns` 51–79 at the stall against a 150 cap; RECRUIT 14/320 = 4.4%, h0 4,
+h2 2, h4 4, h6 1, h8 2; the bridge's 16/960 = 1.67% is L4's 16 exactly. Objectives Escort 10,
+Eliminate 9, Evac 4, Rescue 3, Sabotage 1; missions 3–4 hold 18 of 27. Slot 46 sloppy stalls on
+mission-1 Eliminate at h0, h2 and h4 alike (a deadlock in the sloppy policy on that opener); slot 74
+greedy on m3 Eliminate at h2/h4. Ex-stalemate, no heat rung moves more than 0.6 (RECRUIT ~3).
+
+### Gates and what part B did NOT do
+
+Part B changes no source: docs and `docs/measurements/l5/` only, so the part-A gates stand
+(Release 0/0, `qa-sweep.sh --full` EXIT=0, PAIRTEST PASS). **No lever shipped.** Q is not resolved
+and the README says what it would cost. L4 and L5 are not made comparable at h0/h8 — the bridge
+shows L4's outcomes reproduce, the split-half shows its draw was atypical there; both stand. No
+camping policy, no opener re-tune, no single-policy batch measured. The `/home/user/wt/heat-base`
+worktree used for the inertness chunks was removed at the end of the wave.

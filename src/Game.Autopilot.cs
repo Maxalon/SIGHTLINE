@@ -1931,7 +1931,14 @@ public partial class Game
             // PROGRAM HORIZON W2: in LAST STAND the "turn cap" just ends the horde run cleanly at the
             // waves survived so far (route through EndEndless, not the campaign LoseRun).
             if (Mode == GameMode.Endless) { EndEndless(); return; }
-            LoseRun("STALEMATE", $"Autopilot exceeded the turn cap on mission {_run.Mission}.");
+            // THE HEAT PIN: NAME THE ARM. The per-mission cap (the bot cannot finish THIS mission)
+            // and W9's run-scoped cap (a long campaign the harness declines to keep funding) are
+            // different failures of the instrument and were logged as one word for two programs.
+            // Mission-first when both hold: that is the arm the pre-W9 guard would have fired.
+            bool missionArm = _turnCount > AutoMaxTurns;
+            LoseRun(missionArm ? Stats.StalemateMission : Stats.StalemateRun,
+                    $"Autopilot exceeded the {(missionArm ? "mission" : "run")} turn cap on mission {_run.Mission} ({Objective}): "
+                    + $"mission turn {_turnCount}/{AutoMaxTurns}, run turn {RunTurns}/{AutoMaxRunTurns}.");
             return;
         }
 
