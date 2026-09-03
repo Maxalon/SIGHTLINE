@@ -4369,6 +4369,13 @@ public partial class Game
             _run.PromoteEligible(rec);
         }
 
+        // P15: CLOSE THE MISSION THAT WAS JUST LOST before staging its retry. SetupMission calls
+        // Stats.BeginMission on the SAME mission number, which used to overwrite the open record
+        // outright — so the wiped attempt vanished and no non-terminal mission loss existed
+        // anywhere in the archive. Stats.FlushOpenMission is the structural backstop, but only the
+        // caller knows `_turnCount`, so closing it here is what makes the row's turn count exact.
+        Stats.EndMission(false, _turnCount, 0, Enemies.Count(e => !e.Alive), Stats.MissionRedeployed);
+
         // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
         // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
         // MISSION banner, so override it AFTER with the reinforcements telegraph.
@@ -6815,7 +6822,13 @@ public partial class Game
         ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
         ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
         UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
-        if (AutoPlay) AutoStallCheck();
+        // P15: AutoStallCheck can FORCE-LOSE the run from here (the autopilot's turn caps). Everything
+        // below is start-of-turn bookkeeping for a turn that is no longer going to happen — status
+        // ticks, the bleed-out countdown, soldier selection, the PLAYER TURN banner — and it used to
+        // run to completion on a run already in Phase.Lose. Autoplay-only, but the batch-global
+        // counters (Stats.RecordDownExpired / RecordDownFinished / RecordProc) guard on `Enabled`
+        // alone, so a bleed-out in that tail is recorded against a run that has already ended.
+        if (AutoPlay) { AutoStallCheck(); if (Phase != Phase.PlayerTurn) return; }
         // APEX W2: deny the caged RESCUE captive its start-of-turn action re-grant (see SetupMission).
         // FUL-7: the bleed-out countdown ticks HERE — on the squad's clock, where the player
         // decides. STABILIZE freezes it — but only while a soldier is still standing: with the

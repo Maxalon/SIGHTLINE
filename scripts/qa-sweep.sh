@@ -227,6 +227,12 @@ echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLT
 # three arms DO leak with it off), RunRec.HeatEnd/RunTurns + campaigns[] + heatLeak in the JSON, and
 # the STALEMATE guard naming its arm (STALEMATE-MISSION / STALEMATE-RUN).
 echo -n "HEATPINTEST: "; verdict "$(SIGHTLINE_HEATPINTEST=1 run | grep -oE "HEATPINTEST: (PASS|FAIL)" | head -1)"
+# P15 THE UNVERIFIED: the balance INSTRUMENT's own honesty contract - a batch request that cannot
+# be parsed is refused rather than silently defaulted, "no data" reads as -1 rather than 0.0, the
+# mission a checkpoint redeploy retries is FILED rather than erased, and a LAST STAND stopped by the
+# autopilot's turn cap is named as such rather than logged as a wipe. Needs a window (it starts real
+# missions and a real endless stand), like HEATPINTEST above it.
+echo -n "INSTRUMENTTEST: "; verdict "$(SIGHTLINE_INSTRUMENTTEST=1 run | grep -oE "INSTRUMENTTEST: (PASS|FAIL)" | head -1)"
 # C5 THE HARD EDGES: the ENEMY-turn half of the no-deadlock contract (STALLTEST covers the player
 # turn), and the enemy DECISION CENSUS — every branch of the enemy exec chain must be REACHED, at
 # a rate a player could actually meet. AICOVTEST=6 walks 144 campaigns (~25 s; N=2 gave ~2470 acts, below the AiCovMinActs floor that keeps the rate verdict from being a Poisson draw); the effectively-dead
