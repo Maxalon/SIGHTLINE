@@ -835,6 +835,22 @@ resolved at n=160** (DiD t = −1.61); only MAGMA is negative at every rung.
 re-tuned density, so the ladder above is a pre-fix number and C5 owes it a re-measure.
 `SIGHTLINE_BIOMEMECH=0` restores the pre-C4 board exactly. DEVLOG §C4.
 
+**PROGRAM PARALLAX — wave P10 "THE HELD LANE" (2026-09-03, base `4c1ca3a`)** gave the ORDINARY
+enemy overwatch a cone (`Ai.ChooseLane` picks one of eight axes by the approach ground it covers;
+the exec arms the player's own `OwFocused` flag set, so the hostile takes the same FOCUS trade —
+`+Combat.FocusOwAim` inside, blind outside). `Game.WatchCovers` is now the ONE predicate for "this
+watcher's lane covers this tile" — the red wash, the friendly cone wash, `Threat[].Watched`,
+`InEnemyBraceLane` and `PlayerOverwatchTiles` all call it — which is what let the enemy kill-zone
+wash rise 0.07-0.12 → 0.11-0.16 without lying. `SIGHTLINE_AILANE=0` restores the pre-P10 opponent;
+`SIGHTLINE_LANETEST` is the gate. **Two measured facts a fresh session should not re-discover
+(n=320/rung/arm CRN-paired, `docs/measurements/p10/`): the lane is INERT on win rate — h4 and h8
+gave 0 discordant campaigns in 320 — because the `overwatch` branch fires only 0.15-0.46% of
+enemy acts; and raising `Ai.DeclineWatchRatio` (the lever that DOES feed it: 0.45 → 1.20 takes the
+branch to 10-15% of acts) makes the opponent 5.6-9.0 points WEAKER, p ≤ 0.008 at h4/h8.** So
+ROADMAP's "a real lane would justify a much higher ratio" is refuted, `SIGHTLINE_DECLINEWATCH` is
+a priced-but-unspent dial, and the flywheel still has no term for an ordinary enemy lane (that fix
+is its own wave, per ROADMAP). DEVLOG §THE HELD LANE.
+
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:
 1. Make sure `main` builds and passes autoplay.

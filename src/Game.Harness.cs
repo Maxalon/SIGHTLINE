@@ -2767,6 +2767,37 @@ public partial class Game
         foe.Facing = MathF.Atan2(foe.OwDirY, foe.OwDirX);                      // pike points down the lane (mirrors the exec)
     }
 
+    /// Harness (screenshot): SIGHTLINE_LANESHOT — P10 THE HELD LANE. Stages an ORDINARY enemy
+    /// overwatch (not a PIKEMAN BRACE) holding the lane `Ai.ChooseLane` actually picks against the
+    /// live squad, so one frame shows the whole new read: the raised foe-red kill-zone wash over
+    /// the cone only, the cone-edge rays + chevron that used to be PIKEMAN-only, and the "OW" tag
+    /// on the watcher. Pair with SIGHTLINE_SHOT=760 (under ~700 photographs the briefing card) and
+    /// SIGHTLINE_AILANE=0 for the pre-wave contrast (a board-wide 7-12% wash and no rays at all).
+    public void DebugEnemyLane()
+    {
+        DebugWakeAll();
+        var near = AlivePlayers().FirstOrDefault(p => !p.IsVip);
+        if (near == null) return;
+        // pick the hostile with the clearest standoff on the squad, and stand it ~6 tiles off so
+        // the cone visibly crosses the squad's approach (the PIKESHOT free-staging precedent —
+        // screenshot readability, not gameplay).
+        var foe = Enemies.FirstOrDefault(e => e.Alive);
+        if (foe == null) return;
+        foe.Weapon = Weapon.Make(WeaponKind.Smg); foe.Ammo = foe.Weapon.Clip;
+        for (int dx = 7; dx >= 3; dx--)
+        {
+            int tx = near.X + dx, ty = near.Y;
+            if (Grid.InBounds(tx, ty) && Grid.IsFloor(tx, ty) && !IsOccupiedByOther(tx, ty, foe))
+            { foe.X = tx; foe.Y = ty; foe.SyncPos(); break; }
+        }
+        var live = AlivePlayers(); live.RemoveAll(q => q.Downed);
+        var lane = AiLane ? Ai.ChooseLane(this, foe, foe.X, foe.Y, live, near) : (dx: 0, dy: 0);
+        foe.OnOverwatch = true; foe.OwBrace = false;
+        foe.OwFocused = lane.dx != 0 || lane.dy != 0;
+        foe.OwDirX = lane.dx; foe.OwDirY = lane.dy;
+        if (foe.OwFocused) foe.Facing = MathF.Atan2(foe.OwDirY, foe.OwDirX);
+    }
+
     /// SIGHTLINE_MORALETEST — UNDERTOW W3: enemy pod MORALE / ROUT. On a controlled scene asserts:
     /// (1) killing one of a 2-unit pod ROUTS the survivor (BreakPodMorale threshold), (2) a routed unit
     /// shoots WILD (Combat aim penalty), (3) a routed unit FLEES (Ai.Plan moves it farther from the
@@ -11322,4 +11353,325 @@ public partial class Game
             : "CUETEST: FAIL (" + string.Join(",", fails) + ")");
         return sb.ToString();
     }
+
+    // ─── P10 THE HELD LANE — SIGHTLINE_LANETEST ────────────────────────────────────────────────
+    /// The contract for the wave that gave the ordinary enemy overwatch a LANE.
+    ///
+    /// Before P10 an enemy overwatch was a 360-degree watch held from wherever the unit happened
+    /// to stop (`Game.ActAfterMove`'s `overwatch` branch armed `OnOverwatch` and nothing else);
+    /// only the PIKEMAN's BRACE ever picked a cone. Two ROADMAP items were the same defect seen
+    /// from both ends: a held lane FIRED 24-27% of the time (C2), and the red kill-zone wash
+    /// covered nearly the whole open board at an alpha C2's review measured as invisible — a
+    /// signal that marks everything marks nothing.
+    ///
+    /// Five legs, all on live primitives, never on a re-implementation of them:
+    ///   (a) ARM — a hostile that plans an ordinary overwatch under `Game.AiLane` ends the exec
+    ///       with `OwFocused` true and a NON-ZERO axis, and that axis is the one the plan chose.
+    ///   (b) AIM — the chosen cone covers APPROACH GROUND. Three ways: the scorer is a real
+    ///       argmax and it follows the squad when the squad moves; a soldier the watcher cannot
+    ///       SEE contributes nothing (the LoS filter is real); and over a campaign walk EVERY
+    ///       armed lane satisfies the shipped invariant — `Ai.LaneScore > 0`, or, when no axis
+    ///       can cover any ground at all, the cone contains the nearest living soldier.
+    ///   (c) TRUTH — the overlay predicate (`Game.WatchCovers`, which the red wash, the forecast's
+    ///       `Threat[].Watched` and the bot's lane read all now share) agrees TILE FOR TILE with
+    ///       the REAL `OnUnitEnteredTile` reaction, in BOTH directions, on a live mission board:
+    ///       no washed tile that does not draw a reaction, and no reacting tile left unwashed.
+    ///       This is the leg the wash's alpha rise rests on.
+    ///   (d) CENSUS — the fraction of floor tiles a watcher marks falls MATERIALLY with lane
+    ///       selection on versus off, measured over many watch posts on the same board. This is
+    ///       "a signal that marks everything marks nothing", made mechanical.
+    ///   (e) THE DIAL — `SIGHTLINE_AILANE=0` plans no axis and arms no cone.
+    ///
+    /// Reads the AMBIENT `Game.AiLane` for legs (a)/(b)/(d), so `SIGHTLINE_AILANE=0
+    /// SIGHTLINE_LANETEST=1` FAILS. That is this test's proof it can fail at all.
+    public string LaneSelfTest()
+    {
+        // DETERMINISM (lead, CONTOUR close): every self-test in the sweep pins its RNG stream.
+        Util.Reseed(70311);
+        NoPersist = true;
+        var fails = new List<string>();
+        var notes = new List<string>();
+        bool ambient = AiLane;              // what the process was launched with — never forced
+
+        // ─── the controlled scene: an empty flat 18x11 floor (no cover, LoS always clear) ───
+        _run = new Run(); _run.Start();
+        Grid = new Grid();
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false; Hvt = null; SquadConcealed = false;
+        Objective = Objective.Eliminate;
+
+        // The soldier stands 12 tiles east — clear line of sight, but OUTSIDE the hostile's SMG
+        // MaxRange of 10, which is what makes the planner's no-shot fallback reachable at all
+        // (`sees` is an LoS test with no range test in it). Its own approach disc DOES reach into
+        // that range, so the scorer has real ground to weigh.
+        var sol = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = 14, Y = 5,
+                             Hp = 40, MaxHp = 40, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        sol.Ammo = sol.Weapon.Clip; sol.SyncPos(); sol.BeginTurn();
+        Players.Add(sol);
+        var foe = new Unit { Name = "GRUNT", Cls = "GRUNT", Team = Team.Enemy, X = 2, Y = 5,
+                             Hp = 8, MaxHp = 8, Aim = 55, Mobility = 1, Weapon = Weapon.Make(WeaponKind.Smg) };
+        foe.Ammo = foe.Weapon.Clip; foe.Alert = AlertLevel.Alert; foe.SyncPos(); foe.BeginTurn();
+        Enemies.Add(foe);
+
+        // Pin the hostile in place so `bestTile` is its own tile and the plan spends 0 actions
+        // moving — the no-shot fallback needs `spent < 2`, and a wandering test scene makes that
+        // a coin flip. `reserved` is Ai.Plan's own public knob for "these tiles are taken".
+        var pinned = new HashSet<(int x, int y)>();
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+                if (dx != 0 || dy != 0) pinned.Add((foe.X + dx, foe.Y + dy));
+
+        // ---- (a) ARM: plan -> exec, the flag set and the axis ----------------------------------
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var plan = Ai.Plan(this, foe, pinned);
+        if (!plan.Overwatch) fails.Add("planNoOverwatch");
+        else
+        {
+            if (plan.OwDirX == 0 && plan.OwDirY == 0) fails.Add("planNoLaneAxis");
+            _aiIdx = 0; _aiPlan = plan; _aiStage = AiStage.ActAfterMove; BannerTimer = 0f;
+            UpdateEnemy();
+            if (!foe.OnOverwatch) fails.Add("execNoWatch");
+            if (!foe.OwFocused) fails.Add("execNotFocused");
+            if (foe.OwDirX == 0 && foe.OwDirY == 0) fails.Add("execZeroAxis");
+            if (foe.OwDirX != plan.OwDirX || foe.OwDirY != plan.OwDirY) fails.Add("execAxisMismatch");
+            if (foe.ActionsLeft != 0) fails.Add($"execActionsLeft={foe.ActionsLeft}");
+            // the soldier is due east and every coverable approach tile is east of the watcher:
+            // the lane must point at the squad, not away from it.
+            if (!InOwCone(foe, sol.X, sol.Y)) fails.Add($"laneMissesSquad({foe.OwDirX},{foe.OwDirY})");
+        }
+        _anims.Clear();
+
+        // ---- (b) AIM ---------------------------------------------------------------------------
+        // (b1) the scorer is a real ARGMAX over the eight axes, and it FOLLOWS the squad.
+        var pl = new List<Unit> { sol };
+        foreach (var (spot, want) in new[] { ((14, 5), (1, 0)), ((2, 1), (0, -1)),
+                                             ((2, 9), (0, 1)), ((6, 9), (1, 1)) })
+        {
+            sol.X = spot.Item1; sol.Y = spot.Item2; sol.SyncPos();
+            var pick = Ai.ChooseLane(this, foe, 2, 5, pl, sol);
+            float picked = Ai.LaneScore(this, foe, 2, 5, pick.dx, pick.dy, pl);
+            foreach (var (ax, ay) in new[] { (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1) })
+                if (Ai.LaneScore(this, foe, 2, 5, ax, ay, pl) > picked + 0.001f)
+                    fails.Add($"notArgmax@{spot.Item1},{spot.Item2}");
+            // ...and the axis it picks must actually contain the soldier's approach ground: the
+            // soldier's own tile is the single highest-weighted tile on the board (LaneStandBonus),
+            // so on a one-soldier scene the winning cone contains it whenever anything is coverable.
+            if (picked > 0f && !Game.InConeDir(2, 5, pick.dx, pick.dy, sol.X, sol.Y))
+                fails.Add($"argmaxExcludesSoldier@{spot.Item1},{spot.Item2}");
+            // the four posts are unambiguous by construction (due east / due north / due south /
+            // exactly SE of the watcher on an empty board), so the expected axis is a GATE, not a
+            // note: "the lane follows the squad" is the whole claim of the scorer.
+            if (pick != want) fails.Add($"axis@{spot.Item1},{spot.Item2}={pick.dx},{pick.dy}(want {want.Item1},{want.Item2})");
+        }
+        sol.X = 14; sol.Y = 5; sol.SyncPos();
+
+        // (b2) the LoS filter is REAL: wall the corridor off and the same axis scores zero.
+        float openScore = Ai.LaneScore(this, foe, 2, 5, 1, 0, pl);
+        if (openScore <= 0f) fails.Add("openLaneScoresZero");
+        var walled = new Grid();
+        for (int y = 0; y < walled.H; y++) { walled.Tiles[8, y] = TileType.HighCover; walled.SetCoverHp(8, y); }
+        var keep = Grid; Grid = walled;
+        float blindScore = Ai.LaneScore(this, foe, 2, 5, 1, 0, pl);
+        Grid = keep;
+        if (blindScore != 0f) fails.Add($"blindLaneScored={blindScore:0.0}");
+
+        // (b3) the shipped invariant over a CAMPAIGN WALK: every ordinary lane an enemy actually
+        // arms in real play covers approach ground, or (no coverable ground anywhere) faces the
+        // nearest living soldier. This is the leg that watches the real planner, not a scene.
+        // NOTE the probe takes the WALKING game, not `this`. The first draft of this leg called
+        // `AlivePlayers()` / `InOwCone()` on the OUTER test scene while scoring a lane held on a
+        // completely different board — it passed, and it was measuring nothing.
+        int lanesSeen = 0, laneBad = 0, wideSeen = 0, focusedWithDialOff = 0; long walkActs = 0;
+        Action<Game, Unit, EnemyPlan> laneAudit = (wg, u, p) =>
+        {
+            walkActs++;
+            if (p == null || !p.Overwatch || !u.OnOverwatch || u.OwBrace) return;
+            if (!AiLane) { wideSeen++; if (u.OwFocused) focusedWithDialOff++; return; }
+            lanesSeen++;
+            if (!u.OwFocused || (u.OwDirX == 0 && u.OwDirY == 0)) { laneBad++; return; }
+            var live = wg.AlivePlayers(); live.RemoveAll(q => q.Downed);
+            if (live.Count == 0) return;
+            float best = 0f;
+            foreach (var (ax, ay) in new[] { (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1) })
+                best = Math.Max(best, Ai.LaneScore(wg, u, u.X, u.Y, ax, ay, live));
+            if (best > 0f)
+            {
+                // it covers approach ground the watcher can genuinely shoot on...
+                if (Ai.LaneScore(wg, u, u.X, u.Y, u.OwDirX, u.OwDirY, live) <= 0f) laneBad++;
+            }
+            else
+            {
+                // ...or, when NO axis can cover any, it faces the nearest living soldier.
+                Unit near = null; int nd = int.MaxValue;
+                foreach (var q in live)
+                { int d = Util.ChebyDist(u.X, u.Y, q.X, q.Y); if (d < nd) { nd = d; near = q; } }
+                if (near != null && !Game.InConeDir(u.X, u.Y, u.OwDirX, u.OwDirY, near.X, near.Y)) laneBad++;
+            }
+        };
+        WalkLaneCampaigns(64, laneAudit);
+        if (lanesSeen < 3) fails.Add($"vacuousWalk(ordinaryLanesArmed={lanesSeen})");
+        if (laneBad > 0) fails.Add($"laneInvariantBroken={laneBad}/{lanesSeen}");
+
+        // (e) THE DIAL, measured on the SAME walk machinery: with the lane off, not one ordinary
+        // watch may come back focused. (The scene-level half of (e) is below.)
+        AiLane = false;
+        WalkLaneCampaigns(16, laneAudit);
+        AiLane = ambient;
+        if (wideSeen < 2) fails.Add($"vacuousWalkOff(ordinaryWatches={wideSeen})");
+        if (focusedWithDialOff > 0) fails.Add($"coneArmedWithLaneOff={focusedWithDialOff}/{wideSeen}");
+
+        // ---- (c) TRUTH: the overlay predicate vs the REAL reaction, tile for tile --------------
+        // A live mission board (walls, cover, height) — the empty scene above cannot test LoS.
+        Util.Reseed(70317);
+        _run = new Run(); _run.Start();
+        SetupMission(1);
+        DebugWakeAll();
+        SquadConcealed = false;
+        var mover = Players.First(p => p.Alive && !p.IsVip && !Combat.IgnoresOverwatch(p));
+        mover.Hp = mover.MaxHp = 400;                       // never dies mid-census
+        var watcher = Enemies.First(e => e.Alive);
+        watcher.Weapon = Weapon.Make(WeaponKind.Smg);
+        foreach (var e in Enemies) { e.OnOverwatch = false; e.OwFocused = false; e.OwBrace = false; }
+        int mox = mover.X, moy = mover.Y;
+        int agreeChecked = 0, lied = 0, missed = 0;
+        for (int pass = 0; pass < 2; pass++)                // pass 0 = FOCUSED lane, pass 1 = 360 watch
+        {
+            var livePl = AlivePlayers(); livePl.RemoveAll(q => q.Downed);
+            // The lane comes through the SHIPPED dial, exactly as Game's exec arms it — so with
+            // SIGHTLINE_AILANE=0 pass 0 degenerates to a second 360 watch and the leg still holds
+            // (a wide watch must be told truthfully too), while legs (a)/(b3)/(d) go red.
+            var lane = AiLane ? Ai.ChooseLane(this, watcher, watcher.X, watcher.Y, livePl, mover) : (dx: 0, dy: 0);
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (!Grid.IsFloor(x, y)) continue;
+                    if (x == watcher.X && y == watcher.Y) continue;
+                    watcher.OnOverwatch = true; watcher.ReactedThisTurn = false;
+                    watcher.Ammo = watcher.Weapon.Clip;
+                    watcher.OwBrace = false;
+                    bool focus = pass == 0 && (lane.dx != 0 || lane.dy != 0);
+                    watcher.OwFocused = focus;
+                    watcher.OwDirX = focus ? lane.dx : 0;
+                    watcher.OwDirY = focus ? lane.dy : 0;
+                    bool covers = WatchCovers(watcher, x, y);
+                    mover.X = x; mover.Y = y; mover.SyncPos();
+                    mover.Hp = mover.MaxHp;
+                    _anims.Clear();
+                    OnUnitEnteredTile(mover);
+                    bool reacts = _anims.OfType<ShotAnim>().Any(s => s.A == watcher && s.D == mover);
+                    _anims.Clear();
+                    agreeChecked++;
+                    if (covers && !reacts) lied++;          // a washed tile that draws nothing
+                    if (!covers && reacts) missed++;        // a reaction on unwashed ground
+                }
+        }
+        mover.X = mox; mover.Y = moy; mover.SyncPos();
+        if (agreeChecked < 200) fails.Add($"vacuousTruthLeg({agreeChecked})");
+        if (lied > 0) fails.Add($"washLies={lied}/{agreeChecked}");
+        if (missed > 0) fails.Add($"washMisses={missed}/{agreeChecked}");
+
+        // ---- (d) CENSUS: the marked fraction of the board falls with lane selection ------------
+        // Same board, the same watcher walked over many posts; at each post count the floor tiles
+        // its watch marks with a 360 watch and with the chosen lane. The claim under test is not
+        // "the cone is smaller" (a 90-degree cone is trivially a quarter of the plane) but that
+        // the SHIPPED lane, chosen by the shipped scorer against the real squad, still collapses
+        // the marked region — i.e. the lane is not so wide-angled or so squad-hugging that the
+        // wash goes on covering the board.
+        int wideTiles = 0, coneTiles = 0, posts = 0, floorTiles = 0;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+                if (Grid.IsFloor(x, y)) floorTiles++;
+        int wox = watcher.X, woy = watcher.Y;
+        var players2 = AlivePlayers(); players2.RemoveAll(q => q.Downed);
+        for (int x = 0; x < Grid.W; x += 2)
+            for (int y = 0; y < Grid.H; y += 2)
+            {
+                if (!Grid.IsFloor(x, y)) continue;
+                watcher.X = x; watcher.Y = y;
+                watcher.OwFocused = false; watcher.OwDirX = 0; watcher.OwDirY = 0;
+                int wide = 0;
+                for (int tx = 0; tx < Grid.W; tx++)
+                    for (int ty = 0; ty < Grid.H; ty++)
+                        if (Grid.IsFloor(tx, ty) && WatchCovers(watcher, tx, ty)) wide++;
+                if (wide == 0) continue;                     // a blind post says nothing either way
+                // through the SHIPPED dial: with SIGHTLINE_AILANE=0 the exec arms no cone, so this
+                // census must read 1.000 and FAIL. That is what makes leg (d) a test of the lever
+                // and not merely of the geometry of a 90-degree wedge.
+                var lane = AiLane ? Ai.ChooseLane(this, watcher, x, y, players2, players2[0]) : (dx: 0, dy: 0);
+                bool focus2 = lane.dx != 0 || lane.dy != 0;
+                watcher.OwFocused = focus2; watcher.OwDirX = lane.dx; watcher.OwDirY = lane.dy;
+                int cone = 0;
+                for (int tx = 0; tx < Grid.W; tx++)
+                    for (int ty = 0; ty < Grid.H; ty++)
+                        if (Grid.IsFloor(tx, ty) && WatchCovers(watcher, tx, ty)) cone++;
+                wideTiles += wide; coneTiles += cone; posts++;
+            }
+        watcher.X = wox; watcher.Y = woy; watcher.SyncPos();
+        double marked = wideTiles == 0 ? 1.0 : coneTiles / (double)wideTiles;
+        double wideFloor = posts == 0 ? 0 : wideTiles / (double)(posts * Math.Max(1, floorTiles));
+        double coneFloor = posts == 0 ? 0 : coneTiles / (double)(posts * Math.Max(1, floorTiles));
+        if (posts < 10) fails.Add($"vacuousCensus(posts={posts})");
+        // The gate: a lane must mark materially less than the whole watch. 0.60 is set well clear
+        // of the measured value (see the PASS line) so it fails on a lane that stops being a lane,
+        // not on board-to-board variation.
+        if (marked > 0.60) fails.Add($"laneMarksTooMuch={marked:0.000}");
+        if (coneTiles == 0) fails.Add("laneMarksNothing");
+
+        // ---- (e) THE DIAL, on the scene: no axis planned, no cone armed ------------------------
+        Util.Reseed(70311);
+        _run = new Run(); _run.Start();
+        Grid = new Grid();
+        Players = new List<Unit> { sol }; Enemies = new List<Unit> { foe };
+        sol.X = 14; sol.Y = 5; sol.SyncPos(); sol.BeginTurn();
+        foe.X = 2; foe.Y = 5; foe.SyncPos(); foe.BeginTurn();
+        AiLane = false;
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var off = Ai.Plan(this, foe, pinned);
+        if (!off.Overwatch) fails.Add("dialPlanNoOverwatch");
+        if (off.OwDirX != 0 || off.OwDirY != 0) fails.Add("dialPlannedAxis");
+        _aiIdx = 0; _aiPlan = off; _aiStage = AiStage.ActAfterMove; BannerTimer = 0f;
+        UpdateEnemy();
+        if (!foe.OnOverwatch) fails.Add("dialNoWatch");
+        if (foe.OwFocused) fails.Add("dialArmedCone");
+        AiLane = ambient;
+        _anims.Clear();
+
+        return fails.Count == 0
+            ? $"LANETEST: PASS (ambient SIGHTLINE_AILANE={(ambient ? 1 : 0)}; "
+              + $"exec arms OwFocused+axis; scorer is argmax and blind lanes score 0; "
+              + $"{lanesSeen} ordinary lanes armed over a campaign walk of {walkActs} enemy acts, all covering approach ground "
+              + $"({wideSeen} wide watches with the dial off, 0 focused); "
+              + $"overlay == reaction on {agreeChecked} tile-checks, 0 lies / 0 misses; "
+              + $"census over {posts} posts: a 360 watch marks {wideFloor * 100:0.0}% of the floor, "
+              + $"a chosen lane {coneFloor * 100:0.0}% ({coneTiles}/{wideTiles} = {marked:0.000} of the 360 watch)"
+              + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "") + ")"
+            : $"LANETEST: FAIL ({string.Join(",", fails.Distinct())}) [acts={walkActs} lanes={lanesSeen} bad={laneBad} "
+              + $"wideOff={wideSeen} tileChecks={agreeChecked} lies={lied} misses={missed} "
+              + $"census={marked:0.000} posts={posts}]"
+              + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "");
+    }
+
+    /// P10 helper: walk `n` short headless campaigns with the smart bot so `Game.ActProbe` sees
+    /// real enemy act-opportunities. Bounded by a frame cap (never a TIMEOUT risk in the sweep).
+    void WalkLaneCampaigns(int n, Action<Game, Unit, EnemyPlan> onAct)
+    {
+        var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
+                           Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
+        for (int i = 0; i < n; i++)
+        {
+            Util.Reseed(313000 + i);
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true,
+                               ForcedObjective = objs[i % objs.Length] };
+            ActProbe = (u, p, actionsBefore, ammoBefore, standing) => onAct(g, u, p);
+            g.StartMission(1);
+            int frame = 0;
+            while (frame++ < 30000 && g.Phase != Phase.Win && g.Phase != Phase.Lose)
+                g.Update(1f / 60f);
+        }
+        ActProbe = null;
+    }
+
 }
