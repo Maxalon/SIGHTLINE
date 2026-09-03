@@ -955,6 +955,19 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_HEATPINTEST=1 : wave THE HEAT PIN AND L5 — the balance INSTRUMENT's three new
+        // contracts: EventCatalog.HeatPinned nulls the three heat-raising field-event arms (and
+        // they DO raise heat with it off), RunRec.HeatEnd / RunTurns / campaigns[] / heatLeak land
+        // in the JSON, and the autopilot's STALEMATE guard names its arm. Same 64x64 window as
+        // STALLTEST (the STALEMATE leg starts a real mission).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HEATPINTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(64, 64, "heatpintest");
+            Console.WriteLine(Game.HeatPinSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_GRAPPLETEST=1 : W9 THE REPAIR — the assault GRAPPLE verb, which had ZERO coverage
         // (its two siblings SHOVE and DRAG were both pinned). Reach-2 pull, the adjacent SLAM, and the
         // invariant that a soldier NEVER takes damage from its own grapple — incl. as a JUGGERNAUT,
@@ -1464,6 +1477,16 @@ public static class Program
         // the report (see ChoiceProbe). Read-only, default OFF, no RNG draw — the batch it runs
         // under is byte-identical to the same batch without it.
         ChoiceProbe.On = Environment.GetEnvironmentVariable("SIGHTLINE_BANDPROBE") == "1";
+        // THE HEAT PIN: a measured rung means the rung. Field events could raise a campaign's
+        // HeatLevel mid-run (Events.cs AddHeat, three arms, and the bot PREFERS one of them), so
+        // every rung below 8 was contaminated upward. Pinned by default in a batch;
+        // SIGHTLINE_HEATPIN=0 restores the leaky instrument (the bridge arm in
+        // docs/measurements/l5/). Nothing outside a batch sets it — EVENTTEST and real play see the
+        // shipped outcome.
+        EventCatalog.HeatPinned = Environment.GetEnvironmentVariable("SIGHTLINE_HEATPIN") != "0";
+        Console.WriteLine(EventCatalog.HeatPinned
+            ? "BALANCE: heat PINNED for this batch (field-event AddHeat is a no-op; SIGHTLINE_HEATPIN=0 restores the leak)"
+            : "BALANCE: heat NOT pinned (SIGHTLINE_HEATPIN=0) - a heat-N rung may contain heat-N+1 missions");
 
         // Optional pinned heat; otherwise cycle the ladder-spanning default set so the curve shows.
         // APEX W4: the default re-baseline now SPANS THE LADDER — {0,2,4,6,8} instead of i%5 —
@@ -1589,12 +1612,14 @@ public static class Program
                     // Treat a frame-cap as a loss so the batch never hangs. EndRun is no-op if
                     // the run already finalised; defensively close the run record for the report.
                     capped++; losses++;
-                    Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "frame-cap");
+                    Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "frame-cap",
+                                 game.RunState != null ? game.RunState.HeatLevel : -1, game.RunTurns);
                     return true;
                 }
             }
             // window closed mid-match (Xvfb teardown / Ctrl-C): close the run record and stop.
-            Stats.EndRun(false, endless ? game.Wave : (game.RunState != null ? game.RunState.Mission - 1 : 0), "aborted");
+            Stats.EndRun(false, endless ? game.Wave : (game.RunState != null ? game.RunState.Mission - 1 : 0), "aborted",
+                         game.RunState != null ? game.RunState.HeatLevel : -1, game.RunTurns);
             return false;
         }
 

@@ -75,6 +75,38 @@ public class GameEvent
 
 public static class EventCatalog
 {
+    // ── THE HEAT PIN (wave "THE HEAT PIN AND L5") ─────────────────────────────────────────
+    // Three arms below (relic:0 "Claim it", informant:1 "Turn them in", reservecall:1 "Keep the
+    // roster") carry an AddHeat outcome, so a measured "heat-N rung" was never a fixed rung: every
+    // rung below 8 was contaminated UPWARD while heat 8 is clamped and cannot leak, which means the
+    // instrument systematically compressed the top of the ladder it was used to diagnose (ROADMAP,
+    // CONTOUR C1 review). Measured on the L4 archive: 12-17 heat-raising picks per 160-campaign
+    // rung, 3.6-5.6% of missions played at a heat other than the pin. And it is the BOT'S
+    // PREFERENCE, not exploration — Game.EventOutcomeValue prices AddHeat at -4 against 0.3/intel,
+    // so "Turn them in" (+20 intel) is the VALUE-BEST arm of FACTION INFORMANT.
+    // When HeatPinned is set (the balance batch sets it unless SIGHTLINE_HEATPIN=0) the AddHeat
+    // outcome is a NO-OP that reports HeatPinnedLine. It draws nothing from Util.Rng either way, so a
+    // campaign that never picks a heat-raising arm is byte-identical with the pin on or off
+    // (docs/measurements/l5/). Harness-only: nothing in real play sets it, and EVENTTEST leaves it off.
+    public static bool HeatPinned = false;
+    public const string HeatPinnedLine = "Heat pinned (harness)";
+
+    /// Every catalog arm that carries an AddHeat outcome, as the "id:arm" codes Stats.RecordEvent
+    /// logs — the set Stats uses to count heat-raising picks per campaign, and the set HEATPINTEST
+    /// pins at exactly three so a fourth leak cannot arrive unnoticed.
+    public static List<string> HeatRaisingArms()
+    {
+        var arms = new List<string>();
+        foreach (var ev in All)
+            for (int i = 0; i < ev.Choices.Length; i++)
+                if (RaisesHeat(ev.Choices[i])) arms.Add($"{ev.Id}:{i}");
+        return arms;
+    }
+    public static bool RaisesHeat(EventChoice ch)
+        => ch.Outcome.Kind == EventOutcomeKind.AddHeat
+           || (ch.HasSecond && ch.Outcome2.Kind == EventOutcomeKind.AddHeat)
+           || (ch.HasThird && ch.Outcome3.Kind == EventOutcomeKind.AddHeat);
+
     // ---- builders ----
     static EventOutcome O(EventOutcomeKind k, int amount = 0, int cost = 0, int chance = 0,
                           WeaponMod mod = WeaponMod.Scope, Trait tr = Trait.Killer,
@@ -457,6 +489,7 @@ public static class EventCatalog
             }
             case EventOutcomeKind.AddHeat:
             {
+                if (HeatPinned) return HeatPinnedLine;   // THE HEAT PIN: a rung means the rung (no draw, no mutation)
                 int before = run.HeatLevel;
                 run.HeatLevel = Heat.Clamp(run.HeatLevel + Math.Max(1, o.Amount));
                 return run.HeatLevel > before ? $"Heat rises to {run.HeatLevel}" : "Heat already at ceiling";
@@ -846,6 +879,71 @@ public static class EventCatalog
         }
 
         return fails.Count == 0 ? "EVENTTEST: PASS" : "EVENTTEST: FAIL (" + string.Join(", ", fails) + ")";
+    }
+
+    /// HEATPINTEST, the catalog leg (the Stats / STALEMATE legs live in Game.Harness.cs, which
+    /// composes the verdict). Returns a comma-joined list of failures, "" on success.
+    ///   (1) the catalog carries EXACTLY the three heat-raising arms the instrument's README names,
+    ///       at the arm indices Stats logs them under (relic:0, informant:1, reservecall:1);
+    ///   (2) with the pin OFF each arm raises HeatLevel by one — this is the "proven FAIL pre-fix"
+    ///       half read in reverse: the arms DO leak on the shipped tree, so the pin has work to do;
+    ///   (3) with the pin ON each arm leaves HeatLevel unchanged, the AddHeat outcome reports
+    ///       HeatPinnedLine, and the arm's OTHER outcomes still fire (the pin is a no-op on HEAT
+    ///       only — INFORMANT's +20 intel must still land or the pinned batch plays a different
+    ///       economy from the leaky one).
+    /// Restores HeatPinned to its entry value on every path.
+    public static string HeatPinProbe()
+    {
+        var fails = new List<string>();
+        bool saved = HeatPinned;
+        try
+        {
+            var arms = HeatRaisingArms();
+            var want = new[] { "relic:0", "informant:1", "reservecall:1" };
+            if (arms.Count != want.Length || !Array.TrueForAll(want, w => arms.Contains(w)))
+                fails.Add("heatArms=[" + string.Join(" ", arms) + "]");
+            foreach (var code in want)
+            {
+                var ev = Array.Find(All, e => e.Id == code.Split(':')[0]);
+                if (ev == null) { fails.Add("noEvent:" + code); continue; }
+                var ch = ev.Choices[int.Parse(code.Split(':')[1])];
+                // pin OFF: heat rises by exactly one
+                HeatPinned = false;
+                var r = MakeTestRun(); r.HeatLevel = 2; r.Intel = 50;
+                ApplyArm(r, ch);
+                if (r.HeatLevel != 3) fails.Add($"{code}:unpinnedHeat={r.HeatLevel}");
+                // pin ON: heat is untouched, the AddHeat line names the pin, the rest of the arm fires
+                HeatPinned = true;
+                r = MakeTestRun(); r.HeatLevel = 2; r.Intel = 50;
+                int intel0 = r.Intel, squad0 = r.Squad.Count, boons0 = r.ActiveBoons.Count;
+                string lines = ApplyArm(r, ch);
+                if (r.HeatLevel != 2) fails.Add($"{code}:pinnedHeat={r.HeatLevel}");
+                if (!lines.Contains(HeatPinnedLine)) fails.Add($"{code}:noPinLine[{lines}]");
+                switch (code)
+                {
+                    case "informant:1": if (r.Intel != intel0 + 20) fails.Add($"{code}:intel={r.Intel}"); break;
+                    case "relic:0": if (r.ActiveBoons.Count != boons0 + 1) fails.Add($"{code}:boons={r.ActiveBoons.Count}"); break;
+                    case "reservecall:1": if (r.Squad.Count != squad0) fails.Add($"{code}:squad={r.Squad.Count}"); break;
+                }
+            }
+            // the ceiling is still the ceiling: pin OFF at Heat.Max stays clamped (EVENTTEST's leg,
+            // re-asserted here because the pin branch sits ABOVE the clamp and must not replace it)
+            HeatPinned = false;
+            var top = MakeTestRun(); top.HeatLevel = Heat.Max;
+            Apply(top, new EventOutcome { Kind = EventOutcomeKind.AddHeat, Amount = 1 });
+            if (top.HeatLevel != Heat.Max) fails.Add("clampLost");
+        }
+        catch (Exception e) { fails.Add("exception:" + e.GetType().Name + ":" + e.Message); }
+        finally { HeatPinned = saved; }
+        return string.Join(",", fails);
+    }
+
+    static string ApplyArm(Run run, EventChoice ch)
+    {
+        string line = Apply(run, ch.Outcome);
+        if (ch.HasSecond) line += "; " + Apply(run, ch.Outcome2);
+        if (ch.HasThird) line += "; " + Apply(run, ch.Outcome3);
+        return line;
     }
 
     static Run MakeTestRun()

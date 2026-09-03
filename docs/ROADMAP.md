@@ -2123,7 +2123,7 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       and `HarshAttrition` compounds over a run length the autopilot rarely reaches (avgMis 3.66
       at h5). **Instrument the delivered headcount per (heat, mission) before choosing a lever.**
 
-- [ ] **A "heat-N rung" IS NOT A FIXED RUNG, AND THE LEAK IS DIRECTIONAL — it biases the very
+- [x] **A "heat-N rung" IS NOT A FIXED RUNG, AND THE LEAK IS DIRECTIONAL — it biases the very
       finding this program is chasing.** `Events.cs:460` (`EventOutcomeKind.AddHeat`) lets three
       field-event choices raise a run's HeatLevel mid-campaign, +1 each, so every heat-N cell
       contains some heat-N+1 missions. **Heat 8 is clamped and cannot leak, so every rung below it
@@ -2136,6 +2136,12 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       this ladder has had this hole in it.** A clean fix exists and is cheap: a harness-only pin
       that suppresses `AddHeat` for a measured batch, so a rung means the rung. Do that BEFORE the
       base-difficulty round above, or that round re-inherits the bias.
+      **DONE — wave THE HEAT PIN AND L5 (base `178464a`).** `EventCatalog.HeatPinned` makes the
+      `AddHeat` outcome a reported no-op; every `SIGHTLINE_BALANCE` batch sets it unless
+      `SIGHTLINE_HEATPIN=0`, and the JSON's `heatLeak{}` block says whether it held. Re-counted on the
+      L4 archive (base `7315425`, 960 campaigns): **88 heat-raising picks, 134 of 3,377 missions (4.0%)
+      played above their rung** — RECRUIT 4.2% / h0 4.9% / h2 5.6% / h4 4.6% / h6 3.6% / **h8 0.0%**.
+      DEVLOG §THE HEAT PIN AND L5; the pinned ladder is L5 (`docs/measurements/l5/`).
 
 - [ ] **SKIRMISH AT HEAT 6–7 IS UNMEASURED AND C1 CHANGED IT.** `Game.cs` gates the m1–2 heat grace
       on `Mode != GameMode.Skirmish` (W9's fix), so a heat-6 SKIRMISH now takes C1's +1 enemy damage
@@ -2254,6 +2260,10 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       **20 of 960 in both C3 arms and 20 of 960 in the L3 archive** — identical, because it is a
       property of the worlds, not of any lever. Every published ladder figure sits on top of it and
       no wave has ever mentioned it. Somebody should find out what those campaigns are doing.
+      **Corrected (THE HEAT PIN AND L5): on L4 (base `7315425`) it is 16 of 960 = 1.67%, not 2.1%
+      (RECRUIT 7 / h0 3 / h2 3 / h4 3 / h6 0 / h8 0). The guard now logs WHICH arm fired
+      (`STALEMATE-MISSION` / `STALEMATE-RUN`) with the mission, objective and run-turns on the row —
+      L5's README says what the campaigns were doing.**
 - [x] **`scripts/qa-sweep.sh` had no `exit` statement.** It accumulated `_fail` / `_autofail` and
       ended on an `echo`, so `SWEEP-EXIT` was 0 whatever happened. Every green-sweep claim dated
       before C3 quotes the exit code of an echo. Wired, and `AIIDLETEST` — the one self-test line
@@ -2667,6 +2677,8 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [ ] **A 2.1% HARNESS-FORCED-LOSS FLOOR NOBODY OWNS.** `instrumentHealth.stalemateLosses` reads
       20/960 in both of C3's arms and in L3. It has never been mentioned by any wave. It is not a
       C3 defect; it is a property of the instrument that every ladder in this repository inherits.
+      **Corrected (THE HEAT PIN AND L5): 16/960 = 1.67% on L4, split by arm since this wave — see the
+      copy of this item above and L5's README.**
 
 ---
 
@@ -2711,6 +2723,8 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       turtling is structurally unmeasurable); and pin `Events.cs` `AddHeat` for measured batches —
       it contaminates every rung below 8 **upward** while heat 8 is clamped, so the instrument
       **compresses exactly the region that collapsed in L4.**
+      **The pin landed (THE HEAT PIN AND L5, base `178464a`); the opener re-tune and the camping
+      policy still stand.**
 
 ### WAVE "THE STRIDE" (2026-09-02, base `cee3cba`, details in DEVLOG §THE STRIDE)
 
@@ -2758,3 +2772,30 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       to grow. The end card does not name the faction either.
 - [ ] **No MIXED option on the dial** — reachable only through ANY (a quarter of its deal) or
       `SIGHTLINE_FACTION=mixed`.
+
+### WAVE "THE HEAT PIN AND L5" (2026-09-03, base `178464a`, details in DEVLOG §THE HEAT PIN AND L5)
+
+- [x] **A measured rung means the rung.** `EventCatalog.HeatPinned` (default false; every
+      `SIGHTLINE_BALANCE` batch sets it unless `SIGHTLINE_HEATPIN=0`) makes the field-event `AddHeat`
+      outcome a no-op that reports `Heat pinned (harness)`; the arm's other outcomes still fire, no
+      `Util.Rng` draw moves either way. `heatLeak{pinned, heatRaisingPicks, campaignsRaised,
+      missionsAbovePin, maxHeatEnd}` in the JSON; `RunRec.HeatEnd` stamped at every campaign exit.
+      Real play and EVENTTEST are untouched — the leak is a design cost there, not an instrument bug.
+- [x] **The STALEMATE guard names its arm.** `STALEMATE-MISSION` (the per-mission cap) /
+      `STALEMATE-RUN` (W9's run-scoped cap), mission-first when both hold; `Stats.IsStalemate` matches
+      the prefix so every consumer and every older archive still read. `instrumentHealth` carries the
+      split and a `stalemates[]` row per forced loss (slot, policy, heat, arm, mission, objective,
+      missionTurns, runTurns).
+- [x] **One row per campaign in the JSON.** `campaigns[]` (slot, policy, mode, heat, heatEnd, win,
+      missionsCleared, lossCause, runTurns, endMission, endObjective, heatRaisingPicks) — so a
+      SINGLE-policy batch, which `pairedPolicy.slots` drops entirely, is CRN-pairable.
+      `docs/measurements/l5/rows.py --check` rebuilds `pairedPolicy` from the rows field for field.
+- [x] **`SIGHTLINE_HEATPINTEST`** in `qa-sweep.sh` through `verdict`; FAILS on both pre-fix shapes
+      (an inert pin: `pinnedHeat=3` on all three arms; a one-word guard: `runArmTitle=STALEMATE`).
+- [x] **Inert with the pin off**, by measurement: base-tree chunk vs this tree with `SIGHTLINE_HEATPIN=0`
+      differs in EXACTLY the five new keys at h0-b0 and h4-b10 (`l5/inert.py`); with the pin ON every
+      campaign that took no heat-raising arm is identical (38/38, `l5/pincheck.py`).
+- [ ] **L5 — the PINNED ladder of record** (part B): 6 rungs x 16 slot sets, the bridge row, the
+      cluster tool, the stalemate split, the README.
+- [ ] **RESOLVE THE INTERACTION TERM** (part B): the h6 2^3 factorial, chunk-paired on 16 clusters.
+
