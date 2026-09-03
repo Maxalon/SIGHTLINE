@@ -1434,6 +1434,85 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// The help text for a verb id, with no live game. See VerbTable.
     public static string VerbHelp(string id) => ActionDesc(null, id);
 
+    // ── THE FRONT DOOR: the rest of the bindings, as DATA ────────────────────────────────────
+    /// Every player-facing binding that is NOT an action-bar verb (VerbTable) and NOT a main-menu
+    /// door (IntroDoors + Game.IntroKeys), grouped the way the FIELD MANUAL's VERBS & KEYS tab
+    /// prints them. `SIGHTLINE_KEYTABLE=1` prints README's controls tables from all three, so a
+    /// binding reaches the manual and the README from one row here. The bound set this must cover
+    /// is DERIVED, never remembered: `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u`
+    /// (plus the three mouse reads and held Shift in Renderer.cs). Before this table the README
+    /// was missing H, X, E, G, V and every main-menu letter, and called [6] "FLASH".
+    public static readonly (string Group, string Input, string Action)[] KeyTable =
+    {
+        ("SELECTING & MOVING", "Left-click a soldier", "select it"),
+        ("SELECTING & MOVING", "Left-click a tile", "move there - inside the cyan outline is one action, the dashed outer ring is a dash (both actions)"),
+        ("SELECTING & MOVING", "Left-click a hostile", "fire on it"),
+        ("SELECTING & MOVING", "hold Shift", "reveal the dash / sprint region in the move overlay"),
+        ("SELECTING & MOVING", "Tab", "cycle to the next soldier"),
+        ("SELECTING & MOVING", "Arrows / WASD", "drive the keyboard cursor"),
+        ("SELECTING & MOVING", "Space", "act on the cursor tile (move, fire, or the armed verb)"),
+        ("SELECTING & MOVING", "Enter", "end the turn"),
+        ("SELECTING & MOVING", "Esc / Right-click", "cancel an aim or targeting mode; Esc again opens the pause card"),
+        ("CAMERA", "Wheel", "zoom"),
+        ("CAMERA", "Middle-drag", "pan"),
+        ("CAMERA", "C", "reset the camera (AUTO-CAM on the pause card follows the action on its own)"),
+        ("IN A MISSION", "T", "write a custom tag on the selected soldier (Enter confirms, Backspace edits, Esc cancels)"),
+        ("IN A MISSION", "V", "show every verb while the onboarding is still staging the action bar"),
+        ("IN A MISSION", "P", "restart the drill (TRAINING OP only)"),
+        ("EVERYWHERE", "Esc", "the pause card in a fight; the same card opens as SETTINGS on the main menu and in the barracks"),
+        ("EVERYWHERE", "K", "FIELD MANUAL - from the main menu, the barracks and the pause card (Esc or K closes it)"),
+        ("EVERYWHERE", "Q", "QUIT TO DESKTOP - from the pause card (arm, then confirm) or the main menu"),
+        ("EVERYWHERE", "M", "mute / unmute"),
+        ("EVERYWHERE", "F11", "fullscreen"),
+        ("EVERYWHERE", "F2", "cycle animation speed"),
+        ("MAIN MENU", "Left / Right, A / D, Kp- / Kp+", "dial the DIFFICULTY card (RECRUIT, STANDARD, HEAT 1-8 as earned)"),
+        ("OTHER SCREENS", "DRAFT: Enter / R / Esc", "deploy the founding squad / re-roll the pool / back"),
+        ("OTHER SCREENS", "BARRACKS: Enter / A / Esc / K", "proceed to deployment / open or close the ARMORY / SETTINGS (or back out of the ARMORY) / FIELD MANUAL"),
+        ("OTHER SCREENS", "END CARD: Enter / W / Esc", "new run (after TRAINING OP: run the drill again) / WAR ROOM / main menu"),
+        ("OTHER SCREENS", "FIELD MANUAL: Up / Down (W / S), hold Left / Right (A / D), Esc / K", "change tab / scroll / back"),
+        ("OTHER SCREENS", "SKIRMISH SETUP: Left / Right (A / D), Up / Down (W / S, + / -), Enter, Esc", "objective / heat / deploy / back"),
+        ("OTHER SCREENS", "AUDIO CHECK: Esc or U, M", "back / mute"),
+        ("OTHER SCREENS", "WAR ROOM: Esc", "back"),
+    };
+
+    /// README's controls tables, as markdown, from VerbTable + KeyTable + IntroDoors. Hand-run
+    /// via `SIGHTLINE_KEYTABLE=1`; paste the output over the block between README's KEYTABLE
+    /// markers. Verb rows carry the SAME help text the action bar's tooltip and the manual show.
+    public static string KeyTableMarkdown()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("**In a mission - the verbs** (every one is also a button on the action bar, labelled with its key)");
+        sb.AppendLine();
+        sb.AppendLine("| Key / verb | What it does |");
+        sb.AppendLine("|------------|--------------|");
+        foreach (var v in VerbTable)
+            sb.AppendLine($"| **{v.Key}** / {v.Label} | {VerbHelp(v.Id).Replace("|", "/")} |");
+        string group = null;
+        foreach (var k in KeyTable)
+        {
+            if (k.Group != group)
+            {
+                group = k.Group;
+                sb.AppendLine();
+                sb.AppendLine($"**{Title(group)}**");
+                sb.AppendLine();
+                sb.AppendLine("| Input | Action |");
+                sb.AppendLine("|-------|--------|");
+                if (group == "MAIN MENU")
+                    foreach (var d in IntroDoors)
+                        sb.AppendLine($"| **{IntroDoorKey(d.Id)}** / {d.Label} | {d.Caption}{(d.Id == "continue" ? " (only while a save exists)" : "")} |");
+            }
+            sb.AppendLine($"| **{k.Input}** | {k.Action} |");
+        }
+        return sb.ToString();
+        static string Title(string s)
+        {
+            var w = s.ToLowerInvariant().Split(' ');
+            for (int i = 0; i < w.Length; i++) if (w[i].Length > 1) w[i] = char.ToUpperInvariant(w[i][0]) + w[i].Substring(1);
+            return string.Join(" ", w);
+        }
+    }
+
     /// W5 CHROMETEST seam: run the REAL action-bar layout for `g` and hand back the rects it
     /// publishes. Layout and paint are one pass by design (widths come from measured labels), so
     /// this draws — call it inside a BeginDrawing/EndDrawing pair. Harness-only.
@@ -2555,7 +2634,80 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     //  a fixed screenshot frame is reproducible (content may differ frame-to-frame,
     //  which is fine + intended); no per-frame RNG.
     // ============================================================================
+    // ── THE FRONT DOOR: the intro's doors as DATA ────────────────────────────────────────────
+    /// Every plate on the main menu: its id (the dispatch id in Game.IntroKeys, plus "deploy" for
+    /// the primary verb, which is dispatched on Enter above that table), the label painted on the
+    /// plate, and the caption the shared slot shows while the plate is hovered. DrawIntro paints
+    /// FROM this table and SIGHTLINE_KEYTABLE prints the README's main-menu rows from it, so the
+    /// plate, its chip, the key the dispatch reads and the controls table cannot drift apart.
+    public static readonly (string Id, string Label, string Caption)[] IntroDoors =
+    {
+        ("deploy",   "DEPLOY SQUAD", "NEW CAMPAIGN - draft a squad, pick a doctrine, survive 6 operations"),
+        ("continue", "CONTINUE RUN", "CONTINUE - resume your saved campaign run"),
+        ("training", "TRAINING OP",  "TRAINING OP - a short live-fire drill; nothing is saved, restart it any time"),
+        ("endless",  "LAST STAND",   "LAST STAND - endless horde survival; how many waves can you hold?"),
+        ("warroom",  "WAR ROOM",     "WAR ROOM - spend salvage on unlocks; achievements + hall of fame"),
+        ("codex",    "FIELD MANUAL", "FIELD MANUAL - every enemy, class and rule in one reference"),
+        ("skirmish", "SKIRMISH",     "SKIRMISH - one custom fight; pick the objective and the heat"),
+        ("daily",    "DAILY",        "DAILY - today's seeded run, one attempt, ranked by turns"),
+        ("audio",    "AUDIO CHECK",  "AUDIO CHECK - hear every cue, sweep the music, move the mix; measured numbers beside each"),
+        ("settings", "SETTINGS",     "SETTINGS - text size, colourblind palette, brightness, gamma, animation speed, the mix"),
+        ("quit",     "QUIT",         "QUIT - close the game; a campaign in progress resumes from its last mission start"),
+    };
+    public static string IntroDoorLabel(string id) { foreach (var d in IntroDoors) if (d.Id == id) return d.Label; return id; }
+    public static string IntroDoorCaption(string id) { foreach (var d in IntroDoors) if (d.Id == id) return d.Caption; return ""; }
+    /// The caption's colour follows the plate's semantic role: the danger mode is Foe, the on-ramp
+    /// is Good, the two benches are Accent, everything else is the quiet TxtDim.
+    static Color IntroDoorColor(string id) => id switch
+    {
+        "endless" => Pal.Foe, "training" => Pal.Good, "audio" => Pal.Accent, "settings" => Pal.Accent, _ => Pal.TxtDim,
+    };
+    /// The key chip a door carries, as the plate paints it. DEPLOY SQUAD is dispatched on Enter
+    /// (Game.HandleOverlayClick, above the IntroKeys table); every other door reads Game.IntroKeys.
+    public static string IntroDoorKey(string id) => id == "deploy" ? KeyName(KeyboardKey.Enter) : KeyName(Game.IntroKey(id));
+    /// A key as the chrome names it. Letters are themselves; the few named keys get the word.
+    public static string KeyName(KeyboardKey k) => k switch
+    {
+        KeyboardKey.Enter => "ENTER", KeyboardKey.Escape => "Esc", KeyboardKey.Space => "SPACE",
+        KeyboardKey.Tab => "TAB", KeyboardKey.Null => null, _ => k.ToString().ToUpperInvariant(),
+    };
+
+    /// THE FRONT DOOR: a door drawn WITHOUT a key hint, counted. SETTINGSTEST's front-door leg
+    /// asserts the count does not move across a frame of the intro, so a plate can never again ship
+    /// with its key unlabelled while the dispatch reads it (DEPLOY SQUAD did, for every wave since
+    /// the doors were built: nine chips on the screen and none on the primary verb).
+    public static int IntroNullHintDraws;
+    static bool _introDrawing;
+    /// The DIFFICULTY card's rect, published each intro frame for the caption-fit assertion.
+    public static Rectangle HeatCard;
+
+    /// The resting caption on a COLD profile — no drill seen, no save, no LAST STAND best. The
+    /// one always-visible line of guidance on the menu used to name the danger mode; on a fresh
+    /// profile it now points at the on-ramp. Returns once TrainingSeen, a save, or a best wave.
+    public const string ColdNudge = "NEW HERE? TRAINING OP [N] teaches the verbs in a few minutes - nothing is saved";
+    public static bool IntroCold(Game g) => !Display.TrainingSeen && !SaveGame.Exists && g.EndlessBestWave == 0;
+
+    /// The DIFFICULTY card's second row: how the NEXT rung is earned, or null when "MAX UNLOCKED: n"
+    /// is the more useful fact (dialled below an earned ceiling, or at the ceiling itself). Stated
+    /// because Game.UnlockHeatOnWin's rule — win AT the cap to raise it, and RECRUIT never raises
+    /// it — was written nowhere a player could read. Rung 0 shares the row with "< RECRUIT", so it
+    /// gets the short form; the card is 320 px and the row must fit at 120% text size.
+    public static string HeatUnlockRule(int level, int unlocked)
+    {
+        if (unlocked >= Sightline.Heat.Max) return null;
+        if (level < unlocked && unlocked > 0) return null;
+        return level == 0 ? $"A WIN UNLOCKS HEAT {unlocked + 1}"
+                          : $"WIN AT HEAT {unlocked} TO UNLOCK HEAT {unlocked + 1}";
+    }
+
     static void DrawIntro(Game g)
+    {
+        _introDrawing = true;
+        try { DrawIntroBody(g); }
+        finally { _introDrawing = false; }
+    }
+
+    static void DrawIntroBody(Game g)
     {
         float t = (float)Now();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
 
@@ -2633,21 +2785,23 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         float btnIn = PanelAnim("introBtns", 0.3f, 0.55f);
         int by = ry0 + 46;
         by += (int)((1f - Util.EaseOutQuad(btnIn)) * 14f);
-        string btn = "DEPLOY SQUAD";
-        string secondBtn = SaveGame.Exists ? "CONTINUE RUN" : null;
+        string btn = IntroDoorLabel("deploy");
+        string secondBtn = SaveGame.Exists ? IntroDoorLabel("continue") : null;
         if (secondBtn != null)
         {
-            int bw = 220, gap = 22;
+            // THE FRONT DOOR: 240 wide (was 220). "[ENTER]" is the widest chip on the screen, and
+            // beside a 12-character label at 120% text size a 220 plate had no row for both.
+            int bw = 240, gap = 22;
             OverlayBtn2 = new Rectangle(W / 2 - bw - gap / 2, by, bw, 50);
             OverlayBtn  = new Rectangle(W / 2 + gap / 2, by, bw, 50);
-            DrawOverlayButton(OverlayBtn2, secondBtn, Pal.Friend, "C", btnIn);
-            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
+            DrawOverlayButton(OverlayBtn2, secondBtn, Pal.Friend, IntroDoorKey("continue"), btnIn);
+            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, IntroDoorKey("deploy"), btnIn);
         }
         else
         {
             OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 50);
             OverlayBtn2 = new Rectangle(0, 0, 0, 0);
-            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
+            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, IntroDoorKey("deploy"), btnIn);
         }
 
         // PROGRAM HORIZON W2: LAST STAND (endless horde survival) — the danger mode keeps the
@@ -2659,30 +2813,33 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         float trIn = PanelAnim("introTraining", 0.3f, 0.58f);
         int trBy = by + 62;
         OverlayBtn8 = new Rectangle(W / 2 - 130, trBy, 260, 44);
-        if (!Display.TrainingSeen) DrawOverlayButton(OverlayBtn8, "TRAINING OP", Pal.Good, "N", trIn);
-        else                       DrawGhostButton(OverlayBtn8, "TRAINING OP", "N", trIn);
+        if (!Display.TrainingSeen) DrawOverlayButton(OverlayBtn8, IntroDoorLabel("training"), Pal.Good, IntroDoorKey("training"), trIn);
+        else                       DrawGhostButton(OverlayBtn8, IntroDoorLabel("training"), IntroDoorKey("training"), trIn);
 
         float lsIn = PanelAnim("introLastStand", 0.3f, 0.62f);
         int lsBy = trBy + 56;
         OverlayBtn3 = new Rectangle(W / 2 - 130, lsBy, 260, 44);
-        DrawOverlayButton(OverlayBtn3, "LAST STAND", Pal.Foe, "L", lsIn);
+        DrawOverlayButton(OverlayBtn3, IntroDoorLabel("endless"), Pal.Foe, IntroDoorKey("endless"), lsIn);
 
         // 2x2 utility grid: WAR ROOM / FIELD MANUAL / SKIRMISH / DAILY — same width, same
         // neutral outline (no semantic fill: none of these is a danger or a primary verb).
         float wrIn = PanelAnim("introWarRoom", 0.3f, 0.68f);
         float cxIn = PanelAnim("introCodex", 0.3f, 0.72f);
         float smIn = PanelAnim("introSkirmish", 0.3f, 0.76f);
-        int miniW = 172, miniGap = 12;
+        // THE FRONT DOOR: 188 wide (was 172) — FIELD MANUAL's 12 characters at 120% plus its [K]
+        // chip need ~180 px of row, measured by SETTINGSTEST's front-door leg, which now fails
+        // the moment a chip is painted into its label at any shipped text size.
+        int miniW = 188, miniGap = 12;
         int wrBy = lsBy + 74;
         OverlayBtn4 = new Rectangle(W / 2 - miniW - miniGap / 2, wrBy, miniW, 40);
-        DrawGhostButton(OverlayBtn4, "WAR ROOM", "W", wrIn);
+        DrawGhostButton(OverlayBtn4, IntroDoorLabel("warroom"), IntroDoorKey("warroom"), wrIn);
         OverlayBtn5 = new Rectangle(W / 2 + miniGap / 2, wrBy, miniW, 40);
-        DrawGhostButton(OverlayBtn5, "FIELD MANUAL", "K", cxIn);
+        DrawGhostButton(OverlayBtn5, IntroDoorLabel("codex"), IntroDoorKey("codex"), cxIn);
         int smBy = wrBy + 48;
         OverlayBtn6 = new Rectangle(W / 2 - miniW - miniGap / 2, smBy, miniW, 40);
-        DrawGhostButton(OverlayBtn6, "SKIRMISH", "S", smIn);
+        DrawGhostButton(OverlayBtn6, IntroDoorLabel("skirmish"), IntroDoorKey("skirmish"), smIn);
         OverlayBtn7 = new Rectangle(W / 2 + miniGap / 2, smBy, miniW, 40);
-        DrawGhostButton(OverlayBtn7, "DAILY", "Y", smIn);
+        DrawGhostButton(OverlayBtn7, IntroDoorLabel("daily"), IntroDoorKey("daily"), smIn);
         // RESONANCE A3: AUDIO CHECK — a third utility row. It is a tuning bench rather than a
         // mode, so it takes the same neutral outline.
         // SETTINGS EVERYWHERE: SETTINGS pairs with it — the two benches share the row (the
@@ -2691,16 +2848,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         float acIn = PanelAnim("introAudio", 0.3f, 0.80f);
         int acBy = smBy + 48;
         OverlayBtn9 = new Rectangle(W / 2 - miniW - miniGap / 2, acBy, miniW, 40);
-        DrawGhostButton(OverlayBtn9, "AUDIO CHECK", "U", acIn);
+        DrawGhostButton(OverlayBtn9, IntroDoorLabel("audio"), IntroDoorKey("audio"), acIn);
         IntroSettingsBtn = new Rectangle(W / 2 + miniGap / 2, acBy, miniW, 40);
-        DrawGhostButton(IntroSettingsBtn, "SETTINGS", "O", acIn);
+        DrawGhostButton(IntroSettingsBtn, IntroDoorLabel("settings"), IntroDoorKey("settings"), acIn);
         // W5 THE DOORS: the front door swings both ways. Same neutral outline as the utility grid —
         // leaving is not a mode, and it is certainly not a danger. It takes the last row alone, at
         // the grid's full width: the exit reads as the exit, after everything the menu offers.
         float qIn = PanelAnim("introQuit", 0.3f, 0.84f);
         int qBy = acBy + 48;
         IntroQuitBtn = new Rectangle(W / 2 - miniW - miniGap / 2, qBy, miniW * 2 + miniGap, 40);
-        DrawGhostButton(IntroQuitBtn, "QUIT", "Q", qIn);
+        DrawGhostButton(IntroQuitBtn, IntroDoorLabel("quit"), IntroDoorKey("quit"), qIn);
 
         // ---- shared caption slot (between LAST STAND and the grid) ----
         // Hovering ANY mode button explains it here; at rest it carries LAST STAND's best-wave
@@ -2734,6 +2891,19 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             caption = bestWave > 0 ? $"LAST STAND BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
             if (bestWave > 0) capCol = Pal.Foe;
         }
+
+        // THE FRONT DOOR: the hovered door is resolved by the SAME hit-test the click uses
+        // (Game.IntroHit — it already skips CONTINUE while no save exists), and its caption and
+        // colour come off the IntroDoors table, so the eleven hand-written branches are gone.
+        string hoverId = Raylib.CheckCollisionPointRec(introMouse, OverlayBtn) ? "deploy" : g.IntroHit(introMouse);
+        if (hoverId != null) { caption = IntroDoorCaption(hoverId); capCol = IntroDoorColor(hoverId); }
+        else if (bestWave > 0) { caption = $"LAST STAND BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}"; capCol = Pal.Foe; }
+        // THE FRONT DOOR: on a COLD profile the one always-visible line of guidance used to name
+        // the danger mode ("ENDLESS HORDE SURVIVAL") while TRAINING OP's explanation was hover-only.
+        // The nudge points at the on-ramp and says what it costs (nothing); it yields the moment the
+        // drill is seen, a save exists or a LAST STAND best is on the books.
+        else if (IntroCold(g)) { caption = ColdNudge; capCol = Pal.Good; }
+        else caption = "ENDLESS HORDE SURVIVAL";
         Vector2 bwm = Cfg.Measure(caption, 12, 1f);
         Cfg.Text(caption, new Vector2((int)(W / 2f - bwm.X / 2f), lsBy + 50), 12, 1f,
             Raylib.Fade(capCol, 0.9f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
@@ -6169,6 +6339,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int listH = rungRows.Count == 0 ? step * 2 : (rungRows.Count + bodyRows) * step;
         int h = 132 + listH + 30;
         var card = new Rectangle(x, y, w, h);
+        HeatCard = card;
         PanelShadow(card, 1f, 0.06f);
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f,
@@ -6185,8 +6356,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // (The old "HEAT" caption that used to sit at x+18,y+48 is gone: the minus stepper is drawn
         //  over that exact rect, so it was never visible — it only surfaced at RECRUIT, where the
         //  stepper is disabled and 40% opaque, as a word bleeding through a button.)
-        if (recruit)
-            Cfg.Text("RECRUIT", new Vector2(x + w / 2 - (int)Cfg.Measure("RECRUIT", 26, 1f).X / 2, y + 48), 26, 1f, heatCol);
+        if (recruit || level == 0)
+        {
+            // THE FRONT DOOR: rung 0 is a NAMED setting too. A bare "0" at 40px on a fresh profile
+            // read as "nothing here"; the skirmish card already called the rung STANDARD, and the
+            // two pickers now agree. Same 26px word path RECRUIT has used since W5.
+            string word = recruit ? "RECRUIT" : "STANDARD";
+            Cfg.Text(word, new Vector2(x + w / 2 - (int)Cfg.Measure(word, 26, 1f).X / 2, y + 48), 26, 1f, heatCol);
+        }
         else
         {
             string val = level.ToString();
@@ -6197,7 +6374,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         HeatPlus = new Rectangle(x + w - 52, y + 50, 34, 34);
         DrawStepper(HeatMinus, "-", level > Sightline.Heat.Min);
         DrawStepper(HeatPlus, "+", level < unlocked);
-        Cfg.Text($"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, heatTxt2);
+        // THE FRONT DOOR: at the earned ceiling "MAX UNLOCKED: n" repeats what the disabled [+]
+        // already shows, and on a fresh profile it is a bare zero. The useful fact there is HOW the
+        // next rung is earned — Game.UnlockHeatOnWin's rule (win AT the cap; RECRUIT never raises
+        // it) was written nowhere a player could read it. Below the ceiling the earned number stays.
+        Cfg.Text(HeatUnlockRule(level, unlocked) ?? $"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, heatTxt2);
         // W5 THE ON-RAMP (audit newplayer-4): NAME the rung the minus stepper leads to. RECRUIT
         // was always selectable and always unlabelled, so nothing at level 0 hinted that anything
         // existed below it — the on-ramp was reachable only by pressing an unmarked button. It
@@ -6230,10 +6411,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // W5: on a profile that has never finished a run, level 0's copy no longer frames
             // itself as the floor. "the designed fight" is true and stays true for a returning
             // player; for a first-timer it was actively steering them past the on-ramp.
+            // THE FRONT DOOR: "standard difficulty - " moved up into the 26px word. It was also
+            // what ran this row 25 px past the card's edge at 120% text size (C6's finding 2, left
+            // open for two waves); every card line is now measured against the card edge.
             string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission"
                         : recruit ? "same campaign, wider margin"
-                        : g.FirstTimeProfile ? "standard difficulty - [<] for a gentler first run"
-                        : "standard difficulty - the designed fight";
+                        : g.FirstTimeProfile ? "[<] for a gentler first run"
+                        : "the designed fight";
             Cfg.Text(hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : heatTxt2);
         }
 
@@ -6279,6 +6463,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     static void DrawOverlayButton(Rectangle r, string label, Color baseCol, string keyHint, float anim = 1f)
     {
+        if (keyHint == null && _introDrawing) IntroNullHintDraws++;
         float a = Util.EaseOutQuad(Util.Clamp(anim, 0f, 1f));
         // entrance: fade + a few px of upward slide so it lands rather than pops
         float dy = (1f - a) * 12f;
@@ -6289,19 +6474,37 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         if (hover) Raylib.DrawRectangleRounded(new Rectangle(rr.X - 3, rr.Y - 3, rr.Width + 6, rr.Height + 6), 0.3f, 8, Raylib.Fade(hi, 0.25f));
         Raylib.DrawRectangleRounded(rr, 0.3f, 8, Raylib.Fade(hover ? hi : baseCol, a));
         var lz = Cfg.Measure(label, 18, 1f);
-        var lat = new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 9));
+        string kh = keyHint != null ? "[" + keyHint + "]" : null;
+        float ly = (int)(rr.Y + rr.Height / 2 - 9);
+        var lat = new Vector2((int)LabelX(rr, lz, ly, kh, out var kz, out var kat), ly);
         Plate(label, r, lat, lz);
         Cfg.Text(label, lat, 18, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
-        if (keyHint != null)
+        if (kh != null)
         {
-            // right-align the hint inside the button (measured, 6px inset) — the old fixed
-            // rr.Width - 30 offset bled multi-char hints ("[Esc]") past narrow buttons' edge.
-            string kh = "[" + keyHint + "]";
-            float khw = Cfg.Measure(kh, 12, 1f).X;
-            var kat = new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16));
-            Plate(kh, r, kat, Cfg.Measure(kh, 12, 1f));
+            Plate(kh, r, kat, kz);
             Cfg.Text(kh, kat, 12, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
         }
+    }
+
+    /// THE FRONT DOOR: the chip's inset from the plate's right edge (measured, 6px — the old fixed
+    /// `rr.Width - 30` bled "[Esc]" past narrow plates), the clear air demanded between a label and
+    /// its chip, and the label's floor from the plate's left edge when it has to slide.
+    const float ChipInset = 6f, ChipGap = 3f, LabelInset = 5f;
+    /// Where a label sits beside its key chip, for both plate helpers. Centred on the plate —
+    /// unless its rows cross the chip's row AND its right edge would reach the chip (a 120% label
+    /// on a 172px plate: [K] and [U] were painted INTO "FIELD MANUAL" and "AUDIO CHECK", C6's
+    /// finding 2), in which case it slides LEFT until it clears the chip by ChipGap, never past
+    /// LabelInset. At 100% every label this tree ships lands exactly where it did.
+    static float LabelX(Rectangle rr, Vector2 lz, float ly, string kh, out Vector2 kz, out Vector2 kat)
+    {
+        float lx = rr.X + rr.Width / 2 - lz.X / 2;
+        kz = Vector2.Zero; kat = Vector2.Zero;
+        if (kh == null) return lx;
+        kz = Cfg.Measure(kh, 12, 1f);
+        kat = new Vector2((int)(rr.X + rr.Width - kz.X - ChipInset), (int)(rr.Y + rr.Height - 16));
+        bool rowsCross = ly + lz.Y > kat.Y && ly < kat.Y + kz.Y;
+        if (rowsCross && lx + lz.X + ChipGap > kat.X) lx = MathF.Max(rr.X + LabelInset, kat.X - ChipGap - lz.X);
+        return lx;
     }
 
     /// W12: the NEUTRAL-OUTLINE sibling of DrawOverlayButton — a dark plate + hairline border +
@@ -6310,6 +6513,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// border/label to Friend instead of swapping the fill, so filled = primary stays unambiguous.
     static void DrawGhostButton(Rectangle r, string label, string keyHint, float anim = 1f)
     {
+        if (keyHint == null && _introDrawing) IntroNullHintDraws++;
         float a = Util.EaseOutQuad(Util.Clamp(anim, 0f, 1f));
         float dy = (1f - a) * 12f;
         var rr = new Rectangle(r.X, r.Y + dy, r.Width, r.Height);
@@ -6317,15 +6521,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleRounded(rr, 0.3f, 8, Raylib.Fade(Pal.RGBA(13, 19, 27), 0.88f * a));
         Raylib.DrawRectangleLinesEx(rr, 1.4f, Raylib.Fade(hover ? Pal.Friend : Pal.PanelBd, a));
         var lz = Cfg.Measure(label, 16, 1f);
-        var lat = new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 8));
+        string kh = keyHint != null ? "[" + keyHint + "]" : null;
+        float ly = (int)(rr.Y + rr.Height / 2 - 8);
+        var lat = new Vector2((int)LabelX(rr, lz, ly, kh, out var kz, out var kat), ly);
         Plate(label, r, lat, lz);
         Cfg.Text(label, lat, 16, 1f, Raylib.Fade(hover ? Pal.Friend : Pal.Txt, a));
-        if (keyHint != null)
+        if (kh != null)
         {
-            string kh = "[" + keyHint + "]";
-            float khw = Cfg.Measure(kh, 12, 1f).X;
-            var kat = new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16));
-            Plate(kh, r, kat, Cfg.Measure(kh, 12, 1f));
+            Plate(kh, r, kat, kz);
             Cfg.Text(kh, kat, 12, 1f, Raylib.Fade(Pal.TxtDim, 0.8f * a));
         }
     }

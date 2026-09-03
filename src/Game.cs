@@ -8341,8 +8341,16 @@ public partial class Game
         foreach (var (id, key) in IntroKeys) if (key == k) return id;
         return null;
     }
-    /// The plate a door is drawn on (the rects Hud.DrawIntro published this frame).
-    static Rectangle IntroRect(string id) => id switch
+    /// The key a door answers to, or Null. THE FRONT DOOR: the plate's key CHIP is drawn from this
+    /// (Hud.IntroDoorKey), so the hint on the button and the key the dispatch reads are one fact.
+    public static KeyboardKey IntroKey(string id)
+    {
+        foreach (var (i, key) in IntroKeys) if (i == id) return key;
+        return KeyboardKey.Null;
+    }
+    /// The plate a door is drawn on (the rects Hud.DrawIntro published this frame). Public for
+    /// SETTINGSTEST's front-door leg, which reads the chip painted on exactly this rect.
+    public static Rectangle IntroRect(string id) => id switch
     {
         "continue" => Hud.OverlayBtn2, "endless" => Hud.OverlayBtn3, "warroom" => Hud.OverlayBtn4,
         "codex" => Hud.OverlayBtn5, "skirmish" => Hud.OverlayBtn6, "daily" => Hud.OverlayBtn7,

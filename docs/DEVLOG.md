@@ -12421,6 +12421,153 @@ shows L4's outcomes reproduce, the split-half shows its draw was atypical there;
 camping policy, no opener re-tune, no single-policy batch measured. The `/home/user/wt/heat-base`
 worktree used for the inertness chunks was removed at the end of the wave.
 
+# WAVE "THE FRONT DOOR" (2026-09-02, dev on `wave/front-door`, base `fa482ed`)
+
+## Thesis
+
+The first screen a player meets had four small lies on it, each found by the product-ship and
+code-health lenses and each cheap to fix once named. DEPLOY SQUAD — the primary verb — was the
+only door with no key chip while Enter already opened it, so a first-time player saw nine
+labelled doors, one unlabelled, and an unlabelled Enter dropped them into the squad draft. The
+cold menu's one always-visible line of guidance read "ENDLESS HORDE SURVIVAL": the danger mode,
+named at rest, while TRAINING OP's explanation was hover-only. The DIFFICULTY card painted rung 0
+as a bare 40 px "0" over "MAX UNLOCKED: 0", and the unlock rule (`Game.UnlockHeatOnWin`: win AT
+the cap to raise it; RECRUIT never raises it) was written nowhere a player could read it. And the
+README's controls table disagreed with the bound key set on seven keys, called `[6]` "FLASH",
+listed four classes of five and eleven source files of thirty-three.
+
+**Confirmed on the base tree before touching anything:** `src/Hud.cs` drew the primary button
+with `keyHint = null` in both branches (lines ~2635/2642) while `Game.cs` ~8395 read Enter for it;
+the resting caption at ~2726 was `bestWave > 0 ? "LAST STAND BEST…" : "ENDLESS HORDE SURVIVAL"`;
+`DrawHeatSelector` painted `level.ToString()` at 40 px for every non-RECRUIT rung and
+`$"MAX UNLOCKED: {unlocked}"` unconditionally; `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs
+| sort -u` gave 47 names, of which H, X, E, G, V, N, L, W, S, Y, U, C, Q, O and P were absent from
+README's table. C6 had also recorded (DEVLOG §C6 finding 2, ROADMAP "Left open by C6") that at
+120% text size the `[K]`/`[U]` chips paint into their labels and the card's level-0 hint runs to
+x≈1266 against a card edge at 1239 — "reported precisely rather than fixed".
+
+## What shipped
+
+- **DEPLOY SQUAD carries `[ENTER]`**, from the same place every other chip now comes from:
+  `Hud.IntroDoors` (id, label, hover caption) + `Game.IntroKey(id)` → `Hud.IntroDoorKey(id)` →
+  `Hud.KeyName(key)`. The eleven hand-written caption branches in `DrawIntro` are gone — the
+  hovered door is resolved by `Game.IntroHit`, the SAME hit-test the click uses, and its caption
+  and colour come off the table. A door's label, its chip, the key the dispatch reads and the README
+  row are now one fact.
+- **The chip and the label cannot collide.** `Hud.LabelX` is one rule for both plate helpers:
+  the label is centred on the plate unless its rows cross the chip's row AND its right edge would
+  reach the chip, in which case it slides LEFT until it clears the chip by 3 px (floor 5 px from the
+  plate's edge). At 100% every label lands exactly where it did. The plates that could not be
+  laid out at 120% even so were widened: the CONTINUE/DEPLOY pair 220 → 240 ("[ENTER]" is the
+  widest chip on the screen, beside a 12-character label), the utility grid 172 → 188 (FIELD
+  MANUAL + `[K]`). This closes C6's finding 2, which two waves had left.
+- **The cold nudge.** `Hud.IntroCold(g)` = `!Display.TrainingSeen && !SaveGame.Exists &&
+  EndlessBestWave == 0`; at rest on a cold profile the shared caption slot reads `Hud.ColdNudge`
+  ("NEW HERE? TRAINING OP [N] teaches the verbs in a few minutes - nothing is saved") in Pal.Good,
+  the plate's own colour. A seen drill, a save or a LAST STAND best restores the old line.
+  Measured at 120%: 648 px centred, x 315–963, clear of the DIFFICULTY card (bottom 344 on a
+  cold profile; the caption row is y=526).
+- **The DIFFICULTY card names rung 0 STANDARD** on RECRUIT's 26 px word path (the skirmish card
+  already called it that; the two pickers now agree), and **states the rule**:
+  `Hud.HeatUnlockRule(level, unlocked)` — null (keep "MAX UNLOCKED: n") when dialled below an
+  earned ceiling or at the ceiling itself; otherwise "WIN AT HEAT n TO UNLOCK HEAT n+1", including
+  at RECRUIT on a fresh profile ("WIN AT HEAT 0 TO UNLOCK HEAT 1" — which is also the first time
+  the game says a RECRUIT win does not raise the cap). **Rung 0 gets the short form** "A WIN
+  UNLOCKS HEAT 1", because it shares its row with W5's "< RECRUIT" pointer and the 320 px card
+  has 284 px of row: the 30-character form measured 246 px at 120% + 8 px gap + 74 px pointer =
+  328 > 284. The level-0 hint lost its "standard difficulty - " prefix (now in the 26 px word),
+  which is what ran it 25 px past the card at 120%: it reads "the designed fight", or "[<] for a
+  gentler first run" on a first-time profile.
+- **`SIGHTLINE_KEYTABLE=1`** prints README's controls tables as markdown from `Hud.VerbTable`
+  (the action bar's own source, so a verb row carries the tooltip's help text verbatim),
+  `Hud.KeyTable` (every non-verb binding, grouped: SELECTING & MOVING / CAMERA / IN A MISSION /
+  EVERYWHERE / MAIN MENU / OTHER SCREENS) and `IntroDoors`. It is HAND-RUN, prints no verdict, and
+  its name ends in neither TEST nor GATE, so `qa-sweep.sh`'s COVERAGE GUARD does not count it
+  (`grep -c KEYTABLE scripts/qa-sweep.sh` = 0; derived counts exist = run = 75). README's block
+  sits between `KEYTABLE:BEGIN` / `KEYTABLE:END` markers with the regeneration recipe above it.
+  **The FIELD MANUAL's VERBS & KEYS tab reads the same `KeyTable`** — its three prose entries
+  (SELECTING & MOVING / CAMERA / THE REST) are now generated rows plus a MAIN MENU entry listing
+  every door with its key, so the manual, the plates and the README cannot disagree again.
+- **README:** the class table is five rows (CORPSMAN / SMG / PATCH was missing) with each class's
+  signature ability and default weapon; `[6]` is UTILITY ITEM (smoke / flash / barricade /
+  incendiary by class), not "FLASH"; the project layout lists all 33 files in `src/` from
+  CLAUDE.md's map; the controls paragraph says the tables are generated and how.
+- **`SIGHTLINE_MOUSEPARK=x,y`** (shot only) parks the cursor. Xvfb spawns the pointer at the
+  screen centre, which on the intro is DEPLOY SQUAD, so every menu screenshot this project has
+  taken photographed that door's hover caption in the shared slot rather than the resting line.
+  `SaveGame.ExistsPin` (harness-only `bool?`) lets a self-test audit the menu with and without a
+  save without writing a file; it reaches nothing on disk.
+
+## The test — and it FAILED on the pre-fix tree
+
+`SIGHTLINE_SETTINGSTEST=1` gained leg **(E) THE FRONT DOOR** (it was already the test that draws
+the intro and publishes its rects; `Frame` + `Hud.MousePin` were there). It reads the frame at
+the draw call through `Cfg.InkProbe` and `Hud.PlateProbe`, at all four shipped text sizes, with
+and without a save: (1) `Hud.IntroNullHintDraws` (counted in both plate helpers while `DrawIntro`
+is on the stack) does not move across a frame, and every door's chip — read off the plate it was
+painted on, `Game.IntroRect(id)` — equals `"[" + KeyName(IntroKeys[id]) + "]"`, DEPLOY's
+`[ENTER]`; (2) no chip's box meets its label's box (2 px air) and both stay on the plate, and
+CONTINUE/DEPLOY do not overlap; (3) `ColdNudge` is painted at rest, on the canvas, clear of
+`Hud.HeatCard`, and NOT painted once the drill is seen or a save exists, where "ENDLESS HORDE
+SURVIVAL" returns; (4) "STANDARD" at 26 px and no "0" at 40 px for rung 0; `HeatUnlockRule`'s
+sentence painted and "MAX UNLOCKED" absent whenever the rule applies, else "MAX UNLOCKED: n", over
+(h3/u3), (h1/u3), (h8/u8), (h−1/u0), (h−1/u2), (h5/u5) at 100% and 120%; the rule clears
+"< RECRUIT" by 6 px; (5) every string painted inside the card's band ends inside the card.
+`FITTEST` gained **INTRO-COLD**, **INTRO-SAVE** and **INTRO-HEAT** screen cases (48 screens now),
+and its plain INTRO is pinned to "returning player, no save" instead of whatever the machine's
+`.xdg` held.
+
+Pre-fix, verbatim (the test in the tree, the fix not yet — the line is long because every
+assertion is evaluated per scale, which is the C5 scope rule):
+
+    SETTINGSTEST: FAIL (intro@90%:doorsWithoutKeyHint:1,intro@90%:deploy:chipReads:nothing,intro@90%:coldNudgeMissing,intro@90%:restingLineNamesLastStandOnColdProfile,intro@90%:rung0NotNamedSTANDARD,intro@90%:rung0PaintedAsBareZero,intro@90%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@90%:maxUnlockedStillPainted,intro@100%:doorsWithoutKeyHint:1,intro@100%:deploy:chipReads:nothing,intro@100%:coldNudgeMissing,intro@100%:restingLineNamesLastStandOnColdProfile,intro@100%:rung0NotNamedSTANDARD,intro@100%:rung0PaintedAsBareZero,intro@100%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@100%:maxUnlockedStillPainted,intro@110%:doorsWithoutKeyHint:1,intro@110%:deploy:chipReads:nothing,intro@110%:chipHitsLabel:FIELD MANUAL[K],intro@110%:coldNudgeMissing,intro@110%:restingLineNamesLastStandOnColdProfile,intro@110%:rung0NotNamedSTANDARD,intro@110%:rung0PaintedAsBareZero,intro@110%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@110%:maxUnlockedStillPainted,intro@110%:runsOffCard:'standard difficulty - ~'by1px,intro@120%:doorsWithoutKeyHint:1,intro@120%:deploy:chipReads:nothing,intro@120%:chipHitsLabel:FIELD MANUAL[K],intro@120%:chipHitsLabel:AUDIO CHECK[U],intro@120%:coldNudgeMissing,intro@120%:restingLineNamesLastStandOnColdProfile,intro@120%:rung0NotNamedSTANDARD,intro@120%:rung0PaintedAsBareZero,intro@120%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@120%:maxUnlockedStillPainted,intro@120%:runsOffCard:'standard difficulty - ~'by25px,intro+save@90%:doorsWithoutKeyHint:1,intro+save@90%:deploy:chipReads:nothing,intro+save@90%:rung0NotNamedSTANDARD,intro+save@90%:rung0PaintedAsBareZero,intro+save@90%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@90%:maxUnlockedStillPainted,intro+save@100%:doorsWithoutKeyHint:1,intro+save@100%:deploy:chipReads:nothing,intro+save@100%:rung0NotNamedSTANDARD,intro+save@100%:rung0PaintedAsBareZero,intro+save@100%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@100%:maxUnlockedStillPainted,intro+save@110%:doorsWithoutKeyHint:1,intro+save@110%:deploy:chipReads:nothing,intro+save@110%:chipHitsLabel:FIELD MANUAL[K],intro+save@110%:rung0NotNamedSTANDARD,intro+save@110%:rung0PaintedAsBareZero,intro+save@110%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@110%:maxUnlockedStillPainted,intro+save@110%:runsOffCard:'standard difficulty - ~'by1px,intro+save@120%:doorsWithoutKeyHint:1,intro+save@120%:deploy:chipReads:nothing,intro+save@120%:chipHitsLabel:FIELD MANUAL[K],intro+save@120%:chipHitsLabel:AUDIO CHECK[U],intro+save@120%:rung0NotNamedSTANDARD,intro+save@120%:rung0PaintedAsBareZero,intro+save@120%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@120%:maxUnlockedStillPainted,intro+save@120%:runsOffCard:'standard difficulty - ~'by25px,card(h3/u3)@100%:unlockRuleMissing:'WIN AT HEAT 3 TO UNLOCK HEAT 4',card(h3/u3)@100%:maxUnlockedStillPainted,card(h-1/u0)@100%:unlockRuleMissing:'WIN AT HEAT 0 TO UNLOCK HEAT 1',card(h-1/u0)@100%:maxUnlockedStillPainted,card(h5/u5)@100%:unlockRuleMissing:'WIN AT HEAT 5 TO UNLOCK HEAT 6',card(h5/u5)@100%:maxUnlockedStillPainted,card(h3/u3)@120%:unlockRuleMissing:'WIN AT HEAT 3 TO UNLOCK HEAT 4',card(h3/u3)@120%:maxUnlockedStillPainted,card(h-1/u0)@120%:unlockRuleMissing:'WIN AT HEAT 0 TO UNLOCK HEAT 1',card(h-1/u0)@120%:maxUnlockedStillPainted,card(h5/u5)@120%:unlockRuleMissing:'WIN AT HEAT 5 TO UNLOCK HEAT 6',card(h5/u5)@120%:maxUnlockedStillPainted)
+
+Read it: `doorsWithoutKeyHint:1` / `deploy:chipReads:nothing` at every scale; `chipHitsLabel:FIELD
+MANUAL[K]` at 110% and 120% and `AUDIO CHECK[U]` at 120% (C6's finding, now a red line);
+`coldNudgeMissing` + `restingLineNamesLastStandOnColdProfile`; `rung0NotNamedSTANDARD` +
+`rung0PaintedAsBareZero`; `unlockRuleMissing` + `maxUnlockedStillPainted` at rungs 0, 3, 5 and
+RECRUIT-with-nothing-earned; `runsOffCard:'standard difficulty - ~'by1px` at 110% and `by25px` at
+120%. The three MAX-UNLOCKED-keeps cases ((h1/u3), (h8/u8), (h−1/u2)) passed pre-fix, which is the
+proof the rule's null branch is behaviour-preserving. `[C]` beside CONTINUE RUN did NOT collide
+at 120% — the 220 px pair was widened for `[ENTER]`, not for it.
+
+**After:** `SETTINGSTEST: PASS` (the sentence lists the leg); `FITTEST: PASS` (48 screens, every
+scale); `CODEXTEST: PASS` (VERBS & KEYS rebuilt from `KeyTable`); `CONTRASTTEST: PASS` (the ten
+main-menu labels, CONTINUE_RUN 8.99 / DEPLOY_SQUAD 8.99 / FIELD_MANUAL 13.65 …); `dotnet build -c
+Release` 0 warnings / 0 errors; derived counts exist = run = 75; SWEEPRESULT.
+
+## Screenshots (inspected)
+
+`SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1 SIGHTLINE_FIRSTRUN=1 SIGHTLINE_MOUSEPARK=100,100
+SIGHTLINE_SHOT=90` — the true first launch: RECRUIT by default, "WIN AT HEAT 0 TO UNLOCK HEAT 1",
+the green nudge at rest, `[ENTER]` on DEPLOY SQUAD. The same at `SIGHTLINE_UISCALE=3`: the nudge
+spans x 315–963 under LAST STAND, the card ends at y 344. `SIGHTLINE_INTRO=1 SIGHTLINE_UISCALE=0`
+and `=3` with the staged save: `[C]` CONTINUE RUN and `[ENTER]` DEPLOY SQUAD on the 240 px pair, no
+chip touching a label at 120%, FIELD MANUAL and AUDIO CHECK slid left of their chips, STANDARD /
+"A WIN UNLOCKS HEAT 1 < RECRUIT" / "the designed fight" all inside the card. `SIGHTLINE_HEAT=3`:
+a red 40 px "3" over "WIN AT HEAT 3 TO UNLOCK HEAT 4" and "+13 intel / mission". Scratchpad
+`fd_cold_intro.png`, `fd_cold_intro_120.png`, `fd_save_intro_90.png`, `fd_save_intro_120.png`,
+`fd_heat3_intro.png` (not committed).
+
+## What this wave did NOT do
+
+1. **No gameplay, no balance.** Nothing in `Combat`, `Ai`, `Mission`, `Heat`, `Run` or the map
+   generator was touched; `PAIRTEST` PASS in the sweep is the check. `IntroKeys` is unchanged.
+2. **The pause card's layout and the skirmish setup card** are out of scope and untouched; the
+   skirmish card already said STANDARD, which is why the word was chosen.
+3. **The 12 px small-text floor at the default text size** (ROADMAP, C5) is untouched.
+4. **Bound-key coverage of the README is checked by hand, not by a test.** The KEYTABLE hook prints
+   markdown only, by design; a runtime test cannot grep the source for `KeyboardKey.*`. The
+   derivation is in README and in `Hud.KeyTable`'s doc comment; every one of the 47 derived names
+   (and the three mouse reads and held Shift in `Renderer.cs`) is in one of the three tables, and
+   nothing in the tables is unbound — checked line by line against the grep on this commit.
+5. **"A WIN UNLOCKS HEAT 1" is the short form for one row only.** The long form did not fit
+   beside "< RECRUIT" at 120%; moving the pointer to the footer row (where it would fit) was
+   rejected because W5 placed it beside the stepper it names. If the card is ever re-laid out,
+   the rung-0 sentence should say "WIN AT HEAT 0" like the others.
+6. **No screenshots were sent into the thread** — this session has no file-sending tool; the
+   paths are in the report.
+
 # WAVE "THE BEAT" — THREE BEATS THAT WERE CLAIMED BUT NOT BUILT (2026-09-03, dev on `wave/the-beat`, base `23f0bc1`)
 
 **Branch** `wave/the-beat` off the working branch at **`23f0bc1`** (P6 merged). Files touched, part A:
