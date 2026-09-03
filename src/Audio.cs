@@ -71,7 +71,10 @@ public static partial class Audio
     /// CatOf), so "what counts as UI" is one decision in one place: select / reload / hunker /
     /// over / turn ride the UI fader, everything in-world rides SFX.
     static bool IsUiCue(string id) => CatOf(id) == "ui";
-    static float BusVol(string id) => Util.Clamp(IsUiCue(id) ? Display.VolUi : Display.VolSfx, 0f, 1f);
+    /// THE CUE MAP (part B): `foe` forces the SFX fader. An OPPONENT's telegraph (a BRACED, an
+    /// OVERWATCH, a RELOADING, an ARTILLERY INCOMING) used to ride the UI fader purely because its
+    /// borrowed cue happened to be a UI cue — so pulling UI volume down silenced the enemy's tells.
+    static float BusVol(string id, bool foe) => Util.Clamp(BusOf(id, foe) == "ui" ? Display.VolUi : Display.VolSfx, 0f, 1f);
 
     /// VOICE POOL. `Play` used to call PlaySound on a SINGLE shared Sound per cue, so two
     /// enemies firing the same weapon truncated each other — and worse, SetSoundPitch/
@@ -327,6 +330,77 @@ public static partial class Audio
         Reg("smoke", 0.40f, -12.5f, b => {
             Noise(b, 0, 0.38f, 0.40f, fc: 2200, poles: 2, bodyHz: 1100, bodyQ: 1.6f, bodyMix: 0.8f, dec: 3.2f);
             Noise(b, 0.04f, 0.30f, 0.16f, fc: 700, poles: 3, bodyHz: 300, bodyQ: 1.2f, bodyMix: 0.6f, dec: 3.0f);
+        });
+        // ───────── THE CUE MAP (part B): cues for MEANINGS that used to borrow one ─────────
+        // ALERT — a dormant pod wakes / "CONTACT!". Was `over`, the overwatch chime. A MINOR
+        // SECOND is the interval the ear reads as wrong: two squares a semitone apart, struck
+        // together so they beat against each other, over a hard noise hit and a low thud. It has
+        // to be legible under a firefight, so it sits on the IMPACT bus, not the UI fader — a
+        // player who pulls UI volume down must not stop hearing that they have been seen.
+        Reg("alert", 0.26f, -8f, b => {
+            Click(b, 0, 0.28f, tone: 2400, bright: 7000, len: 0.0026f);
+            Tone(b, 622, 0, 0.15f, Wv.Square, 0.30f, atk: 0.002f, dec: 3.6f, tilt: 2400f);   // Eb5
+            Tone(b, 659, 0, 0.15f, Wv.Square, 0.28f, atk: 0.002f, dec: 3.6f, tilt: 2400f);   // E5 — the minor 2nd
+            Noise(b, 0, 0.07f, 0.30f, fc: 2000, poles: 3, bodyHz: 620, bodyQ: 2.2f, bodyMix: 1.2f, dec: 6f);
+            Tone(b, 96, 0, 0.16f, Wv.Sine, 0.26f, slideTo: 70, atk: 0.003f, dec: 3f);        // the drop under it
+        });
+        // ALARM — reinforcements / the pressure clock / artillery inbound. Was `turn`, the same
+        // two-note the round change plays. A DESCENDING pair (the opposite contour to every
+        // announce cue in the game) over a sub and a dark wash: more of them are coming.
+        Reg("alarm", 0.46f, -11f, b => {
+            Tone(b, 392, 0,     0.20f, Wv.Saw, 0.30f, atk: 0.004f, dec: 3.0f, tilt: 1900f);  // G4
+            Tone(b, 262, 0.16f, 0.26f, Wv.Saw, 0.30f, atk: 0.004f, dec: 2.4f, tilt: 1700f);  // C4 — down a fifth
+            Tone(b, 78,  0,     0.34f, Wv.Sine, 0.30f, slideTo: 62, atk: 0.006f, dec: 2.2f); // the sub
+            Noise(b, 0.02f, 0.24f, 0.16f, fc: 900, poles: 3, bodyHz: 260, bodyQ: 1.3f, bodyMix: 0.9f, dec: 3.4f);
+        });
+        // AMBUSH — squad concealment breaks: the trap springs. Was `turn` (and the banner played
+        // it a second time). A hard transient and a saw SWEEPING UP fast under a tight bite — the
+        // one cue in the game that accelerates.
+        Reg("ambush", 0.26f, -8f, b => {
+            Click(b, 0, 0.32f, tone: 1800, bright: 7000, len: 0.0030f);
+            Tone(b, 180, 0, 0.13f, Wv.Saw, 0.36f, slideTo: 900, atk: 0.001f, dec: 4.5f, tilt: 3000f);
+            Tone(b, 880, 0.09f, 0.10f, Wv.Square, 0.22f, atk: 0.002f, dec: 6f, tilt: 3400f);
+            Noise(b, 0, 0.06f, 0.26f, fc: 2600, poles: 3, bodyHz: 900, bodyQ: 2.4f, bodyMix: 1.2f, dec: 7f);
+        });
+        // ABILITY — a soldier ENGAGES a verb (RUN & GUN / SLIPSTREAM / BLITZ / STEADY / MARK /
+        // SUPPRESS / MOMENTUM). Was `reload`, the mag-change cha-chk, which said "housekeeping"
+        // about the most committing button on the bar. A short bright chirp that RISES.
+        Reg("ability", 0.13f, -13.5f, b => {
+            Click(b, 0, 0.16f, tone: 6500, bright: 11000, len: 0.0014f, ring: 0.6f);
+            Tone(b, 1046, 0, 0.09f, Wv.Sine, 0.34f, slideTo: 1568, atk: 0.0015f, dec: 5.5f);
+            Tone(b, 1568, 0.03f, 0.05f, Wv.Sine, 0.14f, atk: 0.0015f, dec: 8f);
+        });
+        // TICK — objective progress (HACK +1 / CHARGE SET / BEACON SET / INTEL). Was `reload`.
+        // A clean data blip: one high sine, almost no body, nothing that could be mistaken for a
+        // weapon or a footfall. It is the sound of a number going up.
+        Reg("tick", 0.09f, -13f, b => {
+            Click(b, 0, 0.14f, tone: 4200, bright: 9000, len: 0.0012f, ring: 0.5f);
+            Tone(b, 1760, 0, 0.055f, Wv.Sine, 0.34f, atk: 0.0012f, dec: 6f);
+            Tone(b, 2640, 0.006f, 0.03f, Wv.Sine, 0.11f, atk: 0.0012f, dec: 9f);
+        });
+        // UI_OK — a purchase goes through (the requisition, the ARMORY, the WAR ROOM). Was `hit`,
+        // the sound of a round landing on a body: the shop confirmed a spend by playing gunfire.
+        // A consonant stacked fifth — warm, resolved, nothing like an impact.
+        Reg("ui_ok", 0.16f, -12.3f, b => {
+            Click(b, 0, 0.13f, tone: 3400, bright: 7000, len: 0.0016f, ring: 0.6f);
+            Tone(b, 880,  0, 0.12f, Wv.Tri, 0.32f, atk: 0.003f, dec: 4.2f, tilt: 3400f);
+            Tone(b, 1320, 0, 0.11f, Wv.Tri, 0.20f, atk: 0.003f, dec: 4.6f, tilt: 3800f);
+        });
+        // UI_NO — a purchase is REFUSED. Was `miss`, the zip of a round going past your ear. A
+        // dull low two-beat with no brightness at all: the interface saying no, not a near miss.
+        Reg("ui_no", 0.22f, -14f, b => {
+            Tone(b, 190, 0,     0.08f, Wv.Square, 0.32f, atk: 0.003f, dec: 6f, tilt: 900f);
+            Tone(b, 150, 0.085f, 0.10f, Wv.Square, 0.30f, atk: 0.003f, dec: 5f, tilt: 800f);
+            Noise(b, 0, 0.04f, 0.10f, fc: 500, poles: 3, bodyHz: 170, bodyQ: 1.2f, bodyMix: 0.8f, dec: 6f);
+        });
+        // TURN_ENEMY — the round changes hands TO THE OPPONENT. Was `turn`, the identical rising
+        // announce the PLAYER's turn plays: the one moment a player most needs to hear whose
+        // board it is sounded the same either way. This is `turn` mirrored — 494 then 330,
+        // descending — and it rides the SFX fader (category "world"), because whose turn it is
+        // is not menu chrome.
+        Reg("turn_enemy", 0.30f, -14f, b => {
+            Tone(b, 494, 0,     0.13f, Wv.Tri, 0.30f, atk: 0.006f, dec: 3.2f, tilt: 3200f);
+            Tone(b, 330, 0.11f, 0.16f, Wv.Tri, 0.28f, atk: 0.006f, dec: 2.6f, tilt: 2800f);
         });
         // DEATH: a downward collapse — a saw fall + a noise crumple, now with a REAL TAIL.
         // (A1) every layer used to end by 320ms inside a 360ms buffer: the collapse just
@@ -808,7 +882,8 @@ public static partial class Audio
     /// own independent jitter so repeated shots differ in weight as well as pitch.
     /// THE BEAT: `gainDb` is a per-call trim in dB (<= 0 only — a cue is never played HOTTER than
     /// its budgeted peak; the incendiary's "boom" at -6 is the one user today).
-    public static void Play(string id, float pitchVar = -1f, float panX = -1f, float gainDb = 0f)
+    public static void Play(string id, float pitchVar = -1f, float panX = -1f, float gainDb = 0f,
+                            bool foe = false)
     {
         if (!_ready || !Enabled) return;
         if (!_voices.TryGetValue(id, out var v) || v.Ring == null) return;
@@ -828,7 +903,7 @@ public static partial class Audio
         Raylib.SetSoundPitch(s, pv > 0f ? 1f + pv * (Hash01(h) * 2f - 1f) : 1f);
 
         float gdb = DefaultGainVarDb(id);
-        float gain = BusVol(id);
+        float gain = BusVol(id, foe);
         if (gdb > 0f) gain *= MathF.Pow(10f, -gdb * Hash01(h * 2246822519u + 1u) / 20f);   // [-gdb, 0] dB
         if (gainDb < 0f) gain *= MathF.Pow(10f, gainDb / 20f);                             // THE BEAT: per-call trim, downward only
         Raylib.SetSoundVolume(s, Util.Clamp(gain, 0f, 1f));
@@ -1003,7 +1078,9 @@ public static partial class Audio
             // every SFX id the rest of the game plays must exist (catch a dropped recipe)
             string[] gameIds = { "select", "move", "reload", "hunker", "shoot", "hit", "crit",
                                  "miss", "over", "death", "turn", "win", "lose",
-                                 "react", "boom", "flash", "heal", "smoke" };   // THE BEAT
+                                 "react", "boom", "flash", "heal", "smoke",     // THE BEAT
+                                 "alert", "alarm", "ambush", "ability", "tick",
+                                 "ui_ok", "ui_no", "turn_enemy" };             // THE CUE MAP
             foreach (var id in gameIds)
                 if (!_recipes.ContainsKey(id)) return $"AUDIOTEST: FAIL missing game cue '{id}'";
 
@@ -1046,7 +1123,10 @@ public static partial class Audio
         "w_rifle","w_shotgun","w_sniper","w_lmg","w_smg",
         "shoot","hit","crit","miss","over","react","death",
         "boom","flash","smoke","heal",                       // THE BEAT: ordnance + aid
-        "select","move","reload","hunker","turn","win","lose",
+        "alert","alarm","ambush",                            // THE CUE MAP: threat beats
+        "select","move","reload","hunker","turn","turn_enemy","win","lose",
+        "ability","tick","ui_ok","ui_no",                    // THE CUE MAP: verbs, progress, the shop
+
         "st_kill","st_lastkill","st_victory","st_lose","st_squadwipe",
     };
     const long MaxSfxBytes   = 400 * 1024;    // keep the repo lean — reject an oversized SFX drop-in
@@ -1411,7 +1491,9 @@ public static partial class Audio
         ("WEAPONS",  new[] { "w_rifle", "w_shotgun", "w_sniper", "w_lmg", "w_smg", "shoot" }),
         ("COMBAT",   new[] { "hit", "crit", "miss", "over", "react", "death" }),
         ("FIELD",    new[] { "boom", "flash", "smoke", "heal" }),   // THE BEAT: ordnance + aid
-        ("UI",       new[] { "select", "move", "reload", "hunker", "turn", "win", "lose" }),
+        ("THREAT",   new[] { "alert", "alarm", "ambush", "turn_enemy" }),   // THE CUE MAP: the opponent's tells
+        ("UI",       new[] { "select", "move", "reload", "hunker", "ability", "tick",
+                             "ui_ok", "ui_no", "turn", "win", "lose" }),
         ("STINGERS", new[] { "st_kill", "st_lastkill", "st_victory", "st_lose", "st_squadwipe" }),
     };
 
@@ -1444,6 +1526,14 @@ public static partial class Audio
         "flash"       => "flashbang: light, no force",
         "smoke"       => "a canister venting",
         "heal"        => "patch, revive, stabilize",
+        "alert"       => "a pod wakes: you are seen",
+        "alarm"       => "more of them are coming",
+        "ambush"      => "the squad is revealed",
+        "turn_enemy"  => "the round passes to them",
+        "ability"     => "a soldier engages a verb",
+        "tick"        => "objective progress, +1",
+        "ui_ok"       => "a purchase goes through",
+        "ui_no"       => "a purchase is refused",
         "select"      => "unit picked up",
         "move"        => "one tile of footfall",
         "reload"      => "mag out, mag in, bolt",

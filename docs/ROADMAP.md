@@ -2871,5 +2871,24 @@ real move (h4 −0.1 and h8 −0.6 are far inside their own cluster SE).
       the vaulter at its apex; nobody has filmed it.
 - [ ] **The kill-cam on a SQUAD WIPE / lost VIP.** Leg d stages the last-hostile case; the other two
       arms of `IsMissionEndingKill` take the same window but were not photographed.
-- [ ] **Part B — the cue map** (one `over` carrying ~13 meanings, `reload` ~11, `turn` on every banner):
-      see DEVLOG §THE BEAT part B for what landed.
+- [x] **Part B — THE CUE MAP: one meaning, one cue.** `src/Audio.CueMap.cs` adds `Audio.GameEvent`
+      (14 beats) and `Audio.CueFor` — the single place that says what a beat sounds like — plus
+      `Audio.Cue` / `Audio.PlayFoe` / `Audio.BusOf`. Eight new recipes: `alert` (a pod wakes; was
+      `over`), `alarm` (reinforcements / pressure / artillery; was `turn`), `ambush` (concealment
+      breaks; was `turn`, twice), `ability` (every soldier verb; was `reload`, and `over` for
+      MARK/SUPPRESS), `tick` (objective progress; was `reload`), `ui_ok` / `ui_no` (the shop's
+      confirm and refusal; were `hit` and `miss`), `turn_enemy` (the round passing to the opponent;
+      was `turn`, identical to the player's). `ShowBanner` takes a `cue` and puts every
+      `enemy:true` banner on the SFX fader, so an opponent telegraph no longer dies with the UI
+      slider. `Audio.Play("over")` went **13 → 0** sites in `Game.cs`, `Audio.Play("reload")`
+      **11 → 0**; 28 → 36 cues, AUDIOGATE spread still 11.0 dB, seeds 101/202/303 byte-identical
+      against the working branch. `SIGHTLINE_CUETEST` is the gate (injective table, no telegraph
+      on the UI bus, the real `ShowBanner` driven, a source census of the call sites). DEVLOG
+      §THE BEAT part B.
+- [ ] **`hunker` is the last borrowed cue.** `ShoveAnim` plays it and so does the DEPLOY COVER UP
+      ability; neither is digging in. Two one-site collisions of exactly the class part B fixed.
+- [ ] **Nobody has HEARD the eight new cues.** No audio device in the sandbox: every claim about
+      them is a measurement of the rendered buffer, not a judgement that `alert` reads as alert.
+      The owner has a device and the AUDIO CHECK screen (THREAT group).
+- [ ] **The AUDIO CHECK scroll has no thumb drag** and no keyboard focus ring — wheel and Up/Down
+      only. Fine at 36 cues; revisit if the list grows again.

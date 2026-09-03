@@ -12718,3 +12718,194 @@ and caught the first `react` caption at 212 px in a 206 px column.
   full speed. Frames kept under the session scratchpad (`scratchpad/film/`); not committed.
   The first cut of the hook used `ActivatePod` on the dormant last hostile and the reveal-scatter
   queued AHEAD of the shot (seq_24 still showed it running); the hook sets `Alert` directly now.
+
+## Part B — THE CUE MAP: one meaning, one cue (2026-09-03, `wave/the-beat`, base `d50fc5f` + the working branch merged in)
+
+Files touched: `src/Audio.CueMap.cs` (new), `src/Audio.cs`, `src/Audio.Analysis.cs`,
+`src/Game.cs`, `src/Game.Meta.cs`, `src/Game.Endless.cs`, `src/Game.Audition.cs`,
+`src/Game.Harness.cs`, `src/Hud.Audition.cs`, `src/Anim.cs`, `src/Program.cs`,
+`scripts/qa-sweep.sh`, `assets/sfx/CREDITS.txt`, the docs.
+
+### The thesis
+
+Part A added five cues for beats that had none. Part B is the other half of the same defect and
+the larger one: **the beats that DID have a cue were sharing it.** SIGHTLINE had ~130 `Audio.Play`
+call sites and 28 cues, and nothing anywhere said which sound a given meaning made — the mapping
+was written one call site at a time by whoever was in the file that day. Measured on the base tree:
+
+- `Audio.Play("over")` fired at **13 sites in `Game.cs`**: overwatch SET (×4), MOMENTUM (×2),
+  the CONTACT! pod wake, MARK, SUPPRESS (×2), the enemy's BRACED and OVERWATCH, and
+  ARTILLERY INCOMING — whose comment read, verbatim, `// a charge "whine" stand-in`.
+- `Audio.Play("reload")` fired at **11 sites in `Game.cs`**: CHARGE SET, HACK, the custodian
+  re-arm, BEACON, the real reload, RUN & GUN / SLIPSTREAM / BLITZ / STEADY, and two enemy reloads.
+- `Audio.Play("turn")` fired **inside `ShowBanner`**, so all 27 banners were one sound —
+  "VIP DOWN", "AMBUSH!", "POD ROUTED", "ARTILLERY INCOMING" and "ENEMY TURN" were indistinguishable.
+- `"select"` was the CONTACT? sting *and* ~38 menu confirms; `"hit"`/`"miss"` — a round landing on
+  a body and a round going past your ear — were the WAR ROOM's purchase **confirm and refusal**.
+- And every one of the opponent's telegraphs played through the **UI fader**, because its borrowed
+  cue happened to be a UI cue. A player who pulls UI volume down to silence menu chrome was also
+  silencing *the enemy is bracing / reloading / calling artillery*.
+
+A player cannot learn a language whose words each mean six things. The fix is not more cues on
+their own — it is a **table**, plus a gate that keeps it injective.
+
+### The gate, and its FAIL on the pre-change tree — verbatim
+
+`SIGHTLINE_CUETEST` (Game.Harness.cs, routed through the sweep's `verdict`) asserts three things:
+**(a)** `Audio.CueFor(GameEvent)` is INJECTIVE over the canonical events; **(b)** no event that is
+only ever the opponent acting resolves to a UI-bus cue, `Audio.PlayFoe` moves even a UI-category
+cue off the UI fader, and the **real** `Game.ShowBanner` — driven, via `Game.LastBannerCue` /
+`LastBannerBus`, not a copy of its body — puts an `enemy:true` banner on the SFX fader;
+**(c)** the call-site census is under its caps.
+
+Leg (c) is a **SOURCE SCAN** of `src/Game.cs` relative to the working directory, and is labelled
+as one rather than dressed up as a runtime assertion. It is meaningful from the repo tree — which
+is where `qa-sweep.sh` invokes every hook — and prints `census: n/a` from a published binary,
+where `src/` does not ship; legs (a) and (b) stand either way.
+
+On the pre-change tree (part A's `d50fc5f` + the working branch + the probe, with `CueFor`
+written as a **transcription of what the tree actually played**):
+
+```
+CUETEST: map Contact=over Ambush=turn Reinforce=turn Explosion=boom Ability=reload Objective=reload Mend=heal OverwatchSet=over OverwatchFires=react Turn=turn EnemyTurn=turn ShopOk=hit ShopNo=miss Reload=reload
+CUETEST: census: Audio.Play("over") x13 (cap 7), Audio.Play("reload") x11 (cap 3), Audio.PlayFoe x0; banner player='turn' enemy='turn'/ui
+CUETEST: FAIL (notInjective('over'<-Contact+OverwatchSet,'reload'<-Ability+Objective+Reload,'turn'<-Ambush+Reinforce+Turn+EnemyTurn),telegraphOnUiBus(Contact->'over',Reinforce->'turn',EnemyTurn->'turn'),banner:enemy 'ENEMY TURN' fired 'turn' on the ui bus,banner:PLAYER TURN and ENEMY TURN are the same cue 'turn',census:overSites(13>7),census:reloadSites(11>3),census:playFoeSites(0<4))
+```
+
+Read it: three cues answering to nine meanings between them, three opponent telegraphs on the UI
+fader, and the round changing hands sounding identical whichever way it went.
+
+Post-change:
+
+```
+CUETEST: PASS (14 events -> 14 distinct cues, no opponent telegraph on the UI bus, ShowBanner(enemy) on the SFX fader, census: Audio.Play("over") x0 (cap 7), Audio.Play("reload") x0 (cap 3), Audio.PlayFoe x8)
+```
+
+### What shipped
+
+**1. The table.** `src/Audio.CueMap.cs`: `Audio.GameEvent` (14 members), `Audio.CueFor(e)` — the
+one place that decides what a beat sounds like — `Audio.Cue(e, panX, foe)`, `Audio.MappedEvents`
+and `Audio.FoeTelegraphs` (the sets CUETEST iterates, so the contract is legible rather than
+implied), and `Audio.SourceCensus()`.
+
+| event | was | is |
+|---|---|---|
+| Contact (a pod wakes) | `over` | **`alert`** |
+| Ambush (concealment breaks) | `turn` (twice: the banner *and* the site) | **`ambush`** |
+| Reinforce (reinforcements / pressure / artillery) | `turn` | **`alarm`** |
+| Explosion | `boom` (part A) | `boom` |
+| Ability (RUN & GUN / BLITZ / STEADY / SLIPSTREAM / MARK / SUPPRESS / MOMENTUM) | `reload`, and `over` for MARK/SUPPRESS | **`ability`** |
+| Objective (HACK / CHARGE SET / BEACON / INTEL / CAPTIVE) | `reload` | **`tick`** |
+| Mend | `heal` (part A) | `heal` |
+| OverwatchSet | `over` | `over` — now its only job |
+| OverwatchFires | `react` (part A) | `react` |
+| Turn | `turn` | `turn` |
+| EnemyTurn | `turn` | **`turn_enemy`** |
+| ShopOk | `hit` | **`ui_ok`** |
+| ShopNo | `miss` | **`ui_no`** |
+| Reload | `reload` | `reload` — the literal magazine change, and nothing else |
+
+**2. Eight recipes, not seven.** The brief asked for seven and folded *contact* and *ambush* into
+one `alert`; the injectivity gate the same brief specifies forbids that, so AMBUSH got its own
+recipe. `alert` (a minor-2nd stab — two squares a semitone apart struck together — over a noise
+hit and a low drop), `alarm` (a descending fifth over a sub and a dark wash: the opposite contour
+to every announce cue in the game), `ambush` (a hard transient and a saw sweeping UP fast — the
+one cue that accelerates), `ability` (a short bright rising chirp), `tick` (one high sine, almost
+no body — the sound of a number going up), `ui_ok` (a consonant stacked fifth), `ui_no` (a dull
+low two-beat with no brightness at all), `turn_enemy` (`turn` mirrored: 494 → 330, descending).
+
+Measured (`SIGHTLINE_AUDIODUMP`, peak dBFS / RMS dBFS): `alert` −8.0 / −26.0, `alarm` −11.0 /
+−23.8, `ambush` −8.0 / −25.9, `turn_enemy` −14.0 / −25.5, `ability` −13.5 / −28.0, `tick` −13.0 /
+−28.3, `ui_ok` −12.3 / −28.0, `ui_no` −14.0 / −26.1. **AUDIOGATE: 36 cues, all inside their role
+band, spread 11.0 dB (`move` −31.4 → `boom` −20.3) — unchanged from part A's 11.0**, the 12 dB
+ceiling intact. Five of the eight needed a second pass: the first cut put `alert` at −28.0 and
+`ambush` at −27.9 (sitting *on* the impact floor and passing by rounding — part A's lesson,
+applied), `ability` at −29.5, `ui_ok` at −30.7 (on the UI floor) and `tick` at **−32.3, below it**,
+which had also pushed the spread to exactly 12.0 dB.
+
+**3. The bus.** `Audio.Play` takes `foe`; `Audio.BusOf(id, foe)` is the one place that answers
+"which fader"; `Audio.PlayFoe(id)` is the same cue table on the SFX fader. Eight sites in
+`Game.cs` take it (1 `PlayFoe` + 7 `foe: true`) — the CONTACT? sting, the CONTACT! wake, the
+enemy's BRACED / OVERWATCH / RELOADING (×2), the custodian's objective reversal, the wave-spawn
+label — plus **every `enemy:true` banner**, which `ShowBanner` routes structurally rather than
+site by site. `CatOf` puts `alert`/`alarm`/`ambush`
+on the impact bus and `turn_enemy` in `world` (UI-level loudness, SFX fader). No new cue is a UI
+cue except the four that genuinely are chrome (`ability`, `tick`, `ui_ok`, `ui_no`).
+
+**4. `ShowBanner(text, enemy, cue = null)`.** The default is the round-change announce **for that
+side** — an unlabelled enemy banner is still the opponent speaking and must not sound like the
+player's own turn starting. 21 of the ~30 banner sites now pass a named beat (threat / alarm /
+objective): 18 in `Game.cs`, 1 in `Game.Endless.cs`, 2 harness stagers. Two
+duplicate sounds are gone with it: "AMBUSH!" and "PRESSURE RISING" each played the banner cue
+*and* a second `Audio.Play("turn")` on the same frame, and the artillery site's borrowed
+overwatch-chime "charge whine stand-in" is deleted — the banner carries the alarm now.
+
+**5. CONTACT? is CONTACT! said quieter.** `Audio.PlayFoe(CueFor(Contact), gainDb: -5f)`. "Maybe"
+and "yes" are the same fact at two confidences, so they are one word at two levels rather than two
+words. It used to be the menu `select` blip, which said nothing at all.
+
+**6. The AUDIO CHECK table scrolls.** At 36 cues the pitch that part A derived hit its 16 px floor
+and the listing **still overran the BACK button by ~70 px**; crushing rows below 16 px would put
+the role caption under the 12 px small-text floor, so a floor cannot absorb unbounded growth.
+`Hud.AudTableMetrics(screenH)` is now a pure function shared by the draw and by AUDITIONTEST's new
+**vertical**-fit leg (pitch ≥ 16, chip ≥ its label, ≥ 10 rows visible) — every earlier version of
+that test measured only string WIDTHS. A row outside the band is **skipped, not merely
+scissored**: FITTEST audits draw calls, not pixels, and the first cut of the scroll failed it with
+**23 `inkOffCanvas` violations** on the last row at three text scales. New THREAT group
+(`alert` / `alarm` / `ambush` / `turn_enemy`); `ability` / `tick` / `ui_ok` / `ui_no` joined UI.
+
+### Cue counts, before and after (grep on the final tree)
+
+| | before | after |
+|---|---|---|
+| `Audio.Play("over")` in `src/Game.cs` | 13 | **0** (4 player overwatch-set sites go through `Audio.Cue(OverwatchSet)`; 2 enemy sites through `Cue(OverwatchSet, foe: true)`) |
+| `Audio.Play("reload")` in `src/Game.cs` | 11 | **0** (the real reload → `Cue(Reload)`; 2 enemy reloads → `Cue(Reload, foe: true)`) |
+| `Audio.Play("turn")` in all of `src/` | 9 + every banner | **5** — all "the game advances a stage" confirms (draft launch, proceed-from-shop, event resolve, endless offer, skirmish start) |
+| `Audio.Play("hit"/"miss")` as a shop verdict | 8 | **0** — the two remaining `hit` sites are COVER CRACKED / COVER DOWN, which are real in-world impacts |
+| SFX cues | 28 | **36** |
+| table users (`Audio.Cue` / `Audio.CueFor`) | 0 | **74** across 5 files (49 + 25) |
+
+### Gates
+
+- `dotnet build -c Release` **0 warn / 0 err**.
+- `CUETEST` PASS (line above); `AUDIOTEST` / `AUDIOGATE` / `AUDITIONTEST` PASS at 36 cues;
+  `FEELTEST` PASS (part A's three legs unmoved); `FITTEST` PASS; `PAIRTEST` PASS.
+- New AUDIOGATE stack row `w_rifle+hit+alert pod wake` (a suppress/mark/hack rouses a pod on the
+  same frame the round lands): **−7.2 dBFS, 0 clipped**.
+- **Seed-pinned autoplay** against `/home/user/wt/beat-base` (the working-branch commit `715e1a0`),
+  Release binaries, `SIGHTLINE_AUTOPLAY=1 SIGHTLINE_SEED=<s>` under xvfb:
+
+  | seed | beat-base | wave/the-beat |
+  |---|---|---|
+  | 101 | WIN mission=6 frame=13803 turns=38 | WIN mission=6 frame=13803 turns=38 |
+  | 202 | LOSE mission=4 frame=8782 turns=21 | LOSE mission=4 frame=8782 turns=21 |
+  | 303 | WIN mission=6 frame=6505 turns=16 | WIN mission=6 frame=6505 turns=16 |
+
+  Identical, as expected: `Audio` has had its own RNG since RESONANCE A1, `Play` is a no-op with no
+  device, and nothing here touches a `Util.Rng` draw.
+- Derived hook counts equal (**exist 77 = run 77**; the sweep's own footer, which omits the
+  FUL11PROBE `+1`, reads 76 = 76).
+- `bash scripts/qa-sweep.sh --full` → **EXIT=0**, 76 PASS lines, no coverage gap, autoplay
+  LOSE / LOSE / WIN, no TIMEOUT (`sweepB.log`; three runs of the same tree read WIN/WIN/WIN,
+  LOSE/LOSE/LOSE and LOSE/LOSE/WIN — the contract is "no exception, no TIMEOUT", not an outcome).
+
+### What this wave did NOT do
+
+- **Nobody has heard any of it.** There is no audio device in this sandbox. Every claim above is a
+  measurement of the rendered buffer (level, band, spectrum, stack headroom) or of the routing —
+  not a judgement that `alert` reads as *alert*. RESONANCE found the whole audio layer had been
+  graded "Strong" on sound nobody had listened to; this wave does not repeat that. The owner has a
+  device and the AUDIO CHECK screen; the eight new cues are the top of the FIELD/THREAT list.
+- **No balance number was measured or moved.** The wave is presentation-only and the seed-pinned
+  table is the evidence.
+- **`smoke` and `flash` stayed raw `Audio.Play` calls.** Each has exactly one site and no rival
+  meaning, so putting them in the event table would have added a row that decides nothing.
+- **`select` still fires at ~38 menu sites.** That is one meaning at many places, which is the
+  opposite of this wave's defect and is fine.
+- **The audition scroll has no keyboard focus ring and no drag-the-thumb.** Wheel and Up/Down
+  only; the thumb is an indicator, not a control.
+- **The remaining borrowed cue is `hunker`,** at 5 sites: the real HUNKER and the two enemy
+  hunker branches are correct, but `ShoveAnim` plays it (a shove is not digging in) and so does
+  the DEPLOY COVER **UP** ability. Two collisions, both one-site, left for a later pass — they are
+  the same defect this wave fixed and would take the same shape (`GameEvent.Shove`, a cover cue).
+  A grep for the class: `grep -ohE 'Audio\.Play\("[a-z_]+"' src/*.cs | sort | uniq -c | sort -rn`.

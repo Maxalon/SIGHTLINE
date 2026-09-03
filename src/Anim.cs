@@ -677,7 +677,7 @@ public class GrenadeAnim : Anim
     void Explode(Game g)
     {
         float pan = Util.Clamp(_to.X / (float)Cfg.ScreenW, 0f, 1f);
-        Audio.Play("boom", 0f, pan);   // THE BEAT: a real explosion cue (was "crit"+"death" stacked)
+        Audio.Play(Audio.CueFor(Audio.GameEvent.Explosion), 0f, pan);   // THE BEAT: a real explosion cue (was "crit"+"death" stacked)
         // a brief additive flash of LIGHT at the detonation core (the bloom haloes it)
         g.Fx.Flash(_to, Pal.RGBA(255, 226, 180), (Radius + 0.5f) * Cfg.Tile * 0.5f, 0.16f, 0.6f);
         g.Fx.AddShake(12f);
@@ -946,7 +946,7 @@ public class IncendiaryAnim : LobAnim
 
     protected override void Effect(Game g)
     {
-        Audio.Play("boom", gainDb: -6f);   // THE BEAT: a smaller explosion (was "crit")
+        Audio.Play(Audio.CueFor(Audio.GameEvent.Explosion), gainDb: -6f);   // THE BEAT: a smaller explosion (was "crit")
         g.Fx.AddShake(6f);
         g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 160, 70), 30, 300f, 0.5f, 5f, true);
         // lay the fire field. W10 PYROMANIACS boon: a SQUAD-thrown incendiary burns +2 turns
@@ -1008,7 +1008,7 @@ public class HealAnim : Anim
                 int gained = Patient.Hp - before;
                 g.Fx.Burst(Patient.Pos, Pal.Good, 14, 150f, 0.6f, 3.5f, true);
                 g.Fx.PopText(Patient.Pos + new Vector2(0, -26), "+" + gained, Pal.Good, 24f);
-                Audio.Play("heal");   // THE BEAT: a mend sounds like a mend (was "reload")
+                Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: a mend sounds like a mend (was "reload")
             }
         }
         return _t >= Total;

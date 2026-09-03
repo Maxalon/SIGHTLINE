@@ -156,7 +156,7 @@ public partial class Game
     {
         Pressure = PressureMax;
         Combat.PressureAim = PressureMax * PressureAimPerRung;
-        ShowBanner("ENEMY REINFORCEMENTS - MAX PRESSURE", false);
+        ShowBanner("ENEMY REINFORCEMENTS - MAX PRESSURE", false, Audio.CueFor(Audio.GameEvent.Reinforce));
     }
 
     /// FUL-4 harness hook (screenshot only; pair with SIGHTLINE_OBJ=defend): stage the wave-edge
@@ -257,7 +257,7 @@ public partial class Game
         { int d = Util.ChebyDist(foe.X, foe.Y, p.X, p.Y); if (d < nd) { nd = d; nearest = p; } }
         if (nearest != null) { bx = nearest.X; by = nearest.Y; }
         foe.ChargeX = bx; foe.ChargeY = by; foe.ChargeTurns = SiegeFuse;
-        ShowBanner("ARTILLERY INCOMING", true);
+        ShowBanner("ARTILLERY INCOMING", true, Audio.CueFor(Audio.GameEvent.Reinforce));
     }
 
     /// Headless self-test for 4.4 concealment: starts concealed, pods are gated from
@@ -11058,4 +11058,92 @@ public partial class Game
         return sb.ToString();
     }
 
+
+    // ══════════════════════════════════════════════════════════════════════════════════════
+    //  SIGHTLINE_CUETEST — THE CUE MAP's contract (wave "cue-map", THE BEAT part B).
+    //
+    //  (a) INJECTIVITY. `Audio.CueFor` must map the canonical game events to DISTINCT cues. This
+    //      is the whole wave in one assertion: a cue that answers to two meanings teaches the
+    //      player nothing, and the tree shipped `over` answering to five and `turn` to four.
+    //  (b) THE BUS. No event that is only ever the OPPONENT acting may resolve to a UI-bus cue,
+    //      and the REAL Game.ShowBanner must put an `enemy:true` banner on the SFX fader. Driven
+    //      through the actual ShowBanner (via Game.LastBannerCue / LastBannerBus), not a copy of
+    //      its body. `Audio.PlayFoe` is also ground-truthed: it must move even a UI-category cue
+    //      onto the SFX bus.
+    //  (c) THE CENSUS. How many call sites still share one cue. This leg is a SOURCE SCAN of
+    //      src/Game.cs relative to the working directory — honest about being one. It runs from
+    //      the repo tree (which is where qa-sweep.sh invokes every hook) and reports `n/a` from a
+    //      published binary, where src/ does not ship.
+    //
+    //  Device-free; a tiny window is opened by Program only because Game's ctor needs tile math.
+    // ══════════════════════════════════════════════════════════════════════════════════════
+    public const int CueOverCap = 7, CueReloadCap = 3;
+
+    public string CueSelfTest()
+    {
+        var fails = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        Audio.BuildRecipes();
+
+        // ── (a) injectivity over the canonical events ───────────────────────────────────────
+        var byCue = new Dictionary<string, List<string>>();
+        foreach (var ev in Audio.MappedEvents)
+        {
+            string cue = Audio.CueFor(ev);
+            if (!Audio.HasCue(cue)) fails.Add($"cue:{ev}->'{cue}' is not a registered recipe");
+            if (!byCue.TryGetValue(cue, out var l)) byCue[cue] = l = new List<string>();
+            l.Add(ev.ToString());
+        }
+        var shared = new List<string>();
+        foreach (var kv in byCue)
+            if (kv.Value.Count > 1) shared.Add($"'{kv.Key}'<-{string.Join("+", kv.Value)}");
+        shared.Sort();
+        if (shared.Count > 0) fails.Add("notInjective(" + string.Join(",", shared) + ")");
+
+        // ── (b) the bus: an opponent's telegraph is never on the UI fader ───────────────────
+        var uiTele = new List<string>();
+        foreach (var ev in Audio.FoeTelegraphs)
+        {
+            string cue = Audio.CueFor(ev);
+            if (Audio.CategoryOf(cue) == "ui") uiTele.Add($"{ev}->'{cue}'");
+        }
+        if (uiTele.Count > 0) fails.Add("telegraphOnUiBus(" + string.Join(",", uiTele) + ")");
+
+        // PlayFoe must move a UI-category cue onto the SFX bus (the mechanism, not the routing).
+        if (Audio.BusOf("over", false) != "ui")  fails.Add("busOf:overIsNotUiOnThePlayerBus");
+        if (Audio.BusOf("over", true)  != "sfx") fails.Add("busOf:PlayFoeDidNotLeaveTheUiBus");
+
+        // the REAL ShowBanner, driven: an enemy banner rides the SFX fader.
+        ShowBanner("ENEMY TURN", true);
+        string ebCue = LastBannerCue, ebBus = LastBannerBus;
+        if (ebBus != "sfx") fails.Add($"banner:enemy 'ENEMY TURN' fired '{ebCue}' on the {ebBus} bus");
+        ShowBanner("PLAYER TURN", false);
+        string pbCue = LastBannerCue;
+        if (pbCue == ebCue) fails.Add($"banner:PLAYER TURN and ENEMY TURN are the same cue '{pbCue}'");
+        BannerText = null; BannerTimer = 0f;   // leave no banner behind
+
+        // ── (c) the source census ──────────────────────────────────────────────────────────
+        var (haveSrc, nOver, nReload, nFoe) = Audio.SourceCensus();
+        string census;
+        if (!haveSrc) census = "census: n/a (no src/Game.cs next to the working directory)";
+        else
+        {
+            census = $"census: Audio.Play(\"over\") x{nOver} (cap {CueOverCap}), "
+                   + $"Audio.Play(\"reload\") x{nReload} (cap {CueReloadCap}), Audio.PlayFoe x{nFoe}";
+            if (nOver   > CueOverCap)   fails.Add($"census:overSites({nOver}>{CueOverCap})");
+            if (nReload > CueReloadCap) fails.Add($"census:reloadSites({nReload}>{CueReloadCap})");
+            if (nFoe < 4)               fails.Add($"census:playFoeSites({nFoe}<4)");
+        }
+
+        var map = new List<string>();
+        foreach (var ev in Audio.MappedEvents) map.Add($"{ev}={Audio.CueFor(ev)}");
+        sb.AppendLine("CUETEST: map " + string.Join(" ", map));
+        sb.AppendLine("CUETEST: " + census + $"; banner player='{pbCue}' enemy='{ebCue}'/{ebBus}");
+        sb.Append(fails.Count == 0
+            ? $"CUETEST: PASS ({Audio.MappedEvents.Length} events -> {byCue.Count} distinct cues, "
+            + "no opponent telegraph on the UI bus, ShowBanner(enemy) on the SFX fader, "
+            + census + ")"
+            : "CUETEST: FAIL (" + string.Join(",", fails) + ")");
+        return sb.ToString();
+    }
 }

@@ -299,7 +299,7 @@ public partial class Game
     /// reseed the clip. Persistent (the weapon is on the Unit; SaveGame stores Weapon.Kind).
     public void DoRearm(Unit u, WeaponKind k)
     {
-        if (!CanRearm(u, k)) { Audio.Play("miss"); return; }
+        if (!CanRearm(u, k)) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
         _run.Intel -= ArmoryCost;
         Stats.RecordIntel(-ArmoryCost);   // FUL-13 intel cash-flow
         u.Weapon = Weapon.Make(k);
@@ -308,7 +308,7 @@ public partial class Game
         _run.Report.Add($"{u.Name} re-armed with {u.Weapon.Name}");
         Stats.RecordPurchase("ARMORY");
         Stats.RecordAction("REARM");   // W2 verb telemetry
-        Audio.Play("select");
+        Audio.Cue(Audio.GameEvent.ShopOk);
     }
 
     // The shop is two tiers: a fixed block of consumable/stat purchases (indices 0..ModBase-1)
@@ -1688,7 +1688,7 @@ public partial class Game
             int cost = DraftRecallCost;
             if (cost > 0)
             {
-                if (!SaveGame.SpendSalvage(cost)) { Audio.Play("miss"); return; }   // refuse; picks intact
+                if (!SaveGame.SpendSalvage(cost)) { Audio.Cue(Audio.GameEvent.ShopNo); return; }   // refuse; picks intact
                 DraftSalvage = SaveGame.LoadSalvage();
             }
         }
@@ -2287,7 +2287,7 @@ public partial class Game
             if (n >= Run.MaxMissions && Objective == Objective.Decapitate)
             {
                 var kf = Combat.MissionFaction;
-                ShowBanner($"FINALE - KILL THE {Run.FinaleBossName(kf).ToUpperInvariant()}{BiomeMechTag()}", true);
+                ShowBanner($"FINALE - KILL THE {Run.FinaleBossName(kf).ToUpperInvariant()}{BiomeMechTag()}", true, Audio.CueFor(Audio.GameEvent.Contact));
                 BannerSub = Run.FinaleKitClause(kf);
             }
             else ShowBanner($"MISSION {n} - {Biome.Name}{BiomeMechTag()}{facTag}", false);
@@ -2887,11 +2887,26 @@ public partial class Game
         }
     }
 
-    void ShowBanner(string text, bool enemy)
+    // THE CUE MAP probe: what the LAST banner actually fired — the cue id and the mix bus it
+    // rode. Read by SIGHTLINE_CUETEST, which drives the REAL ShowBanner rather than asserting
+    // against a copy of its body.
+    public static string LastBannerCue = "", LastBannerBus = "";
+
+    /// THE CUE MAP: `cue` is the sound this banner makes. All 27 banners used to play the ROUND
+    /// CHANGE announce — "VIP DOWN", "AMBUSH!", "ARTILLERY INCOMING" and "ENEMY TURN" were one
+    /// sound — so the banner told you something had happened and never which kind of thing.
+    /// An `enemy` banner is by definition an opponent TELEGRAPH and rides the SFX fader, not the
+    /// UI one: a player who turns UI volume down is silencing menu chrome, not the enemy's tells.
+    void ShowBanner(string text, bool enemy, string cue = null)
     {
         BannerText = text; BannerEnemy = enemy; BannerSub = null;
         BannerMax = BannerTimer = 1.2f;
-        Audio.Play("turn");
+        // The DEFAULT is the round-change announce FOR THAT SIDE, not one shared announce: an
+        // unlabelled enemy banner is still the opponent speaking, and must not sound like the
+        // player's own turn starting. Named beats (a threat, an alarm, an objective) pass `cue`.
+        cue ??= Audio.CueFor(enemy ? Audio.GameEvent.EnemyTurn : Audio.GameEvent.Turn);
+        LastBannerCue = cue; LastBannerBus = Audio.BusOf(cue, enemy);
+        Audio.Play(cue, foe: enemy);
     }
 
     // ---------------- W11 NEW CONTACT (teach the roster where it's played) ----------------
@@ -2914,7 +2929,7 @@ public partial class Game
                 if (!e.Alive || !e.Active || !e.IsBoss) continue;
                 _bossSighted = true;
                 _seenArchetypes.Add(e.Cls);
-                ShowBanner($"HVT SIGHTED: {e.Name}", true);
+                ShowBanner($"HVT SIGHTED: {e.Name}", true, Audio.CueFor(Audio.GameEvent.Contact));
                 BannerSub = Run.FinaleKitClause(Combat.MissionFaction);
                 return;
             }
@@ -2924,7 +2939,7 @@ public partial class Game
             _seenArchetypes.Add(e.Cls);
             string blurb = Codex.BlurbClause(e.Cls);
             if (string.IsNullOrEmpty(blurb)) continue;   // unknown archetype: no half-empty banner
-            ShowBanner($"NEW CONTACT: {Codex.NameFor(e.Cls)}", true);
+            ShowBanner($"NEW CONTACT: {Codex.NameFor(e.Cls)}", true, Audio.CueFor(Audio.GameEvent.Contact));
             BannerSub = $"{e.Cls} — {blurb}";
             return;
         }
@@ -3119,7 +3134,7 @@ public partial class Game
             Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
             // THE BEAT: the reaction's OWN cue (a descending snap, panned to the watcher) — it used to
             // play the same rising "over" as SETTING overwatch, so the two beats were indistinguishable.
-            Audio.Play("react", panX: Util.Clamp(w.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
+            Audio.Cue(Audio.GameEvent.OverwatchFires, panX: Util.Clamp(w.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
             // OnStart runs when this reaction becomes the active anim (Started is false),
             // by which point the mover has settled on the reacted-to tile.
@@ -3279,7 +3294,7 @@ public partial class Game
         // FUL-7 vocabulary honesty: a soldier's true death pops "KIA" (DOWN now means the
         // bleeding-out state); enemies keep the generic "DOWN" (they have no bleed-out).
         Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : (d.Team == Team.Player ? "KIA" : "DOWN"), c, 22f);
-        if (d.IsVip) { ShowBanner("VIP DOWN", true); Fx.AddShake(13f); }
+        if (d.IsVip) { ShowBanner("VIP DOWN", true, Audio.CueFor(Audio.GameEvent.Reinforce)); Fx.AddShake(13f); }
         Fx.AddShake(7f);
         AddHitStop(0.1f);
         AddZoomPunch(0.05f);
@@ -3361,7 +3376,7 @@ public partial class Game
             // the banner held the whole pod — say so loudly (the player's cue: banner first)
             var anchor = mates.FirstOrDefault(m => m.Active) ?? mates[0];
             Fx.PopText(anchor.Pos + new Vector2(0, -34), "HELD BY BANNER", Pal.Suspect, 18f);
-            ShowBanner("THE BANNER HOLDS THE LINE", true);
+            ShowBanner("THE BANNER HOLDS THE LINE", true, Audio.CueFor(Audio.GameEvent.Contact));
             return;
         }
         if (!broke) return;                                 // survivors dormant or already routing
@@ -3464,7 +3479,7 @@ public partial class Game
         Audio.Play("death");
         // review F3 (honesty): the pill counts 3->2->1 and death lands when it would hit 0, so
         // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
-        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true);
+        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true, Audio.CueFor(Audio.GameEvent.Reinforce));
         BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
         // C1 VOICE: the squad has bonds and the game has never once acknowledged one. BondPartnerOf
         // returns null unless a REAL bonded squadmate is on their feet, so a bondless soldier can
@@ -3516,7 +3531,7 @@ public partial class Game
         Fx.PopText(t.Pos + new Vector2(0, -30), "STABILIZED", Pal.Good, 20f);
         Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
-        Audio.Play("heal");   // THE BEAT: a mend sounds like a mend (was the "reload" cha-chk)
+        Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: a mend sounds like a mend (was the "reload" cha-chk)
         // C1 VOICE: the clutch save. This is the beat the game most needed words for — 146 soldiers
         // went down across 16 measured campaigns and exactly ONE was revived, in total silence.
         Bark(Voice.Beat.Stabilize, Selected, t);
@@ -3600,7 +3615,7 @@ public partial class Game
             Fx.PopText(killer.Pos + new Vector2(0, -40), "+1 ACTION", Pal.Accent, 22f);
             Fx.PopText(killer.Pos + new Vector2(0, -22), "MOMENTUM", Pal.Good, 16f);
             Fx.Burst(killer.Pos, Pal.Accent, 10, 140f, 0.42f, 3f, true);
-            Audio.Play("over");
+            Audio.Cue(Audio.GameEvent.Ability);
         }
     }
 
@@ -3637,7 +3652,7 @@ public partial class Game
         Fx.PopText(killer.Pos + new Vector2(0, -46), "+1 ACTION", Pal.Accent, 22f);
         Fx.PopText(killer.Pos + new Vector2(0, -28), "MOMENTUM", Pal.Good, 16f);
         Fx.Burst(killer.Pos, Pal.Accent, 12, 150f, 0.45f, 3f, true);
-        Audio.Play("over");
+        Audio.Cue(Audio.GameEvent.Ability);
     }
 
     /// Note damage to a player so a near-death survival becomes a feat (IronWill).
@@ -3778,7 +3793,7 @@ public partial class Game
     void DetonateSiege(Unit src, int cx, int cy)
     {
         var center = Util.TileCenter(cx, cy);
-        Audio.Play("boom", panX: Util.Clamp(center.X / (float)Cfg.ScreenW, 0f, 1f));   // THE BEAT: a real explosion cue (was "crit"+"death")
+        Audio.Cue(Audio.GameEvent.Explosion, panX: Util.Clamp(center.X / (float)Cfg.ScreenW, 0f, 1f));   // THE BEAT: a real explosion cue (was "crit"+"death")
         Fx.AddShake(13f); AddHitStop(0.06f); AddZoomPunch(0.06f); AddBloom(0.4f);
         float blastR = (SiegeRadius + 0.5f) * Cfg.Tile;
         Fx.Burst(center, Pal.RGBA(255, 140, 90), 38, 360f, 0.6f, 5f, true);
@@ -3823,7 +3838,7 @@ public partial class Game
         if (_barrelCreditTeam == Team.Player) DemoProgress++;
         var center = Util.TileCenter(bx, by);
 
-        Audio.Play("boom", panX: Util.Clamp(center.X / (float)Cfg.ScreenW, 0f, 1f));   // THE BEAT: a real explosion cue (was "crit"+"death")
+        Audio.Cue(Audio.GameEvent.Explosion, panX: Util.Clamp(center.X / (float)Cfg.ScreenW, 0f, 1f));   // THE BEAT: a real explosion cue (was "crit"+"death")
         Fx.AddShake(14f); AddHitStop(0.06f); AddZoomPunch(0.07f); AddBloom(0.5f);
         float blastR = (BarrelRadius + 0.5f) * Cfg.Tile;
         Fx.Burst(center, Pal.RGBA(255, 170, 70), 40, 380f, 0.6f, 5f, true);
@@ -4306,7 +4321,7 @@ public partial class Game
         // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
         // MISSION banner, so override it AFTER with the reinforcements telegraph.
         SetupMission(_run.Mission);
-        ShowBanner("REINFORCEMENTS DEPLOYED - hold the line.", true);
+        ShowBanner("REINFORCEMENTS DEPLOYED - hold the line.", true, Audio.CueFor(Audio.GameEvent.Reinforce));
         return true;
     }
 
@@ -4479,7 +4494,14 @@ public partial class Game
             Fx.PopText(e.Pos + new Vector2(0, -30), "!", Pal.Suspect, 22f);
             any = true;
         }
-        if (any) { BannerText = "CONTACT?"; BannerEnemy = true; BannerMax = BannerTimer = 0.9f; Audio.Play("select"); }
+        // THE CUE MAP: the SAME word as CONTACT!, said quieter. "Maybe" and "yes" are the same
+        // fact at different confidence, so they are one cue at two levels rather than two cues
+        // (this used to be the menu "select" blip, which said nothing at all).
+        if (any)
+        {
+            BannerText = "CONTACT?"; BannerEnemy = true; BannerMax = BannerTimer = 0.9f;
+            Audio.PlayFoe(Audio.CueFor(Audio.GameEvent.Contact), gainDb: -5f);
+        }
     }
 
     /// At the player's turn end, resolve every Suspicious pod: it confirms the threat
@@ -4516,7 +4538,7 @@ public partial class Game
                 CaptiveLocked = false;
                 Vip.Mobility = 6;                       // can move now
                 Vip.BeginTurn();                        // give it actions this turn
-                ShowBanner("CAPTIVE FREED", false);
+                ShowBanner("CAPTIVE FREED", false, Audio.CueFor(Audio.GameEvent.Objective));
                 Fx.PopText(Vip.Pos + new Vector2(0, -30), "FREED", Pal.VipGold, 22f);
                 Fx.Burst(Vip.Pos, Pal.VipGold, 20, 200f, 0.6f, 4f, true);
                 return;
@@ -4576,7 +4598,7 @@ public partial class Game
         {
             BannerText = "CONTACT!"; BannerEnemy = true; BannerMax = BannerTimer = 1.0f;
             Fx.AddShake(3f);
-            Audio.Play("over");
+            Audio.Cue(Audio.GameEvent.Contact, foe: true);
             // FUL-6 CRITICAL MASS — LINKED ACTIVATION rider ("they heard the guns"): from
             // mission 3 on, waking a real pod puts the NEAREST other pod with a dormant member
             // within LinkRange (closest member to closest member, Util.TileDist — a sound
@@ -4635,9 +4657,8 @@ public partial class Game
         // W10 GHOST secondary: the bonus asks the squad to stay hidden through turn GhostTurns —
         // any break on an earlier turn (shot, proximity, hack: every path funnels here) blows it.
         if (Secondary == SecondaryKind.Ghost && _turnCount <= GhostTurns) SecondaryFailed = true;
-        ShowBanner("AMBUSH!", false);
+        ShowBanner("AMBUSH!", false, Audio.CueFor(Audio.GameEvent.Ambush));
         Fx.AddShake(4f);
-        Audio.Play("turn");
         // wake every pod a soldier can currently see (each pod activates once). A SUPPRESSED shot
         // narrows the wake to the TARGET's own pod (pod-less targets fall back to the full wake —
         // ungrouped hostiles are spawned already alert, so there is nothing to narrow to).
@@ -4666,7 +4687,7 @@ public partial class Game
         Fx.PopText(c + new Vector2(0, -26), $"+{gain} INTEL", Pal.VipGold, 22f);
         Fx.Burst(c, Pal.VipGold, 18, 200f, 0.55f, 4f, true);
         Fx.Flash(c, Pal.VipGold, 24f, 0.16f, 0.5f);
-        ShowBanner("INTEL CACHE SECURED", false);
+        ShowBanner("INTEL CACHE SECURED", false, Audio.CueFor(Audio.GameEvent.Objective));
         Audio.Play("select");
     }
 
@@ -5536,7 +5557,7 @@ public partial class Game
         Fx.PopText(target.Pos + new Vector2(0, -34), "MARKED", Pal.Foe, 18f);
         Fx.PopText(u.Pos + new Vector2(0, -34), "MARK", Pal.Good, 16f);
         Fx.Burst(target.Pos, Pal.Foe, 10, 120f, 0.4f, 3f);
-        Audio.Play("over");
+        Audio.Cue(Audio.GameEvent.Ability);
         MarkMode = false; ShoveMode = false; GrappleMode = false;
     }
 
@@ -5853,7 +5874,7 @@ public partial class Game
         Selected.ActionsLeft = 0;
         Stats.RecordAction("OVERWATCH");   // W2 verb telemetry
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
-        Audio.Play("over");
+        Audio.Cue(Audio.GameEvent.OverwatchSet);
         AimMode = false;
         _tutOver = true;
     }
@@ -5900,7 +5921,7 @@ public partial class Game
             Stats.RecordAction("FOCUS");       // W2 verb telemetry
             Fx.PopText(Selected.Pos + new Vector2(0, -30), "FOCUS", Pal.VipGold, 18f);
         }
-        Audio.Play("over");
+        Audio.Cue(Audio.GameEvent.OverwatchSet);
         AimMode = false;
         _tutOver = true;
     }
@@ -5921,7 +5942,7 @@ public partial class Game
         Selected.ActionsLeft = 0;
         Stats.RecordAction("BRACE");   // W2 verb telemetry
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "BRACE", Pal.Good, 18f);
-        Audio.Play("over");
+        Audio.Cue(Audio.GameEvent.OverwatchSet);
         AimMode = false;
         _tutOver = true;
     }
@@ -5958,7 +5979,7 @@ public partial class Game
         u.ActionsLeft = 0;
         Stats.RecordAction("FOCUS");   // W2 verb telemetry
         Fx.PopText(u.Pos + new Vector2(0, -30), "FOCUS", Pal.VipGold, 18f);
-        Audio.Play("over");
+        Audio.Cue(Audio.GameEvent.OverwatchSet);
         AimMode = false;
         _tutOver = true;
     }
@@ -5992,7 +6013,7 @@ public partial class Game
             Fx.PopText(sat + new Vector2(0, -30), "CHARGE SET", Pal.Foe, 20f);
             Fx.Burst(sat, Pal.Accent, 22, 240f, 0.6f, 4.5f, true);
             Fx.AddShake(6f);
-            Audio.Play("reload");
+            Audio.Cue(Audio.GameEvent.Objective);
             return;
         }
         HackProgress++;
@@ -6003,7 +6024,7 @@ public partial class Game
         var at = Util.TileCenter(Terminal.x, Terminal.y);
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
-        Audio.Play("reload");
+        Audio.Cue(Audio.GameEvent.Objective);
     }
 
     // ---- SIGNAL W8 — CUSTODIAN re-lock/re-arm (the enemy contests objective PROGRESS) ----------
@@ -6041,7 +6062,7 @@ public partial class Game
         {
             HackProgress--;
             Fx.PopText(at + new Vector2(0, -30), "RE-LOCKED", Pal.Foe, 20f);
-            ShowBanner("CUSTODIAN RE-LOCKS THE TERMINAL", true);
+            ShowBanner("CUSTODIAN RE-LOCKS THE TERMINAL", true, Audio.CueFor(Audio.GameEvent.Reinforce));
         }
         else if (HasSabotage)
         {
@@ -6049,11 +6070,11 @@ public partial class Game
             if (i < 0) return;
             SabotageBlown.Remove(i);
             Fx.PopText(at + new Vector2(0, -30), "RE-ARMED", Pal.Foe, 20f);
-            ShowBanner("CUSTODIAN RE-ARMS THE CHARGE", true);
+            ShowBanner("CUSTODIAN RE-ARMS THE CHARGE", true, Audio.CueFor(Audio.GameEvent.Reinforce));
         }
         else return;
         Fx.Burst(at, Pal.Foe, 14, 160f, 0.5f, 3f);
-        Audio.Play("reload");
+        Audio.Cue(Audio.GameEvent.Objective, foe: true);   // the opponent moved the objective backwards
     }
 
     /// DEPLOY BEACON (Evac only, one/mission): the selected soldier spends ONE action to drop a
@@ -6085,7 +6106,7 @@ public partial class Game
         Fx.PopText(at + new Vector2(0, -30), "BEACON SET", Pal.Good, 22f);
         Fx.Burst(at, Pal.Good, 22, 240f, 0.6f, 4.5f, true);
         Fx.AddShake(4f);
-        Audio.Play("reload");
+        Audio.Cue(Audio.GameEvent.Objective);
         CheckEnd();   // planting where the squad already stands can complete the extraction outright
     }
 
@@ -6159,7 +6180,7 @@ public partial class Game
         Selected.ActionsLeft -= 1;
         Stats.RecordAction("RELOAD");   // W2 verb telemetry
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "RELOAD", Pal.TxtDim, 18f);
-        Audio.Play("reload");
+        Audio.Cue(Audio.GameEvent.Reload);
         AimMode = false;
     }
 
@@ -6312,7 +6333,7 @@ public partial class Game
             pinned++;
         }
         Fx.PopText(u.Pos + new Vector2(0, -34), "SUPPRESS", Pal.Accent, 16f);
-        Audio.Play("over");
+        Audio.Cue(Audio.GameEvent.Ability);
         PinMode = false; MarkMode = false; ShoveMode = false; GrappleMode = false;
     }
 
@@ -6340,7 +6361,7 @@ public partial class Game
                 Stats.RecordAction("RUNGUN");   // W2 verb telemetry
                 Fx.PopText(at, "RUN & GUN", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
-                Audio.Play("reload");
+                Audio.Cue(Audio.GameEvent.Ability);
                 break;
             case AbilityKind.Slipstream:
                 // RANGER SLIPSTREAM: arm a free, overwatch-immune move (consumed by the next IssueMove).
@@ -6355,21 +6376,21 @@ public partial class Game
                 Stats.RecordAction("SLIPSTREAM");   // W2 verb telemetry
                 Fx.PopText(at, "SLIPSTREAM", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 12, 150f, 0.4f, 3f);
-                Audio.Play("reload");
+                Audio.Cue(Audio.GameEvent.Ability);
                 break;
             case AbilityKind.Blitz:
                 u.Blitz = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
                 Stats.RecordAction("BLITZ");   // W2 verb telemetry
                 Fx.PopText(at, "BLITZ", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
-                Audio.Play("reload");
+                Audio.Cue(Audio.GameEvent.Ability);
                 break;
             case AbilityKind.Steady:
                 u.Steady = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;
                 Stats.RecordAction("STEADY");   // W2 verb telemetry
                 Fx.PopText(at, "STEADY", Pal.Good, 18f);
                 Fx.Burst(u.Pos, Pal.Good, 10, 120f, 0.4f, 3f);
-                Audio.Play("reload");
+                Audio.Cue(Audio.GameEvent.Ability);
                 break;
             case AbilityKind.Suppress:
                 var t = FirstTargetFor(u);
@@ -6382,7 +6403,7 @@ public partial class Game
                 Stats.RecordAction("SUPPRESS");   // W2 verb telemetry
                 Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
                 Fx.PopText(at, "SUPPRESS", Pal.Accent, 16f);
-                Audio.Play("over");
+                Audio.Cue(Audio.GameEvent.Ability);
                 if (!t.Active) ActivatePod(t.PodId);   // pinning fire reveals the pod
                 break;
             case AbilityKind.Heal:
@@ -6412,7 +6433,7 @@ public partial class Game
                     Fx.Flash(ally.Pos, Pal.Good, 22f, 0.16f, 0.5f);
                     Fx.PopText(at, "PATCH", Pal.Good, 16f);
                     ally.Flash = 0.6f;
-                    Audio.Play("heal");   // THE BEAT: the medic's own cue (was "reload")
+                    Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: the medic's own cue (was "reload")
                     break;
                 }
                 int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
@@ -6430,7 +6451,7 @@ public partial class Game
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
                 ally.Flash = 0.6f;                          // a brief restorative flash on the patient
-                Audio.Play("heal");   // THE BEAT: the medic's own cue (was "reload")
+                Audio.Cue(Audio.GameEvent.Mend);   // THE BEAT: the medic's own cue (was "reload")
                 break;
         }
         AimMode = false;
@@ -6532,7 +6553,7 @@ public partial class Game
         // FUL-4: seal the wave's morale snapshot (the _podOrig pattern SetupMission uses for the
         // initial force) — one pod per wave, sized to what ACTUALLY landed under the cap.
         if (podded && added > 0) { _podOrig[_nextWavePod] = added; _nextWavePod++; }
-        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Cue(Audio.GameEvent.Reinforce, foe: true); RefreshCombatRoster(); }
         // C3: every mid-mission body, whatever spawned it, lands on this one counter. EnemiesStart
         // is the DEPLOY force only, so without this the report cannot tell a mission that beat six
         // hostiles from one that beat six and then six more.
@@ -6561,8 +6582,8 @@ public partial class Game
         if (rung > Pressure)
         {
             // telegraphed escalation -- the player sees it coming and can choose to advance
-            ShowBanner(rung >= PressureMax ? "ENEMY REINFORCEMENTS - MAX PRESSURE" : "PRESSURE RISING", false);
-            Audio.Play("turn");
+            ShowBanner(rung >= PressureMax ? "ENEMY REINFORCEMENTS - MAX PRESSURE" : "PRESSURE RISING",
+                       false, Audio.CueFor(Audio.GameEvent.Reinforce));
         }
         Pressure = rung;
         Stats.RecordPressure(rung);   // C3: harness-only high-water mark of the anti-turtle rung
@@ -6637,7 +6658,7 @@ public partial class Game
         _aiStage = AiStage.PickNext;
         _aiPlan = null;
         ClearIntent();
-        ShowBanner("ENEMY TURN", true);
+        ShowBanner("ENEMY TURN", true, Audio.CueFor(Audio.GameEvent.EnemyTurn));
         Enqueue(new WaitAnim(0.5f), Team.Enemy);
     }
 
@@ -6662,7 +6683,7 @@ public partial class Game
         {
             CachePresent = false;
             Fx.PopText(Util.TileCenter(CacheX, CacheY) + new Vector2(0, -20), "CACHE LOST", Pal.TxtDim, 18f);
-            ShowBanner("INTEL CACHE WENT DARK", true);
+            ShowBanner("INTEL CACHE WENT DARK", true, Audio.CueFor(Audio.GameEvent.Reinforce));
         }
         LeashVip();                       // ESCORT / freed-RESCUE: the asset tags along with the squad (no hand-walking)
         ClearIntent();                    // no enemy intent lingers into the player's turn
@@ -6712,7 +6733,7 @@ public partial class Game
     void MaybeWaveTelegraph()
     {
         if (!DefendWaveTurn(_turnCount)) return;
-        ShowBanner("WAVE INBOUND - EAST EDGE", true);
+        ShowBanner("WAVE INBOUND - EAST EDGE", true, Audio.CueFor(Audio.GameEvent.Reinforce));
         BannerSub = "reinforcements land when this turn ends";
     }
 
@@ -7138,7 +7159,7 @@ public partial class Game
                 e.Aim += 15; e.Mobility += 2;
                 Fx.PopText(e.Pos + new Vector2(0, -34), "ENRAGED", Pal.Foe, 20f);
                 Fx.AddShake(8f);
-                ShowBanner(e.Name + " ENRAGED", true);
+                ShowBanner(e.Name + " ENRAGED", true, Audio.CueFor(Audio.GameEvent.Contact));
             }
             // SIGNAL W5 — the Legion BREAKER's SECOND rage tier: an already-enraged RagesTwice
             // elite FRENZIES once when first acting at <=25% HP (+aim/+mob again, and Ai.Plan
@@ -7153,7 +7174,7 @@ public partial class Game
                 e.Aim += 10; e.Mobility += 2;
                 Fx.PopText(e.Pos + new Vector2(0, -34), "FRENZY", Pal.Foe, 22f);
                 Fx.AddShake(11f);
-                ShowBanner(e.Name + " FRENZIES", true);
+                ShowBanner(e.Name + " FRENZIES", true, Audio.CueFor(Audio.GameEvent.Contact));
             }
             // UNDERTOW W4 — incremental coordination: recompute the shared focus against the CURRENT board
             // right before this unit plans, so a shove/breach an EARLIER unit just landed (exposing a
@@ -7242,8 +7263,9 @@ public partial class Game
                     e.ChargeX = cx; e.ChargeY = cy;
                     e.ChargeTurns = SiegeFuse;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "CHARGING STRIKE", Pal.Foe, 16f);
-                    ShowBanner("ARTILLERY INCOMING", true);
-                    Audio.Play("over");                          // a charge "whine" stand-in
+                    // THE CUE MAP: the banner now carries the ALARM (on the SFX fader), so the
+                    // borrowed overwatch chime that stood in for a charge whine is gone.
+                    ShowBanner("ARTILLERY INCOMING", true, Audio.CueFor(Audio.GameEvent.Reinforce));
                     Enqueue(new WaitAnim(0.25f), Team.Enemy);
                 }
                 else if (_aiPlan.SapTile != null && e.ActionsLeft > 0 &&
@@ -7343,7 +7365,7 @@ public partial class Game
                     e.Facing = MathF.Atan2(e.OwDirY, e.OwDirX);
                     e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "BRACED", Pal.Foe, 16f);
-                    Audio.Play("over");
+                    Audio.Cue(Audio.GameEvent.OverwatchSet, foe: true);
                 }
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
@@ -7364,7 +7386,7 @@ public partial class Game
                     _actBranch = "overwatch";
                     e.OnOverwatch = true; e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
-                    Audio.Play("over");
+                    Audio.Cue(Audio.GameEvent.OverwatchSet, foe: true);
                 }
                 else if (_aiPlan.Reload && e.ActionsLeft > 0 && e.Ammo < e.Weapon.Clip)
                 {
@@ -7383,7 +7405,7 @@ public partial class Game
                     e.Ammo = e.Weapon.Clip;
                     e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
                     Fx.PopText(e.Pos + new Vector2(0, -30), "RELOADING", Pal.TxtDim, 16f);
-                    Audio.Play("reload");
+                    Audio.Cue(Audio.GameEvent.Reload, foe: true);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
                     // a spare action after the mag change digs in behind it (never a free extra shot —
                     // choosing what to do with a fresh clip is W3's question, not this wave's).
@@ -7431,7 +7453,7 @@ public partial class Game
                     {
                         e.Ammo = e.Weapon.Clip;
                         Fx.PopText(e.Pos + new Vector2(0, -30), "RELOADING", Pal.TxtDim, 16f);
-                        Audio.Play("reload");
+                        Audio.Cue(Audio.GameEvent.Reload, foe: true);
                     }
                     else
                     {
@@ -7804,7 +7826,7 @@ public partial class Game
 
     void DoPurchase(int item)
     {
-        if (!CanBuy(item)) { Audio.Play("miss"); return; }
+        if (!CanBuy(item)) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
         if (IsPrepItem(item))
         {
             var f = PrepFactionOffered;
@@ -7813,20 +7835,20 @@ public partial class Game
             _run.Intel -= ShopCost[item];
             Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
             Stats.RecordPurchase("COUNTER-PREP");
-            Audio.Play("select");
+            Audio.Cue(Audio.GameEvent.ShopOk);
             return;
         }
         if (IsModItem(item))
         {
             var mod = ModForItem(item);
             var t = ModTarget(mod);
-            if (t == null) { Audio.Play("miss"); return; }
+            if (t == null) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
             t.InstallMod(mod);   // persistent: baked into the soldier's Weapon, carried across the run
             _run.Report.Add($"{t.Name} fitted {WeaponModDef.Name(mod)}  ({WeaponModDef.Desc(mod)})");
             _run.Intel -= ShopCost[item];
             Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
             Stats.RecordPurchase(ShopName[item]);
-            Audio.Play("select");
+            Audio.Cue(Audio.GameEvent.ShopOk);
             return;
         }
         switch (item)
@@ -7843,7 +7865,7 @@ public partial class Game
                 _run.Report.Add($"{weak.Name} stimmed  (+3 max HP)");
                 break;
             case 2:
-                if (!_run.TryQueueBonusPerk("requisition")) { Audio.Play("miss"); return; }
+                if (!_run.TryQueueBonusPerk("requisition")) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
                 break;
             case 3:
                 var carrier = _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).First();
@@ -7852,7 +7874,7 @@ public partial class Game
                 break;
             case 4:
                 var plated = ArmorTarget();
-                if (plated == null) { Audio.Play("miss"); return; }
+                if (plated == null) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
                 plated.Armor += 1;
                 _run.Report.Add($"{plated.Name} fitted ballistic plating  (armor {plated.Armor}, -1 dmg/hit)");
                 break;
@@ -7860,7 +7882,7 @@ public partial class Game
         _run.Intel -= ShopCost[item];
         Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
         Stats.RecordPurchase(ShopName[item]);
-        Audio.Play("select");
+        Audio.Cue(Audio.GameEvent.ShopOk);
     }
 
     /// Leave the requisition — [Enter] or the PROCEED plate. Review round 1: this also closes the

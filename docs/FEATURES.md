@@ -448,6 +448,26 @@ seeds (mix of WIN/LOSE, no exceptions):
   (smoke grenade — was `hunker`), `heal` (medic PATCH/REVIVE, STABILIZE, `HealAnim` — was
   `reload`), `react`. All file-first (`assets/sfx/<id>.ogg`), listed on AUDIO CHECK, measured by
   AUDIOGATE (a `boom+death+st_kill` stack row). `Audio.Play` gained a downward-only `gainDb`.
+- **THE CUE MAP — one meaning, one cue (2026-09-03, part B of THE BEAT):** `src/Audio.CueMap.cs`
+  adds `Audio.GameEvent` (14 beats) and `Audio.CueFor`, the single place that decides what a beat
+  sounds like; `SIGHTLINE_CUETEST` asserts the table is **injective**, so two meanings physically
+  cannot share a sound. Eight recipes for meanings that were sharing one: **`alert`** (a pod wakes
+  / CONTACT — was `over`, the overwatch chime), **`alarm`** (reinforcements / the pressure clock /
+  ARTILLERY INCOMING — was `turn`), **`ambush`** (squad concealment breaks — was `turn`),
+  **`ability`** (RUN & GUN / SLIPSTREAM / BLITZ / STEADY / MARK / SUPPRESS / MOMENTUM — was
+  `reload`), **`tick`** (HACK / CHARGE SET / BEACON / INTEL — was `reload`), **`ui_ok`** /
+  **`ui_no`** (a purchase confirmed / refused — were `hit` and `miss`, i.e. gunfire), and
+  **`turn_enemy`** (the round passing to the opponent — was `turn`, identical to the player's).
+  `Game.ShowBanner(text, enemy, cue)` gives each of ~30 banners its own beat and routes every
+  `enemy:true` banner through the **SFX** fader (`Audio.PlayFoe` / `Audio.BusOf`), so pulling UI
+  volume down no longer silences the opponent's tells. CONTACT? is CONTACT! at −5 dB. 36 cues,
+  all file-first, AUDIOGATE spread 11.0 dB with a `w_rifle+hit+alert pod wake` stack row.
+- **AUDIO CHECK scrolls (THE CUE MAP):** at 36 cues the derived row pitch hit its 16 px floor and
+  the listing overran the BACK button, so the table scrolls (wheel / Up / Down, with a thumb in
+  the gutter). New **THREAT** group (`alert` / `alarm` / `ambush` / `turn_enemy`); `ability` /
+  `tick` / `ui_ok` / `ui_no` joined UI. `Hud.AudTableMetrics` is a pure function shared by the
+  draw and by AUDITIONTEST's new **vertical**-fit leg — rows outside the band issue no draw call
+  at all, because FITTEST audits draw calls and not pixels.
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
