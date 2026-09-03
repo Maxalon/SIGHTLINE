@@ -21,7 +21,7 @@ against every earlier ladder's 8) because L4's own README said an 8-cluster rung
 
 | file | what |
 |---|---|
-| `L5-h{R,0,2,4,6,8}-b{0..150}.json/.log/.report.txt` | **the ladder** — 96 chunks, heat pinned, 16 slot sets x 6 rungs. |
+| `L5-h{R,0,2,4,6,8}-b{0..150}.json/.report.txt` | **the ladder** — 96 chunks, heat pinned, 16 slot sets x 6 rungs. |
 | `L5bridge-h*-b{0..70}.*` | **the bridge** — L4's 8 slot sets, `SIGHTLINE_HEATPIN=0`, SAME binary. 48 chunks. |
 | `L5fac-m{0,3}a{0,1}b{0,1}-h6-b{0..150}.*` | **the factorial** — 8 arms x 16 slot sets at h6, heat pinned. 128 chunks. |
 | `L5-chunks.txt` `L5bridge-chunks.txt` `L5fac-chunks.txt` | the runner's own `OK <tag> runs=20` line for all 272 chunks — the completion assertions, verbatim. |
