@@ -12567,3 +12567,154 @@ a red 40 px "3" over "WIN AT HEAT 3 TO UNLOCK HEAT 4" and "+13 intel / mission".
    the rung-0 sentence should say "WIN AT HEAT 0" like the others.
 6. **No screenshots were sent into the thread** — this session has no file-sending tool; the
    paths are in the report.
+
+# WAVE "THE BEAT" — THREE BEATS THAT WERE CLAIMED BUT NOT BUILT (2026-09-03, dev on `wave/the-beat`, base `23f0bc1`)
+
+**Branch** `wave/the-beat` off the working branch at **`23f0bc1`** (P6 merged). Files touched, part A:
+`src/Game.cs`, `src/Anim.cs`, `src/Audio.cs`, `src/Audio.Analysis.cs`, `src/Hud.Audition.cs`,
+`src/Game.Harness.cs`, `src/Program.cs`, `assets/sfx/CREDITS.txt`, the docs. A previous developer
+was cut off before editing anything; this write-up covers the whole wave.
+
+## The thesis
+
+THE STRIDE gave pillar 2 its first gate and listed three things it deliberately left alone:
+the kill-cam, the reaction beat, the explosion cue. All three were CLAIMED — by FEATURES.md,
+by ROADMAP 3.11, by a comment in `KillUnit` reading "lingers in slow-mo" — and none was built.
+The player-feel lens graded them confidence 5 because each is checkable by reading the code:
+
+1. **The "slow-mo kill-cam" was a hard 0.4 s freeze.** `KillUnit`'s mission-ending arm added
+   `HitStop(0.4)`, and `Game.Update` reads `if (HitStop > 0) { HitStop -= dt; return; }` BEFORE
+   `Fx.Update` and the anim pump — so the shatter sat at frame 0 for 24 frames and then played at
+   full speed. Worse, `_camPulse *= exp(-11 dt)` ran ABOVE that return, so the 0.13 zoom-punch the
+   same arm added decayed to `exp(-11 × 0.4)` ≈ 1.2% inside the freeze: the zoom spent itself on a
+   still frame and was gone by the time anything moved.
+2. **Overwatch reaction shots had no beat of their own.** `ShotAnim.Reaction` was set by
+   `OnUnitEnteredTile` and read by no presentation code; the reaction fired on the flat 0.10 s
+   wind-up of any shot, with no hit-stop, and the site played the same rising `over` cue that
+   SETTING overwatch plays — so "I set a watch" and "my watch just fired" were one sound.
+3. **No explosion cue existed.** Grenade, barrel and siege strike played `crit`+`death` stacked
+   (a metallic ping over a collapse); flashbang and incendiary played `crit`; smoke and SHOVE
+   played `hunker`; HealAnim, STABILIZE, PATCH and REVIVE all played the `reload` cha-chk.
+
+## The gate, and its FAIL on the pre-fix tree — verbatim
+
+Three legs were added to `SIGHTLINE_FEELTEST` (routed through the sweep's `verdict` like the
+rest). Leg **d** stages a REAL mission (`StartMission(1)`, Eliminate), kills every hostile but
+one directly, then kills the last and steps the REAL `Game.Update` at 1/60 with AutoPlay OFF for
+30 frames, following one shatter particle by reference. Leg **e** constructs a reaction `ShotAnim`
+exactly as the reaction site does and `OnStart`s it, with a plain shot and the windless (AutoPlay)
+reaction as controls. Leg **f** asserts the five new cue ids are registered recipes.
+
+On `23f0bc1` + the probes, all three FAILed:
+
+```
+FEELTEST: ... killcam: window 0.45s at x0.25, tracked particle still-frames 24/27, px/frame in-window 0.36 vs after 2.75 (ratio 0.13), camPulse peak 0.130 -> frame 24 0.002 (1%), phase Barracks; reaction: fires at 0.14s (plain 0.14s, autoplay 0.04s), total 0.52s (plain 0.52s, autoplay 0.52s), hit-stop 0.00s (plain 0.00s, autoplay 0.00s), reticle r0 26px, mover lights 0, mover flinch 0.00; cues: react- boom- flash- heal- smoke-
+FEELTEST: FAIL (killcamStillFrames(24),killcamSlowmoRatio(0.13),killcamZoomSpent(1%<50%),reactionWindUp(0.14s),reactionNoHitStop,cueMissing(react,boom,flash,heal,smoke))
+```
+
+Read it: 24 of the 27 window frames had the particle at zero displacement, the zoom-punch was at
+**1%** of its peak by frame 24, the reaction fired at 0.14 s with no hit-stop, and none of the cues
+existed. That is the "slow-mo kill-cam" as shipped.
+
+## What shipped (part A)
+
+**1. A kill-cam WINDOW instead of a freeze.** `Game.TimeScale` (default 1) is the presentation
+multiplier; the `t` that feeds `Fx.Update`, `DecayUnitFx`, the scorch fade and the anim pump is now
+`min(dt, 0.05) × TimeScale`. `KillUnit`'s mission-ending arm no longer adds HitStop in live play: it
+zeroes it (the ≤ 0.1 s impact freeze added above is folded in so the shatter moves on the very next
+frame), arms `_killCam = KillCamWindow` (0.45 s) and sets `TimeScale = KillCamScale` (0.25). The
+window counts down in real time (`dt × AnimSpeed`, so fast-forward shortens it exactly as it
+shortens a hit-stop), ticked BEFORE the HitStop return so a freeze inside it (a chained barrel)
+cannot stretch it; while it runs `_camPulse` is HELD, not decayed. HitStop stays binary for every
+other freeze. **Under AutoPlay the arm keeps `AddHitStop(0.4)`** so the harness's frame counts do
+not move — the seed-pinned table below is the proof. `SetupMission` resets the window with HitStop.
+
+Post-fix FEELTEST reads `still-frames 0/27, px/frame in-window 0.45 vs after 1.26 (ratio 0.36),
+camPulse peak 0.130 -> frame 24 0.130 (100%)`. The ratio is above 0.25 because the particle's drag
+runs on the scaled clock too (velocity decays less inside the window); the gate band is 0.18–0.45.
+
+What a player sees: the deciding blow lands at the shot's fire beat, and because `KillUnit` arms
+the window from INSIDE the active `ShotAnim`, that anim's remaining 0.38 s at ×0.25 keeps the board
+up for the whole window (the tracer lingers, the shatter drifts, the zoom holds), then ~0.27 s at
+full speed, then the queue drains and the win/requisition card comes up. `SIGHTLINE_KILLCAM=<frame>`
+(shot-only) stages exactly that path — the first attempt used a bare `KillUnit` and `CheckEnd`
+reached the requisition card on the same frame, which covered the window; the hook now kills
+through a real forced-crit `ShotAnim` from the first soldier.
+
+**2. The reaction beat.** `ShotAnim.OnStart`, when `Reaction && !_windless`: the wind-up becomes
+`ReactWindUp` = 0.26 s (fire at 0.30 s instead of 0.14), `g.AddHitStop(ReactHitStop = 0.06)` snaps
+the frame the instant the watcher answers, a larger team-tinted `ReticleSnap` (r0 44 vs 26) closes
+on the MOVER, an `Fx.Flash` of the watcher's colour lands on the mover and the mover flinches
+(`FlinchAnim ≥ 0.6`). The beam and settle are now laid out FROM the fire beat (`BeamEndAt = FireAt
++ 0.20`, `TotalAt = FireAt + 0.38`), so a plain shot is 0.14 → 0.34 → 0.52 exactly as before, a
+reaction 0.30 → 0.50 → 0.68, and windless keeps `Total` = 0.52 so AutoPlay frame counts do not
+move. The reaction site (`OnUnitEnteredTile`) plays the new `react` cue panned to the watcher.
+Post-fix FEELTEST: `fires at 0.30s (plain 0.14s, autoplay 0.04s), total 0.68s (plain 0.52s,
+autoplay 0.52s), hit-stop 0.06s (plain 0.00s, autoplay 0.00s), reticle r0 44px, mover lights 1,
+mover flinch 0.60`.
+
+**3. Five cues.** `react` (a bright transient, a note dropping a fourth, a hard noise bite — the
+mirror of `over`, which rises), `boom` (a 48 → 28 Hz sub sine under a noise wash whose cutoff falls
+1.2 kHz → 180 Hz in three layered bands, a saw crack, 0.6 s, −4 dBFS peak, never detuned — CatOf
+`blast` → `DefaultPitchVar` 0), `flash` (a 3 kHz ping over a short white burst, 0.2 s, 99.9% of its
+energy above 1 kHz — the one blast that reads as LIGHT), `heal` (a rising C–E–G sine triad, the
+opposite contour to every hit), `smoke` (a soft band-limited hiss, no transient). Routing:
+grenade / barrel / siege → `boom`; incendiary → `boom` at −6 dB (`Audio.Play` gained a
+downward-only `gainDb`); flashbang → `flash`; smoke → `smoke`; HealAnim / STABILIZE / PATCH /
+REVIVE → `heal`. The borrowed-cue sites are gone by grep on the final tree:
+
+```
+$ grep -n 'Audio.Play("crit"); Audio.Play("death")\|Audio.Play("crit", 0.05f, pan)' src/*.cs | wc -l   -> 0   (was 3: grenade, barrel, siege)
+$ grep -n 'Audio.Play("reload")' src/Anim.cs | wc -l                                                   -> 0   (was 1: HealAnim)
+$ grep -c 'Audio.Play("over")'   src/Game.cs                                                           -> 13  (was 14: the reaction site)
+$ grep -c 'Audio.Play("reload")' src/Game.cs                                                           -> 11  (was 14: STABILIZE, PATCH, REVIVE)
+```
+
+Registered everywhere a cue has to be: `SfxCueIds` (so the FILE-FIRST loader's validation and
+`SIGHTLINE_AUDIOASSETS` know them — the loader itself iterates `_recipes`, so a dropped-in
+`assets/sfx/boom.ogg` already overrides the synth; CREDITS.txt lists the ids), AUDIOTEST's
+`gameIds`, `AuditionGroups` (a new FIELD group: boom / flash / smoke / heal; `react` sits in
+COMBAT next to `over`), `CueRole` captions, `CatOf` (`react`/`flash` → impact; `boom` → a new
+`blast` band −24..−18; `heal`/`smoke` → a new `world` band, UI-level loudness on the SFX bus — none
+of the five is a UI cue), `DefaultPitchVar` (`world` 0.03, `blast` 0), and a `boom+death+st_kill`
+row in `Stacks` (a grenade kill). AUDIOGATE's two hard-coded "23 cues" strings now derive from
+`OrderedCues.Length`. Measured (`SIGHTLINE_AUDIODUMP`): react −27.2 dB RMS, boom −20.3, flash
+−25.9, smoke −29.5, heal −24.5; the spread went 10.5 → **11.0 dB** (`boom` is the loudest cue in the
+game, as it should be; the 12 dB ceiling holds); the new stack mixes to −5.0 dBFS with 0 clipped.
+Two of the first-cut levels sat EXACTLY on a band edge (smoke −31.0 on the `world` floor, heal
+−23.0 on its ceiling) and passed by rounding — both were re-targeted 1.5 dB inward.
+
+**4. AUDIO CHECK grows.** The cue table's row pitch is now derived from the cue count (floor 16,
+was a fixed 21) so 28 rows end above the BACK button; AUDITIONTEST measures the captions at 120%
+and caught the first `react` caption at 212 px in a 206 px column.
+
+## Gates (part A)
+
+- `dotnet build -c Release` 0 warn / 0 err.
+- FEELTEST PASS (line above); AUDIOTEST / AUDIOGATE / AUDITIONTEST PASS with 28 cues.
+- **Seed-pinned autoplay against the base worktree** (`/home/user/wt/beat-base` at `23f0bc1`,
+  Release binaries, `SIGHTLINE_AUTOPLAY=1 SIGHTLINE_SEED=<s>` under xvfb):
+
+  | seed | base | the-beat |
+  |---|---|---|
+  | 101 | WIN mission=6 frame=13803 turns=38 | WIN mission=6 frame=13803 turns=38 |
+  | 202 | LOSE mission=4 frame=8782 turns=21 | LOSE mission=4 frame=8782 turns=21 |
+  | 303 | WIN mission=6 frame=6505 turns=16 | WIN mission=6 frame=6505 turns=16 |
+
+  Identical: the kill-cam window never arms under AutoPlay and the windless reaction keeps
+  `Total`, so neither the frame count nor a single RNG draw moved.
+- Derived hook counts equal (exist 76 = run 76); `bash scripts/qa-sweep.sh --full` EXIT=0 (below).
+- `bash scripts/qa-sweep.sh --full`: **75/75 PASS, autoplay WIN/LOSE/LOSE, no TIMEOUT, no coverage
+  gap, EXIT=0** (`sweep.log`, run on the tree before the last DebugKillCam-only edit; re-run at the
+  end of part B on the final tree).
+- **Filmstrip, inspected.** `SIGHTLINE_SEED=101 SIGHTLINE_KILLCAM=750 SIGHTLINE_SHOT=750
+  SIGHTLINE_SHOTSEQ=60` (Release, xvfb) → `sightline_seq_00..59.png`. The staged shot is enqueued at
+  frame 750 (seq_00 is the pre-kill frame — `frame++` sits between Update and the screenshot), the
+  blow lands at its 0.14 s fire beat (seq_09/10: HOSTILES 0, CRIT 11, the tracer at full brightness,
+  the shatter ring at the impact, the board visibly ZOOMED and cropped at its left edge — the punch
+  is holding), seq_24 has the tracer still lit, the ring a little wider, the number risen and grown,
+  the zoom unchanged; seq_36 (the window's last frame) has the tracer thinned, sparks still
+  scattering, the zoom only now relaxing; seq_48 is back at zoom 1 with the sparks spread wide at
+  full speed. Frames kept under the session scratchpad (`scratchpad/film/`); not committed.
+  The first cut of the hook used `ActivatePod` on the dormant last hostile and the reveal-scatter
+  queued AHEAD of the shot (seq_24 still showed it running); the hook sets `Alert` directly now.

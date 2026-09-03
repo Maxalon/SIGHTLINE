@@ -283,6 +283,51 @@ public static partial class Audio
             Tone(b, 440, 0, 0.08f, Wv.Square, 0.28f, atk: 0.004f, dec: 4f, tilt: 2000f);
             Tone(b, 660, 0.075f, 0.10f, Wv.Square, 0.24f, atk: 0.004f, dec: 3.5f, tilt: 2400f);
         });
+        // ───────── THE BEAT: cues for beats that used to BORROW one ─────────
+        // REACT — overwatch FIRES: the mirror of "over". "over" rises (a watch is SET); a reaction is
+        // the answer, so it SNAPS DOWN: a bright transient, a high note dropping a fourth, a short
+        // hard noise bite. Played at Game.OnUnitEnteredTile, panned to the watcher.
+        Reg("react", 0.22f, -12.5f, b => {
+            Click(b, 0, 0.30f, tone: 3100, bright: 9000, len: 0.0022f);
+            Tone(b, 740, 0, 0.07f, Wv.Square, 0.30f, atk: 0.002f, dec: 5f, tilt: 2600f);
+            Tone(b, 494, 0.06f, 0.12f, Wv.Square, 0.28f, slideTo: 440, atk: 0.002f, dec: 4f, tilt: 2200f);
+            Noise(b, 0, 0.05f, 0.18f, fc: 2600, poles: 3, bodyHz: 900, bodyQ: 2.2f, bodyMix: 1.2f, dec: 7f);
+        });
+        // BOOM — grenade / barrel / siege strike (incendiary plays it 6 dB down). Until now every
+        // explosion in the game was "crit"+"death" stacked: a metallic ping over a collapse. This is
+        // a sub-bass sine sweeping 48 -> 28 Hz under a noise wash whose cutoff falls 1.2 kHz -> 180 Hz
+        // (layered bands, so the wash darkens as it decays), a short saw body for the crack, and a
+        // slow tail. No detune ever (CatOf "blast" -> DefaultPitchVar 0): a detuned explosion reads
+        // as a pitch, and an explosion has none.
+        Reg("boom", 0.60f, -4f, b => {
+            Click(b, 0, 0.30f, tone: 900, bright: 5000, len: 0.0060f);                         // the initial crack
+            Noise(b, 0, 0.06f, 0.52f, fc: 1200, poles: 2, bodyHz: 380, bodyQ: 1.4f, bodyMix: 1.1f, dec: 5f);  // bright onset
+            Noise(b, 0.02f, 0.16f, 0.36f, fc: 600, poles: 3, bodyHz: 240, bodyQ: 1.3f, bodyMix: 1.0f, dec: 4f);
+            Noise(b, 0.06f, 0.36f, 0.22f, fc: 180, poles: 3, bodyHz: 120, bodyQ: 1.2f, bodyMix: 0.8f, dec: 3.5f);  // the dark wash
+            Tone(b, 48, 0, 0.42f, Wv.Sine, 0.52f, slideTo: 28, atk: 0.003f, dec: 2.6f);          // the sub
+            Tone(b, 160, 0, 0.12f, Wv.Saw, 0.30f, slideTo: 70, atk: 0.001f, dec: 4.5f, tilt: 1400f);  // the body
+        });
+        // FLASH — flashbang: a 3 kHz ping over a short white burst. Bright, brief, no low end at all,
+        // so it is the one blast in the game that reads as LIGHT rather than force.
+        Reg("flash", 0.20f, -8f, b => {
+            Click(b, 0, 0.30f, tone: 3000, bright: 12000, len: 0.0020f);
+            Noise(b, 0, 0.05f, 0.40f, fc: 9000, poles: 1, dec: 9f);                            // the white burst
+            Tone(b, 3000, 0, 0.16f, Wv.Sine, 0.34f, atk: 0.001f, dec: 5f);                      // the ping
+            Tone(b, 4500, 0.004f, 0.06f, Wv.Sine, 0.10f, atk: 0.001f, dec: 9f);
+        });
+        // HEAL — medic PATCH / REVIVE, STABILIZE, the HealAnim: a rising sine triad (a soft major
+        // arpeggio that resolves UP — the opposite contour to every hit and the collapse).
+        Reg("heal", 0.30f, -14.5f, b => {
+            Tone(b, 523, 0,     0.16f, Wv.Sine, 0.26f, atk: 0.008f, dec: 3.2f);
+            Tone(b, 659, 0.07f, 0.16f, Wv.Sine, 0.24f, atk: 0.008f, dec: 3.2f);
+            Tone(b, 784, 0.14f, 0.16f, Wv.Sine, 0.22f, atk: 0.008f, dec: 2.8f);
+        });
+        // SMOKE — the smoke grenade: a soft band-limited hiss (a canister venting), no transient, no
+        // pitch. The old cue was the "hunker" thunk, which says "dug in", not "vapour".
+        Reg("smoke", 0.40f, -12.5f, b => {
+            Noise(b, 0, 0.38f, 0.40f, fc: 2200, poles: 2, bodyHz: 1100, bodyQ: 1.6f, bodyMix: 0.8f, dec: 3.2f);
+            Noise(b, 0.04f, 0.30f, 0.16f, fc: 700, poles: 3, bodyHz: 300, bodyQ: 1.2f, bodyMix: 0.6f, dec: 3.0f);
+        });
         // DEATH: a downward collapse — a saw fall + a noise crumple, now with a REAL TAIL.
         // (A1) every layer used to end by 320ms inside a 360ms buffer: the collapse just
         // stopped dead and 40ms of digital silence followed. The sub now rings on and a
@@ -738,7 +783,8 @@ public static partial class Audio
         "crit"   => 0.035f,
         "move"   => 0.070f,
         "ui"     => 0.022f,
-        _        => 0f,          // stinger / win / lose: no detune, ever
+        "world"  => 0.030f,      // THE BEAT: heal / smoke — soft in-world verbs
+        _        => 0f,          // stinger / win / lose / blast: no detune, ever
     };
     /// Per-call gain jitter DEPTH in dB — and it is deliberately ONE-SIDED DOWNWARD.
     /// A symmetric +-1.5 dB would let a cue land 1.5 dB HOTTER than the level A1's per-cue
@@ -760,7 +806,9 @@ public static partial class Audio
     /// fire). The offset is now hash-scrambled off a counter, still fully deterministic (the
     /// headless harness needs reproducibility) but with no audible order, and gain gets its
     /// own independent jitter so repeated shots differ in weight as well as pitch.
-    public static void Play(string id, float pitchVar = -1f, float panX = -1f)
+    /// THE BEAT: `gainDb` is a per-call trim in dB (<= 0 only — a cue is never played HOTTER than
+    /// its budgeted peak; the incendiary's "boom" at -6 is the one user today).
+    public static void Play(string id, float pitchVar = -1f, float panX = -1f, float gainDb = 0f)
     {
         if (!_ready || !Enabled) return;
         if (!_voices.TryGetValue(id, out var v) || v.Ring == null) return;
@@ -782,6 +830,7 @@ public static partial class Audio
         float gdb = DefaultGainVarDb(id);
         float gain = BusVol(id);
         if (gdb > 0f) gain *= MathF.Pow(10f, -gdb * Hash01(h * 2246822519u + 1u) / 20f);   // [-gdb, 0] dB
+        if (gainDb < 0f) gain *= MathF.Pow(10f, gainDb / 20f);                             // THE BEAT: per-call trim, downward only
         Raylib.SetSoundVolume(s, Util.Clamp(gain, 0f, 1f));
 
         // Raylib pan: 0.5 = centre, 0 = right, 1 = left. Map screen-x so left of screen
@@ -953,7 +1002,8 @@ public static partial class Audio
 
             // every SFX id the rest of the game plays must exist (catch a dropped recipe)
             string[] gameIds = { "select", "move", "reload", "hunker", "shoot", "hit", "crit",
-                                 "miss", "over", "death", "turn", "win", "lose" };
+                                 "miss", "over", "death", "turn", "win", "lose",
+                                 "react", "boom", "flash", "heal", "smoke" };   // THE BEAT
             foreach (var id in gameIds)
                 if (!_recipes.ContainsKey(id)) return $"AUDIOTEST: FAIL missing game cue '{id}'";
 
@@ -994,7 +1044,8 @@ public static partial class Audio
     static readonly string[] SfxCueIds =
     {
         "w_rifle","w_shotgun","w_sniper","w_lmg","w_smg",
-        "shoot","hit","crit","miss","over","death",
+        "shoot","hit","crit","miss","over","react","death",
+        "boom","flash","smoke","heal",                       // THE BEAT: ordnance + aid
         "select","move","reload","hunker","turn","win","lose",
         "st_kill","st_lastkill","st_victory","st_lose","st_squadwipe",
     };
@@ -1358,7 +1409,8 @@ public static partial class Audio
     public static readonly (string Group, string[] Ids)[] AuditionGroups =
     {
         ("WEAPONS",  new[] { "w_rifle", "w_shotgun", "w_sniper", "w_lmg", "w_smg", "shoot" }),
-        ("COMBAT",   new[] { "hit", "crit", "miss", "over", "death" }),
+        ("COMBAT",   new[] { "hit", "crit", "miss", "over", "react", "death" }),
+        ("FIELD",    new[] { "boom", "flash", "smoke", "heal" }),   // THE BEAT: ordnance + aid
         ("UI",       new[] { "select", "move", "reload", "hunker", "turn", "win", "lose" }),
         ("STINGERS", new[] { "st_kill", "st_lastkill", "st_victory", "st_lose", "st_squadwipe" }),
     };
@@ -1386,7 +1438,12 @@ public static partial class Audio
         "crit"        => "heavier than a plain hit",
         "miss"        => "round goes past the ear",
         "over"        => "overwatch set, two notes",
+        "react"       => "overwatch FIRES: snap down",
         "death"       => "a soldier collapses",
+        "boom"        => "grenade / barrel / strike",
+        "flash"       => "flashbang: light, no force",
+        "smoke"       => "a canister venting",
+        "heal"        => "patch, revive, stabilize",
         "select"      => "unit picked up",
         "move"        => "one tile of footfall",
         "reload"      => "mag out, mag in, bolt",

@@ -1339,6 +1339,22 @@ public partial class Game
     // game-feel: hit-stop freeze + camera zoom-punch + red death-flash (3.11)
     public float HitStop;
     float _camPulse;
+    // THE BEAT — the mission-ending KILL-CAM is SLOW-MO, not a freeze. HitStop stays BINARY for the
+    // <= 0.1 s impact freezes (Update returns before the sim); the deciding death instead arms a
+    // KillCamWindow during which Update keeps running but the PRESENTATION clock (Fx.Update, the
+    // anim pump, DecayUnitFx, the scorch fade) runs at KillCamScale, and the zoom-punch is HELD
+    // rather than decayed — so the shatter plays out slowly under a held zoom instead of sitting
+    // at frame 0 for 0.4 s and then playing at full speed under a zoom that had already spent
+    // itself inside the freeze (_camPulse decayed ABOVE the HitStop return: ~1.2% left after 0.4 s).
+    // TimeScale is the effective presentation multiplier (1 = real time); the window drives it.
+    // Under AutoPlay the window never arms and the old 0.4 s HitStop is used, so autoplay frame
+    // counts do not move (FEELTEST leg d pins the live behaviour; seed-pinned autoplay the other).
+    public float TimeScale = 1f;
+    float _killCam;                              // seconds left in the kill-cam window (0 = off)
+    public const float KillCamWindow = 0.45f;    // how long the deciding death lingers
+    public const float KillCamScale  = 0.25f;    // presentation clock inside the window
+    public float CamPulse => _camPulse;          // harness read (FEELTEST: the zoom must HOLD)
+    public float KillCamLeft => _killCam;        // harness read
     bool  _autoCamManual;   // true = player manually moved camera; suppresses auto-follow until C-reset
     public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
     readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
@@ -2173,6 +2189,7 @@ public partial class Game
         Fx.Texts.Clear();
         _anims.Clear();
         HitStop = 0;
+        _killCam = 0f; TimeScale = 1f;   // THE BEAT: a new mission never inherits a kill-cam window
         _turnCount = 1;
         RunTurns++;   // W9: the mission's OPENING turn is a real turn — SetupMission seats it without
                       // going through StartPlayerTurn, so the run-scoped counter has to book it here.
@@ -3100,7 +3117,9 @@ public partial class Game
             // FUL-1 PROC: the boon actually waived the halving on a landed brace (no-op unless Stats.Enabled)
             if (brace && res.Hit && Combat.BraceFullDamage(w)) Stats.RecordProc("SHK");
             Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
-            Audio.Play("over");
+            // THE BEAT: the reaction's OWN cue (a descending snap, panned to the watcher) — it used to
+            // play the same rising "over" as SETTING overwatch, so the two beats were indistinguishable.
+            Audio.Play("react", panX: Util.Clamp(w.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
             // OnStart runs when this reaction becomes the active anim (Started is false),
             // by which point the mover has settled on the reacted-to tile.
@@ -3282,13 +3301,18 @@ public partial class Game
             CheckLastStanding();
         }
 
-        // final-blow kill-cam (3.11): the mission-deciding death lingers in slow-mo
+        // final-blow kill-cam (3.11 -> THE BEAT): the mission-deciding death lingers in SLOW-MO.
+        // Live play arms the KillCamWindow (Update scales the presentation clock and HOLDS the
+        // zoom-punch); the impact freeze added above is folded into it so the shatter starts moving
+        // on the very next frame. AutoPlay keeps the original 0.4 s HitStop so the harness's frame
+        // counts are what they were (seed-pinned autoplay against the base tree is the gate).
         if (IsMissionEndingKill(d))
         {
-            AddHitStop(0.4f);
             AddZoomPunch(0.13f);
             AddBloom(0.4f);
             Fx.AddShake(11f);
+            if (AutoPlay) AddHitStop(0.4f);
+            else { HitStop = 0f; _killCam = KillCamWindow; TimeScale = KillCamScale; }
         }
 
         // purge any queued movement for the dead unit, AND any queued reaction shots aimed AT it:
@@ -3492,7 +3516,7 @@ public partial class Game
         Fx.PopText(t.Pos + new Vector2(0, -30), "STABILIZED", Pal.Good, 20f);
         Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
-        Audio.Play("reload");
+        Audio.Play("heal");   // THE BEAT: a mend sounds like a mend (was the "reload" cha-chk)
         // C1 VOICE: the clutch save. This is the beat the game most needed words for — 146 soldiers
         // went down across 16 measured campaigns and exactly ONE was revived, in total silence.
         Bark(Voice.Beat.Stabilize, Selected, t);
@@ -3754,7 +3778,7 @@ public partial class Game
     void DetonateSiege(Unit src, int cx, int cy)
     {
         var center = Util.TileCenter(cx, cy);
-        Audio.Play("crit"); Audio.Play("death");
+        Audio.Play("boom", panX: Util.Clamp(center.X / (float)Cfg.ScreenW, 0f, 1f));   // THE BEAT: a real explosion cue (was "crit"+"death")
         Fx.AddShake(13f); AddHitStop(0.06f); AddZoomPunch(0.06f); AddBloom(0.4f);
         float blastR = (SiegeRadius + 0.5f) * Cfg.Tile;
         Fx.Burst(center, Pal.RGBA(255, 140, 90), 38, 360f, 0.6f, 5f, true);
@@ -3799,7 +3823,7 @@ public partial class Game
         if (_barrelCreditTeam == Team.Player) DemoProgress++;
         var center = Util.TileCenter(bx, by);
 
-        Audio.Play("crit"); Audio.Play("death");
+        Audio.Play("boom", panX: Util.Clamp(center.X / (float)Cfg.ScreenW, 0f, 1f));   // THE BEAT: a real explosion cue (was "crit"+"death")
         Fx.AddShake(14f); AddHitStop(0.06f); AddZoomPunch(0.07f); AddBloom(0.5f);
         float blastR = (BarrelRadius + 0.5f) * Cfg.Tile;
         Fx.Burst(center, Pal.RGBA(255, 170, 70), 40, 380f, 0.6f, 5f, true);
@@ -4000,9 +4024,21 @@ public partial class Game
         UpdateBriefing(dt);            // RESONANCE C1: the mission briefing card's own clock
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
-        // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
-        _camPulse *= MathF.Exp(-dt * 11f);
-        if (_camPulse < 0.001f) _camPulse = 0;
+        // THE BEAT kill-cam window: counts down in REAL time (fast-forward shortens it exactly as it
+        // shortens the hit-stop); while it runs the zoom-punch is HELD and the presentation clock
+        // `t` below is scaled by TimeScale. Ticked before the HitStop return so a freeze inside the
+        // window (a chained barrel, say) cannot stretch it.
+        if (_killCam > 0f)
+        {
+            _killCam -= dt * AnimSpeed;
+            if (_killCam <= 0f) { _killCam = 0f; TimeScale = 1f; }
+        }
+        // camera zoom-punch relaxes (outside the kill-cam window); hit-stop freezes the rest of the sim
+        if (_killCam <= 0f)
+        {
+            _camPulse *= MathF.Exp(-dt * 11f);
+            if (_camPulse < 0.001f) _camPulse = 0;
+        }
         if (DeathFlash > 0) DeathFlash = MathF.Max(0, DeathFlash - dt * 1.6f);
 
         // Phase 5.2: bloom decays smoothly (half-life ~0.6 s) and drives Display post-FX.
@@ -4030,7 +4066,10 @@ public partial class Game
             if (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn) { HandleCamera(); UpdateAutoCam(dt); }
         }
 
-        float t = MathF.Min(dt, 0.05f);
+        // THE BEAT: `t` is the PRESENTATION clock — Fx, the unit flinch/recoil decay, the scorch
+        // fade and the anim pump all run on it, so the kill-cam window slows every one of them
+        // together (TimeScale is 1 outside the window; never touched under AutoPlay).
+        float t = MathF.Min(dt, 0.05f) * TimeScale;
         Fx.Update(t);
         // DECAPITATE telegraph: a guarded HVT hit was softened this frame — pop a single "GUARDED"
         // float at the HVT (Combat can't reach Fx; it just raises the one-shot flag, drained here).
@@ -6373,7 +6412,7 @@ public partial class Game
                     Fx.Flash(ally.Pos, Pal.Good, 22f, 0.16f, 0.5f);
                     Fx.PopText(at, "PATCH", Pal.Good, 16f);
                     ally.Flash = 0.6f;
-                    Audio.Play("reload");
+                    Audio.Play("heal");   // THE BEAT: the medic's own cue (was "reload")
                     break;
                 }
                 int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
@@ -6391,7 +6430,7 @@ public partial class Game
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
                 ally.Flash = 0.6f;                          // a brief restorative flash on the patient
-                Audio.Play("reload");
+                Audio.Play("heal");   // THE BEAT: the medic's own cue (was "reload")
                 break;
         }
         AimMode = false;
