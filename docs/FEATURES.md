@@ -430,8 +430,24 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Death feedback:** a fallen soldier gets a prominent `KIA  NAME "NICK"` stamp
   (`Fx.Stamp`) + a red screen death-flash (`Game.DeathFlash`) and is listed at the top
   of the barracks debrief; the mission-deciding blow (last hostile / wipe / lost VIP,
-  `Game.IsMissionEndingKill`) lingers in a slow-mo kill-cam (extra HitStop + zoom-punch).
+  `Game.IsMissionEndingKill`) lingers in a slow-mo kill-cam. **THE BEAT (2026-09-03) made
+  that sentence true**: until then the "kill-cam" was a hard 0.4 s `HitStop` freeze during which
+  `Game.Update` returned before `Fx.Update`, and the zoom-punch — decayed above that return —
+  spent itself inside the freeze (1% left when the freeze lifted). Now the deciding death arms
+  `Game.KillCamWindow` (0.45 s) during which the presentation clock (`Game.TimeScale`: Fx, the
+  anim pump, unit flinch/recoil, scorch fade) runs at `KillCamScale` = 0.25 and the zoom is HELD.
+  Under AutoPlay the old freeze is kept so frame counts do not move. `SIGHTLINE_FEELTEST` leg d.
   (Phase 3 item 3.11.)
+- **THE BEAT — three beats that were claimed but not built (2026-09-03):** (1) the kill-cam above;
+  (2) an overwatch REACTION has its own beat — `ShotAnim.Reaction` (set for two programs, read by
+  nothing) now winds up 0.26 s instead of 0.10 with a 0.06 s snap-freeze, a larger team-tinted
+  reticle on the MOVER, a flash and a flinch, and its own `react` cue (a descending snap; SETTING
+  overwatch keeps the rising `over`); plain shots and the AutoPlay path are unchanged (FEELTEST
+  leg e); (3) five cues for beats that borrowed one: `boom` (grenade / barrel / siege strike —
+  was `crit`+`death`; incendiary plays it 6 dB down), `flash` (flashbang — was `crit`), `smoke`
+  (smoke grenade — was `hunker`), `heal` (medic PATCH/REVIVE, STABILIZE, `HealAnim` — was
+  `reload`), `react`. All file-first (`assets/sfx/<id>.ogg`), listed on AUDIO CHECK, measured by
+  AUDIOGATE (a `boom+death+st_kill` stack row). `Audio.Play` gained a downward-only `gainDb`.
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
@@ -837,6 +853,20 @@ branch point.
   writer, same as in-mission. Hook: `SIGHTLINE_SETTINGSTEST`; screenshots: `SIGHTLINE_SETTINGS=1`
   (alias of `SIGHTLINE_PAUSE=1`) with `SIGHTLINE_INTRO=1` / `SIGHTLINE_SHOP=1`, plus
   `SIGHTLINE_QUITARMED=1` for the armed sentence.
+- **THE FRONT DOOR.** Every main-menu plate draws its label, key chip and hover caption from one
+  table (`Hud.IntroDoors` + `Game.IntroKeys`), so DEPLOY SQUAD carries `[ENTER]` like every other
+  door and the chip can never name a key the dispatch does not read; `Hud.LabelX` slides a label
+  clear of its chip at 110/120% text size. On a cold profile (no drill seen, no save, no LAST STAND
+  best) the resting caption is the TRAINING OP nudge (`Hud.ColdNudge`) instead of "ENDLESS HORDE
+  SURVIVAL". The DIFFICULTY card names rung 0 **STANDARD** (26 px, like RECRUIT) and states the
+  unlock rule (`Hud.HeatUnlockRule`: "WIN AT HEAT n TO UNLOCK HEAT n+1" at the earned ceiling and
+  on a fresh profile's RECRUIT default; "MAX UNLOCKED: n" below it). `SIGHTLINE_KEYTABLE=1`
+  prints README's controls tables from `Hud.VerbTable` + `Hud.KeyTable` + `IntroDoors` (hand-run,
+  markdown only); the FIELD MANUAL's VERBS & KEYS non-verb rows are generated from the same
+  `KeyTable`. Hooks: `SIGHTLINE_SETTINGSTEST` leg (E), `FITTEST` INTRO-COLD / INTRO-SAVE /
+  INTRO-HEAT; screenshots: `SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1 SIGHTLINE_FIRSTRUN=1
+  SIGHTLINE_MOUSEPARK=100,100` (the pointer park keeps the resting caption visible), with
+  `SIGHTLINE_UISCALE=<idx>` and `SIGHTLINE_HEAT=<n>`.
 - **RECRUIT is the DEFAULT on a never-played profile.** `Game.FirstTimeProfile` (from
   `SaveGame.LoadRunTotals`) dials the intro to rung −1 and rewrites level 0's hint; "< RECRUIT"
   names the rung below zero on every profile. A default, not a rung — no measured heat number

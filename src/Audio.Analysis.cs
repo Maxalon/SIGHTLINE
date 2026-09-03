@@ -250,6 +250,8 @@ public static partial class Audio
                                                ("w_rifle", 0.12f), ("hit", 0.12f),
                                                ("w_rifle", 0.24f), ("hit", 0.24f) }),
         ("w_shotgun+crit+st_lastkill", new[] { ("w_shotgun", 0f), ("crit", 0f), ("st_lastkill", 0f) }),
+        // THE BEAT: a grenade kill — the blast, the collapse and the takedown stinger land together
+        ("boom+death+st_kill",         new[] { ("boom", 0f), ("death", 0f), ("st_kill", 0f) }),
     };
 
     /// Mix a stack at the REAL master volume and report its peak + clipped-sample count.
@@ -408,11 +410,13 @@ public static partial class Audio
     // cue to have character inside its role, tight enough that an accidental level shift trips.
     static readonly (string cat, float lo, float hi)[] RmsBands =
     {
+        ("blast",   -24f, -18f),   // THE BEAT: boom — the heaviest thing the FIELD does (inside the 12 dB spread)
         ("crit",    -23f, -17f),   // the heaviest thing a shot can do
         ("stinger", -25f, -18f),   // event punctuation, over the weapons
         ("weapon",  -27f, -20f),   // the constant voice of the game
-        ("impact",  -28f, -19f),   // hit / miss / death
+        ("impact",  -28f, -19f),   // hit / miss / death / react / flash
         ("ui",      -31f, -23f),   // present, never competing with a gunshot
+        ("world",   -31f, -23f),   // THE BEAT: heal / smoke — UI-level loudness on the SFX bus
         ("move",    -34f, -28f),   // fires a hundred times a mission
     };
 
@@ -421,7 +425,9 @@ public static partial class Audio
         "crit" => "crit",
         "move" => "move",
         "shoot" or "w_rifle" or "w_shotgun" or "w_sniper" or "w_smg" or "w_lmg" => "weapon",
-        "hit" or "miss" or "death" => "impact",
+        "hit" or "miss" or "death" or "react" or "flash" => "impact",   // THE BEAT: a reaction and a flashbang are in-world hits
+        "boom" => "blast",                          // THE BEAT: the loudest thing the field does; SFX bus, no detune
+        "heal" or "smoke" => "world",               // THE BEAT: soft in-world verbs — SFX bus, UI-level loudness
         "st_kill" or "st_lastkill" or "st_victory" or "st_lose" or "st_squadwipe"
             or "win" or "lose" => "stinger",
         _ => "ui",                                  // select/reload/hunker/over/turn
@@ -469,7 +475,7 @@ public static partial class Audio
                 if (s.PeakDb > PeakCeilDb) bad.Add($"{s.Id} {F(s.PeakDb, "0.0")}");
             }
             Chk(bad.Count == 0, "peak <= -1.0 dBFS",
-                bad.Count == 0 ? $"hottest {worstId} {F(worst, "0.0")} dBFS (23 cues + 2 beds)"
+                bad.Count == 0 ? $"hottest {worstId} {F(worst, "0.0")} dBFS ({OrderedCues.Length} cues + 2 beds)"
                                : $"{bad.Count} over: {string.Join(", ", bad)}");
         }
 
@@ -484,7 +490,7 @@ public static partial class Audio
                     bad.Add($"{s.Id}({c}) {F(s.RmsDb, "0.0")} not in [{F(band.lo, "0")},{F(band.hi, "0")}]");
             }
             Chk(bad.Count == 0, "rms in category band",
-                bad.Count == 0 ? "all 23 cues inside their role band"
+                bad.Count == 0 ? $"all {OrderedCues.Length} cues inside their role band"
                                : $"{bad.Count} outside: {string.Join("; ", bad)}");
         }
 

@@ -265,20 +265,29 @@ public static class Codex
             if (string.IsNullOrWhiteSpace(help)) continue;
             e.Add(new CodexEntry { Title = v.Label, Code = "[" + v.Key + "]", Desc = help });
         }
-        // The non-verb bindings, which live nowhere else at all.
-        e.Add(new CodexEntry { Title = "SELECTING & MOVING", Code = "CLICK",
-            Desc = "Click a soldier to select; [Tab] cycles. Click inside the CYAN OUTLINE to move - the corner " +
-                   "ticks mark each reachable tile, and the DASHED outer ring costs both actions. Arrows / WASD " +
-                   "drive a keyboard cursor and [Space] acts on it. [Enter] ends the turn." });
-        e.Add(new CodexEntry { Title = "CAMERA", Code = "WHEEL",
-            Desc = "Mouse wheel zooms, middle-drag pans, [C] resets. AUTO-CAM (pause menu) follows the action on " +
-                   "its own." });
-        e.Add(new CodexEntry { Title = "THE REST", Code = "GLOBAL",
-            Desc = "[Esc] cancels an aim / targeting mode, or opens the pause card; on the main menu and in the " +
-                   "barracks the same [Esc] opens it as SETTINGS ([O] on the menu). [K] opens this manual from " +
-                   "the main menu, the barracks and the pause card. [T] writes a custom tag on the selected " +
-                   "soldier. [V] shows every verb while the onboarding is staging the bar. [M] mutes, [F11] is " +
-                   "fullscreen, [F2] cycles animation speed, [Q] quits from the pause card or the main menu." });
+        // The non-verb bindings. THE FRONT DOOR: generated from Hud.KeyTable (and the main-menu doors
+        // from Hud.IntroDoors), the same rows SIGHTLINE_KEYTABLE prints for the README — so the manual,
+        // the menu's plates and the README name one key set. Before this they were three prose
+        // paragraphs here and a hand-typed table there, and the two disagreed on seven keys.
+        string group = null; var desc = new System.Text.StringBuilder();
+        void Flush()
+        {
+            if (group == null) return;
+            e.Add(new CodexEntry { Title = group, Code = group == "MAIN MENU" ? "DOORS" : group == "CAMERA" ? "WHEEL" : group == "SELECTING & MOVING" ? "CLICK" : "KEYS", Desc = desc.ToString().Trim() });
+            desc.Clear();
+        }
+        foreach (var k in Hud.KeyTable)
+        {
+            if (k.Group != group)
+            {
+                Flush(); group = k.Group;
+                if (group == "MAIN MENU")
+                    foreach (var d in Hud.IntroDoors)
+                        desc.Append('[').Append(Hud.IntroDoorKey(d.Id)).Append("] ").Append(d.Label).Append(". ");
+            }
+            desc.Append('[').Append(k.Input).Append("] ").Append(k.Action).Append(". ");
+        }
+        Flush();
         return e;
     }
 

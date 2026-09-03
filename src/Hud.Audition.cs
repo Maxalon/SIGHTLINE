@@ -114,23 +114,29 @@ public static partial class Hud
         Raylib.DrawLine(x, hy + 15, x + w, hy + 15, Raylib.Fade(Pal.PanelBd, in_));
 
         int y = hy + 21;
+        // THE BEAT: the row pitch is DERIVED so the table always ends above the BACK button. 23 cues
+        // fit at the original 21 px; every cue the game grows (this wave added five) would otherwise
+        // walk the last rows into the button. Floor 16 keeps the 13 px chip label inside its chip.
+        int groups = Audio.AuditionGroups.Length, cues = Audio.AuditionCues.Length;
+        int pitch = Math.Clamp((Cfg.ScreenH - 58 - y - groups * 5) / Math.Max(1, groups + cues), 16, 21);
+        int chipH = pitch - 3;
         var mouse = Raylib.GetMousePosition();
         foreach (var (group, ids) in Audio.AuditionGroups)
         {
             Cfg.Text(group, new Vector2(btnX, y + 3), 12, 1f, Raylib.Fade(Pal.Accent, 0.85f * in_));
             float gw = Cfg.Measure(group, 12, 1f).X;
             Raylib.DrawLine((int)(btnX + gw + 10), y + 9, x + w, y + 9, Raylib.Fade(Pal.PanelBd, 0.7f * in_));
-            y += 22;
+            y += pitch + 1;
 
             foreach (var id in ids)
             {
                 g.AudFlash.TryGetValue(id, out float glow);
-                var row = new Rectangle(x, y - 1, w, 20);
+                var row = new Rectangle(x, y - 1, w, pitch - 1);
                 if (glow > 0f)
                     Raylib.DrawRectangleRec(row, Raylib.Fade(Pal.Accent, 0.16f * glow));
 
-                var btn = new Rectangle(btnX, y, btnW, 18);
-                var brt = new Rectangle(burstX, y, burstW, 18);
+                var btn = new Rectangle(btnX, y, btnW, chipH);
+                var brt = new Rectangle(burstX, y, burstW, chipH);
                 AudCueBtns.Add(btn); AudBurstBtns.Add(brt);
 
                 bool hb = Raylib.CheckCollisionPointRec(mouse, btn);
@@ -164,7 +170,7 @@ public static partial class Hud
                 {
                     RightText("...", peakR, y + 3, 12, Raylib.Fade(Pal.TxtDim, 0.6f * in_));
                 }
-                y += 21;
+                y += pitch;
             }
             y += 4;
         }

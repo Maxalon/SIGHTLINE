@@ -399,6 +399,16 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_KEYTABLE=1 : THE FRONT DOOR — print README's controls tables (markdown) from
+        // Hud.VerbTable + Hud.KeyTable + Hud.IntroDoors / Game.IntroKeys. HAND-RUN, not a test: it
+        // prints no verdict, and its name deliberately ends in neither TEST nor GATE so the sweep's
+        // COVERAGE GUARD does not count it as an unrun self-test. Paste the output over the block
+        // between the `KEYTABLE:BEGIN` / `KEYTABLE:END` markers in README.md.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYTABLE") == "1")
+        {
+            Console.Write(Hud.KeyTableMarkdown());
+            return;
+        }
         // SIGHTLINE_SETTINGSTEST=1 : SETTINGS EVERYWHERE — the settings card is reachable from the
         // INTRO and the BARRACKS, not just a fight (ROADMAP "Left open by C5"). Draws the intro and
         // the card to publish their rects, so it needs a context + fonts; stashes display.json.
@@ -1185,6 +1195,19 @@ public static class Program
             Display.UiScaleIdx = Math.Clamp(uiIdx, 0, Display.UiScaleLevels.Length - 1);
             Display.ApplyUiScale();
         }
+        // THE FRONT DOOR (shot only): SIGHTLINE_MOUSEPARK=x,y parks the cursor for the whole shot,
+        // so a hover-driven surface can be photographed AT REST. Xvfb spawns the pointer at the
+        // screen centre, which on the intro is DEPLOY SQUAD, so every menu shot so far photographed
+        // that door's hover caption in the shared slot rather than the resting line. Inert unset.
+        {
+            string park = Environment.GetEnvironmentVariable("SIGHTLINE_MOUSEPARK");
+            if (shot && !string.IsNullOrEmpty(park))
+            {
+                var xy = park.Split(',');
+                if (xy.Length == 2 && int.TryParse(xy[0], out int px) && int.TryParse(xy[1], out int py))
+                    game.DebugMousePark = new System.Numerics.Vector2(px, py);
+            }
+        }
         string longMoveEnv = Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE");
         bool longMove = shot && (longMoveEnv == "1" || longMoveEnv == "vault");   // THE STRIDE: =vault films a leap instead
         if (longMove && longMoveEnv == "vault") Console.WriteLine($"LONGMOVE: vault staged {game.DebugVaultMove()} at {game.AnimSpeed:0.##}x");
@@ -1277,6 +1300,13 @@ public static class Program
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAPHOVER"), out int mapHover);   // C3: hover map choice k
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
+        // THE BEAT: SIGHTLINE_KILLCAM=<frame> — at that frame (before Update) the last hostile falls
+        // by Game.DebugKillCam, arming the LIVE kill-cam window (AutoPlay off, so it is the slow-mo a
+        // player sees, not autoplay's 0.4 s freeze). Pair with SIGHTLINE_SHOT=<same frame> and
+        // SIGHTLINE_SHOTSEQ=<n> to film the window; the mission-1 briefing covers the board until
+        // ~frame 700, so use 750+. Shot-only, so nothing measured moves.
+        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_KILLCAM"), out int killCamFrame);
+        if (!shot) killCamFrame = 0;
         // RESONANCE C1: SIGHTLINE_SHOTONBARK=1 — do not shoot a fixed frame; wait until a soldier
         // BARK has actually landed in the combat log during live play, then shoot 40 frames later
         // (long enough for the line to settle into the ledger, short enough that it is still one of
@@ -1333,6 +1363,7 @@ public static class Program
             }
             if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
                                                                // delta from the Xvfb pointer clears it otherwise)
+            if (killCamFrame > 0 && frame == killCamFrame) game.DebugKillCam();   // THE BEAT: film the live kill-cam
             game.Update(dt);
             Audio.UpdateMusic(dt);
 

@@ -12420,3 +12420,301 @@ and the README says what it would cost. L4 and L5 are not made comparable at h0/
 shows L4's outcomes reproduce, the split-half shows its draw was atypical there; both stand. No
 camping policy, no opener re-tune, no single-policy batch measured. The `/home/user/wt/heat-base`
 worktree used for the inertness chunks was removed at the end of the wave.
+
+# WAVE "THE FRONT DOOR" (2026-09-02, dev on `wave/front-door`, base `fa482ed`)
+
+## Thesis
+
+The first screen a player meets had four small lies on it, each found by the product-ship and
+code-health lenses and each cheap to fix once named. DEPLOY SQUAD — the primary verb — was the
+only door with no key chip while Enter already opened it, so a first-time player saw nine
+labelled doors, one unlabelled, and an unlabelled Enter dropped them into the squad draft. The
+cold menu's one always-visible line of guidance read "ENDLESS HORDE SURVIVAL": the danger mode,
+named at rest, while TRAINING OP's explanation was hover-only. The DIFFICULTY card painted rung 0
+as a bare 40 px "0" over "MAX UNLOCKED: 0", and the unlock rule (`Game.UnlockHeatOnWin`: win AT
+the cap to raise it; RECRUIT never raises it) was written nowhere a player could read it. And the
+README's controls table disagreed with the bound key set on seven keys, called `[6]` "FLASH",
+listed four classes of five and eleven source files of thirty-three.
+
+**Confirmed on the base tree before touching anything:** `src/Hud.cs` drew the primary button
+with `keyHint = null` in both branches (lines ~2635/2642) while `Game.cs` ~8395 read Enter for it;
+the resting caption at ~2726 was `bestWave > 0 ? "LAST STAND BEST…" : "ENDLESS HORDE SURVIVAL"`;
+`DrawHeatSelector` painted `level.ToString()` at 40 px for every non-RECRUIT rung and
+`$"MAX UNLOCKED: {unlocked}"` unconditionally; `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs
+| sort -u` gave 47 names, of which H, X, E, G, V, N, L, W, S, Y, U, C, Q, O and P were absent from
+README's table. C6 had also recorded (DEVLOG §C6 finding 2, ROADMAP "Left open by C6") that at
+120% text size the `[K]`/`[U]` chips paint into their labels and the card's level-0 hint runs to
+x≈1266 against a card edge at 1239 — "reported precisely rather than fixed".
+
+## What shipped
+
+- **DEPLOY SQUAD carries `[ENTER]`**, from the same place every other chip now comes from:
+  `Hud.IntroDoors` (id, label, hover caption) + `Game.IntroKey(id)` → `Hud.IntroDoorKey(id)` →
+  `Hud.KeyName(key)`. The eleven hand-written caption branches in `DrawIntro` are gone — the
+  hovered door is resolved by `Game.IntroHit`, the SAME hit-test the click uses, and its caption
+  and colour come off the table. A door's label, its chip, the key the dispatch reads and the README
+  row are now one fact.
+- **The chip and the label cannot collide.** `Hud.LabelX` is one rule for both plate helpers:
+  the label is centred on the plate unless its rows cross the chip's row AND its right edge would
+  reach the chip, in which case it slides LEFT until it clears the chip by 3 px (floor 5 px from the
+  plate's edge). At 100% every label lands exactly where it did. The plates that could not be
+  laid out at 120% even so were widened: the CONTINUE/DEPLOY pair 220 → 240 ("[ENTER]" is the
+  widest chip on the screen, beside a 12-character label), the utility grid 172 → 188 (FIELD
+  MANUAL + `[K]`). This closes C6's finding 2, which two waves had left.
+- **The cold nudge.** `Hud.IntroCold(g)` = `!Display.TrainingSeen && !SaveGame.Exists &&
+  EndlessBestWave == 0`; at rest on a cold profile the shared caption slot reads `Hud.ColdNudge`
+  ("NEW HERE? TRAINING OP [N] teaches the verbs in a few minutes - nothing is saved") in Pal.Good,
+  the plate's own colour. A seen drill, a save or a LAST STAND best restores the old line.
+  Measured at 120%: 648 px centred, x 315–963, clear of the DIFFICULTY card (bottom 344 on a
+  cold profile; the caption row is y=526).
+- **The DIFFICULTY card names rung 0 STANDARD** on RECRUIT's 26 px word path (the skirmish card
+  already called it that; the two pickers now agree), and **states the rule**:
+  `Hud.HeatUnlockRule(level, unlocked)` — null (keep "MAX UNLOCKED: n") when dialled below an
+  earned ceiling or at the ceiling itself; otherwise "WIN AT HEAT n TO UNLOCK HEAT n+1", including
+  at RECRUIT on a fresh profile ("WIN AT HEAT 0 TO UNLOCK HEAT 1" — which is also the first time
+  the game says a RECRUIT win does not raise the cap). **Rung 0 gets the short form** "A WIN
+  UNLOCKS HEAT 1", because it shares its row with W5's "< RECRUIT" pointer and the 320 px card
+  has 284 px of row: the 30-character form measured 246 px at 120% + 8 px gap + 74 px pointer =
+  328 > 284. The level-0 hint lost its "standard difficulty - " prefix (now in the 26 px word),
+  which is what ran it 25 px past the card at 120%: it reads "the designed fight", or "[<] for a
+  gentler first run" on a first-time profile.
+- **`SIGHTLINE_KEYTABLE=1`** prints README's controls tables as markdown from `Hud.VerbTable`
+  (the action bar's own source, so a verb row carries the tooltip's help text verbatim),
+  `Hud.KeyTable` (every non-verb binding, grouped: SELECTING & MOVING / CAMERA / IN A MISSION /
+  EVERYWHERE / MAIN MENU / OTHER SCREENS) and `IntroDoors`. It is HAND-RUN, prints no verdict, and
+  its name ends in neither TEST nor GATE, so `qa-sweep.sh`'s COVERAGE GUARD does not count it
+  (`grep -c KEYTABLE scripts/qa-sweep.sh` = 0; derived counts exist = run = 75). README's block
+  sits between `KEYTABLE:BEGIN` / `KEYTABLE:END` markers with the regeneration recipe above it.
+  **The FIELD MANUAL's VERBS & KEYS tab reads the same `KeyTable`** — its three prose entries
+  (SELECTING & MOVING / CAMERA / THE REST) are now generated rows plus a MAIN MENU entry listing
+  every door with its key, so the manual, the plates and the README cannot disagree again.
+- **README:** the class table is five rows (CORPSMAN / SMG / PATCH was missing) with each class's
+  signature ability and default weapon; `[6]` is UTILITY ITEM (smoke / flash / barricade /
+  incendiary by class), not "FLASH"; the project layout lists all 33 files in `src/` from
+  CLAUDE.md's map; the controls paragraph says the tables are generated and how.
+- **`SIGHTLINE_MOUSEPARK=x,y`** (shot only) parks the cursor. Xvfb spawns the pointer at the
+  screen centre, which on the intro is DEPLOY SQUAD, so every menu screenshot this project has
+  taken photographed that door's hover caption in the shared slot rather than the resting line.
+  `SaveGame.ExistsPin` (harness-only `bool?`) lets a self-test audit the menu with and without a
+  save without writing a file; it reaches nothing on disk.
+
+## The test — and it FAILED on the pre-fix tree
+
+`SIGHTLINE_SETTINGSTEST=1` gained leg **(E) THE FRONT DOOR** (it was already the test that draws
+the intro and publishes its rects; `Frame` + `Hud.MousePin` were there). It reads the frame at
+the draw call through `Cfg.InkProbe` and `Hud.PlateProbe`, at all four shipped text sizes, with
+and without a save: (1) `Hud.IntroNullHintDraws` (counted in both plate helpers while `DrawIntro`
+is on the stack) does not move across a frame, and every door's chip — read off the plate it was
+painted on, `Game.IntroRect(id)` — equals `"[" + KeyName(IntroKeys[id]) + "]"`, DEPLOY's
+`[ENTER]`; (2) no chip's box meets its label's box (2 px air) and both stay on the plate, and
+CONTINUE/DEPLOY do not overlap; (3) `ColdNudge` is painted at rest, on the canvas, clear of
+`Hud.HeatCard`, and NOT painted once the drill is seen or a save exists, where "ENDLESS HORDE
+SURVIVAL" returns; (4) "STANDARD" at 26 px and no "0" at 40 px for rung 0; `HeatUnlockRule`'s
+sentence painted and "MAX UNLOCKED" absent whenever the rule applies, else "MAX UNLOCKED: n", over
+(h3/u3), (h1/u3), (h8/u8), (h−1/u0), (h−1/u2), (h5/u5) at 100% and 120%; the rule clears
+"< RECRUIT" by 6 px; (5) every string painted inside the card's band ends inside the card.
+`FITTEST` gained **INTRO-COLD**, **INTRO-SAVE** and **INTRO-HEAT** screen cases (48 screens now),
+and its plain INTRO is pinned to "returning player, no save" instead of whatever the machine's
+`.xdg` held.
+
+Pre-fix, verbatim (the test in the tree, the fix not yet — the line is long because every
+assertion is evaluated per scale, which is the C5 scope rule):
+
+    SETTINGSTEST: FAIL (intro@90%:doorsWithoutKeyHint:1,intro@90%:deploy:chipReads:nothing,intro@90%:coldNudgeMissing,intro@90%:restingLineNamesLastStandOnColdProfile,intro@90%:rung0NotNamedSTANDARD,intro@90%:rung0PaintedAsBareZero,intro@90%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@90%:maxUnlockedStillPainted,intro@100%:doorsWithoutKeyHint:1,intro@100%:deploy:chipReads:nothing,intro@100%:coldNudgeMissing,intro@100%:restingLineNamesLastStandOnColdProfile,intro@100%:rung0NotNamedSTANDARD,intro@100%:rung0PaintedAsBareZero,intro@100%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@100%:maxUnlockedStillPainted,intro@110%:doorsWithoutKeyHint:1,intro@110%:deploy:chipReads:nothing,intro@110%:chipHitsLabel:FIELD MANUAL[K],intro@110%:coldNudgeMissing,intro@110%:restingLineNamesLastStandOnColdProfile,intro@110%:rung0NotNamedSTANDARD,intro@110%:rung0PaintedAsBareZero,intro@110%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@110%:maxUnlockedStillPainted,intro@110%:runsOffCard:'standard difficulty - ~'by1px,intro@120%:doorsWithoutKeyHint:1,intro@120%:deploy:chipReads:nothing,intro@120%:chipHitsLabel:FIELD MANUAL[K],intro@120%:chipHitsLabel:AUDIO CHECK[U],intro@120%:coldNudgeMissing,intro@120%:restingLineNamesLastStandOnColdProfile,intro@120%:rung0NotNamedSTANDARD,intro@120%:rung0PaintedAsBareZero,intro@120%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro@120%:maxUnlockedStillPainted,intro@120%:runsOffCard:'standard difficulty - ~'by25px,intro+save@90%:doorsWithoutKeyHint:1,intro+save@90%:deploy:chipReads:nothing,intro+save@90%:rung0NotNamedSTANDARD,intro+save@90%:rung0PaintedAsBareZero,intro+save@90%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@90%:maxUnlockedStillPainted,intro+save@100%:doorsWithoutKeyHint:1,intro+save@100%:deploy:chipReads:nothing,intro+save@100%:rung0NotNamedSTANDARD,intro+save@100%:rung0PaintedAsBareZero,intro+save@100%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@100%:maxUnlockedStillPainted,intro+save@110%:doorsWithoutKeyHint:1,intro+save@110%:deploy:chipReads:nothing,intro+save@110%:chipHitsLabel:FIELD MANUAL[K],intro+save@110%:rung0NotNamedSTANDARD,intro+save@110%:rung0PaintedAsBareZero,intro+save@110%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@110%:maxUnlockedStillPainted,intro+save@110%:runsOffCard:'standard difficulty - ~'by1px,intro+save@120%:doorsWithoutKeyHint:1,intro+save@120%:deploy:chipReads:nothing,intro+save@120%:chipHitsLabel:FIELD MANUAL[K],intro+save@120%:chipHitsLabel:AUDIO CHECK[U],intro+save@120%:rung0NotNamedSTANDARD,intro+save@120%:rung0PaintedAsBareZero,intro+save@120%:unlockRuleMissing:'A WIN UNLOCKS HEAT 1',intro+save@120%:maxUnlockedStillPainted,intro+save@120%:runsOffCard:'standard difficulty - ~'by25px,card(h3/u3)@100%:unlockRuleMissing:'WIN AT HEAT 3 TO UNLOCK HEAT 4',card(h3/u3)@100%:maxUnlockedStillPainted,card(h-1/u0)@100%:unlockRuleMissing:'WIN AT HEAT 0 TO UNLOCK HEAT 1',card(h-1/u0)@100%:maxUnlockedStillPainted,card(h5/u5)@100%:unlockRuleMissing:'WIN AT HEAT 5 TO UNLOCK HEAT 6',card(h5/u5)@100%:maxUnlockedStillPainted,card(h3/u3)@120%:unlockRuleMissing:'WIN AT HEAT 3 TO UNLOCK HEAT 4',card(h3/u3)@120%:maxUnlockedStillPainted,card(h-1/u0)@120%:unlockRuleMissing:'WIN AT HEAT 0 TO UNLOCK HEAT 1',card(h-1/u0)@120%:maxUnlockedStillPainted,card(h5/u5)@120%:unlockRuleMissing:'WIN AT HEAT 5 TO UNLOCK HEAT 6',card(h5/u5)@120%:maxUnlockedStillPainted)
+
+Read it: `doorsWithoutKeyHint:1` / `deploy:chipReads:nothing` at every scale; `chipHitsLabel:FIELD
+MANUAL[K]` at 110% and 120% and `AUDIO CHECK[U]` at 120% (C6's finding, now a red line);
+`coldNudgeMissing` + `restingLineNamesLastStandOnColdProfile`; `rung0NotNamedSTANDARD` +
+`rung0PaintedAsBareZero`; `unlockRuleMissing` + `maxUnlockedStillPainted` at rungs 0, 3, 5 and
+RECRUIT-with-nothing-earned; `runsOffCard:'standard difficulty - ~'by1px` at 110% and `by25px` at
+120%. The three MAX-UNLOCKED-keeps cases ((h1/u3), (h8/u8), (h−1/u2)) passed pre-fix, which is the
+proof the rule's null branch is behaviour-preserving. `[C]` beside CONTINUE RUN did NOT collide
+at 120% — the 220 px pair was widened for `[ENTER]`, not for it.
+
+**After:** `SETTINGSTEST: PASS` (the sentence lists the leg); `FITTEST: PASS` (48 screens, every
+scale); `CODEXTEST: PASS` (VERBS & KEYS rebuilt from `KeyTable`); `CONTRASTTEST: PASS` (the ten
+main-menu labels, CONTINUE_RUN 8.99 / DEPLOY_SQUAD 8.99 / FIELD_MANUAL 13.65 …); `dotnet build -c
+Release` 0 warnings / 0 errors; derived counts exist = run = 75; SWEEPRESULT.
+
+## Screenshots (inspected)
+
+`SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1 SIGHTLINE_FIRSTRUN=1 SIGHTLINE_MOUSEPARK=100,100
+SIGHTLINE_SHOT=90` — the true first launch: RECRUIT by default, "WIN AT HEAT 0 TO UNLOCK HEAT 1",
+the green nudge at rest, `[ENTER]` on DEPLOY SQUAD. The same at `SIGHTLINE_UISCALE=3`: the nudge
+spans x 315–963 under LAST STAND, the card ends at y 344. `SIGHTLINE_INTRO=1 SIGHTLINE_UISCALE=0`
+and `=3` with the staged save: `[C]` CONTINUE RUN and `[ENTER]` DEPLOY SQUAD on the 240 px pair, no
+chip touching a label at 120%, FIELD MANUAL and AUDIO CHECK slid left of their chips, STANDARD /
+"A WIN UNLOCKS HEAT 1 < RECRUIT" / "the designed fight" all inside the card. `SIGHTLINE_HEAT=3`:
+a red 40 px "3" over "WIN AT HEAT 3 TO UNLOCK HEAT 4" and "+13 intel / mission". Scratchpad
+`fd_cold_intro.png`, `fd_cold_intro_120.png`, `fd_save_intro_90.png`, `fd_save_intro_120.png`,
+`fd_heat3_intro.png` (not committed).
+
+## What this wave did NOT do
+
+1. **No gameplay, no balance.** Nothing in `Combat`, `Ai`, `Mission`, `Heat`, `Run` or the map
+   generator was touched; `PAIRTEST` PASS in the sweep is the check. `IntroKeys` is unchanged.
+2. **The pause card's layout and the skirmish setup card** are out of scope and untouched; the
+   skirmish card already said STANDARD, which is why the word was chosen.
+3. **The 12 px small-text floor at the default text size** (ROADMAP, C5) is untouched.
+4. **Bound-key coverage of the README is checked by hand, not by a test.** The KEYTABLE hook prints
+   markdown only, by design; a runtime test cannot grep the source for `KeyboardKey.*`. The
+   derivation is in README and in `Hud.KeyTable`'s doc comment; every one of the 47 derived names
+   (and the three mouse reads and held Shift in `Renderer.cs`) is in one of the three tables, and
+   nothing in the tables is unbound — checked line by line against the grep on this commit.
+5. **"A WIN UNLOCKS HEAT 1" is the short form for one row only.** The long form did not fit
+   beside "< RECRUIT" at 120%; moving the pointer to the footer row (where it would fit) was
+   rejected because W5 placed it beside the stepper it names. If the card is ever re-laid out,
+   the rung-0 sentence should say "WIN AT HEAT 0" like the others.
+6. **No screenshots were sent into the thread** — this session has no file-sending tool; the
+   paths are in the report.
+
+# WAVE "THE BEAT" — THREE BEATS THAT WERE CLAIMED BUT NOT BUILT (2026-09-03, dev on `wave/the-beat`, base `23f0bc1`)
+
+**Branch** `wave/the-beat` off the working branch at **`23f0bc1`** (P6 merged). Files touched, part A:
+`src/Game.cs`, `src/Anim.cs`, `src/Audio.cs`, `src/Audio.Analysis.cs`, `src/Hud.Audition.cs`,
+`src/Game.Harness.cs`, `src/Program.cs`, `assets/sfx/CREDITS.txt`, the docs. A previous developer
+was cut off before editing anything; this write-up covers the whole wave.
+
+## The thesis
+
+THE STRIDE gave pillar 2 its first gate and listed three things it deliberately left alone:
+the kill-cam, the reaction beat, the explosion cue. All three were CLAIMED — by FEATURES.md,
+by ROADMAP 3.11, by a comment in `KillUnit` reading "lingers in slow-mo" — and none was built.
+The player-feel lens graded them confidence 5 because each is checkable by reading the code:
+
+1. **The "slow-mo kill-cam" was a hard 0.4 s freeze.** `KillUnit`'s mission-ending arm added
+   `HitStop(0.4)`, and `Game.Update` reads `if (HitStop > 0) { HitStop -= dt; return; }` BEFORE
+   `Fx.Update` and the anim pump — so the shatter sat at frame 0 for 24 frames and then played at
+   full speed. Worse, `_camPulse *= exp(-11 dt)` ran ABOVE that return, so the 0.13 zoom-punch the
+   same arm added decayed to `exp(-11 × 0.4)` ≈ 1.2% inside the freeze: the zoom spent itself on a
+   still frame and was gone by the time anything moved.
+2. **Overwatch reaction shots had no beat of their own.** `ShotAnim.Reaction` was set by
+   `OnUnitEnteredTile` and read by no presentation code; the reaction fired on the flat 0.10 s
+   wind-up of any shot, with no hit-stop, and the site played the same rising `over` cue that
+   SETTING overwatch plays — so "I set a watch" and "my watch just fired" were one sound.
+3. **No explosion cue existed.** Grenade, barrel and siege strike played `crit`+`death` stacked
+   (a metallic ping over a collapse); flashbang and incendiary played `crit`; smoke and SHOVE
+   played `hunker`; HealAnim, STABILIZE, PATCH and REVIVE all played the `reload` cha-chk.
+
+## The gate, and its FAIL on the pre-fix tree — verbatim
+
+Three legs were added to `SIGHTLINE_FEELTEST` (routed through the sweep's `verdict` like the
+rest). Leg **d** stages a REAL mission (`StartMission(1)`, Eliminate), kills every hostile but
+one directly, then kills the last and steps the REAL `Game.Update` at 1/60 with AutoPlay OFF for
+30 frames, following one shatter particle by reference. Leg **e** constructs a reaction `ShotAnim`
+exactly as the reaction site does and `OnStart`s it, with a plain shot and the windless (AutoPlay)
+reaction as controls. Leg **f** asserts the five new cue ids are registered recipes.
+
+On `23f0bc1` + the probes, all three FAILed:
+
+```
+FEELTEST: ... killcam: window 0.45s at x0.25, tracked particle still-frames 24/27, px/frame in-window 0.36 vs after 2.75 (ratio 0.13), camPulse peak 0.130 -> frame 24 0.002 (1%), phase Barracks; reaction: fires at 0.14s (plain 0.14s, autoplay 0.04s), total 0.52s (plain 0.52s, autoplay 0.52s), hit-stop 0.00s (plain 0.00s, autoplay 0.00s), reticle r0 26px, mover lights 0, mover flinch 0.00; cues: react- boom- flash- heal- smoke-
+FEELTEST: FAIL (killcamStillFrames(24),killcamSlowmoRatio(0.13),killcamZoomSpent(1%<50%),reactionWindUp(0.14s),reactionNoHitStop,cueMissing(react,boom,flash,heal,smoke))
+```
+
+Read it: 24 of the 27 window frames had the particle at zero displacement, the zoom-punch was at
+**1%** of its peak by frame 24, the reaction fired at 0.14 s with no hit-stop, and none of the cues
+existed. That is the "slow-mo kill-cam" as shipped.
+
+## What shipped (part A)
+
+**1. A kill-cam WINDOW instead of a freeze.** `Game.TimeScale` (default 1) is the presentation
+multiplier; the `t` that feeds `Fx.Update`, `DecayUnitFx`, the scorch fade and the anim pump is now
+`min(dt, 0.05) × TimeScale`. `KillUnit`'s mission-ending arm no longer adds HitStop in live play: it
+zeroes it (the ≤ 0.1 s impact freeze added above is folded in so the shatter moves on the very next
+frame), arms `_killCam = KillCamWindow` (0.45 s) and sets `TimeScale = KillCamScale` (0.25). The
+window counts down in real time (`dt × AnimSpeed`, so fast-forward shortens it exactly as it
+shortens a hit-stop), ticked BEFORE the HitStop return so a freeze inside it (a chained barrel)
+cannot stretch it; while it runs `_camPulse` is HELD, not decayed. HitStop stays binary for every
+other freeze. **Under AutoPlay the arm keeps `AddHitStop(0.4)`** so the harness's frame counts do
+not move — the seed-pinned table below is the proof. `SetupMission` resets the window with HitStop.
+
+Post-fix FEELTEST reads `still-frames 0/27, px/frame in-window 0.45 vs after 1.26 (ratio 0.36),
+camPulse peak 0.130 -> frame 24 0.130 (100%)`. The ratio is above 0.25 because the particle's drag
+runs on the scaled clock too (velocity decays less inside the window); the gate band is 0.18–0.45.
+
+What a player sees: the deciding blow lands at the shot's fire beat, and because `KillUnit` arms
+the window from INSIDE the active `ShotAnim`, that anim's remaining 0.38 s at ×0.25 keeps the board
+up for the whole window (the tracer lingers, the shatter drifts, the zoom holds), then ~0.27 s at
+full speed, then the queue drains and the win/requisition card comes up. `SIGHTLINE_KILLCAM=<frame>`
+(shot-only) stages exactly that path — the first attempt used a bare `KillUnit` and `CheckEnd`
+reached the requisition card on the same frame, which covered the window; the hook now kills
+through a real forced-crit `ShotAnim` from the first soldier.
+
+**2. The reaction beat.** `ShotAnim.OnStart`, when `Reaction && !_windless`: the wind-up becomes
+`ReactWindUp` = 0.26 s (fire at 0.30 s instead of 0.14), `g.AddHitStop(ReactHitStop = 0.06)` snaps
+the frame the instant the watcher answers, a larger team-tinted `ReticleSnap` (r0 44 vs 26) closes
+on the MOVER, an `Fx.Flash` of the watcher's colour lands on the mover and the mover flinches
+(`FlinchAnim ≥ 0.6`). The beam and settle are now laid out FROM the fire beat (`BeamEndAt = FireAt
++ 0.20`, `TotalAt = FireAt + 0.38`), so a plain shot is 0.14 → 0.34 → 0.52 exactly as before, a
+reaction 0.30 → 0.50 → 0.68, and windless keeps `Total` = 0.52 so AutoPlay frame counts do not
+move. The reaction site (`OnUnitEnteredTile`) plays the new `react` cue panned to the watcher.
+Post-fix FEELTEST: `fires at 0.30s (plain 0.14s, autoplay 0.04s), total 0.68s (plain 0.52s,
+autoplay 0.52s), hit-stop 0.06s (plain 0.00s, autoplay 0.00s), reticle r0 44px, mover lights 1,
+mover flinch 0.60`.
+
+**3. Five cues.** `react` (a bright transient, a note dropping a fourth, a hard noise bite — the
+mirror of `over`, which rises), `boom` (a 48 → 28 Hz sub sine under a noise wash whose cutoff falls
+1.2 kHz → 180 Hz in three layered bands, a saw crack, 0.6 s, −4 dBFS peak, never detuned — CatOf
+`blast` → `DefaultPitchVar` 0), `flash` (a 3 kHz ping over a short white burst, 0.2 s, 99.9% of its
+energy above 1 kHz — the one blast that reads as LIGHT), `heal` (a rising C–E–G sine triad, the
+opposite contour to every hit), `smoke` (a soft band-limited hiss, no transient). Routing:
+grenade / barrel / siege → `boom`; incendiary → `boom` at −6 dB (`Audio.Play` gained a
+downward-only `gainDb`); flashbang → `flash`; smoke → `smoke`; HealAnim / STABILIZE / PATCH /
+REVIVE → `heal`. The borrowed-cue sites are gone by grep on the final tree:
+
+```
+$ grep -n 'Audio.Play("crit"); Audio.Play("death")\|Audio.Play("crit", 0.05f, pan)' src/*.cs | wc -l   -> 0   (was 3: grenade, barrel, siege)
+$ grep -n 'Audio.Play("reload")' src/Anim.cs | wc -l                                                   -> 0   (was 1: HealAnim)
+$ grep -c 'Audio.Play("over")'   src/Game.cs                                                           -> 13  (was 14: the reaction site)
+$ grep -c 'Audio.Play("reload")' src/Game.cs                                                           -> 11  (was 14: STABILIZE, PATCH, REVIVE)
+```
+
+Registered everywhere a cue has to be: `SfxCueIds` (so the FILE-FIRST loader's validation and
+`SIGHTLINE_AUDIOASSETS` know them — the loader itself iterates `_recipes`, so a dropped-in
+`assets/sfx/boom.ogg` already overrides the synth; CREDITS.txt lists the ids), AUDIOTEST's
+`gameIds`, `AuditionGroups` (a new FIELD group: boom / flash / smoke / heal; `react` sits in
+COMBAT next to `over`), `CueRole` captions, `CatOf` (`react`/`flash` → impact; `boom` → a new
+`blast` band −24..−18; `heal`/`smoke` → a new `world` band, UI-level loudness on the SFX bus — none
+of the five is a UI cue), `DefaultPitchVar` (`world` 0.03, `blast` 0), and a `boom+death+st_kill`
+row in `Stacks` (a grenade kill). AUDIOGATE's two hard-coded "23 cues" strings now derive from
+`OrderedCues.Length`. Measured (`SIGHTLINE_AUDIODUMP`): react −27.2 dB RMS, boom −20.3, flash
+−25.9, smoke −29.5, heal −24.5; the spread went 10.5 → **11.0 dB** (`boom` is the loudest cue in the
+game, as it should be; the 12 dB ceiling holds); the new stack mixes to −5.0 dBFS with 0 clipped.
+Two of the first-cut levels sat EXACTLY on a band edge (smoke −31.0 on the `world` floor, heal
+−23.0 on its ceiling) and passed by rounding — both were re-targeted 1.5 dB inward.
+
+**4. AUDIO CHECK grows.** The cue table's row pitch is now derived from the cue count (floor 16,
+was a fixed 21) so 28 rows end above the BACK button; AUDITIONTEST measures the captions at 120%
+and caught the first `react` caption at 212 px in a 206 px column.
+
+## Gates (part A)
+
+- `dotnet build -c Release` 0 warn / 0 err.
+- FEELTEST PASS (line above); AUDIOTEST / AUDIOGATE / AUDITIONTEST PASS with 28 cues.
+- **Seed-pinned autoplay against the base worktree** (`/home/user/wt/beat-base` at `23f0bc1`,
+  Release binaries, `SIGHTLINE_AUTOPLAY=1 SIGHTLINE_SEED=<s>` under xvfb):
+
+  | seed | base | the-beat |
+  |---|---|---|
+  | 101 | WIN mission=6 frame=13803 turns=38 | WIN mission=6 frame=13803 turns=38 |
+  | 202 | LOSE mission=4 frame=8782 turns=21 | LOSE mission=4 frame=8782 turns=21 |
+  | 303 | WIN mission=6 frame=6505 turns=16 | WIN mission=6 frame=6505 turns=16 |
+
+  Identical: the kill-cam window never arms under AutoPlay and the windless reaction keeps
+  `Total`, so neither the frame count nor a single RNG draw moved.
+- Derived hook counts equal (exist 76 = run 76); `bash scripts/qa-sweep.sh --full` EXIT=0 (below).
+- `bash scripts/qa-sweep.sh --full`: **75/75 PASS, autoplay WIN/LOSE/LOSE, no TIMEOUT, no coverage
+  gap, EXIT=0** (`sweep.log`, run on the tree before the last DebugKillCam-only edit; re-run at the
+  end of part B on the final tree).
+- **Filmstrip, inspected.** `SIGHTLINE_SEED=101 SIGHTLINE_KILLCAM=750 SIGHTLINE_SHOT=750
+  SIGHTLINE_SHOTSEQ=60` (Release, xvfb) → `sightline_seq_00..59.png`. The staged shot is enqueued at
+  frame 750 (seq_00 is the pre-kill frame — `frame++` sits between Update and the screenshot), the
+  blow lands at its 0.14 s fire beat (seq_09/10: HOSTILES 0, CRIT 11, the tracer at full brightness,
+  the shatter ring at the impact, the board visibly ZOOMED and cropped at its left edge — the punch
+  is holding), seq_24 has the tracer still lit, the ring a little wider, the number risen and grown,
+  the zoom unchanged; seq_36 (the window's last frame) has the tracer thinned, sparks still
+  scattering, the zoom only now relaxing; seq_48 is back at zoom 1 with the sparks spread wide at
+  full speed. Frames kept under the session scratchpad (`scratchpad/film/`); not committed.
+  The first cut of the hook used `ActivatePod` on the dormant last hostile and the reveal-scatter
+  queued AHEAD of the shot (seq_24 still showed it running); the hook sets `Alert` directly now.
