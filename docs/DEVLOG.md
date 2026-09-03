@@ -13172,3 +13172,56 @@ scissored**: FITTEST audits draw calls, not pixels, and the first cut of the scr
   the DEPLOY COVER **UP** ability. Two collisions, both one-site, left for a later pass — they are
   the same defect this wave fixed and would take the same shape (`GameEvent.Shove`, a cover cue).
   A grep for the class: `grep -ohE 'Audio\.Play\("[a-z_]+"' src/*.cs | sort | uniq -c | sort -rn`.
+
+---
+
+## PROGRAM PARALLAX — LEAD NOTE: THE COVERAGE GUARD HAD TWO HOLES OF ITS OWN (2026-09-03, base `4c1ca3a`)
+
+Not a wave — a lead-run repair to the merge gate, found by the code-health research lens and
+verified before and after by hand. `scripts/qa-sweep.sh`'s **COVERAGE GUARD** is this project's
+only structural defence against a self-test that exists in `src/` and never runs. It is the block
+the whole "DO NOT WRITE A COUNT HERE" doctrine in CLAUDE.md defers to. It had two defects, and
+both are of the class that makes a gate go **quiet** instead of loud.
+
+**(1) The alphabet disagreed with itself, and the code had drifted from both halves of its own
+recipe.** The header comment prescribed `(TEST|GATE)` plus a hand-written `# +1 for FUL11PROBE` on
+the `exist` side and `(TEST|GATE|PROBE)` on the `run` side; the code below matched `(TEST|GATE)` on
+BOTH. So `SIGHTLINE_FUL11PROBE` — a genuine assertion hook (`Game.Harness.cs:5193` prints
+`FUL11PROBE PASS|FAIL`) that this sweep genuinely runs — was counted by neither side, and **any
+future hook named `*PROBE` would have been invisible to the guard by construction.** A hand-written
+`+1` is the same hand-maintained registry this file has been burned by six times.
+
+**(2) A comment could mask a gap.** The `run` side grepped the ENTIRE script, so merely *naming* a
+hook in a comment in `qa-sweep.sh` marked it covered. Nothing was masked on the day of the fix
+(checked: zero comment-only matches), but the guard must not be defeatable by prose.
+
+**Both holes were demonstrated live before the fix.** With a throwaway `src/` fixture naming
+`SIGHTLINE_ZZZPROBE`, the old recipe reported an empty gap and the new one named it. With a fixture
+naming `SIGHTLINE_ZZZTEST` plus one comment line in the sweep mentioning it, the old recipe again
+reported an empty gap and the new one named it. Both fixtures were removed.
+
+**Shipped:** the alphabet is `TEST|GATE|PROBE` on both sides, over **non-comment lines only** of the
+sweep, with a **named** `_SWEEP_EXEMPT` list for hooks that match the alphabet but are measurement
+*reports* rather than assertions (`SIGHTLINE_BANDPROBE`, TRUE BAND's choice-band instrument-design
+probe, is the only entry). Exempting by NAME rather than by an accident of spelling is the point:
+anything new is named by the guard until someone deliberately adds it. The exemption is filtered off
+the `run` side too — `_SWEEP_EXEMPT` is itself an ordinary line of the script, and without that
+filter the footer reported `ran = have + 1`.
+
+**Derived counts after the fix: 78 exist, 78 run.** The `exist` side read **77** under the old
+alphabet and the single name the widening adds is `SIGHTLINE_FUL11PROBE` — measured, not inferred
+(`comm -13` between the two alphabets over `src/*.cs`, exempt list applied). No test was added by
+this commit. (The first draft of this paragraph said "75/75, delta of three"; 75 was a stale figure
+copied from an older sweep log and the delta was never derived. Corrected here rather than quietly,
+because this file's whole subject is counts that were asserted instead of measured.)
+
+**The rule this leaves behind, and it is now in CLAUDE.md:** a hook whose name does not end in
+`TEST`, `GATE` or `PROBE` is invisible to the guard. End it in one of those three.
+
+**Also this pass (documentation, same commit):** CLAUDE.md had accreted a duplicate
+"Self-tests & measurement" paragraph and a duplicate "Free keys" paragraph whose list
+(`I J N O P Q U V Z`) the paragraph immediately below it explicitly warned was wrong — the stale one
+is deleted and the derive-it one kept (`grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u`
+re-derived today: **`I J Z`**, confirming the surviving paragraph). The file map's
+`Game.cs ... (4707 lines)` read 8563 in fact; the count is replaced with an instruction not to write
+one, for the same reason the sweep footer does not.

@@ -13,9 +13,23 @@
 # found the "derived" recipe itself was wrong - it grepped only `...TEST|FUL11PROBE`, so it never
 # counted AUDIOGATE, and it counted over THIS FILE while the label said "exist". Both halves are
 # now derived, and from the right place. If you add a test, re-run BOTH:
-#   exist (in src/):   grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l    # +1 for FUL11PROBE
-#   run   (this file): grep -oE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)=' scripts/qa-sweep.sh | sort -u | wc -l
+#   exist (in src/):   grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u   (minus $_SWEEP_EXEMPT)
+#   run   (this file): the same alphabet, over NON-COMMENT lines of this file only
 # The two must be EQUAL - if `run` is smaller the COVERAGE GUARD below will name the gap.
+#
+# PARALLAX (the lead, after the docket flagged it): the recipe ABOVE THIS LINE was itself stale in
+# two ways, and both were holes in the guard rather than in the footer.
+#   (1) THE ALPHABET DISAGREED WITH ITSELF. The `exist` side matched `(TEST|GATE)` and carried a
+#       hand-written "+1 for FUL11PROBE"; the `run` side matched `(TEST|GATE|PROBE)`. The code below
+#       had drifted to `(TEST|GATE)` on BOTH sides, so `SIGHTLINE_FUL11PROBE` - a real assertion hook
+#       that this sweep really runs - was counted by NEITHER, and any future *PROBE assertion hook
+#       would have been invisible to the COVERAGE GUARD by construction. The alphabet is now
+#       TEST|GATE|PROBE on both sides, with a NAMED exemption list so a report-shaped probe is
+#       excluded on purpose and by name instead of by an accident of spelling.
+#   (2) A COMMENT COULD MASK A GAP. The `run` side grepped the WHOLE of this file, so merely NAMING
+#       a hook in a comment here marked it covered. Nothing was masked on the day this was fixed
+#       (checked: zero comment-only matches), but the guard is the project's only defence against a
+#       test that exists and never runs, and it must not be defeatable by prose.
 # `--full` runs all of them; the default skips exactly one (PAIRTEST).
 #
 # RUN --full BEFORE MERGING. PAIRTEST (38 s measured) is the CRN-pairing identity check
@@ -243,9 +257,15 @@ fi
 # COVERAGE GUARD: this sweep's test list has drifted from src/ twice (a hand-maintained
 # counter said 41 while 42 ran; a later recount still missed TUTTEST and THREATTEST). Derive
 # it instead of trusting it - if a self-test exists in src/ and is not invoked above, say so.
+# The EXEMPTION LIST: hooks whose names match the alphabet but are measurement REPORTS, not
+# assertions - they print a table, never a PASS/FAIL, so there is nothing for this sweep to gate on.
+# Exempting BY NAME (rather than by leaving them outside the regex) is the point: anything new is
+# named by the guard until someone deliberately adds it here.
+#   SIGHTLINE_BANDPROBE - TRUE BAND's choice-band instrument-DESIGN probe (Game.Autopilot.cs:2277).
+_SWEEP_EXEMPT='SIGHTLINE_BANDPROBE'
 _missing=$(comm -23 \
-  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u) \
-  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' scripts/qa-sweep.sh | sort -u))
+  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u | grep -vxE "$_SWEEP_EXEMPT") \
+  <(grep -vE '^[[:space:]]*#' "$_SELF" | grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' | sort -u | grep -vxE "$_SWEEP_EXEMPT"))
 if [ -n "$_missing" ]; then
   echo "!! COVERAGE GAP - these self-tests exist in src/ but this sweep never runs them:"
   echo "$_missing" | sed 's/^/     /'
@@ -289,8 +309,11 @@ echo "=== DONE ===   (full per-hook outputs kept under $SWEEP_LOGDIR)"
 # name is stable no matter how the invocation is wrapped. Both halves are counted on the same
 # basis, from their own file, so the two are directly comparable and the COVERAGE GUARD block above
 # — which lists any hook in src/ this file never names — remains the real check.
-_have=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l)
-_ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' "$_SELF" | sort -u | wc -l)
+_have=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u | grep -vxE "$_SWEEP_EXEMPT" | wc -l)
+# ...and the exemption list is filtered off the `run` side too: `_SWEEP_EXEMPT` is itself an
+# ordinary (non-comment) line of this file, so without this the footer counted the exemption
+# ASSIGNMENT as a run test and reported ran = have + 1.
+_ran=$(grep -vE '^[[:space:]]*#' "$_SELF" | grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' | sort -u | grep -vxE "$_SWEEP_EXEMPT" | wc -l)
 [ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is the only --full-gated one
 echo "($_have self-tests exist in src/; this sweep ran $_ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped")."
 echo " Both counts are derived from env-var NAMES, not line shapes. Every line above must read"

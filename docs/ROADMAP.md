@@ -2327,6 +2327,20 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       re-walk when the first pass lands under the floor), priced CRN-paired; the guard should then
       sample more boards, not fewer.
 
+- [x] **CLOSED by the PARALLAX lead — the COVERAGE GUARD could go quiet two ways.** The sweep's
+      guard is the project's only structural defence against a self-test that exists and never
+      runs, and CLAUDE.md's whole "DO NOT WRITE A COUNT HERE" doctrine defers to it. Its alphabet
+      was `(TEST|GATE)` while its own header comment prescribed `(TEST|GATE|PROBE)` plus a
+      hand-written `+1 for FUL11PROBE`, so a real assertion hook the sweep really runs was in
+      neither count and any future `*PROBE` was invisible by construction; and its "is it run?"
+      side grepped the whole script, so naming a hook in a COMMENT there marked it covered. Both
+      demonstrated live with throwaway fixtures before the fix (the old recipe reported an empty
+      gap in both cases, the new one named the hook), then removed. Now `TEST|GATE|PROBE` on both
+      sides over non-comment lines, with a named `_SWEEP_EXEMPT` for report-shaped probes
+      (`BANDPROBE`). Counts 77 -> 78 exist / 78 run, the one added name being `FUL11PROBE`.
+      **A hook whose name ends in none of those three is still invisible — end it in one.**
+      DEVLOG §PARALLAX LEAD NOTE.
+
 ### Standing gaps, honestly declared
 
 - [ ] **A FOUR-SLOT-SET RUNG IS NOT INTERCHANGEABLE WITH ANOTHER FOUR-SLOT-SET RUNG — measured.**

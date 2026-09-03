@@ -181,12 +181,6 @@ loosening and a tightening in one. Measured over
 zero TIMEOUTs. **A WIN is normal, not suspicious.** `sightline_shot.png` is gitignored;
 `docs/screenshot.png` (README image) is committed.
 
-**Self-tests & measurement:** many features ship a window-free `SIGHTLINE_*TEST` hook
-(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`, `STACKTEST`) that prints `PASS/FAIL`, and there
-are `SIGHTLINE_*` screenshot hooks per feature. The `SIGHTLINE_BALANCE=<N>` flywheel runs
-N headless campaigns and reports win-rate/decision-richness/policy-gap. A fuller (but
-non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Program.cs`
-for `SIGHTLINE_` for the authoritative set.
 **Reference timings** (this container; the whole suite is `bash scripts/qa-sweep.sh --full`,
 ~2 min 40 s, which is the mode to run before merging):
 
@@ -210,11 +204,6 @@ for `SIGHTLINE_` for the authoritative set.
 > excluded** — that block records nproc/loadavg/elapsed and is designed to vary, which is why
 > `inert_diff.sh` strips it. `SIGHTLINE_BALANCE_DRAW=1` restores the old path.
 
-**Free keys** (nothing is bound to them — check here before adding a shortcut):
-**`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
-arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−, and **held SHIFT** (W4: reveals the
-dash/sprint region in the move overlay — the only key read as a *modifier*; held keys as such are
-not new, `Game.Codex.cs` has scrolled the field manual on held Left/Right/A/D since before it).
 **Free keys** — **DO NOT TRUST THE LIST BELOW; DERIVE IT.** The 2026 audit (wildcard-4)
 found four of the nine letters this line advertised as free were already bound (N/P/U/V),
 and the duplicate registry at `src/Game.cs` ("Free letters remaining…") disagreed with it.
@@ -237,7 +226,14 @@ while a different number ran, and then two successive "derivations" that were th
 The sweep derives both halves at runtime *from env-var NAMES rather than line shapes* (the last
 break was a counter keyed on a line shape that a routing change invalidated), prints them in its
 footer, and its **COVERAGE GUARD** block — which names any hook in `src/` the sweep never invokes
-— is the real check. Run it and read the last lines.
+— is the real check. Run it and read the last lines. **The guard had two holes of its own until
+PARALLAX, and both are the kind that make it go quiet rather than loud:** its alphabet was
+`(TEST|GATE)`, so `SIGHTLINE_FUL11PROBE` — a real assertion hook the sweep really runs — was in
+neither count and any future `*PROBE` was invisible by construction; and the "is it run?" side
+grepped the WHOLE script, so merely NAMING a hook in a comment there marked it covered. The
+alphabet is now `TEST|GATE|PROBE` on both sides over NON-COMMENT lines, with a named
+`_SWEEP_EXEMPT` list for report-shaped probes (`BANDPROBE` today). **If you add a hook whose name
+does not end in TEST, GATE or PROBE, the guard cannot see it** — end it in one of those three.
 **Since W9 the sweep was SUPPOSED to EXIT NON-ZERO** on any FAIL line, a non-empty COVERAGE GAP, a
 TIMEOUT or a missing RESULT line — **and until CONTOUR C3 it did not: the script accumulated
 `_fail`/`_autofail` and then ended on an `echo`, so its status was always 0.** C3 found it when its
@@ -286,7 +282,9 @@ non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Progr
 Sightline.csproj     net8.0, Nullable disabled, Raylib-cs 8.0.0
 src/
   Program.cs    entry + window loop + env-gated test harness
-  Game.cs       state machine, input, turn flow, overwatch, AI staging (4707 lines)
+  Game.cs       state machine, input, turn flow, overwatch, AI staging (the biggest file;
+                DON'T write a line count here - the last one sat at 4707 while the file
+                held 8563, and a stale number is worse than none. `wc -l src/Game.cs`.)
                 (`partial`; slices in Game.*.cs: Autopilot/Harness/Endless/Meta/Modes/Codex)
   Game.Autopilot.cs  SmartStep/AutoStep balance + smoke-test AI (headless-only)
   Game.Harness.cs    every Debug*/*SelfTest env-gated hook (headless-only)
