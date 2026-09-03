@@ -10714,6 +10714,182 @@ public partial class Game
     }
 
 
+
+    // ── THE FORK PAYS (SIGHTLINE_FORKTEST) — the wave's gate, in four legs ────────────────
+    /// THE FINDING IT GUARDS. The campaign map's route choice was not a decision.
+    ///
+    ///  * SUPPLY STRICTLY DOMINATED COMBAT: EnemyDelta -1 / StatDelta -1 / a full squad heal AND
+    ///    base+10 intel against COMBAT's 0 / 0 / nothing / base. The LIGHTER fight also paid MORE
+    ///    (measured Supply 94.4% clear vs Combat 89.2%, W1) — DESIGN.md 3.A's definition of a
+    ///    non-decision. And the heal was applied BEFORE Run.DebriefSurvivors, whose fresh-wound
+    ///    gauge reads `u.Hp`, so no soldier who finished a SUPPLY clear on their feet could ever be
+    ///    wounded by it: an undocumented second subsidy nothing in the game said out loud.
+    ///  * THE PITCHED NODE WAS NOT PRICED (C3's declared-open half): NodeIntel switched on Kind
+    ///    alone, so a 45.3%-clear PITCHED node paid exactly what an 81.8%-clear TASKED sibling
+    ///    paid. The fork NAMED the class and still gave no reason to choose the hard one.
+    ///  * THE EVENT NODE'S HOVER LIED: its sentinel card (Objective = Eliminate, ModName "EVENT")
+    ///    was printed verbatim, so the one node with no fight advertised "EVENT - ELIMINATE /
+    ///    Standard force  +0 intel".
+    ///
+    /// EVERY LEG FAILS ON THE PRE-WAVE TREE, and each fails for its own reason:
+    ///   (A) ordering — Supply paid base+10, above Combat's base.
+    ///   (B) pricing  — a PITCHED node paid its TASKED sibling exactly.
+    ///   (C) subsidy  — a soldier who ended a Supply clear at 1 HP came out of the debrief unwounded.
+    ///   (D) honesty  — the Event hover contained "ELIMINATE" and "Standard force".
+    /// Window-free: bare Run maps and pure Hud string composition, no GL context, no mission build.
+    public static string ForkSelfTest(int seeds = 250)
+    {
+        var fails = new List<string>();
+        int baseAt(int m) => Run.BaseIntel(m);
+
+        // ═══ (A) THE ORDERING — ELITE > COMBAT > SUPPLY at equal depth, for every class ══════
+        // A1 is exhaustive over the arithmetic: the ordering must hold for BOTH classes at BOTH
+        // ends, i.e. the WORST Elite must still beat the BEST Combat. (This is why the class
+        // premium is paid by the two fight kinds only — a PITCHED Supply at base+2 would jump a
+        // TASKED Combat at base and put the economy stop back on top of the fight.)
+        for (int m = 1; m <= Run.MaxMissions; m++)
+        {
+            int Node(NodeKind k, Objective o) =>
+                Run.NodeIntel(new MissionNode { Col = m - 1, Row = 0, RowCount = 1, Kind = k,
+                                                Card = new MissionCard { Objective = o, ModName = "X" } });
+            int eliteMin = Math.Min(Node(NodeKind.Elite, Objective.Eliminate), Node(NodeKind.Elite, Objective.Evac));
+            int combMax  = Math.Max(Node(NodeKind.Combat, Objective.Eliminate), Node(NodeKind.Combat, Objective.Evac));
+            int combMin  = Math.Min(Node(NodeKind.Combat, Objective.Eliminate), Node(NodeKind.Combat, Objective.Evac));
+            int suppMax  = Math.Max(Node(NodeKind.Supply, Objective.Eliminate), Node(NodeKind.Supply, Objective.Evac));
+            if (eliteMin <= combMax) fails.Add($"A1:m{m} eliteMin{eliteMin}<=combMax{combMax}");
+            if (combMin <= suppMax)  fails.Add($"A1:m{m} combMin{combMin}<=suppMax{suppMax}");
+            // and SUPPLY must pay strictly LESS than a plain fight: the heal IS the reward.
+            if (suppMax >= baseAt(m)) fails.Add($"A1:m{m} supply{suppMax}>=base{baseAt(m)}");
+        }
+
+        // A2 on the REAL dealt maps: every same-column pair of different kinds must rank
+        // Elite > Combat > Supply. Counted, so a map generator that stopped dealing Supply nodes
+        // would fail the vacuity check rather than pass this leg silently.
+        int rankPairs = 0, eventNodes = 0, hoverNodes = 0, siblingPairs = 0, premiumSeen = 0;
+        int Rank(NodeKind k) => k == NodeKind.Elite ? 3 : k == NodeKind.Combat ? 2 : 1;
+        for (int s = 1; s <= seeds; s++)
+        {
+            var run = new Run();
+            run.GenerateMap(s);
+            foreach (var a in run.Map)
+            {
+                // ═══ (B) EVENT pays 0; START / BOSS keep the bare base (unchanged by this wave) ══
+                if (a.Kind == NodeKind.Event)
+                {
+                    eventNodes++;
+                    if (a.Intel != 0) fails.Add($"B:event intel {a.Intel} seed{s}");
+                }
+                else if (a.Kind == NodeKind.Start || a.Kind == NodeKind.Boss)
+                {
+                    if (a.Intel != baseAt(a.Mission)) fails.Add($"B:{a.Kind} {a.Intel}!={baseAt(a.Mission)} seed{s}");
+                }
+                foreach (var b in run.Map)
+                {
+                    if (b.Col != a.Col || ReferenceEquals(a, b)) continue;
+                    bool fightA = a.Kind == NodeKind.Supply || a.Kind == NodeKind.Combat || a.Kind == NodeKind.Elite;
+                    bool fightB = b.Kind == NodeKind.Supply || b.Kind == NodeKind.Combat || b.Kind == NodeKind.Elite;
+                    if (!fightA || !fightB) continue;
+                    if (a.Kind != b.Kind)
+                    {
+                        rankPairs++;
+                        if (Rank(a.Kind) > Rank(b.Kind) && a.Intel <= b.Intel)
+                            fails.Add($"A2:seed{s} c{a.Col} {a.Kind}{a.Intel}<={b.Kind}{b.Intel}");
+                    }
+                    // ═══ (B) the CLASS PREMIUM on a same-kind, same-column sibling ═════════════
+                    else if (a.Kind != NodeKind.Supply
+                             && Run.IsKillObjective(a.Card.Objective) && !Run.IsKillObjective(b.Card.Objective))
+                    {
+                        siblingPairs++;
+                        if (a.Intel - b.Intel != Run.PitchedPremium)
+                            fails.Add($"B:seed{s} c{a.Col} {a.Kind} pitched{a.Intel}-tasked{b.Intel}");
+                    }
+                }
+
+                // ═══ (D) THE HOVER — what the fork SAYS about this node ═══════════════════════
+                var lines = Hud.NodeHoverLines(run, a);
+                hoverNodes++;
+                string joined = string.Join(" | ", lines);
+                if (a.Kind == NodeKind.Event)
+                {
+                    // it must name the signal, must NOT name an objective it does not have, and
+                    // must not claim a force is waiting on a node with no fight.
+                    if (!joined.Contains("EVENT")) fails.Add($"D:noEVENT seed{s} [{joined}]");
+                    foreach (var nm in ObjNamesForTest)
+                        if (joined.Contains(nm)) { fails.Add($"D:objName '{nm}' seed{s} [{joined}]"); break; }
+                    if (joined.ToLowerInvariant().Contains("force")) fails.Add($"D:force seed{s} [{joined}]");
+                    if (!joined.Contains("no clear intel")) fails.Add($"D:noIntelClause seed{s}");
+                }
+                else
+                {
+                    // a fight node still says its objective, its class and its payout...
+                    if (!joined.Contains($"+{a.Intel} intel")) fails.Add($"D:noPayout seed{s} [{joined}]");
+                    if (!joined.Contains("PITCHED") && !joined.Contains("TASKED")) fails.Add($"D:noClass seed{s}");
+                    // ...and a PITCHED fight node PRINTS the premium it just earned, or the price
+                    // is invisible and therefore not a decision.
+                    bool paid = Run.ClassPremium(a.Kind, a.Card.Objective) > 0;
+                    bool printed = joined.Contains($"(+{Run.PitchedPremium} PITCHED)");
+                    if (paid) premiumSeen++;
+                    if (paid != printed) fails.Add($"D:premiumPrint paid{paid} printed{printed} seed{s}");
+                }
+            }
+        }
+        if (rankPairs < 50) fails.Add($"VACUOUS: only {rankPairs} same-column cross-kind pairs");
+        if (siblingPairs < 20) fails.Add($"VACUOUS: only {siblingPairs} PITCHED/TASKED sibling pairs");
+        if (eventNodes < 20) fails.Add($"VACUOUS: only {eventNodes} event nodes");
+        if (premiumSeen < 20) fails.Add($"VACUOUS: only {premiumSeen} premium-paying nodes");
+
+        // ═══ (C) THE SUBSIDY — a SUPPLY clear can still wound the soldier it heals ════════════
+        // Three runs of the SAME construction, differing only in when (or whether) the card's full
+        // heal lands. The third reproduces the PRE-WAVE ordering (heal, then debrief) and is here
+        // to show the leg is not vacuous: it is the shipped behaviour that was broken, and it
+        // still reads Wound 0.
+        (int wound, int hp, int maxHp) Clear(bool heal, bool healFirst)
+        {
+            Util.Reseed(20260903);
+            var r = new Run(); r.Start();
+            var u = r.Squad[0];
+            u.Benched = false; u.Wound = 0; u.WasNearDeath = false;
+            u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.FeatBurned = false;
+            u.Hp = 1;                                   // walked off the field on their last point
+            if (healFirst) u.Hp = u.MaxHp;              // <- the pre-wave ordering, verbatim
+            r.DebriefSurvivors(heal && !healFirst);
+            return (u.Wound, u.Hp, u.MaxHp);
+        }
+        var supply = Clear(true, false);       // shipped: a cleared SUPPLY node
+        var plain  = Clear(false, false);      // control: a cleared COMBAT node
+        var prewave = Clear(true, true);       // the defect, reproduced
+        if (supply.wound < 2) fails.Add($"C:supplyWound={supply.wound} (want >=2 — the subsidy is back)");
+        if (supply.hp != supply.maxHp) fails.Add($"C:supplyHp={supply.hp}/{supply.maxHp} (the heal must still land)");
+        if (plain.wound < 2) fails.Add($"C:plainWound={plain.wound}");
+        if (plain.hp >= plain.maxHp) fails.Add($"C:plainHp={plain.hp}/{plain.maxHp} (a plain clear must not full-heal)");
+        if (prewave.wound != 0) fails.Add($"C:prewaveWound={prewave.wound} (the defect no longer reproduces — leg C is vacuous)");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"FORKTEST: {seeds} maps — {rankPairs} cross-kind column pairs, {siblingPairs} PITCHED/TASKED "
+                    + $"siblings, {premiumSeen} premium-paying nodes, {eventNodes} events, {hoverNodes} hovers composed");
+        sb.AppendLine($"  prices: supply {Run.SupplyDiscount:+#;-#;0}  combat +0  elite +{Run.ElitePremium}  "
+                    + $"PITCHED +{Run.PitchedPremium} (Combat/Elite only)");
+        sb.AppendLine($"  supply clear at 1 HP -> wound {supply.wound}, hp {supply.hp}/{supply.maxHp}   "
+                    + $"| pre-wave ordering -> wound {prewave.wound}");
+        foreach (var f in fails.Take(8)) sb.AppendLine("  " + f);
+        sb.Append(fails.Count == 0
+            ? "FORKTEST: PASS (ELITE > COMBAT > SUPPLY at equal depth for both classes and on every dealt "
+              + "column; a PITCHED Combat/Elite node pays its same-column TASKED sibling exactly "
+              + "+" + Run.PitchedPremium + " and PRINTS it; Event pays 0 and its hover names the signal with no "
+              + "objective and no force; START/BOSS keep the bare base; a SUPPLY clear at 1 HP still wounds "
+              + "and still heals, while the pre-wave heal-then-debrief ordering still reads wound 0)"
+            : "FORKTEST: FAIL " + string.Join(", ", fails.Take(8)));
+        return sb.ToString();
+    }
+
+    /// The eight objective display names, as Hud paints them — leg D asserts an Event hover
+    /// contains none of them. Kept here (not in Hud) so the assertion cannot be satisfied by the
+    /// same table that produced the string.
+    static readonly string[] ObjNamesForTest =
+    {
+        "ELIMINATE", "HACK", "EXTRACT", "ESCORT VIP", "SABOTAGE", "RESCUE", "DEFEND", "DECAPITATE",
+    };
+
     // ── C2 THE OPPONENT DECLINES — SIGHTLINE_DECLINETEST ────────────────────────────────────
     /// Pins the two halves of wave C2 on a CONSTRUCTED board, plus the reconstruction they both
     /// rest on. Reads the AMBIENT Game.AiDecline for every shipped-behaviour leg, so running it

@@ -358,7 +358,28 @@ seeds (mix of WIN/LOSE, no exceptions):
   two-entry key under the node-kind legend, a class line at the top of the node hover tooltip
   ("PITCHED - it ends when the field is clear" / "TASKED - it ends when the task is done"), and the tag on
   the legacy deploy card. Single source of truth `Run.IsKillObjective`; gate `SIGHTLINE_CLASSTEST`; shot
-  hooks `SIGHTLINE_MAPHOVER=<k>` (park the cursor on the k-th choice) and `SIGHTLINE_MAPCOL=<n>`.
+  hooks `SIGHTLINE_MAPHOVER` (see below) and `SIGHTLINE_MAPCOL=<n>`.
+- **THE ROUTING ECONOMY — the fork is a trade (wave THE FORK PAYS):** every node's intel payout is
+  `Run.NodeIntel` = a depth base (`Run.DepthBase` 12 + 4x mission) plus its price. **SUPPLY pays a
+  DISCOUNT** (`SupplyDiscount` **−6**) because the full squad heal *is* its reward — it used to pay
+  base+10, i.e. the lighter fight also paid more, which §3.A calls a non-decision. **ELITE keeps the
+  top premium** (`ElitePremium` **+14**). **A PITCHED Combat/Elite node pays `PitchedPremium` +8** —
+  C3 named the class and this prices it — and the payout row PRINTS the premium
+  (`Standard force   +32 intel  (+8 PITCHED)`) on the node hover and the deploy card. START/BOSS keep
+  the bare base (neither is a branch choice); EVENT pays 0. Ordering is an invariant at every depth
+  and in both classes: **ELITE > COMBAT > SUPPLY**. The SUPPLY heal is now applied INSIDE
+  `Run.DebriefSurvivors(fullHeal: true)`, after the fresh-wound gauge — before this wave the heal ran
+  first and no soldier who finished a SUPPLY clear on their feet could ever be wounded by it.
+  Gate `SIGHTLINE_FORKTEST`; rationale `docs/DESIGN.md` §5.3; measured round
+  `docs/measurements/fork-pays/`.
+- **Honest node hovers (`Hud.NodeHoverCard` / `NodeHoverLines`):** every string the campaign fork says
+  about a node is composed by a PURE function — no draw, no mouse, no clock — so it can be asserted
+  headlessly. That is what caught the EVENT node's hover printing its *sentinel* card
+  (`EVENT - ELIMINATE / Standard force +0 intel` for a node with no fight at all); it now reads
+  `EVENT - UNKNOWN SIGNAL / No fight - so no clear intel (a battle here pays +24) / + Rewards come
+  from the choice you make`. Shot staging: `SIGHTLINE_MAPHOVER=<k>` parks the cursor on the k-th
+  reachable node, or name one — `supply|combat|elite|event|boss|start|pitched|tasked` — and it reports
+  which node it resolved to (or that nothing matched).
 - **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
   ~80% of missions) dealt from a **per-run no-repeat deck** derived purely from
   the run's MapSeed (FUL-9: an arena never repeats within a run; the displayed

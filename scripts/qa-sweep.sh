@@ -144,6 +144,11 @@ echo -n "HVTTEST    : "; verdict "$(SIGHTLINE_HVTTEST=1 run | grep -oE "HVTTEST:
 # tooltip's class line, both classes staged, read at the draw call) + LEVER (the anti-turtle clock
 # adds no bodies to an ELIMINATE while its aim ramp still rises; Hack/Decapitate unchanged).
 echo -n "CLASSTEST  : "; verdict "$(SIGHTLINE_CLASSTEST=1 run | grep -oE "CLASSTEST: (PASS|FAIL)" | head -1)"
+# THE FORK PAYS: the campaign fork's ECONOMY. ELITE > COMBAT > SUPPLY at equal depth (SUPPLY used
+# to pay MORE than the fight it is lighter than), C3's declared-open PITCHED premium is paid AND
+# printed, the EVENT node's hover no longer prints its sentinel card's objective and force, and a
+# SUPPLY clear can wound again (the heal used to land before the fresh-wound gauge read the HP).
+echo -n "FORKTEST   : "; verdict "$(SIGHTLINE_FORKTEST=1 run | grep -oE "FORKTEST: (PASS|FAIL)" | tail -1)"
 # RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
 # but were never run by this sweep - the integration review caught it. THREATTEST prints
 # "NAME PASS" with no colon, like EXPOSURETEST.

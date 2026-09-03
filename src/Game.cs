@@ -2606,15 +2606,19 @@ public partial class Game
         Stats.EndMission(true, _turnCount, survivors, Enemies.Count(e => !e.Alive), "");
         if (finished) Stats.EndRun(true, _run.Mission, "", _run.HeatLevel, RunTurns);   // THE HEAT PIN: stamp HeatEnd / RunTurns
 
-        // reward for clearing the chosen deployment
-        if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal)
-            foreach (var u in _run.Squad) u.Hp = u.MaxHp;
+        // reward for clearing the chosen deployment.
+        // THE FORK PAYS: this used to be `foreach (var u in _run.Squad) u.Hp = u.MaxHp;` RIGHT HERE,
+        // i.e. BEFORE the debrief — and Run.DebriefSurvivors gauges a soldier's fresh wound from
+        // `u.Hp`, so a full heal applied first meant a cleared SUPPLY node could not wound anybody
+        // who walked off the field. The heal is now handed to the debrief, which applies it AFTER
+        // the gauge. Same reward, one fewer hidden subsidy.
+        bool cardFullHeal = !finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal;
 
         // DebriefSurvivors reads the just-played bench state (benched soldiers recover faster),
         // backfills the roster, then calls AutoDeploy() to set the DEFAULT deployment for next
         // mission (best healthy DeployCap; wounded benched). So Benched is now meaningful coming
         // out of the debrief — the player tunes it in the barracks; we must NOT clear it here.
-        _run.DebriefSurvivors();
+        _run.DebriefSurvivors(cardFullHeal);
 
         // secondary objective (3.9): award bonus intel if the optional goal was met
         if (Secondary != SecondaryKind.None)
@@ -2671,7 +2675,7 @@ public partial class Game
             // map node is current (legacy deploy-card path / harness). A small survivor bonus stays
             // as a reward for keeping people alive.
             var clearedNode = _run.CurrentNode;
-            int nodeIntel = clearedNode != null ? clearedNode.Intel : (10 + 4 * _run.Mission);
+            int nodeIntel = clearedNode != null ? clearedNode.Intel : Run.OfferIntel(_run.CurrentCard, _run.Mission);
             int gained = nodeIntel + survivors;
             if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
             int heatBonus = Sightline.Heat.IntelBonus(_run.HeatLevel);
