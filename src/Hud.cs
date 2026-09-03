@@ -1476,8 +1476,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         ("OTHER SCREENS", "BARRACKS: Enter / A / Esc / K", "proceed to deployment / open or close the ARMORY / SETTINGS (or back out of the ARMORY) / FIELD MANUAL"),
         ("OTHER SCREENS", "END CARD: Enter / W / Esc", "new run (after TRAINING OP: run the drill again) / WAR ROOM / main menu"),
         ("OTHER SCREENS", "FIELD MANUAL: Up / Down (W / S), hold Left / Right (A / D), Esc / K", "change tab / scroll / back"),
+        // P12 (C6): the [TAB] faction cycler was live on the screen and in its own legend, and in
+        // neither this table nor the README the generator builds from it.
         ("OTHER SCREENS", "SKIRMISH SETUP: Left / Right (A / D), Tab (Shift-Tab reverses), Up / Down (W / S, + / -), Enter, Esc", "objective / opposition / heat / deploy / back"),
-        ("OTHER SCREENS", "AUDIO CHECK: Esc or U, M", "back / mute"),
+        // P13: the scroll half was missing. THE CUE MAP gave the cue table Up/Down and the wheel
+        // (Game.HandleAudition) and did not come back here, so both the in-game FIELD MANUAL and
+        // the generated README block told a player the screen had two keys when it has four.
+        ("OTHER SCREENS", "AUDIO CHECK: Up / Down or Wheel, M, Esc or U", "scroll the cue table / mute / back"),
         ("OTHER SCREENS", "WAR ROOM: Esc", "back"),
     };
 

@@ -56,6 +56,20 @@ FULL=0
 # only the "X: FAIL" token and the reason was lost — a FITTEST flake on the merged P1+P2 tree
 # could not be diagnosed from the sweep that caught it.
 SWEEP_LOGDIR="$(mktemp -d /tmp/sightline-sweep.XXXXXX)"
+# P13 checked this and it HOLDS, but it holds for a reason worth writing down, because the reason
+# is not obvious and the failure would be silent. The hook name comes from `env | head -1`, and the
+# house isolation procedure exports SIGHTLINE_BALANCE_JSON into the same environment — so the
+# question is whether that config var can win the race and name every hook's log after itself.
+# It cannot, because bash places a command's TEMPORARY assignments ahead of the inherited exported
+# environment in `environ`, and every call below is `SIGHTLINE_<HOOK>=1 run` with exactly one such
+# assignment. MEASURED, not assumed: all 78 hooks this script invokes, under a full house-isolated
+# environment, resolve to their own name (P13, 0 misnamed), and one real `SIGHTLINE_DKTEST=1 run`
+# under that environment leaves
+# SIGHTLINE_DKTEST.out, which is what `verdict`'s detail grep goes looking for.
+# TWO THINGS WOULD BREAK IT, both quiet: running this script under a shell that appends temporary
+# assignments instead (with SIGHTLINE_BALANCE_JSON exported, 23 of the 78 names sort ahead of it),
+# and a call site that sets a SECOND SIGHTLINE_ var alongside the hook (order among temporaries is
+# hash order, not written order — verified). Keep the shebang, and keep one var per call.
 run() {
   local hook; hook="$(env | grep -oE '^SIGHTLINE_[A-Z0-9_]+=' | head -1 | tr -d '=')"
   xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug 2>/dev/null | tee "$SWEEP_LOGDIR/${hook:-run}.out"
@@ -189,6 +203,7 @@ echo -n "CHROMETEST : "; verdict "$(SIGHTLINE_CHROMETEST=1 run | grep -oE "CHROM
 # no string on the doctrine / armory / hall-of-fame / draft screens is painted outside its own
 # chrome or into another string's pixels, at EVERY scale - not just at 100%, which is the only
 # scale any self-test in this project had ever run at. SIGHTLINE_OLDFIT=1 makes it fail (40).
+echo -n "KEYTABLEGATE: "; verdict "$(SIGHTLINE_KEYTABLEGATE=1 run | grep -oE "KEYTABLEGATE: (PASS|FAIL)" | head -1)"
 echo -n "FITTEST    : "; verdict "$(SIGHTLINE_FITTEST=1 run | grep -oE "FITTEST: (PASS|FAIL)" | head -1)"
 # W5-FIX: the backdrop registry — no phase may paint a full-screen backdrop from the chrome pass.
 echo -n "BACKDROPTEST: "; verdict "$(SIGHTLINE_BACKDROPTEST=1 run | grep -oE "BACKDROPTEST: (PASS|FAIL)" | head -1)"

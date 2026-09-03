@@ -3067,3 +3067,47 @@ Open, handed on:
 - [ ] **Every per-mission and decision-density figure in the archive is survivorship-biased.**
       Corrected going forward; the historical tables were NOT recomputed (the erased rows do not
       exist in those files and cannot be reconstructed). Re-measure before quoting one.
+
+## OPEN — from wave P13 "THE UNVERIFIED — PERSISTENCE AND THE GATE" (base `a933cfe`)
+
+Three real findings this wave confirmed and deliberately did not fix, plus one gate whose scope is
+a declared limit. Detail and traces: `docs/DEVLOG.md` §THE UNVERIFIED.
+
+- [ ] **A forced objective desyncs the mission PLAYED from the intel the node PAYS.**
+      Harness-only, but it biases the flywheel. `node.Intel` is assigned once in `Run.GenerateMap`
+      (`Run.cs:805`) from `Run.NodeIntel`, which reads `node.Card.Objective` through `ClassPremium`.
+      `Game.ForcedObjective` (`SIGHTLINE_OBJ`) is read in exactly one place — `Game.cs:2008` — and
+      sets the objective PLAYED without touching any card, so from **mission 2 onward** (mission 1
+      is fine: `DebugForceObjective` rewrites the card) an objective sweep plays `<x>` while the
+      economy pays whatever the map dealt. Size, from the constants: `Run.PitchedPremium = 8`
+      against `BaseIntel(m) = 12 + 4m` (16 at m1, 36 at m6) — **up to a third of a Combat/Elite
+      node's payout, in either direction**. New since THE FORK PAYS made `NodeIntel`
+      objective-dependent.
+      **The fix is one line** — where `Game.cs:2008` overrides `Objective`, also rewrite
+      `_run.CurrentCard.Objective` and re-derive `CurrentNode.Intel = Run.NodeIntel(CurrentNode)` so
+      the whole world (economy, the PITCHED/TASKED label, the hover and deploy cards) agrees with
+      what is played. **It is an INSTRUMENT change and must be paired with a re-measure**: it moves
+      measured intel in every `SIGHTLINE_OBJ` batch, so it belongs to a wave that can run one.
+
+- [ ] **Four self-tests still hand-roll a truncating restore of a player-data file.**
+      `Game.Endless.cs:535` (HORDETEST), `Game.Modes.cs:640` and `:679` (MODETEST),
+      `Game.Meta.cs:612` and `:615` (the WAR ROOM leg), `Program.cs:1579` and `:2586` (two shot
+      paths). All are `if (x != null) File.WriteAllText(path, x)` — the null guard means **none can
+      zero a file**, which is what made the SETTINGSTEST one dangerous — but every one truncates the
+      target in place, the tear `docs/DISTRIBUTION.md` §5 says cannot happen. Convert to
+      `SaveGame.StashForSelfTest` / `RestoreForSelfTest` (rename out, rename back), as P13 did for
+      SETTINGSTEST / TUTTEST / SAVEEDGETEST / QUITTEST / BRIEFTEST / ONRAMPTEST. Left alone here
+      only because those files belong to other developers this sprint.
+
+- [ ] **`SIGHTLINE_KEYTABLEGATE` leg (b) covers ONE screen.** It derives the keys
+      `src/Game.Audition.cs` reads and asserts each is named in `Hud.KeyTable`'s AUDIO CHECK row —
+      the leg that would have caught THE CUE MAP. AUDIO CHECK is the only screen with a dedicated
+      input-handler file; every other row (FIELD MANUAL, SKIRMISH SETUP, BARRACKS, DRAFT, END CARD,
+      WAR ROOM, MAIN MENU) is documented and **un-derived**, because their handlers are interleaved
+      through `Game.cs`. Closing this needs a seam — a per-screen input dispatch, or a marker
+      convention `Game.cs` handlers opt into — not another regex.
+
+- [ ] **`KeyTable` coverage for the game as a whole is still un-gated.** CLAUDE.md's advice is
+      `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u` before binding anything; nothing
+      asserts the result is a subset of what `KeyTable` documents. A whole-project version of leg
+      (b) needs an exclusion list for harness-only keys first.
