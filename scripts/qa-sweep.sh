@@ -152,6 +152,13 @@ echo -n "STACKTEST  : "; verdict "$(SIGHTLINE_STACKTEST=1 run | grep -oE "STACKT
 # "NAME PASS" with no colon; the others use "NAME: PASS".)
 echo -n "DOWNTEST   : "; verdict "$(SIGHTLINE_DOWNTEST=1 run | grep -oE "DOWNTEST: (PASS|FAIL)" | head -1)"
 echo -n "PIKETEST   : "; verdict "$(SIGHTLINE_PIKETEST=1 run | grep -oE "PIKETEST: (PASS|FAIL)" | head -1)"
+# P10 THE HELD LANE (~22 s: it walks 80 short campaigns for its planner legs): the ordinary enemy
+# overwatch's CONE. Arms the player's own OwFocused flag set with an axis Ai.ChooseLane picked; the
+# lane covers approach ground; the red wash / Threat[].Watched predicate (Game.WatchCovers) agrees
+# TILE FOR TILE with the real OnUnitEnteredTile reaction in both directions; and the marked fraction
+# of the floor collapses (59.1% -> 28.4% on its staged board). Reads the AMBIENT dial, so
+# `SIGHTLINE_AILANE=0 SIGHTLINE_LANETEST=1` FAILS — that is the proof it can.
+echo -n "LANETEST   : "; verdict "$(SIGHTLINE_LANETEST=1 run | grep -oE "LANETEST: (PASS|FAIL)" | head -1)"
 echo -n "PODTEST    : "; verdict "$(SIGHTLINE_PODTEST=1 run | grep -oE "PODTEST: (PASS|FAIL)" | head -1)"
 echo -n "EXPOSURETEST: "; verdict "$(SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST (PASS|FAIL)" | head -1)"
 echo -n "FUL11PROBE : "; verdict "$(SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1)"

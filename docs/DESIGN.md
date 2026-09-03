@@ -740,6 +740,23 @@ at all (only the PIKEMAN's BRACE picks a cone). **Give the opponent a reason to 
 piece of ground and the decline becomes worth taking; until then it is not.** Recorded as the next
 wave in `docs/ROADMAP.md`.
 
+**P10 "THE HELD LANE" (2026-09-03) answered the last paragraph, and the answer was not the one it
+predicted.** The lane exists now: `Ai.ChooseLane` picks one of eight compass axes by the approach
+ground it would cover, and the ordinary-overwatch exec arms the player's own `OwFocused` cone with
+it, so the hostile takes the *same trade the player takes* — `+Combat.FocusOwAim` inside the arc,
+blind outside it. That symmetry is the design point, and it is a trade rather than a buff on
+purpose: the 360-degree watch it replaces threatened everything and could not be walked around, so
+it was both a worse verb to play against (no counterplay) and a worse verb to look at (the wash
+covered the open board and therefore marked nothing). **But "give the opponent a reason to watch a
+particular piece of ground and the decline becomes worth taking" is now measured, and it did not
+happen: CRN-paired on base `4c1ca3a`, n=320 per rung per arm, heat 4 and heat 8 came out with ZERO
+discordant campaigns in 320 and heat 0 with two.** The reason is one line of telemetry the C2
+round did not carry: the `overwatch` branch fires **0.15-0.46% of enemy acts**. The binding
+constraint was never the lane's AIM, and this section said it was. It is the branch's FREQUENCY —
+which is `Ai.DeclineWatchRatio`'s business, and P10 priced that dial rather than spending it
+(`SIGHTLINE_DECLINEWATCH`; DEVLOG §THE HELD LANE). **A verb the opponent takes once every few
+hundred acts cannot be made to matter by making it better.**
+
 `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly. Round: `docs/measurements/c2/`,
 960 CRN-paired campaigns on base `17934ee`. **Four rungs net one discordant pair and heat 8 nets
 two — but 124 of 480 paired worlds (25.8%) came out differently, so the round is near-inert in

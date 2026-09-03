@@ -22,6 +22,13 @@ public class EnemyPlan
     public (int x, int y)? RelockTile;  // CUSTODIAN (W8): re-lock/re-arm the objective at this site (else null)
     public bool Brace;                  // PIKEMAN (FUL-8): plant a braced focus cone over a movement lane
     public int BraceDirX, BraceDirY;    // FUL-8: cone axis = anchor - plant tile (Math.Sign per component)
+    // ── P10 THE HELD LANE ────────────────────────────────────────────────────────────────
+    // The cone axis for an ORDINARY overwatch (plan.Overwatch), chosen by Ai.ChooseLane from
+    // the tile this plan ends on. (0,0) means "no lane" — a 360-degree watch, which is what
+    // every enemy overwatch was before this wave and what SIGHTLINE_AILANE=0 restores.
+    // Deliberately SEPARATE from BraceDirX/Y: the two verbs are armed by different exec
+    // branches and a shared field would let a stale brace axis leak into a plain watch.
+    public int OwDirX, OwDirY;
     public bool Reload;                 // W2: the gun is empty — spend the action changing the mag
     public bool IdleRepair;             // W2 (harness accounting): this plan's action exists only
                                         // because of the wave's terminal else — dash or dig-in.
@@ -96,7 +103,12 @@ public static class Ai
     internal const float DeclineThreatScale = 0.20f;
     internal const int DeclineThreatCap = 3;
     internal const float ShotSeat = 18f;
-    internal const float DeclineWatchRatio = 0.45f;
+    /// P10 THE HELD LANE: `static` rather than `const` so `SIGHTLINE_DECLINEWATCH=<ratio>` can
+    /// price it. The SHIPPED value is unchanged at 0.45 and P10 did NOT spend this dial — see the
+    /// priced-but-unspent note in docs/DEVLOG.md §THE HELD LANE. ROADMAP predicted that a real
+    /// lane "would justify a much higher" ratio; P10 measured the lane and then measured this,
+    /// and the two findings are recorded together because the second is what the first implies.
+    internal static float DeclineWatchRatio = 0.45f;
     internal const float DeclineDigRatio = 0.30f;
     internal const float DeclineAbsKeep = 3.00f;
     // A killing blow is worth more than its damage number — it takes a gun off the board for
@@ -117,6 +129,101 @@ public static class Ai
         => Game.AiDecline
              ? ShotSeat + bestHit * (Util.Clamp(hitPct, 0, 100) / 100f)
              : 100 + bestHit;                                        // the pre-C2 constant
+
+
+    // ── P10 THE HELD LANE — WHERE the opponent watches ────────────────────────────────────
+    /// The eight compass axes an ordinary enemy overwatch may brace along. The player's own
+    /// FOCUS derives its axis from the aimed tile (any raw dx,dy); the opponent has no cursor,
+    /// so it picks from the compass. Eight is the whole candidate set on purpose: the cone is
+    /// +-45 degrees, so eight axes tile the plane with 100% overlap and no gap — a ninth axis
+    /// cannot cover ground the eight do not.
+    static readonly (int dx, int dy)[] LaneAxes =
+        { (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1) };
+
+    /// How far from a soldier a tile still counts as that soldier's APPROACH GROUND. A squad
+    /// moves 4-6 tiles a turn; 4 is a deliberate under-estimate — the near ring is where the
+    /// weight is anyway (see the falloff below) and a wider disc mostly buys tiles behind the
+    /// soldier, which it is walking AWAY from.
+    internal const int LaneReach = 4;
+    /// The extra weight on a soldier's OWN tile. It is the one tile the squad is certainly
+    /// standing on right now, so a lane covering it catches the first step off it in any
+    /// direction — the highest-confidence ground on the board.
+    internal const float LaneStandBonus = 3f;
+
+    /// P10 — the score of holding a 90-degree lane along (dx,dy) from (ox,oy), for watcher `e`.
+    ///
+    /// WHAT IT OPTIMISES: the amount of ground the squad is plausibly about to walk through
+    /// that this watcher could actually SHOOT someone on. Candidate ground is the union of the
+    /// Chebyshev discs of radius `LaneReach` around every living soldier — "where can they be
+    /// standing at the end of their next move" — filtered to tiles that are floor, inside the
+    /// cone, inside weapon MaxRange and in line of sight from the watch tile under CanTarget's
+    /// commanding-height rule. That filter is the SAME range+LoS pair `Game.OnUnitEnteredTile`
+    /// gates the reaction on, so a lane is only ever credited for ground it can really cover.
+    /// Each surviving tile is worth `(LaneReach + 1 - cheby(tile, soldier))` summed over the
+    /// soldiers near it — ground right in front of a soldier counts most, and ground two
+    /// soldiers share counts twice — plus `LaneStandBonus` on a soldier's own tile.
+    ///
+    /// WHAT IT DELIBERATELY IGNORES, and why:
+    ///   * WALLS between the soldier and the candidate tile. A Chebyshev disc is not a CostMap;
+    ///     this is a cheap stand-in for "where can it get to", and the LoS filter above already
+    ///     drops the ground the watcher cannot shoot. A real per-soldier CostMap here would cost
+    ///     a Dijkstra per plan for a decision that is a choice between eight axes.
+    ///   * THE OBJECTIVE. An Evac or Escort squad may run somewhere the hostiles are not; this
+    ///     lane watches the SOLDIERS, not the win condition.
+    ///   * THE OTHER HOSTILES' LANES. Each unit picks its axis alone — no coordination term, no
+    ///     anti-overlap. Two hostiles watching the same corridor is a legal (and often correct)
+    ///     outcome; making it a joint optimisation is a different wave.
+    ///   * COVER on the candidate tile. Overwatch reacts on tile ENTRY, and a soldier crossing
+    ///     into cover is uncovered on the way in (that is C2's `Combat.AsIfExposed` premise), so
+    ///     discounting covered ground would mis-price the verb.
+    /// Deterministic — NO `Util.Rng` draw anywhere in here, so the CRN pairing between
+    /// SIGHTLINE_AILANE=1 and =0 survives right up to the first tile the two arms disagree on.
+    internal static float LaneScore(Game g, Unit e, int ox, int oy, int dx, int dy, List<Unit> players)
+    {
+        float total = 0f;
+        int range = e.Weapon != null ? e.Weapon.MaxRange : 0;
+        foreach (var p in players)
+        {
+            for (int tx = p.X - LaneReach; tx <= p.X + LaneReach; tx++)
+                for (int ty = p.Y - LaneReach; ty <= p.Y + LaneReach; ty++)
+                {
+                    if (!g.Grid.InBounds(tx, ty) || !g.Grid.IsFloor(tx, ty)) continue;
+                    if (Util.TileDist(ox, oy, tx, ty) > range) continue;
+                    if (!Game.InConeDir(ox, oy, dx, dy, tx, ty)) continue;
+                    bool commanding = g.Grid.HeightAt(ox, oy) - g.Grid.HeightAt(tx, ty) >= 2;
+                    if (!g.Grid.HasLineOfSight(ox, oy, tx, ty, commanding)) continue;
+                    int d = Util.ChebyDist(tx, ty, p.X, p.Y);
+                    total += (LaneReach + 1 - d) + (d == 0 ? LaneStandBonus : 0f);
+                }
+        }
+        return total;
+    }
+
+    /// P10 — pick the lane axis for an ordinary overwatch held from (ox,oy). Argmax of
+    /// `LaneScore` over the eight compass axes, ties broken by the FIXED order of `LaneAxes`
+    /// (never randomly — see the determinism note on LaneScore).
+    ///
+    /// FALLBACK: if no axis covers any approach ground at all — the watcher is blind, or the
+    /// squad is out of its range — it faces the nearest soldier by sign. That is never (0,0):
+    /// `Ai.Plan` guarantees at least one living soldier and no unit shares a tile with one, so
+    /// an armed lane always has a real axis (SIGHTLINE_LANETEST leg (a) is that invariant).
+    ///
+    /// COST: one pass over 8 axes x (2*LaneReach+1)^2 tiles per soldier, i.e. a few hundred
+    /// bounded Bresenham walks — but paid ONCE PER PLAN and only on the plans that actually
+    /// decided to hold a lane (~1% of enemy acts, C5's census), never per reachable tile.
+    internal static (int dx, int dy) ChooseLane(Game g, Unit e, int ox, int oy, List<Unit> players, Unit nearest)
+    {
+        (int dx, int dy) best = (0, 0);
+        float bestScore = 0f;
+        foreach (var (dx, dy) in LaneAxes)
+        {
+            float s = LaneScore(g, e, ox, oy, dx, dy, players);
+            if (s > bestScore) { bestScore = s; best = (dx, dy); }
+        }
+        if (best.dx != 0 || best.dy != 0) return best;
+        if (nearest == null) return (0, 0);
+        return (Math.Sign(nearest.X - ox), Math.Sign(nearest.Y - oy));
+    }
 
     /// C2: the archetypes that never decline, because declining is not what they ARE. The
     /// rushers (BERSERKER/HOUND/STRIKER/DRONE and the Legion BREAKER's second rage) are the
@@ -1170,7 +1277,22 @@ public static class Ai
                 // C2: a decline taken under two or more guns digs in instead of watching.
                 else if (plan.DeclineDigIn && coverHere.Level > 0) plan.Hunker = true;
                 else if (sees && e.Ammo > 0 && !routing
-                         && (!Game.AiIdleFix || !e.HasStatus(StatusKind.Disoriented))) plan.Overwatch = true;
+                         && (!Game.AiIdleFix || !e.HasStatus(StatusKind.Disoriented)))
+                {
+                    plan.Overwatch = true;
+                    // P10 THE HELD LANE — the opponent now chooses WHERE it watches. Computed HERE,
+                    // after the branch has been taken, so the cost is paid only on the ~1% of enemy
+                    // acts that actually hold a lane and never inside the per-reachable-tile scorer
+                    // (the discipline C2's decline gate records at its own call site).
+                    // The axis rides plan.OwDirX/Y to Game's ActAfterMove exec, which arms the same
+                    // OwFocused cone the player's FOCUS [F] arms — and therefore takes the same
+                    // trade: +Combat.FocusOwAim inside the lane, blind outside it.
+                    if (Game.AiLane)
+                    {
+                        var (lx, ly) = ChooseLane(g, e, bestTile.x, bestTile.y, players, nearest);
+                        plan.OwDirX = lx; plan.OwDirY = ly;
+                    }
+                }
                 else if (coverHere.Level > 0) plan.Hunker = true;
                 // W2 TERMINAL ELSE. `if (watch) ... else if (cover) ...` with no final branch meant a
                 // hostile that had lost line of sight to the squad AND was standing on open floor got

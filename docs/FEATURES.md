@@ -239,6 +239,18 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Graze / partial-hit (S2-A):** a shot that misses by <=15 GRAZES (hit for min weapon
   damage, no crit) instead of a clean miss; every hit deals >=1 (`Combat.GrazeBand`,
   `ShotResult.Graze`, lighter "GRAZE" FX). Softens the output-randomness tail (DESIGN.md 3B).
+- **Enemy overwatch LANES (P10 "THE HELD LANE"):** an ordinary enemy overwatch is no longer a
+  360-degree watch held from wherever the unit stopped. `Ai.ChooseLane` picks one of eight compass
+  axes by the APPROACH GROUND the cone would cover (the squad's move discs, filtered to tiles the
+  watcher has range + line of sight to, weighted by soldier proximity), and the exec arms the
+  player's own `OwFocused` + `OwDir` flag set — so the hostile takes the identical FOCUS trade:
+  `+Combat.FocusOwAim` inside the lane, **blind outside it**, which is the counterplay a 360 watch
+  never had. The board says so: the foe-red kill-zone wash rose to a perceptible tier and the
+  cone-edge rays + chevron (PIKEMAN-only since FUL-8) draw for any focused enemy watcher.
+  `Game.WatchCovers` is the single predicate behind every kill-zone surface, so a washed tile is a
+  tile that genuinely draws a reaction. `SIGHTLINE_AILANE=0` restores the pre-P10 opponent;
+  `SIGHTLINE_LANETEST` is the gate. **Measured balance-neutral** (n=320/rung/arm; the branch fires
+  0.15-0.46% of enemy acts) — see `docs/DEVLOG.md` §THE HELD LANE.
 - **Enemy AI utility items (S2-B):** SNIPER/SCOUT throw SMOKE to blind a player overwatch
   lane; BERSERKER throws FLASH to disorient a cluster; late GRUNTs get smoke. `EnemyPlan.UseItem`
   + `Ai.BestSmoke/BestFlash` + a `Game.UpdateEnemy` item branch + `Unit.EnemyItem`. Never
