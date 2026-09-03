@@ -867,6 +867,26 @@ ROADMAP's "a real lane would justify a much higher ratio" is refuted, `SIGHTLINE
 a priced-but-unspent dial, and the flywheel still has no term for an ordinary enemy lane (that fix
 is its own wave, per ROADMAP). DEVLOG §THE HELD LANE.
 
+**PROGRAM PARALLAX — wave P12 "THE CONFIRMED EIGHT" (2026-09-03, base `a933cfe`)** fixed eight
+adversarially-found, doubly-verified defects that all sat under a **green `--full` sweep**, five of
+them under a green run of the very test that owns their surface (`QUITTEST` and `SETTINGSTEST` were
+PASS while four of the eight held). Two seams a fresh session should know, because they are the
+answer to "why did nothing catch this":
+**`Game.Frozen`** (`Paused || Phase == Codex || Phase == AudioCheck`) is now THE one line for "a
+modal card owns the frame; nothing below this ticks" — `Fx.Update`, the anim pump and the scorch
+fade were always below `Update`'s pause return and froze; the four teaching updaters and the
+kill-cam window sat above it and did not, so a **one-shot FIELD TIP could be burned from the
+profile behind a card that hid it**. **`Game.Paused` is a property**, so every close (Escape,
+[K]/[Q], RESUME, a future caller) releases an in-flight mix-fader drag — it used to survive the
+card and never reach `display.json`. Also: `Game.KeyPin` (harness key injection, three read sites,
+null in real play) — without it "[M] is dead on AUDIO CHECK because two handlers consume the same
+press" is not expressible in a test; `Fx.TextTopY` bounds THE STRIDE's rung ladder, which only ever
+climbed and printed a row-0 kill's name stamp at **y = −34**, entirely off the window; and
+`Game.CardCanAbandon` separates "is there a fight to end" from "what phase is this", because LAST
+STAND's mid-stand barracks detour is a live stand the card was hiding END STAND from. Every fix
+ships a test leg **shown red first**; no new hook (80 exist / 80 ran, unchanged). Detail
+`docs/DEVLOG.md` §THE CONFIRMED EIGHT; five things found and not fixed in `docs/ROADMAP.md`.
+
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:
 1. Make sure `main` builds and passes autoplay.

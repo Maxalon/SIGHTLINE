@@ -455,12 +455,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static string IntroFooter => "GEOMETRY · PARTICLES · NO QUARTER   ·   " + Ship.VersionLabel;
 
     // ---------------- pause / settings ----------------
-    /// The card's first-row verb. RESUME over a fight (the card paused it); BACK on the intro and
-    /// in the barracks (nothing was paused — it is a SETTINGS card there). Exposed so
-    /// SIGHTLINE_SETTINGSTEST can assert the label the player reads in each phase.
-    public static string PauseResumeLabel(Game g) => g.CardInFight ? "RESUME" : "BACK";
+    /// The card's first-row verb. RESUME wherever something is genuinely in flight (a fight, or —
+    /// P12 C5 — LAST STAND's mid-stand barracks detour, which is always a live stand); BACK on the
+    /// intro and in the CAMPAIGN barracks, where nothing was paused and it is a SETTINGS card.
+    /// Exposed so SIGHTLINE_SETTINGSTEST can assert the label the player reads in each phase.
+    public static string PauseResumeLabel(Game g) => g.CardCanAbandon ? "RESUME" : "BACK";
     /// The card's title, by the same rule.
-    public static string PauseTitle(Game g) => g.CardInFight ? "PAUSED" : "SETTINGS";
+    public static string PauseTitle(Game g) => g.CardCanAbandon ? "PAUSED" : "SETTINGS";
 
     static void DrawPause(Game g)
     {
@@ -549,21 +550,26 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // bottom-align the two exits with the left column's last row, so the card reads as
         // two balanced columns rather than one long one next to a short one
         // SETTINGS EVERYWHERE: ABANDON is a row only over a FIGHT. On the intro there is no run to
-        // abandon. In the BARRACKS there is one, but AbandonRun's promise — "the checkpoint is
-        // kept, CONTINUE resumes it" — would be FALSE there: SetupMission is the only checkpoint
+        // abandon. In the CAMPAIGN BARRACKS there is one, but AbandonRun's promise — "the checkpoint
+        // is kept, CONTINUE resumes it" — would be FALSE there: SetupMission is the only checkpoint
         // writer, so in the debrief the file on disk is the START of the mission just cleared;
         // CONTINUE would replay a won mission and drop every debrief pick, and AbandonRun would
-        // also close a mission Stats already closed. So the barracks card offers BACK and QUIT TO
-        // DESKTOP (whose armed sentence names that same cost honestly) and no abandon row. The
-        // two remaining exits stay bottom-aligned with the left column.
-        int exitRows = g.CardInFight ? 3 : 2;
+        // also close a mission Stats already closed. So the campaign barracks card offers BACK and
+        // QUIT TO DESKTOP (whose armed sentence names that same cost honestly) and no abandon row.
+        // P12 (C5): that reasoning is about the CAMPAIGN CHECKPOINT and does NOT transfer to LAST
+        // STAND, which never writes save.json. Endless reaches Phase.Barracks only through
+        // CheckEndless's mid-stand offer detour, so a stand is ALWAYS live there and END STAND —
+        // the LOSSLESS exit, which banks the best wave — belongs on the card. `CardCanAbandon` is
+        // the predicate; `CardInFight` still gates the camera legend below, which is a fight's.
+        // The two remaining exits stay bottom-aligned with the left column.
+        int exitRows = g.CardCanAbandon ? 3 : 2;
         by = top + leftRows * bh + (leftRows - 1) * gap - (exitRows * bh + (exitRows - 1) * gap);
         PauseCodex   = new Rectangle(cx2, by, bw, bh); by += bh + gap;
-        if (g.CardInFight) { PauseAbandon = new Rectangle(cx2, by, bw, bh); by += bh + gap; }
+        if (g.CardCanAbandon) { PauseAbandon = new Rectangle(cx2, by, bw, bh); by += bh + gap; }
         else PauseAbandon = new Rectangle(0, 0, 0, 0);   // no stale rect for a click to find
         PauseQuit    = new Rectangle(cx2, by, bw, bh);
         DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
-        if (g.CardInFight)
+        if (g.CardCanAbandon)
         {
             // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
             string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
@@ -1470,10 +1476,48 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         ("OTHER SCREENS", "BARRACKS: Enter / A / Esc / K", "proceed to deployment / open or close the ARMORY / SETTINGS (or back out of the ARMORY) / FIELD MANUAL"),
         ("OTHER SCREENS", "END CARD: Enter / W / Esc", "new run (after TRAINING OP: run the drill again) / WAR ROOM / main menu"),
         ("OTHER SCREENS", "FIELD MANUAL: Up / Down (W / S), hold Left / Right (A / D), Esc / K", "change tab / scroll / back"),
-        ("OTHER SCREENS", "SKIRMISH SETUP: Left / Right (A / D), Up / Down (W / S, + / -), Enter, Esc", "objective / heat / deploy / back"),
+        ("OTHER SCREENS", "SKIRMISH SETUP: Left / Right (A / D), Tab (Shift-Tab reverses), Up / Down (W / S, + / -), Enter, Esc", "objective / opposition / heat / deploy / back"),
         ("OTHER SCREENS", "AUDIO CHECK: Esc or U, M", "back / mute"),
         ("OTHER SCREENS", "WAR ROOM: Esc", "back"),
     };
+
+    // ── P12 THE CONFIRMED EIGHT (C6): THE SKIRMISH SETUP LEGEND, AS DATA ────────────────────
+    /// The line SKIRMISH SETUP paints under its panel — and the CONTRACT the FIELD MANUAL's row
+    /// for that screen must satisfy. THE MODES GET THE BESTIARY added the [TAB] faction dial, put
+    /// it in the on-screen legend and in the screen's blurb, and left the KeyTable row (the SINGLE
+    /// source for the manual's VERBS & KEYS tab AND for README's generated block) on its pre-wave
+    /// text: the screen advertised a binding the manual and the README did not carry, for a whole
+    /// program. `Manual` is the spelling the KeyTable row must use for that key; MODETEST leg (11)
+    /// asserts every entry here is named by that row, in BOTH halves. Add a dial to the screen and
+    /// the sweep now makes you carry it to the manual.
+    public static readonly (string Key, string What, string Manual)[] SkirmishLegend =
+    {
+        ("< >",   "objective",  "Left / Right"),
+        ("TAB",   "opposition", "Tab"),
+        ("+/-",   "heat",       "+ / -"),
+        ("ENTER", "deploy",     "Enter"),
+    };
+    /// The legend exactly as the screen paints it, composed from the table above.
+    public static string SkirmishLegendLine
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var e in SkirmishLegend)
+            {
+                if (sb.Length > 0) sb.Append("   ·   ");
+                sb.Append(e.Key).Append(' ').Append(e.What);
+            }
+            return sb.ToString();
+        }
+    }
+    /// The KeyTable row that documents one screen (matched on the row's "NAME: " prefix), or a
+    /// default pair when the manual has no row for it at all. Harness seam for the gate above.
+    public static (string Input, string Action) KeyTableRow(string screen)
+    {
+        foreach (var k in KeyTable) if (k.Input.StartsWith(screen + ":")) return (k.Input, k.Action);
+        return (null, null);
+    }
 
     /// README's controls tables, as markdown, from VerbTable + KeyTable + IntroDoors. Hand-run
     /// via `SIGHTLINE_KEYTABLE=1`; paste the output over the block between README's KEYTABLE
@@ -2648,7 +2692,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         ("endless",  "LAST STAND",   "LAST STAND - endless horde survival; how many waves can you hold?"),
         ("warroom",  "WAR ROOM",     "WAR ROOM - spend salvage on unlocks; achievements + hall of fame"),
         ("codex",    "FIELD MANUAL", "FIELD MANUAL - every enemy, class and rule in one reference"),
-        ("skirmish", "SKIRMISH",     "SKIRMISH - one custom fight; pick the objective and the heat"),
+        ("skirmish", "SKIRMISH",     "SKIRMISH - one custom fight; pick the objective, the opposition and the heat"),
         ("daily",    "DAILY",        "DAILY - today's seeded run, one attempt, ranked by turns"),
         ("audio",    "AUDIO CHECK",  "AUDIO CHECK - hear every cue, sweep the music, move the mix; measured numbers beside each"),
         ("settings", "SETTINGS",     "SETTINGS - text size, colourblind palette, brightness, gamma, animation speed, the mix"),
@@ -3486,7 +3530,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         DrawOverlayButton(SkirmStart, "DEPLOY", Pal.Friend, null, btnIn);
         DrawGhostButton(SkirmBack, "BACK", "Esc", btnIn);
 
-        string legend = "< > objective   ·   TAB opposition   ·   +/- heat   ·   ENTER deploy";
+        string legend = SkirmishLegendLine;
         Vector2 lgm = Cfg.Measure(legend, 12, 1f);
         Cfg.Text(legend, new Vector2(W / 2f - lgm.X / 2f, py + ph + 18), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
     }

@@ -1035,6 +1035,39 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
 pass, and other waves own parts of that file). The biome signature pass stays floor-tile-only,
 so its emissive cues do not creep around cover bases.
 
+## OPEN — found by PARALLAX P12 "THE CONFIRMED EIGHT" and deliberately NOT fixed
+
+- [ ] **Delete `Hud.DrawIntro`'s dead caption chain (~35 lines).** It still carries the
+      pre-FRONT-DOOR `else if (CheckCollisionPointRec(introMouse, OverlayBtnN)) caption = "…"`
+      ladder, and EVERY branch of it is unconditionally overwritten twenty lines later by
+      `string hoverId = … g.IntroHit(introMouse); if (hoverId != null) caption = IntroDoorCaption(hoverId);`
+      — `IntroHit` resolves any hovered door, so the live string always comes off `IntroDoors`.
+      It is not merely dead, it is a **trap**: someone updated the SKIRMISH caption in the dead
+      copy (it already read "the opposition") while the live table stayed on the pre-P4 text, which
+      is half of P12's C6. Deleting it needs one check — that no branch there says something
+      `IntroDoors` does not (the DAILY branch interpolates `g.TodayDailyForceName`, so its caption
+      is NOT a constant and must move into the table or stay as a special case).
+- [ ] **`HandleOverlayClick`'s `Phase == Phase.Barracks` branch is unreachable** and was carried
+      into `Game.ActPrimary` unchanged. The function is dispatched only for Intro / Win / Lose
+      (`Game.Update`'s phase switch), so `NextMission()` can never be reached from it. Harmless;
+      removing it wants its own pass over who else could ever call `ActPrimary`.
+- [ ] **The pause card's footer line is still keyed on `CardInFight`, not `CardCanAbandon`.** In a
+      mid-stand LAST STAND barracks the card now titles itself PAUSED with a RESUME row, while the
+      footer reads "Every change is saved as you make it - [Esc] back". Both sentences are true
+      (Esc does go back to the offer screen) and the alternative — the camera legend — would be
+      wrong there, so P12 scoped the change deliberately. A third footer string for that one cell
+      would close it.
+- [ ] **`Game.KeyPin` covers three read sites, not the keymap.** P12 added it for two defects that
+      are inexpressible without a key press (a global colliding with a per-screen handler; a key
+      loop above a drag guard). A general injection layer over every `Raylib.IsKeyPressed` in
+      `src/` would make the whole keymap testable — and would have caught the C3 class by
+      construction — but it is a large mechanical diff and belongs in its own wave.
+- [ ] **Nothing bounds a floating text's RISE.** `Fx.TextTopY` bounds where a text is BORN (P12 C7);
+      `Fx.Update`'s `t.Pos.Y -= t.Rise * dt` still carries it off the top of the window as it dies,
+      at an alpha heading for zero. Left alone on purpose: pinning risen text to the ceiling would
+      read as a pile-up. If a future wave wants it, the bound belongs in `Fx.Update`, not the
+      ladder.
+
 ## OPEN / NEXT (post-FULCRUM backlog — seeded at the FUL-13 close)
 
 Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG.md §FUL-13)

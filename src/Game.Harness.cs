@@ -1980,7 +1980,19 @@ public partial class Game
     public void DebugKia()
     {
         var c = Players.Where(p => !p.IsVip).ToList();
-        if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.WasDownedThisMission = true; /* FUL-7: stage the TRUE death (skip the bleed-out) */ v.Hp = 0; KillUnit(v); }
+        if (c.Count > 1)
+        {
+            var v = c[1];
+            // P12 THE CONFIRMED EIGHT (C7), screenshot only: SIGHTLINE_KIAROW=<row> seats the victim
+            // on a given board row before the kill, so the ladder's TOP-EDGE behaviour can be
+            // photographed. Row 0 used to print the 30px name stamp at y = -34 (entirely above the
+            // window) and "KIA" under the 64px HUD top plate. Inert when unset.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_KIAROW"), out int krow)
+                && krow >= 0 && krow < Cfg.GridH)
+            { v.Y = krow; v.SyncPos(); }
+            v.Nickname = "GHOST"; v.WasDownedThisMission = true; /* FUL-7: stage the TRUE death (skip the bleed-out) */
+            v.Hp = 0; KillUnit(v);
+        }
     }
 
     /// THE BEAT (screenshot/filmstrip only, SIGHTLINE_KILLCAM=<frame>): the last hostile falls to a
@@ -7959,7 +7971,21 @@ public partial class Game
                 CardDetour(g, "barracks", Phase.Barracks, "codex", KeyboardKey.K);
                 CardDetour(g, "barracks", Phase.Barracks, "audio");
                 g.OnEscape(); ArmedFits(g, "barracks"); g.Paused = false;
-                g.Mode = GameMode.Endless; g.OnEscape(); ArmedFits(g, "barracks-endless"); g.Paused = false; g.Mode = GameMode.Campaign;
+                g.Mode = GameMode.Endless; g.OnEscape(); ArmedFits(g, "barracks-endless"); g.Paused = false;
+                // P12 THE CONFIRMED EIGHT (C5) — LAST STAND'S BARRACKS DETOUR IS A LIVE STAND.
+                // CheckEndless parks a stand on Phase.Barracks purely to resolve queued perk/spec/
+                // boon offers, so Barracks+Endless is reachable ONLY mid-stand and a stand is
+                // ALWAYS live there. The card read that pair as "nothing is in flight": it hid
+                // END STAND (the lossless exit, which AbandonRun routes to EndEndless and which
+                // banks the best wave) and printed BACK, while simultaneously printing the armed
+                // sentence "the stand ends here - its waves are not saved" under QUIT TO DESKTOP,
+                // the LOSSY exit. The barracks justification above is entirely about the CAMPAIGN
+                // checkpoint, which endless never writes.
+                CardRoundTrip(g, "barracks-endless", Phase.Barracks, expectAbandon: true, expectVerb: "RESUME");
+                if (Hud.PauseTitle(g) != "PAUSED") fails.Add("barracks-endless:cardTitleReads:" + Hud.PauseTitle(g));
+                g.Mode = GameMode.Campaign;
+                // ...and the CAMPAIGN barracks is unmoved: still a settings card, still no abandon
+                CardRoundTrip(g, "barracks-recheck", Phase.Barracks, expectAbandon: false, expectVerb: "BACK");
                 // the ARMORY owns Escape while it is open (HandleShopClick backs out one level)
                 g.ArmoryMode = true; g.OnEscape();
                 if (g.Paused) fails.Add("barracks:escapeStoleArmoryBack");
@@ -8198,6 +8224,94 @@ public partial class Game
                     Display.UiScaleIdx = savedScale; Display.ApplyUiScale();
                 }
             }
+
+            // ---- (F) P12 THE CONFIRMED EIGHT (C2) — A FADER DRAG NEVER SURVIVES THE CARD -------
+            // `_volDrag` was written and cleared ONLY inside HandlePauseMenu, and three exits from
+            // the card never reach its release branch: ESCAPE (read one line ABOVE Update's
+            // `if (Paused) { HandlePauseMenu(); return; }` gate) and the card's own [K] / [Q],
+            // whose key loop sat ABOVE the drag guard. Abandon a drag through any of them and the
+            // fader still owned the mouse — the next click anywhere on the card was eaten
+            // re-seating it — and `Display.CommitVol` never ran, so the change never reached
+            // display.json. The sibling AUDIO CHECK screen guards this on BOTH sides (it clears its
+            // drag on entry and flushes on exit); the pause card had neither.
+            {
+                Display.CommitVol();                     // a known-good baseline on disk to diff against
+                int bus = 1;                             // SFX — never the master (SetVol(0) drives the device)
+                float baseline = Display.Vol(bus);
+                int k = 0;
+                foreach (var (how, exit) in new (string, Action<Game>)[]
+                         {
+                             ("escape", x => x.OnEscape()),                 // ESC mid-drag
+                             ("manual", x => x.BeginCodex()),               // the card's [K] door
+                             ("resume", x => x.ActPause("resume")),         // the card's own first row
+                         })
+                {
+                    float want = 0.23f + 0.11f * (++k);
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(1);
+                    g.OnEscape();
+                    Frame(g);                            // publishes Hud.PauseVol
+                    if (Hud.PauseVol.Length <= bus || Hud.PauseVol[bus].Width < 20) { fails.Add("card:noMixFader"); break; }
+                    g.BeginVolDrag(bus, want);           // exactly what HandlePauseMenu's mouse-down does
+                    if (g.VolDragBus != bus) fails.Add($"card:{how}:dragDidNotArm");
+                    exit(g);                             // ...and leave the card with the button still held
+                    if (g.VolDragBus >= 0) fails.Add($"card:{how}:dragSurvivedTheCard(bus {g.VolDragBus})");
+                    // ...and the value reached disk through Display's ONE writer
+                    Display.SetVol(bus, baseline);       // clobber the live static so the read is from the FILE
+                    Display.LoadForTest();
+                    if (MathF.Abs(Display.Vol(bus) - want) > 0.002f)
+                        fails.Add($"card:{how}:volNeverCommitted(disk {Display.Vol(bus):0.000} != {want:0.000})");
+                }
+                // ...and while the button is genuinely still DOWN the drag owns the card's keys too,
+                // exactly as HandleAudition's ordering has always made it own theirs.
+                {
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(1);
+                    g.OnEscape();
+                    Frame(g);
+                    g.BeginVolDrag(bus, 0.5f);
+                    Game.KeyPin = new HashSet<KeyboardKey> { KeyboardKey.K };
+                    try { g.HandlePauseMenu(); }
+                    finally { Game.KeyPin = null; }
+                    if (g.Phase == Phase.Codex) fails.Add("card:dragDidNotOwnTheKeyboard");
+                    g.Paused = false;
+                }
+                Display.SetVol(bus, baseline); Display.CommitVol();
+            }
+
+            // ---- (G) P12 THE CONFIRMED EIGHT (C4/C8) — THE CARD FREEZES WHAT IT HIDES ----------
+            // Four teaching updaters and the kill-cam window are called in Update ABOVE the pause
+            // gate, and neither TipsAllowed nor BriefAllowed carries a `!Paused` term. A one-shot
+            // FIELD TIP — burned from the profile the moment it SHOWS — could therefore fire, run
+            // its 9 s clock out and retire while a 760x694 plate over an 0.82 scrim hid it. That is
+            // a verb permanently spent from the profile, unwatched.
+            {
+                Environment.SetEnvironmentVariable("SIGHTLINE_TIP", "0");   // stage tip bit 0 deterministically
+                try
+                {
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(1);
+                    g.BriefLines = null;
+                    g.Paused = true;
+                    for (int f = 0; f < 30; f++) g.Update(1f / 60f);
+                    if (g.CalloutText != null) fails.Add("card:tipFiredBehindTheCard");
+                    g.Paused = false;
+                    for (int f = 0; f < 5; f++) g.Update(1f / 60f);
+                    if (g.CalloutText == null) fails.Add("card:tipNeverFires");   // the leg is not vacuous
+                    else
+                    {
+                        float t0 = g.CalloutTimer;
+                        g.Paused = true;
+                        for (int f = 0; f < 60; f++) g.Update(1f / 60f);
+                        if (g.CalloutTimer < t0 - 0.001f)
+                            fails.Add($"card:tipClockDrainedBehindTheCard({t0 - g.CalloutTimer:0.00}s of {t0:0.0}s)");
+                        g.Paused = false;
+                        for (int f = 0; f < 30; f++) g.Update(1f / 60f);
+                        if (g.CalloutTimer >= t0 - 0.001f) fails.Add("card:tipClockNeverRuns");
+                    }
+                }
+                finally { Environment.SetEnvironmentVariable("SIGHTLINE_TIP", null); }
+            }
         }
         catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
         finally
@@ -8226,7 +8340,11 @@ public partial class Game
               + "without a save, the cold profile's resting line is the TRAINING OP nudge and yields "
               + "to a seen drill or a save, rung 0 reads STANDARD at 26px and the card states the "
               + "unlock rule at the ceiling / MAX UNLOCKED below it, and every card line ends inside "
-              + "the card at 120%)"
+              + "the card at 120%; a mid-stand LAST STAND barracks offers END STAND and reads "
+              + "PAUSED while the campaign barracks still reads BACK; a mix-fader drag never "
+              + "outlives the card by ESC / [K] / RESUME and commits to display.json when it ends, "
+              + "and owns the card's keys while the button is down; the card FREEZES the teaching "
+              + "layer it hides - no one-shot FIELD TIP fires or burns its clock behind it)"
             : "SETTINGSTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
@@ -9702,6 +9820,31 @@ public partial class Game
         if (sC < Fx.TextSep) fails.Add($"twinNumbersOverprint({sC:0.0}px)");
         if (!twinsDiverge) fails.Add("twinNumbersSameArc");
 
+        // ---- (c2) P12 THE CONFIRMED EIGHT (C7): THE RUNG LADDER HAS A CEILING ----
+        // THE STRIDE's ladder only ever CLIMBED and nothing bounded it. Board row 0 sits at
+        // Util.TileCenter(x,0).Y == Cfg.OriginY + Tile/2 == 72, so the kill trio's three anchors
+        // are y = 46 / 62 / 38; the number took rung 0, "KIA" rung 3 (-54px) and the 30px name
+        // stamp rung 4 (-72px) => y = -34, a glyph box entirely ABOVE the window, with "KIA" at
+        // y = 8 buried under Hud's 64px top plate. Row 0 is open floor in every arena template
+        // and three of the four deployment shapes seat a pod lead there, so this is the ordinary
+        // case, not a corner. Same three call sites as leg (c), moved to row 0.
+        {
+            Fx = new Fx();
+            var top = Util.TileCenter(4, 0);
+            Fx.PopText(top + new Vector2(0, -26), "7", num, 32f);                 // ShotAnim: the killing number
+            Fx.PopText(top + new Vector2(0, -10), "KIA", Pal.Foe, 22f);           // Game.KillUnit: the pop
+            Fx.Stamp(top + new Vector2(0, -34), "KIA  DOE", Pal.Foe, 30f, 2.4f);  // Game.KillUnit: the name stamp
+            float highest = float.MaxValue; string highWho = "-";
+            foreach (var t in Fx.Texts) if (t.Pos.Y < highest) { highest = t.Pos.Y; highWho = t.Text; }
+            Fx.Update(1f / 60f);
+            float sep0 = MinSep(Fx.Texts.ToList());
+            detail.Append($"; row-0 kill trio: highest ink y={highest:0.0} ('{highWho}'), min sep {sep0:0.0}px, ceiling {Fx.TextTopY:0}px");
+            if (Fx.Texts.Count != 3) fails.Add($"rowZeroTrioMissing({Fx.Texts.Count})");
+            if (highest < 0f) fails.Add($"killTextOffTopOfWindow({highest:0.0}px)");
+            else if (highest < Fx.TextTopY - 0.01f) fails.Add($"killTextUnderTheTopPlate({highest:0.0}px<{Fx.TextTopY:0}px)");
+            if (sep0 < Fx.TextSep) fails.Add($"rowZeroTrioOverprint({sep0:0.0}px)");
+        }
+
         // ---- (d) THE BEAT: the mission-ending KILL-CAM is slow-mo, not a freeze ----
         // A REAL mission (StartMission: the kill-cam reads the objective and the live roster), the
         // REAL Game.Update stepped at 1/60 with AutoPlay OFF (a human is watching), one death-FX
@@ -9746,6 +9889,35 @@ public partial class Game
             // the window runs at ~KillCamScale of the post-window rate (drag makes it a touch higher)
             if (ratio < 0.18f || ratio > 0.45f) fails.Add($"killcamSlowmoRatio({ratio:0.00})");
             if (peakPulse > 0f && pulsePct < 50f) fails.Add($"killcamZoomSpent({pulsePct:0}%<50%)");
+        }
+
+        // ---- (d2) P12 THE CONFIRMED EIGHT (C8): the window does NOT drain behind the pause card ----
+        // ESC is read ONE LINE above Update's `if (Paused) { HandlePauseMenu(); return; }`, and the
+        // kill-cam tick sits above both — so a player who pauses inside the 0.45 s window spends it
+        // behind an opaque card, and the zoom-punch (HELD only while _killCam > 0) is released with
+        // it. Fx.Update, DecayUnitFx, the scorch fade and the anim pump are all below the return and
+        // correctly freeze; the window was the one clock that was not.
+        {
+            var g = new Game { NoPersist = true, ForcedObjective = Objective.Eliminate };
+            Util.Reseed(70033);
+            g.StartMission(1);
+            g.BriefLines = null;
+            var ff = g.Enemies.Where(e => e.Alive).ToList();
+            for (int i = 0; i < ff.Count - 1; i++) { ff[i].Hp = 0; g.KillUnit(ff[i]); }
+            g.HitStop = 0f;
+            ff[ff.Count - 1].Hp = 0; g.KillUnit(ff[ff.Count - 1]);      // the deciding death arms the window
+            float armed = g.KillCamLeft, armedPulse = g.CamPulse, armedScale = g.TimeScale;
+            g.Paused = true;
+            for (int f = 0; f < 60; f++) g.Update(1f / 60f);            // a full second behind the card
+            float held = g.KillCamLeft, heldPulse = g.CamPulse;
+            g.Paused = false;
+            for (int f = 0; f < 60; f++) g.Update(1f / 60f);            // ...and it drains once resumed
+            detail.Append($"; killcam-paused: armed {armed:0.000}s (x{armedScale:0.00}, pulse {armedPulse:0.000}) -> "
+                        + $"60 paused frames {held:0.000}s (pulse {heldPulse:0.000}) -> 60 live frames {g.KillCamLeft:0.000}s");
+            if (armed <= 0f) fails.Add("killcamPausedNotArmed");
+            if (MathF.Abs(held - armed) > 1e-4f) fails.Add($"killCamDrainedBehindTheCard({armed:0.000}s->{held:0.000}s)");
+            if (MathF.Abs(heldPulse - armedPulse) > 1e-4f) fails.Add($"zoomPunchSpentBehindTheCard({armedPulse:0.000}->{heldPulse:0.000})");
+            if (g.KillCamLeft > 0f) fails.Add($"killCamNeverDrains({g.KillCamLeft:0.000}s)");
         }
 
         // ---- (e) THE BEAT: an overwatch REACTION has its own beat ----
@@ -9801,7 +9973,7 @@ public partial class Game
             ? "FEELTEST: PASS (6-tile walk: mid-path speed never dips under " + MoveStepAnim.FeelMinSpeedRatio.ToString("0.00") +
               "x its max, zero stall frames, one lean kick, 48-frame cadence pinned; VAULT lifts >= " + MoveStepAnim.FeelVaultLiftMin.ToString("0") +
               "px over the cover and lands on the tile centre; stacked floating text keeps >= " + Fx.TextSep.ToString("0") + "px separation and twin numbers arc apart; " +
-              "kill-cam: no still frame in the " + Game.KillCamWindow.ToString("0.00") + "s window, FX at ~x" + Game.KillCamScale.ToString("0.00") + " with the zoom held; " +
+              "kill-cam: no still frame in the " + Game.KillCamWindow.ToString("0.00") + "s window, FX at ~x" + Game.KillCamScale.ToString("0.00") + " with the zoom held, and neither the window nor the held zoom drains behind the pause card; text ladder bounded at y=" + Fx.TextTopY.ToString("0") + " so a row-0 kill stamps on screen; " +
               "a reaction shot winds up ~0.30s with its own hit-stop while a plain shot and the autoplay path are unchanged; react/boom/flash/heal/smoke are registered cues)"
             : "FEELTEST: FAIL (" + string.Join(",", fails) + ")";
     }

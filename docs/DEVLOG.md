@@ -13608,3 +13608,291 @@ number above is an *upper* bound on the opponent's strength under the lane.
 * The flywheel's missing enemy-overwatch exposure term (ROADMAP, unchanged).
 * `Ai.ChooseLane` re-derives the squad's discs per call. Harmless at 0.4% of acts; if a future wave
   makes the branch common, cache it per enemy turn.
+
+---
+
+# PROGRAM PARALLAX — wave P12 "THE CONFIRMED EIGHT" (2026-09-03)
+
+**Branch** `wave/confirmed8` · **base** `a933cfe` (PARALLAX milestone 8: the held lane + the crash
+file). One developer, no measurement round: this is a **defect wave**, not a balance wave.
+
+## The input, and why it is unusual
+
+An adversarial QA hunt over everything PROGRAM PARALLAX had landed produced eight findings, each
+then handed to **two refute-by-default skeptics** who tried to kill it and could not. Six of the
+eight were *reasoned from code and never observed at runtime* — because the thing they describe is
+either process-internal (a stale `Mode` flag), needs a held mouse button, or needs a key press on a
+screen the headless harness has no way to press a key on. That is the shape of the whole wave:
+**every one of these eight sat under a green sweep, and five of them sat under a green sweep of a
+test aimed at the very surface they broke.** `SIGHTLINE_QUITTEST` and `SIGHTLINE_SETTINGSTEST` were
+both PASS while findings 2, 4, 5 and 8 all held.
+
+So the wave's real product is not eight patches. It is **eight assertions that would have caught
+them**, each shown FAILING on the pre-fix tree before the fix landed, plus the two small harness
+seams that made two of them expressible at all.
+
+## The three that were one defect
+
+Findings 2, 4 and 8 are the same shape: **state and clocks that keep running behind a modal card.**
+The lead asked whether one place should own "the game is paused, nothing below this line ticks".
+It should, and there are actually **two** such places, because the card has two different kinds of
+leak:
+
+1. **`Game.Frozen`** — the freeze line. `Paused || Phase == Codex || Phase == AudioCheck`. Read once
+   at the top of `Update` into a local, and gating the four teaching updaters and the kill-cam
+   window. Everything else in `Update` was already correctly frozen: `Fx.Update`, `DecayUnitFx`, the
+   scorch fade and the anim pump all sit BELOW `if (Paused) { HandlePauseMenu(); return; }`. The two
+   that leaked sat above it — and could not simply be moved below, because the `HitStop` return sits
+   between them and the pause gate and its own comment forbids a freeze stretching the kill-cam
+   window. So: a predicate, not a move.
+2. **`Game.Paused` is now a property** — the seam that owns "the card closed". `_volDrag` was
+   written and cleared *only* inside `HandlePauseMenu`, and three exits never reach its release
+   branch. Making the setter release the fader means every close, from anywhere — `OnEscape`,
+   `BeginCodex`, `ExitAudition`, `ActPause("resume")`, `AbandonRun`, a future caller nobody has
+   written yet — passes through one line. This is the guard `Game.Audition.cs` has had on both sides
+   since A3 (`_audVolDrag = -1` on entry, a flush on exit); the pause card had neither.
+
+`Frozen` deliberately does NOT cover `HitStop`, the ambient particle field, the bloom decay or
+`Display.AdvanceTime` — those burn nothing and tick no once-only state. AutoPlay never pauses and
+never enters Codex/AudioCheck, so the whole change is **gameplay-inert for the flywheel by
+construction**, not by measurement.
+
+## The eight, each with the assertion that now covers it
+
+### C1 [major] DEPLOY SQUAD on the main menu launched the TRAINING DRILL
+
+`HandleOverlayClick`'s Win/Lose block had two exits to the main menu and only one cleared `Mode`.
+MAIN MENU [Esc] reset it; WAR ROOM [W] did not, and neither `BeginWarRoom` nor the War Room's own
+BACK does. So a finished TRAINING OP taken out through the War Room landed on `Phase.Intro` with
+`Mode == GameMode.Training` still set — and DEPLOY SQUAD is **the one intro door dispatched outside
+the `ActIntro` table**, so it fell through to the "re-run the drill" branch. Every named door
+(CONTINUE / LAST STAND / SKIRMISH / DAILY / TRAINING / …) was safe because each routes through a
+`Begin*` that calls `ResetModeState`. The plate reads "NEW CAMPAIGN — draft a squad, pick a
+doctrine, survive 6 operations", and the drill's own win card says "now deploy for real."
+
+**Fix.** Both end-card doors and the primary verb are split into named methods — `ActEndWarRoom`,
+`ActEndMainMenu`, `ActPrimary` — the `ActIntro`/`ActPause` shape this project uses everywhere else,
+so a test can press exactly what a click dispatches to. Both doors now call `ClearEndedRunMode()`.
+Belt as well as braces: `ActPrimary`'s drill-restart branch is scoped to `Phase != Phase.Intro`,
+because on the intro that plate is DEPLOY SQUAD and reading a run-mode flag there is the bug.
+
+**Gate.** `SIGHTLINE_MODETEST` leg (10) walks both doors after a real `BeginTraining` +
+`EndTraining(true)`, then presses `ActPrimary`.
+Pre-fix: `MODETEST: FAIL (endCard:warroom:leakedMode(Training),endCard:warroom:introDeployLaunched(Training))`.
+
+### C2 [major] A volume drag survived the pause card closing
+
+`_volDrag` (a bus index, -1 = none) was set on mouse-down and cleared only on mouse-up inside
+`HandlePauseMenu`. Three exits skip that: **ESC** is read one line ABOVE `if (Paused) { … return; }`
+so `OnEscape` toggles the card off and `HandlePauseMenu` is never entered again; **[K]** and **[Q]**
+were read by a key loop that sat ABOVE the drag guard. Consequences: the fader still owned the
+mouse, so the next click anywhere on the re-opened card was eaten re-seating it; and
+`Display.CommitVol` never ran, so the change never reached `display.json`.
+
+**Fix.** Two, and both are needed. The `Paused` property (above) covers every close. And the drag
+guard moves ABOVE the `PauseKeys` loop — the ordering `HandleAudition` has always had — because
+[Q]-[Q] takes the process down *without* closing the card, which is the one exit a setter cannot
+catch.
+
+**Gate.** `SIGHTLINE_SETTINGSTEST` leg (F): three exits × {drag released, value on disk}, plus a
+keyboard-ownership check driven through the new `Game.KeyPin`.
+Pre-fix: `card:escape:dragSurvivedTheCard(bus 1)`, `card:escape:volNeverCommitted(disk 1.000 != 0.340)`,
+same for `manual` and `resume`, and `card:dragDidNotOwnTheKeyboard`.
+
+### C3 [major] `[M]` was a dead key on the AUDIO CHECK screen
+
+`Update`'s GLOBAL key block reads `M` on every phase, and `HandleAudition` read it again, with
+nothing returning between the two on that phase (the pause gate excludes AudioCheck; the anim pump
+skips it by design). `Audio.ToggleMute()` is a pure flip and `IsKeyPressed` is an edge-state read,
+not a queue pop — so both sites saw the same press and the net effect was **zero**. The screen's own
+`MUTE [M]` / `MUTED [M]` chip is drawn from the same field, so it did not even change caption: no
+feedback of any kind, on the one screen in the game built to A/B the mix, with the key advertised in
+three places (the chip, the FIELD MANUAL, the README).
+
+**Fix.** Delete the local read. The global already fires on every phase. `ApplyMasterVolume` was not
+lost with it — it only pushes `Display.VolMaster` and never reads `Audio.Enabled`, so it was
+vestigial there (it is still called by the chip's CLICK handler, which cannot double).
+
+**Gate.** `SIGHTLINE_AUDITIONTEST` leg (5) — and this one needed a new seam to exist at all.
+
+### The seam: `Game.KeyPin`
+
+A harness-only key injection: `public static HashSet<KeyboardKey> KeyPin` plus
+`Game.KeyPressed(k) => KeyPin != null ? KeyPin.Contains(k) : Raylib.IsKeyPressed(k)`. Null in real
+play, so every read is byte-for-byte what it was. Deliberately **narrow** — only three read sites are
+routed through it (Update's global block, the pause card's key table, the AUDIO CHECK screen's own
+keys), because those are the ones a test needs. It exists because two of this wave's defects are a
+key that two handlers both consumed in one frame and a key loop above a drag guard, and **neither is
+expressible in a test that cannot press a key.**
+
+A caution worth recording, because it nearly produced a false green: the first version of leg (5)
+**PASSED on the broken tree.** Routing only the global read through `KeyPressed` meant the audition's
+own read still went to the real (empty) keyboard, so only one toggle fired and the assertion held.
+The leg is only a reproduction of the defect once *both* reads answer from the same pinned press.
+Pre-fix, with both routed: `AUDITIONTEST: FAIL / AUDIO CHECK: [M] is a DEAD KEY — the global mute
+and the screen's own both fire in one frame and cancel`.
+
+### C4 [minor] The teaching layer ran behind the pause card
+
+`UpdateTutorial / UpdateTraining / UpdateFieldTips / UpdateBriefing` are called above the pause
+gate, and neither `TipsAllowed` (`Phase == PlayerTurn && …`) nor `BriefAllowed` carries a `!Paused`
+term — `Paused` is a plain flag that does not change `Phase`. A once-per-profile FIELD TIP is
+**burned at SHOW time** (`Display.MarkTipSeen(pick.Bit)`, right beside `CalloutTimer = 9f`), and the
+card is drawn LAST over a 760×694 plate on an 0.82 scrim. So: pause on a player turn, spend nine
+seconds on BRIGHTNESS or the mix faders — exactly what SETTINGS EVERYWHERE added the in-fight card
+for — and a teaching card is gone from the profile, permanently, unwatched.
+
+**On the reporter's second arm, which the verifier partly refuted and I agree with:** "any click on
+the pause card kills the mission briefing" does not normally happen, because `UpdateBriefing` holds
+the codebase's only `Raylib.GetKeyPressed()` — a consuming queue read — and it dismisses on the very
+Escape press that is about to open the card, one line earlier in the same frame. There is nothing
+left behind the card to destroy. The residue is narrower: `_briefHold` accrues while paused and can
+cross `BriefHoldMax`. The freeze closes that too, but it is not the finding as written, and I am not
+claiming it as one.
+
+**Gate.** `SIGHTLINE_SETTINGSTEST` leg (G), with `SIGHTLINE_TIP=0` staging tip bit 0 deterministically:
+no tip fires in 30 paused frames; it fires within 5 unpaused ones (so the leg is not vacuous); its
+9 s clock does not move in 60 paused frames and does move in 30 live ones.
+Pre-fix: `card:tipFiredBehindTheCard`, `card:tipClockDrainedBehindTheCard(1.00s of 8.4s)`.
+
+### C5 [minor] LAST STAND's barracks detour
+
+`CardInFight` was phase-only. `CheckEndless` parks a live stand on `Phase.Barracks` purely to
+resolve queued perk/spec/boon offers, and that is the **only** assignment that puts endless there —
+so `Barracks + Endless` means a stand is in flight, always. The card read it as "nothing is in
+flight": it hid END STAND, printed BACK and titled itself SETTINGS, while simultaneously printing
+"the stand ends here - its waves are not saved" under QUIT TO DESKTOP. It hid the lossless exit
+(`AbandonRun` → `EndEndless`, which banks the best wave) and left the lossy one. The justification
+written above that line in `DrawPause` is entirely about the CAMPAIGN checkpoint, and endless never
+writes `save.json`.
+
+**Fix.** A second predicate rather than a widened one: `CardCanAbandon = CardInFight || (Barracks &&
+Endless)` drives the abandon row, the first-row verb and the title; `CardInFight` keeps the camera
+legend, which really is a fight's legend.
+
+**Gate.** `SIGHTLINE_SETTINGSTEST` leg (B) runs the existing `CardRoundTrip` a second time with
+`Mode = Endless` (`expectAbandon: true, expectVerb: "RESUME"`), asserts the title, and then re-runs
+the CAMPAIGN barracks as an unchanged control.
+Pre-fix: `barracks-endless:abandonMissing`, `barracks-endless:firstRowReads:BACK`,
+`barracks-endless:cardTitleReads:SETTINGS`.
+
+### C6 [doc] The generated controls table omitted SKIRMISH SETUP's `[TAB]`
+
+THE MODES GET THE BESTIARY added the faction dial, painted it into the screen's legend and blurb,
+and left `Hud.KeyTable` — the single source for the in-game FIELD MANUAL's VERBS & KEYS tab *and*
+for README's generated block — on its pre-wave row. The screen advertised a binding the manual did
+not carry, for a whole program. The intro door's caption was stale the same way.
+
+**Fix.** The legend is now **data** (`Hud.SkirmishLegend`, four `(Key, What, Manual)` rows) and the
+screen paints from it; the KeyTable row and the door caption are corrected; README's block is
+**regenerated** with `SIGHTLINE_KEYTABLE=1` (two lines changed, which is itself evidence the
+generator is otherwise stable).
+
+**Gate.** `SIGHTLINE_MODETEST` leg (11): every legend entry must be named by the KeyTable row for
+that screen, in BOTH halves. The reporter's own proposed check ("the key appears in some KeyTable
+row") would have **passed on the broken tree** — `Tab` is already in an unrelated in-mission row —
+so the gate is scoped to the screen's own row via `Hud.KeyTableRow("SKIRMISH SETUP")`.
+Pre-fix: `keyTable:skirmishSetupRowOmits[TAB]as'Tab'`, `keyTable:skirmishSetupActionOmits'opposition'`.
+
+### C7 [major] `Fx.TextRung` had no screen bound
+
+THE STRIDE's anti-overprint ladder only ever CLIMBED — `-TextPitch * r` for r in 0..7, plus an
+exhausted fallback at `-TextPitch * 8` — and nothing clamped the result, not in `TextRung`, not in
+`PopText`/`Stamp`, not in `DrawText`. `grep ScreenH src/Fx.cs` returns zero hits.
+
+Board row 0 sits at `Cfg.OriginY + Tile/2 = 72`, so a kill there has anchors y = 46 / 62 / 38. The
+number takes rung 0; "KIA" is blocked to rung 3 (−54); the 30px name stamp is blocked to rung 4
+(−72) — **y = −34, a glyph box entirely above the window** — and "KIA" at y = 8 sits under Hud's
+64px opaque top plate. Then they RISE. Row 0 is open floor in every arena template and three of the
+four deployment shapes seat a pod lead there, so it is the ordinary case. It is also a STRIDE
+regression: pre-ladder all three printed at their raw anchors — overprinted, but on screen.
+
+**Fix.** The ladder gets a ceiling, `Fx.TextTopY = 70` (the 64px plate + 6px of air), in board/world
+y, which is screen y at the default camera. The anchor is lifted to the ceiling first and any rung
+that would still breach it is **mirrored downward** — the clearance test then runs on whichever side
+the rung landed, so mirroring cannot re-introduce the overprint the ladder exists to prevent. Inert
+for any anchor below y = 196, which the mid-board control confirms: the kill-trio min separation is
+**42.1px before and after**, to the decimal.
+
+**Gate.** `SIGHTLINE_FEELTEST` leg (c2) — the same three call sites as leg (c), on row 0.
+Pre-fix: `row-0 kill trio: highest ink y=-34.0 ('KIA  DOE')` → `FEELTEST: FAIL (killTextOffTopOfWindow(-34.0px))`.
+Post-fix: `highest ink y=70.0 ('7'), min sep 36.2px, ceiling 70px`.
+
+**On the lead's suggestion of FITTEST:** its screen audit reads ink through `Cfg.InkProbe` during
+`Hud.Draw`, and explicitly **excludes** the board pass — "it paints inside a `Camera2D`, so its ink
+is in world space, not screen space". Floating text is drawn there. FITTEST is structurally the
+wrong home; FEELTEST already owns `Fx.Texts` geometry and stages this exact trio.
+
+### C8 [minor] The kill-cam window drained behind the pause card
+
+`_killCam -= dt * AnimSpeed` and the `_camPulse` relax sit above the pause gate, and ESC is live
+throughout the window because the block that reads it is above the anim pump. `KillUnit`'s
+mission-ending arm sets `HitStop = 0`, so the hit-stop return does not fire; the phase stays
+PlayerTurn/EnemyTurn for the whole 0.45 s (≈1.5 s of real time at `TimeScale = 0.25`). Pause inside
+it and both the window and the HELD zoom-punch were spent behind an opaque card.
+
+**Fix.** The `Frozen` gate (above).
+**Gate.** `SIGHTLINE_FEELTEST` leg (d2). Pre-fix:
+`killcam-paused: armed 0.450s -> 60 paused frames 0.000s (pulse 0.130 -> 0.000)` →
+`FAIL (killCamDrainedBehindTheCard(0.450s->0.000s),zoomPunchSpentBehindTheCard(0.130->0.000))`.
+Post-fix: `armed 0.450s -> 60 paused frames 0.450s (pulse 0.130) -> 60 live frames 0.000s` — held,
+then drained.
+
+## All eight reproduced
+
+None of the eight was refuted on today's tree. Six were reported as reasoned-only; all six are now
+**observed**, each by a test that was seen RED before its fix. The one correction to the input is
+the second arm of C4 (the briefing), recorded above and not claimed.
+
+## Gates
+
+- `dotnet build -c Release` → **0 warning / 0 error**.
+- `bash scripts/qa-sweep.sh --full` → **SWEEP-EXIT-CODE=0**, every line PASS, no COVERAGE GAP,
+  autoplay LOSE / LOSE / WIN, no TIMEOUT. Derived counts **80 exist / 80 ran** — identical to the
+  base commit's (`grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u | wc -l`
+  reads 81 at both `a933cfe` and here, minus the one `_SWEEP_EXEMPT` entry).
+
+## Screenshots
+
+- `docs/p12-kia-row0-before.png` / `docs/p12-kia-row0-after.png` — the same board (seed-pinned
+  `SIGHTLINE_SEED=4242`, STEEL / IRON REACH), a KIA on board row 0. BEFORE: "KIA KRESS "GHOST"" is
+  in the top HUD bar, overprinting MISSION 1/6 and the objective label and clipped by the plate.
+  AFTER: it is on the board at y≈118, clear of the plate, with the "KIA" pop above it.
+- `docs/p12-laststand-card-before.png` / `docs/p12-laststand-card-after.png` — a mid-stand LAST
+  STAND barracks with the card up and QUIT armed. BEFORE: **SETTINGS / BACK, no END STAND**, under
+  an armed quit that reads "the stand ends here - its waves are not saved". AFTER: **PAUSED /
+  RESUME / END STAND**.
+
+## What this wave did NOT do
+
+- **No new `SIGHTLINE_*TEST` hook.** All eight assertions are legs on tests that already own the
+  surface — MODETEST (mode/phase state and the mode screens), SETTINGSTEST (the card), FEELTEST
+  (`Fx` geometry and THE BEAT), AUDITIONTEST (the bench). The sweep's derived counts and its
+  COVERAGE GUARD are therefore unchanged, which is the right outcome: these defects were never a
+  missing hook, they were missing assertions inside the hooks that already ran.
+- **No balance measurement.** Nothing here touches the sim, and the two behavioural changes that
+  could (`Frozen`, the text ladder) are unreachable under AutoPlay / away from the board's top edge
+  respectively. No ladder number is restated.
+- **Did not clamp a text's RISE.** A number spawned near the ceiling still drifts up and off as it
+  dies, at an alpha heading for zero. Bounding the spawn is the defect; pinning risen text to the
+  top of the window would look like a pile-up.
+- **Did not widen `CardInFight`.** Two predicates, because the camera legend and the abandon row are
+  genuinely different questions.
+- **Did not route the whole keymap through `KeyPin`.** Three read sites, named. A general injection
+  layer over every `Raylib.IsKeyPressed` in the project is a different wave and a much larger diff.
+
+## Open, handed on
+
+- **The intro's caption chain has ~35 lines of dead code.** `Hud.DrawIntro` still carries the
+  pre-FRONT-DOOR `else if (CheckCollisionPointRec(introMouse, OverlayBtnN)) caption = "…"` chain, and
+  every branch of it is unconditionally overwritten twenty lines later by
+  `hoverId = … g.IntroHit(introMouse); if (hoverId != null) caption = IntroDoorCaption(hoverId);`.
+  It is not merely dead — it is a **trap**: someone updated the skirmish caption in the dead copy
+  (it already said "the opposition") while the live table stayed stale, which is half of C6. Delete
+  the chain. Recorded in ROADMAP.
+- **`HandleOverlayClick`'s `if (Phase == Phase.Barracks)` is unreachable** — the function is
+  dispatched only for Intro / Win / Lose. Carried into `ActPrimary` unchanged rather than removed in
+  a defect wave; it is harmless and its removal deserves its own check that nothing else calls it.
+- **The `[Q]`-during-a-drag ordering is fixed but only structurally tested.** Leg (F) proves the
+  drag owns the card's keys via `KeyPin`; it does not prove the process-exit path, because the test
+  cannot let the process exit.

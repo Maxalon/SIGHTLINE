@@ -798,10 +798,61 @@ public partial class Game
             if (facA != facB) fails.Add($"dailyFactionNonDeterministic({facA}/{facB})");
             if (forceA != forceB) fails.Add("dailyForceNonDeterministic");
             Console.WriteLine($"MODETEST daily {DailyStamp} faction={facA} force={forceA}  (must match across processes)");
+
+            // (10) P12 THE CONFIRMED EIGHT (C1) — AN ENDED RUN'S MODE DIES AT *EVERY* END-CARD DOOR.
+            // The end card has TWO exits that land on the main menu (MAIN MENU [Esc] and WAR ROOM
+            // [W] -> BACK) and only the first cleared `Mode`. Take the other one after a TRAINING
+            // OP and you arrive on Phase.Intro with Mode == Training; the intro's DEPLOY SQUAD
+            // plate is the ONE door dispatched outside the ActIntro table, so it fell through to
+            // ActPrimary's "re-run the drill" branch — the main menu's primary verb, captioned
+            // "NEW CAMPAIGN - draft a squad...", launched the drill instead. Both doors, both
+            // asserted, and the assertion is pressed through the same methods the player's click
+            // dispatches to.
+            NoPersist = true;
+            foreach (bool viaWarRoom in new[] { true, false })
+            {
+                string door = viaWarRoom ? "warroom" : "mainmenu";
+                BeginTraining();
+                if (Mode != GameMode.Training) fails.Add($"endCard:{door}:trainingModeNotSet");
+                EndTraining(true);
+                if (Phase != Phase.Win) fails.Add($"endCard:{door}:trainingWinCardNotSet");
+                if (viaWarRoom)
+                {
+                    ActEndWarRoom();
+                    if (Phase != Phase.WarRoom) fails.Add("endCard:warroom:doorDidNotOpen");
+                    ExitWarRoom();
+                }
+                else ActEndMainMenu();
+                if (Phase != Phase.Intro) fails.Add($"endCard:{door}:landsOn:{Phase}");
+                if (Mode != GameMode.Campaign) fails.Add($"endCard:{door}:leakedMode({Mode})");
+                if (DailyMode) fails.Add($"endCard:{door}:leakedDailyFlag");
+                // ...and the intro's PRIMARY verb (the DEPLOY SQUAD plate / [Enter]) opens a
+                // CAMPAIGN rather than re-running the drill.
+                ActPrimary();
+                if (Mode != GameMode.Campaign) fails.Add($"endCard:{door}:introDeployLaunched({Mode})");
+            }
+
+            // (11) P12 THE CONFIRMED EIGHT (C6) — WHAT A SCREEN ADVERTISES, THE MANUAL CARRIES.
+            // THE MODES GET THE BESTIARY added the [TAB] faction dial to SKIRMISH SETUP and painted
+            // it into that screen's own legend and blurb — and left Hud.KeyTable, the SINGLE source
+            // for the in-game FIELD MANUAL's VERBS & KEYS tab and for README's generated controls
+            // block, on its pre-wave row. The screen therefore advertised a binding the manual a
+            // player opens in-game did not enumerate, for a whole program. Note the gate has to be
+            // SCOPED TO THE SCREEN'S OWN ROW: "Tab" already appears in an unrelated in-mission row
+            // ("cycle to the next soldier"), so an any-row membership check would have passed on
+            // the broken tree.
+            var (skIn, skAct) = Hud.KeyTableRow("SKIRMISH SETUP");
+            if (skIn == null) fails.Add("keyTable:noSkirmishSetupRow");
+            else
+                foreach (var (key, what, manual) in Hud.SkirmishLegend)
+                {
+                    if (!skIn.Contains(manual)) fails.Add($"keyTable:skirmishSetupRowOmits[{key}]as'{manual}'");
+                    if (!skAct.Contains(what)) fails.Add($"keyTable:skirmishSetupActionOmits'{what}'");
+                }
         }
         catch (Exception e) { return "MODETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched; a skirmish fields the full roster, pods of 3 and one mid-boss from heat 4; the daily has a named faction and the same stamp deals the same force)"
+            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched; a skirmish fields the full roster, pods of 3 and one mid-boss from heat 4; the daily has a named faction and the same stamp deals the same force; BOTH end-card doors to the main menu clear an ended run's mode, so the intro's DEPLOY plate opens a campaign and not the drill; the FIELD MANUAL's SKIRMISH SETUP row names every key that screen's own legend advertises)"
             : "MODETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
