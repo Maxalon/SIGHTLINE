@@ -3393,3 +3393,73 @@ Detail in `docs/DEVLOG.md` §SHIPS AS v1.0.0; the contract is `docs/DISTRIBUTION
       unlocks is back where the docket started, one ladder later. Whether that is fine (the ladder
       is finite, so a finite reward track matching it is correct) or whether the top wants a
       genuinely repeatable, non-power sink is an OWNER decision, not a defect to fix by reflex.
+
+---
+
+## PROGRAM PARALLAX — wave "L6 THE LADDER OF RECORD" (2026-09-04, base `6a6ebee`, DEVLOG §L6)
+
+**L6 is the ladder of record** (`CLAUDE.md`, raw round `docs/measurements/l6/`). The "L5 is a
+pre-P20 ladder" warning is resolved. **No corrective lever was shipped** — two rungs under floor is
+a finding, as in L4 and L5. What L6 leaves open, in priority order:
+
+- [ ] **`Mission.Build` DOES NOT OWN ITS OWN GRID — MOVE `Grid.ClearHazards()` INTO IT.**
+      **THE DESIGN IS SETTLED; THIS IS A DECISION, NOT A DISCUSSION.** `Grid` has eight per-tile
+      arrays. Six are cleared by `Build` and leak nothing. `Fire` is uncleaned but inert (nothing in
+      Build reads it). **`Barrel` MOVES THE BOARD**: `Grid.IsFloor` is
+      `InBounds && Tiles==Floor && !Barrel[x,y] && !rift` — a barrel sits in the same predicate the
+      rift was added to — so `TryApplyLayout`'s accept/reject guard, `EnsureConnectivity`'s carve
+      and `PlaceBarrels`' filter all read the PREVIOUS mission's barrels. Measured, one dirty layer
+      at a time: dirtying `Barrel` alone moves **Tiles, Height, CoverHp, CoverSeed and Barrel**.
+      **It is LATENT, NOT LIVE — no live board defect exists.** `Game.SetupMission` is the only
+      production caller of `Mission.Build`, every mode funnels through it, and it calls
+      `Grid.ClearHazards()` unconditionally 28 lines before the call. What is wrong is *where* the
+      invariant lives: in the caller, not in Build — **the exact arrangement `Ground` had, which
+      bit at 8-15% of daily processes (P20)**. One line, in one place, is all that stands between
+      here and P20.
+      **THE FIX:** move `Grid.ClearHazards()` from `Game.SetupMission` into `Mission.Build`, beside
+      `ClearGround`. On every production path it is a no-op (the clear already runs, immediately
+      before, and it is idempotent). **It was deliberately NOT shipped in L6** because 96 ladder
+      chunks were already measured when it was found, and a board-touching edit — even a provably
+      inert one — would publish a ladder measured on a tree that no longer existed. That is the
+      mixing the one-lever-per-round rule prevents, and C4 was burned by it once.
+      **WHAT THE WAVE OWES:** the move, then MODETEST leg (14a-2) widened from the six layers Build
+      clears to all eight with the same dirt (the leg is written to make that a one-line change),
+      then a CRN-paired inertness round to prove the no-op — chunks are ~8 s on this box, so
+      2 rungs x 16 slot sets is about five minutes. Until it lands, **any new caller of
+      `Mission.Build` must clear hazards first**, and `CLAUDE.md`'s `Grid.cs` entry says so.
+- [ ] **THE FORK PAYS HAS NO RESTORE FLAG, AND IT BROKE THE CRN CHAIN.** `Run.DepthBase` (10 -> 12),
+      `SupplyDiscount`, `PitchedPremium` and `ElitePremium` are `const int`s in `src/Run.cs` with no
+      environment switch, against `CLAUDE.md`'s rule that every gameplay lever has one "because a
+      wave that cannot be switched off cannot be attributed". L6's bridge to L5 failed on **96 of 96
+      chunks** and bisection put the break on that one merge; L6 could only price the wave by
+      building milestone 5 as a second tree. **Give the four constants a `SIGHTLINE_FORKPRICE=0`
+      arm** (statics read once at class load, the `Terrain.NewGround` pattern) so the chain becomes
+      crossable and the L5 archive becomes reachable again. Cheap, and it retires a permanent hole.
+- [ ] **THE LADDER'S SOFT SPOT MOVED AND IS NOT LOCATED.** `h6 -> h8` buys **2.5** points, the
+      smallest step in the L6 table, and `h0 -> h2` buys 8.4 where L5 read 14.1. C1 located the
+      last flat step by measuring **all ten rungs** (a six-rung ladder cannot see which of two rungs
+      is the flat one, which is how a dead `AiTier` row survived two programs). **A per-RUNG L6 is
+      the diagnostic**, and at ~8 s a chunk it is affordable now in a way it was not for C1.
+- [ ] **h0 IS UNDER ITS FLOOR ON TWO SUCCESSIVE LADDERS** (L5 -0.1, L6 -2.6; 1.23 cluster-SE under).
+      L4/C1 flagged the LEVEL at the top of the ladder as the biggest open number and it has not
+      moved. An apex-neutral `Heat.Mods` lever cannot fix it — it is a BASE-difficulty lever, and it
+      needs one round per side (X1's rule for `MakeHostile`).
+- [ ] **P20's own h4 number should be corrected where it is quoted.** L6 re-priced the lever on 16
+      slot sets: **-2.5, n_disc 22, MDE 4.1, NOT RESOLVED**, with P20's own 8 sets giving -4.4
+      (z = -2.33) and 8 sets it never saw giving -0.6. `docs/measurements/p20/README.md` still says
+      "h4 is resolved: the fix is a -3.8-point tightening". It was resolved *on those eight sets*.
+      **A rung is sixteen slot sets. So is a lever** — third measurement of that shape after L5's
+      split-half and W2's four-vs-sixteen.
+- [ ] **SLOT 46's MISSION-1 `Eliminate` DEADLOCKS BOTH POLICIES.** It stalls at h0/h2 (sloppy) and
+      h6/h8 (greedy), `runTurns` 51 every time; L5 saw the same world stall at h0/h2/h4 on sloppy
+      alone, so it has survived a board-moving wave and spread to the other policy. That makes it a
+      property of the opener, not of a rung or a policy — and the most reproducible autopilot case
+      anyone will get: `SIGHTLINE_BALANCE_BASE=40`, slot 46. The stalemate arm is 1.77% of L6's
+      1,920 campaigns and it is an instrument floor, not a ladder effect (the RUN arm has now fired
+      **zero** times across three ladders).
+- [ ] **THE SCREEN AUDIT STILL HAS NO OVERLAP CHECK, AND NOW NEITHER HALF OF THE BOARD GATE DID.**
+      L6 widened `BoardSignature()` from Tiles + Height + seats to all eight layers, because the
+      gate that caught P20 was blind to the layer next door. That is one instance of a pattern
+      worth a pass of its own: **ask of each gate what it would have said if the thing it guards
+      were broken.** (P18's open item about `FITTEST` having no drawn-string-vs-plate overlap check
+      is the other live instance.)

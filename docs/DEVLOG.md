@@ -15979,3 +15979,216 @@ name existed only in a comment this wave wrote in `src/Mission.cs`, pointing at 
 was folded into MODETEST instead. The guard scans `src/` for hook-shaped names and does not care
 that the occurrence is a comment, so naming a hook you did not build is a hard failure. That is the
 right behaviour and the opposite of the failure mode PARALLAX opened on: it failed **loud**.
+
+---
+
+# WAVE "L6 — THE LADDER OF RECORD" (2026-09-04, dev on `wave/ladder-l6`, base `6a6ebee`)
+
+**A measurement wave. Its product is a number and the evidence for it.** `CLAUDE.md` carried a
+warning that L5 was a **pre-P20** ladder and an absolute win rate from it could not be quoted
+against this tree — an honest flag that left the project's reference measurement not describing the
+game. P16, P18 and P19 had landed since L5 as well, so L6 is the first measurement of the
+**composed** tree. Protocol is L5's exactly, because the point is comparability of *method* even
+when the numbers move: 6 rungs, **16** CRN slot bases, n=320/rung, heat pinned, three-layer chunk
+assertions, Release binary from a gitignored snapshot.
+
+**224 chunks, every one asserted, zero `BAD` — 4,480 campaigns.** Raw round, every runner and every
+analysis script: `docs/measurements/l6/`. **No corrective lever was shipped.**
+
+## 1. THE LADDER (base `6a6ebee`, pinned, 16 clusters of 20 per rung, n=320)
+
+| rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|---|
+| **win%** | **70.6** | **44.4** | **35.9** | **23.1** | **11.2** | **8.8** |
+| binomial SE | 2.55 | 2.78 | 2.68 | 2.36 | 1.77 | 1.58 |
+| **cluster SE** | 2.41 | 2.13 | 2.89 | 3.09 | 2.17 | 1.41 |
+| band | 67-83 | 47-63 | 32-48 | 22-38 | 12-28 | 5-15 |
+| verdict | IN (+3.6) | **OUT −2.6** | IN (+3.9) | IN (+1.1) | **OUT −0.8** | IN (+3.8) |
+
+Monotone at every step; four of six in band. Steps 26.2 / 8.4 / 12.8 / 11.9 / **2.5**.
+`LEAK-CHECK: PASS` — 96/96 chunks pinned, `campaignsRaised = missionsAbovePin = 0` on every one
+(7,928 missions), while the bot still took a heat-raising arm 150 times: the pin nulls the outcome,
+not the choice.
+
+**Neither OUT is a measured breach and no IN is a robustness claim.** h0 is 1.23 cluster-SE under
+its floor, h6 0.35 under, and h4 clears its floor by 0.36 cluster-SE — inside the noise in the
+other direction. **The shape's soft spot has moved:** h6→h8 buys 2.5, the smallest step in the
+table, and h0→h2 buys 8.4 where L5 read 14.1. Locating a flat step is what C1's per-RUNG ladder is
+for; this round sampled six rungs, not ten, and did not chase it.
+
+## 2. THE BRIDGE BROKE, AND LOCATING IT WAS WORTH MORE THAN THE LADDER
+
+The bridge arm is the same 96 cells with **every gameplay lever that landed since L5's base
+restored** — a set *derived* by diffing the env-var surface of `src/` at `7180374` against this
+tree's, not remembered from a written-down list, because written-down lists here go stale:
+`AILANE=0` (P10), `NEWGROUND=0` (P16), `SECONDAXIS=0` `PERKPICK=0` `ASSISTLATCH=0` (P18),
+`ELITEBOSS=0` `ROSTERID=0` (P19), `STALEGROUND=1` (P20). Excluded with reasons in the runner:
+`MODEDEPTH` (skirmish-only), `BIOMEDEAL` (default off *is* pre-P16), `MISSIONFLUSH` (a `Stats`
+bookkeeping arm), `DECLINEWATCH` (its default is the shipped ratio).
+
+**Against L5 it reproduced 0/96 chunks and 1,519/1,920 legs.** Bisecting by milestone merge, one
+cell of L5's own ladder replayed on each snapshot with that snapshot's own defaults:
+
+```
+7180374  SAME SAME SAME SAME   <- THE CONTROL: L5's own base commit
+cb58a4b  diff2 diff0 SAME diff1   <- main WITHOUT the heat pin — not a gameplay break, see below
+715e1a0  SAME SAME SAME SAME   <- milestone 3
+ad2f6c9  SAME SAME SAME SAME   <- milestone 4
+54147dc  diff2 diff8 diff5 diff7  <- MILESTONE 5: THE FORK PAYS
+```
+
+1. **The control passes**, which rules out the runner change (L5 used `c1/run_chunk.sh`; this round
+   uses `p15/run_chunk.sh`, the runner of record) and makes every row below mean what it says.
+2. **`cb58a4b` is not a break.** `7180374` is the tip of the heat-pin wave branch, merged at
+   milestone 3; milestone 2 merged before it, so a batch there runs **unpinned**. Milestone 3 —
+   containing milestone 2 *and* the pin — reproduces L5 on all four cells, which is also the proof
+   that "the modes get the bestiary" is campaign-inert.
+3. **THE BREAK IS THE FORK PAYS**, which repriced the routing economy — `Run.DepthBase` 10 → 12,
+   a SUPPLY discount, a PITCHED premium, an ELITE premium — with every one a `const int` in
+   `src/Run.cs` and **no environment restore flag**. `CLAUDE.md`'s own rule is that *every*
+   gameplay lever gets one "because a wave that cannot be switched off cannot be attributed". This
+   one cannot, so **no bridge to L5 can exist through it, by construction.** That is the finding:
+   not that a number moved, but that the project shipped an unswitchable gameplay change and only
+   noticed two programs later, when the ladder needed to cross it.
+
+**The bridge that DOES hold, one merge later.** Against milestone 5 itself — built from its own
+worktree and run on the same 96 cells with its own defaults — the bridge arm is **96/96 chunks and
+1,920/1,920 outcomes identical.** So every wave from milestone 6 through milestone 12 is fully
+switchable and its restore flag does what it claims, and the CRN machinery is intact across seven
+merges. The chain is broken at exactly one named place and reproduces on both sides of it.
+
+*(The milestone-5 arm predates P15, so its JSONs carry no `batch` block and layer (c) refuses them
+rather than guessing — the P15 defect, working. Those 96 were re-checked with
+`check_chunk.py --legacy`: 96 OK, 0 BAD, with the tool printing "this is an assumption, not a
+check" for the run count. What makes that arm trustworthy is not its own accounting but the
+1,920/1,920 match: a chunk that had measured the wrong rung could not reproduce it campaign for
+campaign.)*
+
+## 3. THE PRICE OF THE UNFLAGGED WAVE, AND OF THE FLAGGED ONES
+
+Because the bridge arm *is* the milestone-5 tree, `L5 → L6bridge` is a clean CRN-paired measurement
+of THE FORK PAYS on 6 rungs × 16 slot sets — **twelve times its own round's n**. Every row carries
+`n_disc` and the MDE, per C2's rule that a CRN round's resolving power is its discordant count:
+
+| | RECRUIT | h0 | h2 | h4 | h6 | h8 | pooled |
+|---|---|---|---|---|---|---|---|
+| **THE FORK PAYS** delta | −1.2 | −4.4 | +2.8 | +0.9 | 0.0 | −0.3 | **−0.36** |
+| n_disc / MDE(80%) | 76 / 7.6 | 88 / 8.2 | 93 / 8.4 | 67 / 7.2 | 46 / 5.9 | 31 / 4.9 | 401 / 2.9 |
+| **P10+P16+P18+P19+P20** delta | +0.9 | +1.9 | +0.3 | +2.2 | −1.9 | +0.9 | **+0.73** |
+| n_disc / MDE(80%) | 87 / 8.2 | 110 / 9.2 | 107 / 9.1 | 93 / 8.4 | 50 / 6.2 | 41 / 5.6 | 488 / 3.2 |
+
+**Neither half of the L5 → L6 difference is a measured lever move** — every rung sits inside its
+own MDE, both pooled CIs include zero. THE FORK PAYS changed 401 of 1,920 paired worlds (20.9%) and
+still shows no level effect, which is exactly what its own README claimed on 160 campaigns at two
+rungs; that claim now has 1,920 campaigns at six rungs behind it. **Read this as a limit on the
+instrument, not a licence to compare L5 with L6 directly.** Neither is a zero: the per-rung MDEs
+are 4.9–9.2 points.
+
+## 4. P20 RE-PRICED ON SIXTEEN SLOT SETS — AND IT DOES NOT SURVIVE THE DOUBLING
+
+This wave exists because P20 was reported as a −3.8 tightening at h4 (z = −3.00, chunk-paired
+t = −3.97, negative in all eight slot sets). Same lever, same binary, `SIGHTLINE_STALEGROUND=1`
+against the ladder's own chunks, **16 slot sets**:
+
+| rung | slot sets | stale | shipped | delta | n_disc | MDE | z | chunk t |
+|---|---|---|---|---|---|---|---|---|
+| h0 | all 16 | 42.2 | 44.4 | +2.2 | 31 | 4.9 | +1.26 | +1.24 |
+| h4 | P20's 8 (b0–70) | 22.5 | 18.1 | **−4.4** | 9 | 5.3 | **−2.33** | **−2.50** |
+| h4 | 8 NEW (b80–150) | 28.8 | 28.1 | **−0.6** | 13 | 6.3 | −0.28 | −0.23 |
+| **h4** | **all 16** | **25.6** | **23.1** | **−2.5** | **22** | **4.1** | **−1.71** | **−1.52** |
+
+**P20's h0 non-result reproduces (+2.2 both times). P20's h4 RESULT is a property of P20's eight
+slot sets:** on eight sets it never saw, the same lever is −0.6 and indistinguishable from nothing.
+**This is the third time this project has measured that shape** — L5's split-half found L4's h0 and
+h8 were single draws of eight clusters; W2 found four slot sets putting a leg below a band floor
+that sixteen put inside; here eight sets resolve a lever that sixteen cannot. **A rung is sixteen
+slot sets. So is a lever.**
+
+What P20 unambiguously did is **move the board, and that reproduces**: 27.2% of h0 and 22.2% of h4
+paired campaigns take a different course (P20 reported 25.3% / 16.6%). So the `CLAUDE.md` warning
+was right about the mechanism and overstated about the consequence — the ladder did owe a
+re-measure, and the win-rate effect of P20 alone is not resolved at n=320/rung. **Not resolved is
+not zero:** the 16-set h4 estimate is −2.5 with an MDE of 4.1.
+
+## 5. STALEMATES
+
+| | mission arm | run arm | share |
+|---|---|---|---|
+| L6 ladder (1,920) | **34** | **0** | 1.77% |
+| L6bridge (1,920) | 28 | 0 | 1.46% |
+
+**The run arm fired zero times again, in every arm of this round** (`runTurns` at the stall 51–75
+against a cap of 150) — W9's backstop is a backstop, three ladders running. L6's 1.77% against
+L5's 1.41% is 7 campaigns in 1,920 and nothing here resolves that as a change rather than a draw.
+By objective: Escort 10, Eliminate 9, Evac 8, Rescue 6, Decapitate 1; missions 2–4 hold 26 of 34.
+**Slot 46's mission-1 Eliminate stalls at four rungs — h0/h2 sloppy, h6/h8 greedy, runTurns 51
+every time.** L5 recorded the same world stalling at h0/h2/h4 on the sloppy policy alone; it has
+now survived a board-moving wave and taken the greedy policy with it, so the deadlock belongs to
+that opener rather than to a rung or a policy. `SIGHTLINE_BALANCE_BASE=40`, slot 46 — the most
+reproducible autopilot case anyone will get.
+
+## 6. P20's OPEN ITEM, CLOSED — AND `Grid` HAS A SECOND STALE LAYER
+
+P20's regression leg pinned **one** of `Grid`'s eight per-tile arrays against stale carry-over and
+left a note saying the accounting for the other seven *looks* complete — "which is what the ground
+layer looked like for two programs". Extending it to all eight asserts the general statement the
+specific one instances: **Build's output is a function of Build's inputs, whatever the grid held
+before.** Two Builds, same mission number, same reseeded stream, same fresh squad, one on a clean
+grid and one on a dirty one. **It fails on 6 of 8.** Per-layer attribution, one dirty layer at a
+time — this table replaces "the accounting looks complete", and it is the deliverable:
+
+```
+dirt=Tiles      moved=[]                                        force=same
+dirt=Height     moved=[]                                        force=same
+dirt=Smoke      moved=[]                                        force=same
+dirt=CoverHp    moved=[]                                        force=same
+dirt=CoverSeed  moved=[]                                        force=same
+dirt=Ground     moved=[]                                        force=same   <- P20's fix, holding
+dirt=Fire       moved=[Fire]                                    force=same
+dirt=Barrel     moved=[Tiles Height CoverHp CoverSeed Barrel]   force=same
+```
+
+Six are self-cleaning; **Fire** is inert but uncleaned; **`Barrel` moves the board.** `Grid.IsFloor`
+is `InBounds && Tiles==Floor && !Barrel[x,y] && !rift` — a barrel sits in the same predicate the
+rift was added to — so every connectivity flood inside Build reads the previous mission's barrels:
+`TryApplyLayout`'s accept/reject guard, `EnsureConnectivity`'s carve (which says so itself: *"a
+barrel keeps a tile non-walkable"*), `PlaceBarrels`' candidate filter. **It is P20's defect with a
+different array in the same slot of the same test.**
+
+**It is LATENT, NOT LIVE, and that distinction is not a hedge.** `Game.SetupMission` is the only
+production caller of `Mission.Build` — the other two are a harness call on a fresh `new Grid()` and
+this leg — every mode funnels through it, and it calls `Grid.ClearHazards()` unconditionally, with
+no branch, 28 lines before the Build call. **No live board defect was found.** What is wrong is
+*where* the invariant lives: in the caller, not in Build. That is the exact arrangement `Ground`
+had, and it bit at 8-15% of daily processes. **One line, in one place, is all that stands between
+here and P20.**
+
+**The fix is agreed and deliberately NOT shipped here.** Moving `Grid.ClearHazards()` into
+`Mission.Build` beside `ClearGround` is a no-op on every production path, but 96 ladder chunks were
+already measured when this was found, and a board-touching edit — even a provably inert one — would
+mean the ladder L6 publishes was measured on a tree that no longer existed by the time it landed.
+That is the mixing the one-lever-per-round rule exists to prevent, and this project has already
+been burned by a wave whose shipped layer was not its measured layer (C4). It is `docs/ROADMAP.md`'s
+next item, with the design settled.
+
+**So the assertion splits where the code splits, rather than where one would prefer:**
+- **(14a-2)** the six layers Build itself clears, at the **Build seam**, plus the force and the
+  seats. Proven able to fail: with `SIGHTLINE_STALEGROUND=1` the same dirt must move a layer.
+- **(14b)**, extended, the full eight at the **`SetupMission` seam** — the shipped path, where the
+  hazard clear actually is. That is what covers Fire and Barrel, and it fails loudly if a future
+  caller stops doing Build's job.
+
+**And the gate that caught P20 was blind to the layer next door.** `BoardSignature()` hashed
+Tiles, Height and unit seats only, so no barrel difference was ever visible to it — not to (14b),
+not to the daily's cross-process check. It now hashes **all eight layers**. That is a harness-only
+widening (the function has no caller outside `ModeSelfTest` and `DailySignatureLine`), which is
+precisely why it was safe to do inside a measurement wave when the `ClearHazards` move was not.
+It broke no existing assertion: MODETEST passes ×3 including the cross-process leg.
+
+## 7. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — see §Gate numbers in the wave's final report; every self-test
+  PASS, no COVERAGE GAP, no TIMEOUT, `SWEEP-EXIT-CODE=0`.
+- `SIGHTLINE_MODETEST=1` ×3 on the shipped binary — 3 PASS, with the widened signature.
+- 224/224 chunks asserted; `rows.py --check` on all 192 shipped-runner chunks — `ROWS-CHECK: PASS`.

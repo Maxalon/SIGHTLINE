@@ -357,7 +357,15 @@ src/
                 yet, because Game.StampBiomeGround runs AFTER Build. So a board was a function of
                 the board before it. SIGHTLINE_STALEGROUND=1 restores that; never ship it on.
   Voice.cs      the squad's radio barks (line pools + the cooldown/priority picker)
-  Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
+  Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra.
+                EIGHT per-tile arrays (Tiles/Height/Smoke/CoverHp/CoverSeed/Fire/Barrel/Ground).
+                L6: SIX are cleared by `Mission.Build` itself and leak nothing into its own
+                terrain decisions; **Fire and Barrel are cleared by the CALLER**
+                (`Game.SetupMission` -> `Grid.ClearHazards()`, the only production caller), and
+                `Barrel` is read by `IsFloor`, so a stale one would move the board exactly as the
+                stale Ground did. MODETEST leg (14a-2) gates the six at the Build seam and (14b)
+                all eight at the SetupMission seam. Moving the clear into Build is ROADMAP's next
+                item — until then, ANY new caller of Mission.Build must clear hazards first.
   Terrain.cs    C4 + P16: the per-tile biome GROUND layer. FIVE of eight biomes are mechanical
                 on five axes - VERDANT undergrowth (cover) / TUNDRA ice (movement) / MAGMA
                 vents (sight) / VOID RIFT (topology: impassable, TRANSPARENT, no cover) /
@@ -605,76 +613,88 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > > now plays a different world. Measured over the exact 10 slots X2 archived as `S1-h0-b0`, the tree
 > > reproduced **10/10** slots up to W1's break and **3/10** after it.
 > >
-> > So the table below, and every archive under `docs/measurements/` dated before W1
-> > (`x1/`, `x2/`, `w4/`, `l1/`), are **INCOMPARABLE with anything measured on the current tree**.
+> > So every archive under `docs/measurements/` dated before W1 (`x1/`, `x2/`, `w4/`, `l1/`) is
+> > **INCOMPARABLE with anything measured on the current tree**. (The ladder of record BELOW is
+> > post-W1 and is not affected; this warning is about the pre-W1 archives it superseded.)
 > > They remain valid as history — L1 in particular is the only n≥80 picture of the pre-repair tree
 > > that will ever exist — but a number from them may not be **compared** with, or **rescaled** to, a
 > > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
 >
 >
-> ### ⚠ L5 IS A **PRE-P20** LADDER. Wave P20 THE STALE GROUND removed a read of the PREVIOUS
-> mission's ground layer from `Mission.Build`, which **moves the terrain**: CRN-paired on `dac9f2f`
-> (`SIGHTLINE_STALEGROUND=1` as the control), the same slot seed now plays a measurably different
-> world on a substantial share of campaigns. The pairing MACHINERY is intact — a slot is still a
-> slot — but an ABSOLUTE win rate from L5 may not be compared with one measured after P20 without
-> saying so. `docs/measurements/p20/` has the priced round; DEVLOG §P20 §5 has what it does and
-> does not resolve. **The ladder owes a re-measure.**
+> ### ⚠ THE LADDER OF RECORD IS **L6**. L5 AND EVERYTHING BELOW IT ARE PROVENANCE.
+> **The "L5 is a pre-P20 ladder" warning that stood here is RESOLVED: L6 re-measured the composed
+> tree.** It also re-priced P20 alone on SIXTEEN slot sets and found P20's own headline (−3.8 at
+> h4, "resolved") **does not survive the doubling** — on eight sets P20 never saw, the same lever
+> reads −0.6. The board does move (27.2% / 22.2% of paired campaigns take a different course, which
+> reproduces P20's 25.3% / 16.6%); the WIN-RATE effect is not resolved at n=320/rung. Details below
+> and in DEVLOG §L6.
 >
-> ### ⚠ THE LADDER OF RECORD IS **L5**, ON THE PINNED INSTRUMENT. THE L4 AND C1 TABLES BELOW ARE PROVENANCE.
->
-> **L5 — base commit `7180374` (wave THE HEAT PIN AND L5 part A on `178464a`), heat PINNED
+> **L6 — base commit `6a6ebee` (`main` after PROGRAM PARALLAX milestone 12), heat PINNED
 > (`EventCatalog.HeatPinned` — a rung means the rung), 6 rungs x **16** CRN slot bases (0..150),
-> n=320/rung, 1,920 campaigns, 96/96 chunks `runs=20` asserted, `LEAK-CHECK PASS` (0 of 6,749
-> missions off-rung). Raw round: `docs/measurements/l5/` (README has every table below in full).**
+> n=320/rung, 1,920 campaigns; 224 chunks over the whole round, every one asserted through
+> `p15/run_chunk.sh` (THE RUNNER OF RECORD — not `c1`'s, which drove L4/L5 and is superseded),
+> zero BAD, `LEAK-CHECK PASS` (0 of 7,928 missions off-rung). Raw round: `docs/measurements/l6/`
+> (README has every table below in full).**
 >
 > | rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
 > |---|---|---|---|---|---|---|
-> | **win%** | **70.9** | **46.9** | **32.8** | **20.0** | **13.1** | **8.1** |
-> | binomial SE | 2.54 | 2.79 | 2.62 | 2.24 | 1.89 | 1.53 |
-> | **cluster SE** | 2.93 | 3.41 | 3.09 | 2.96 | 2.32 | 1.98 |
+> | **win%** | **70.6** | **44.4** | **35.9** | **23.1** | **11.2** | **8.8** |
+> | binomial SE | 2.55 | 2.78 | 2.68 | 2.36 | 1.77 | 1.58 |
+> | **cluster SE** | 2.41 | 2.13 | 2.89 | 3.09 | 2.17 | 1.41 |
 > | band | 67-83 | 47-63 | 32-48 | 22-38 | 12-28 | 5-15 |
-> | verdict | IN (+3.9) | **OUT -0.1** | IN (+0.8) | **OUT -2.0** | IN (+1.1) | IN (+3.1) |
+> | verdict | IN (+3.6) | **OUT -2.6** | IN (+3.9) | IN (+1.1) | **OUT -0.8** | IN (+3.8) |
 >
-> **Monotone at every step; four of six in band.** Steps 24.1 / 14.1 / 12.8 / 6.9 / 5.0. h0 sits ON
-> its floor (0.04 cluster-SE under) and h4 is 0.68 cluster-SE under — neither is a measured breach,
-> and no IN is a robustness claim (h0's jackknife range 45.3-48.3 straddles the floor).
+> **Monotone at every step; four of six in band.** Steps 26.2 / 8.4 / 12.8 / 11.9 / **2.5**. Neither
+> OUT is a measured breach (h0 is 1.23 cluster-SE under its floor, h6 0.35) and no IN is a
+> robustness claim (h4 clears its floor by 0.36 cluster-SE — inside the noise the other way).
+> **The soft spot MOVED: h6->h8 buys 2.5, the smallest step in the table, and h0->h2 buys 8.4 where
+> L5 read 14.1.** Locating a flat step is what C1's per-RUNG ladder is for; L6 sampled six rungs.
 >
-> **THE BRIDGE: L4 REPRODUCED TO THE CAMPAIGN.** The same binary with `SIGHTLINE_HEATPIN=0` on L4's
-> 8 slot sets gives L4's 960 outcomes **960/960, 48/48 chunks** — the CRN chain is intact from
-> `7315425` through every PARALLAX merge and part A. **The pin is worth +1.0 pooled** (960 CRN pairs,
-> 17 vs 7 discordant, z=+2.04): +2.5 / +1.2 / +1.9 / -1.2 / +1.9 / **0.0** by rung — **heat 8 has
-> ZERO discordant pairs because it cannot leak**, the prediction the pin was built on, observed.
+> **THE BRIDGE BROKE, AND WHERE IT BROKE IS THE FINDING.** The bridge arm — the same 96 cells with
+> every post-L5 gameplay lever restored (`AILANE=0 NEWGROUND=0 SECONDAXIS=0 PERKPICK=0
+> ASSISTLATCH=0 ELITEBOSS=0 ROSTERID=0 STALEGROUND=1`, a set DERIVED by diffing the env-var surface
+> of `src/` at `7180374`) — reproduces L5 on **0/96 chunks**. Bisected by milestone merge, with
+> L5's own base commit as a control that passes on 4/4 cells: the chain is intact through milestone
+> 4 and **breaks at milestone 5, THE FORK PAYS**, which repriced the routing economy
+> (`Run.DepthBase` 10->12, SUPPLY discount, PITCHED premium, ELITE premium) with every one a
+> `const int` and **NO restore flag**. So no bridge to L5 can exist through it, by construction —
+> **the one wave in this repository that broke its own house rule is the one the ladder had to
+> cross.** Against MILESTONE 5 itself the bridge arm is **96/96 chunks, 1,920/1,920 outcomes**, so
+> every wave from milestone 6 to 12 IS switchable and the CRN machinery is intact across seven
+> merges.
 >
-> **THE LEVEL IS A SLOT-SPACE QUESTION.** Both halves pinned, L4's 8 slot sets read h0 **54.4** and
-> the 8 NEW sets **39.4** (+15.0, t=+2.58); h8 goes the other way (4.4 vs 11.9, t=-2.09). L4's "h0 in
-> band by +6.1" and "h8 under floor" were each one draw of eight clusters. **The L4 rows are NOT
-> comparable with L5 at h0 or h8 — do not subtract them — and a rung is sixteen slot sets now.**
+> **NEITHER HALF OF THE L5->L6 DIFFERENCE IS A MEASURED LEVER MOVE.** CRN-paired on 1,920 worlds
+> each: THE FORK PAYS **-0.36 pooled** (401 discordant, MDE 2.9, z=-0.35) and
+> P10+P16+P18+P19+P20 composed **+0.73 pooled** (488 discordant, MDE 3.2, z=+0.63); every rung sits
+> inside its own MDE (4.9-9.2). **Report `n_disc` and the MDE beside every paired row** — a flat row
+> at low discordance is an absence of evidence, not neutrality (C2's rule), and neither of these is
+> a zero. **Shape may be compared with L5; LEVEL may not** — the bridge that would license it is the
+> broken one.
 >
-> **THE INTERACTION TERM IS NOT RESOLVED, AND THE FACTORIAL SAYS WHY IT CANNOT BE, CHEAPLY.** h6,
-> 2^3 factorial MIDTOOTH{0,3} x AIDECLINE{0,1} x BIOMEMECH{0,1}, 8 arms x 16 clusters x 20 = 2,560
-> campaigns, chunk-paired (the composed arm reproduces the ladder's h6 chunks 16/16 byte-for-byte):
-> L4's quantity **Q = +5.94 ± 5.25, t(15)=+1.13, 95% CI [-5.2, +17.1]** — the point estimate
-> reproduces +5.8, the CI includes it and zero, and its SE is structural (the sum of three
-> conditional contrasts carries 6.3 on its own; ~70 clusters would be needed). What IS resolved:
-> **the MIDTOOTH main effect +7.58 ± 0.96 (t=+7.9)**; AIDECLINE -0.08 ± 1.52 and BIOMEMECH +0.39 ±
-> 1.35 are zero; no two-way term exceeds |t|=1.8 (AxB +2.27 ± 1.27 the largest). **Stop citing +5.8;
-> quote the averaged terms. `Heat.MidTooth` is the term and the composition is additive within ±3.**
+> **P20 RE-PRICED ON 16 SETS: h0 +2.2 (its own +2.2, reproduced); h4 -2.5, NOT RESOLVED** (n_disc 22,
+> MDE 4.1). Split-half: P20's own 8 sets give **-4.4, z=-2.33**; 8 sets it never saw give **-0.6**.
+> **Third time this project has measured that shape** (L5's split-half on L4; W2's four-vs-sixteen).
+> **A rung is sixteen slot sets. So is a lever.**
 >
-> **STALEMATES: 27/1,920 = 1.41%, ALL on the MISSION arm; the RUN arm fired 0 times in 5,440
-> campaigns** (runTurns at the stall 51-79 against 150). RECRUIT carries 4.4% (14/320) — the bot's
-> finishing line on Escort/Evac late in a long run, not a ladder effect; ex-stalemate no heat rung
-> moves more than 0.6.
+> **STALEMATES: 34/1,920 = 1.77% on the MISSION arm; the RUN arm fired 0 times in all 4,480
+> campaigns of the round** (runTurns 51-75 against 150) — three ladders running. Escort 10 /
+> Eliminate 9 / Evac 8 / Rescue 6 / Decapitate 1; missions 2-4 hold 26 of 34. **Slot 46's mission-1
+> Eliminate stalls at FOUR rungs on BOTH policies** (`SIGHTLINE_BALANCE_BASE=40`, slot 46) — L5 saw
+> the same world stall on sloppy alone, so the deadlock belongs to that opener, not to a rung.
 >
 > **No corrective lever was shipped.** Two rungs under floor is a finding to publish, not to repair
-> inside a measurement round.
+> inside a measurement round — as in L4 and L5.
 >
 > ---
 > **SUPERSEDED LADDERS ARE NOT HERE ANY MORE — they are in `docs/DEVLOG.md` and under
-> `docs/measurements/`.** L4 (`7315425`, n=160/rung), C1 (`17934ee`, the first per-RUNG ladder,
-> 16,640 campaigns) and C3 both had full tables in this file; L5 reproduces L4 outcome-for-outcome
-> through its bridge, so quoting L5 is quoting all of them. **The L4 rows are NOT comparable with
-> L5 at h0 or h8** — both halves pinned, L4's 8 slot sets read h0 54.4 against the 8 new sets'
-> 39.4 — so a rung is sixteen slot sets now, and do not subtract one table from another.
+> `docs/measurements/`.** L5 (`7180374`, the first pinned 16-set ladder — `docs/measurements/l5/`,
+> DEVLOG §THE HEAT PIN AND L5), L4 (`7315425`, n=160/rung), C1 (`17934ee`, the first per-RUNG
+> ladder, 16,640 campaigns) and C3 all had full tables in this file. **L5 reproduces L4
+> outcome-for-outcome through its own bridge, and L6 reproduces MILESTONE 5 through its own — but
+> the two chains do not join**, because THE FORK PAYS sits between them with no restore flag. So:
+> quote **L6** for this tree; quote L5 only for the tree it measured, and never subtract one table
+> from another. The L4-vs-L5 caution stands unchanged (both halves pinned, L4's 8 slot sets read
+> h0 54.4 against the 8 new sets' 39.4).
 >
 > **A pooled objective row can hide a 49.5-point artifact** — W8 proved it on `Eliminate`, whose
 > 89.1% row is largely 960 mission-1s and reads ~40% over its mid-run cells. Use the
@@ -714,7 +734,8 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P17** SHIPS AS v1.0.0 | The release artefact is DERIVED, not written: the archive is named from the version **the binary reports**, the changelog from `git log --first-parent`, and the checksum is recomputed in-process. `--tag` makes a LOCAL tag and never pushes. `Display.AllowLaunchFit` defaults **false** so the first-launch window fit can never reach the harness. | §SHIPS AS v1.0.0 |
 | **P18** THE SECOND AXIS | The WAR ROOM's six salvage unlocks cost **330** against **61** income for a heat-0 clear, so it emptied in ~5 wins while `UnlockHeatOnWin` kept climbing to `Heat.Max = 8`. Three unlocks are now gated on a rung **CLEARED** (`MetaDto.BestHeatWon`, appended; `MaxHeat` cannot serve — it is a CEILING that stops rising at `Heat.Max`, so a heat-8 clear moves it not at all). **The WAR ROOM's UNLOCKS column has 8px of slack**: a heat-gated unlock is a 24px ledger row, never a card, or FITTEST ellipsizes four descriptions. Also: a BONUS perk's recipient is now chosen (the roll is KEPT as the default, so the RNG stream is untouched and a retarget spends zero draws), and `Run.AssistLevel` reads the **latched** `StartHeat` so an `AddHeat` event can no longer confiscate an assist the player never opted out of. **Campaign-inert at the flywheel by construction** — 240 CRN-paired campaigns, 3 rungs, 2,356 fields, zero diffs (`docs/measurements/p18/`); the width it sells is UNPRICED and unmeasurable until a staged-profile batch hook exists. | §THE SECOND AXIS |
 | **P19** THE ROSTER CONTESTS | The named mid-boss now belongs to the map's **ELITE NODE** (`Mission.MidBossFor`), with the floor walked on the ROUTE (`Game.IsFinalApproach`) because an Event node can occupy a route's column-4 slot — **a `mission == 5` floor leaks on 8.1% of routes and the old `n == 3 \|\| n == 5` leaked on 2.7%.** Also: **BOMBARD/WARBRINGER's "0.8%/1.6%" are BODY rates and are the wrong denominator** — both are capped at one per mission, so exposure is **5.6% / 12.5% of missions**; and the arenas' "88% tile-identical" is the **85.3% floor-share baseline**, not duplication (one real near-duplicate: ZIGGURAT/FORGE, Jaccard 72.7%). | §P19 |
-| **P20** THE STALE GROUND | `Mission.Build` wiped Tiles, Height and Smoke but **not the biome GROUND layer**, and it asks for that layer through `Grid.IsFloor` / `Grid.CostMap` before `Game.StampBiomeGround` runs — so a board was a function of **the board before it**. Latent since C4, armed by P16 (the rift is the first ground that stops a mover). `Mission.ClearGroundOnBuild`; MODETEST leg (14). **The fix moves the board, so L5 is a pre-P20 ladder.** | §P20 |
+| **P20** THE STALE GROUND | `Mission.Build` wiped Tiles, Height and Smoke but **not the biome GROUND layer**, and it asks for that layer through `Grid.IsFloor` / `Grid.CostMap` before `Game.StampBiomeGround` runs — so a board was a function of **the board before it**. Latent since C4, armed by P16 (the rift is the first ground that stops a mover). `Mission.ClearGroundOnBuild`; MODETEST leg (14). The fix moves the board — **but L6 re-priced it on 16 slot sets and its "-3.8 at h4, resolved" does NOT survive the doubling** (-0.6 on eight sets it never saw). | §P20 |
+| **L6** THE LADDER OF RECORD | Two things a fresh session must not re-derive. **(1) THE FORK PAYS has no restore flag**, so the CRN chain cannot cross milestone 5 and no bridge to L5 exists; ship a gameplay constant and its flag in the same commit. **(2) `Grid` has a SECOND stale layer: `Barrel`.** `IsFloor` reads it, so Build's connectivity floods read the previous mission's barrels — P20's defect, different array, same predicate. **Latent, not live**: `Game.SetupMission` clears hazards 28 lines before the Build call, and it is the only production caller. `BoardSignature()` was blind to it and now hashes all eight layers. | §L6 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be
 switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, exactly),
@@ -729,7 +750,15 @@ SMG monoculture) and `SIGHTLINE_STALEGROUND=1` (the pre-P20 seam, in which `Miss
 PREVIOUS mission's ground layer — never a shipping configuration; it makes the SEEDED DAILY's
 headline contract false). **Grep `Program.cs` for `SIGHTLINE_` for the authoritative set** — that list
 is derived, this one is written down, and written-down lists in this repository go stale.
-is derived, this one is written down, and written-down lists in this repository go stale.
+
+> **⚠ ONE WAVE HAS NO FLAG, AND IT COST THE PROJECT A BRIDGE.** **THE FORK PAYS** (milestone 5,
+> `54147dc`) repriced the routing economy — `Run.DepthBase` 10->12, `SupplyDiscount`,
+> `PitchedPremium`, `ElitePremium` — as `const int`s in `src/Run.cs` with no environment switch.
+> L6 found it by bisection when its bridge to L5 failed on 96 of 96 chunks: **the chain is intact
+> on both sides of that one merge and cannot cross it.** L6 priced the wave anyway, by using
+> milestone 5 as the bridge target (`-0.36 pooled over 1,920 CRN pairs, 401 discordant, MDE 2.9`),
+> so the number exists — but only because a whole extra tree had to be built to get it. **If you
+> ship a gameplay constant, ship its flag in the same commit.**
 
 **PROGRAM PARALLAX is the twelfth and is current.** Its own thesis, earned twice over: the gates in
 this project fail QUIET rather than loud. It found the sweep's coverage guard blind to a whole class
@@ -737,7 +766,10 @@ of hook name and defeatable by a comment; a defect hunt whose post-processing fi
 findings as "refuted" with an empty reason; two self-tests that could zero a player's settings file;
 audio censuses structurally unable to fail; and a measurement layer reporting numbers where it had
 measured nothing. **When a check here says everything is fine, ask what it would have said if it
-were not.**
+were not.** Wave **L6** earned it a third time, twice in one round: `BoardSignature()` — the gate
+that caught P20's stale ground — could not see six of the eight layers it was trusted for, and the
+one gameplay wave in this repository that shipped without a restore flag (THE FORK PAYS) was found
+only when a ladder needed to cross it.
 
 
 **PROGRAM PARALLAX — wave P16 "GROUND TRUTH" (2026-09-04, base `e57e151`)** ended C4's standing
