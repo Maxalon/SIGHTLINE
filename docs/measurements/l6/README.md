@@ -6,7 +6,9 @@ contests, the stale ground). Binary snapshot `runbin/l6/` (gitignored), Release,
 `SIGHTLINE_BALANCE`, Release snapshot under `xvfb-run`, greedy+sloppy per slot, **heat PINNED**
 (`EventCatalog.HeatPinned`) except where a row says otherwise.
 
-**224 chunks, every one asserted, zero `BAD` — 4,480 campaigns.**
+**320 chunks, every one asserted, zero `BAD` — 6,400 campaigns.** 224 of them ran on the `6a6ebee`
+snapshot and are checked strictly by `p15/check_chunk.py`; the other 96 are the milestone-5 bridge
+target, which predates P15 and is `--legacy`-checked (see Method).
 
 ## Why this round exists
 
@@ -243,15 +245,19 @@ read "not resolved" as "zero": the 16-set h4 point estimate is −2.5 with an MD
 
 ## THE STALEMATE SPLIT
 
-Across all 4,480 campaigns of this round (ladder + bridge + milestone-5 + P20 arms), and in the
-ladder alone:
+All four arms of this round, 6,400 campaigns:
 
-| | mission arm | run arm | share |
-|---|---|---|---|
-| **L6 ladder (1,920)** | **34** | **0** | **1.77%** |
-| L6bridge (1,920) | 28 | 0 | 1.46% |
+| arm | campaigns | mission arm | run arm | share |
+|---|---|---|---|---|
+| **L6 ladder** | 1,920 | **34** | **0** | **1.77%** |
+| L6bridge | 1,920 | 28 | 0 | 1.46% |
+| L6stale (P20 arm) | 640 | 10 | 0 | 1.56% |
+| milestone-5 target | 1,920 | 28 | 0 | 1.46% |
 
-* **The run arm fired ZERO times again**, in every arm of this round. `runTurns` at the stall runs
+*(L6bridge and the milestone-5 target read 28 each — a free cross-check on the 1,920/1,920 outcome
+identity above, from a field the bridge comparison never looked at.)*
+
+* **The run arm fired ZERO times in all four arms, 6,400 campaigns.** `runTurns` at the stall runs
   51–75 against a cap of 150. W9's backstop remains a backstop, three ladders running.
 * **L6 reads 1.77% against L5's 1.41%** — RECRUIT 9/320 (2.81%), h0 8, h2 7, h4 1, h6 5, h8 4.
   The rung profile is flatter than L5's, whose RECRUIT carried 4.4%; the totals differ by 7

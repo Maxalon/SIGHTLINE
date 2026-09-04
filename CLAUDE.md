@@ -631,9 +631,10 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 >
 > **L6 — base commit `6a6ebee` (`main` after PROGRAM PARALLAX milestone 12), heat PINNED
 > (`EventCatalog.HeatPinned` — a rung means the rung), 6 rungs x **16** CRN slot bases (0..150),
-> n=320/rung, 1,920 campaigns; 224 chunks over the whole round, every one asserted through
-> `p15/run_chunk.sh` (THE RUNNER OF RECORD — not `c1`'s, which drove L4/L5 and is superseded),
-> zero BAD, `LEAK-CHECK PASS` (0 of 7,928 missions off-rung). Raw round: `docs/measurements/l6/`
+> n=320/rung, 1,920 campaigns; **320 chunks / 6,400 campaigns over the whole round** — 224 on the
+> shipped snapshot, asserted through `p15/run_chunk.sh` (THE RUNNER OF RECORD — not `c1`'s, which
+> drove L4/L5 and is superseded), plus 96 on a milestone-5 snapshot legacy-checked because it
+> predates P15; zero BAD anywhere, `LEAK-CHECK PASS` (0 of 7,928 missions off-rung). Raw round: `docs/measurements/l6/`
 > (README has every table below in full).**
 >
 > | rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
@@ -676,8 +677,8 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > **Third time this project has measured that shape** (L5's split-half on L4; W2's four-vs-sixteen).
 > **A rung is sixteen slot sets. So is a lever.**
 >
-> **STALEMATES: 34/1,920 = 1.77% on the MISSION arm; the RUN arm fired 0 times in all 4,480
-> campaigns of the round** (runTurns 51-75 against 150) — three ladders running. Escort 10 /
+> **STALEMATES: 34/1,920 = 1.77% on the MISSION arm; the RUN arm fired 0 times in ALL FOUR ARMS,
+> 6,400 campaigns** (runTurns 51-75 against 150) — three ladders running. Escort 10 /
 > Eliminate 9 / Evac 8 / Rescue 6 / Decapitate 1; missions 2-4 hold 26 of 34. **Slot 46's mission-1
 > Eliminate stalls at FOUR rungs on BOTH policies** (`SIGHTLINE_BALANCE_BASE=40`, slot 46) — L5 saw
 > the same world stall on sloppy alone, so the deadlock belongs to that opener, not to a rung.

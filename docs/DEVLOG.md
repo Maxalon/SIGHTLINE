@@ -15992,8 +15992,9 @@ game. P16, P18 and P19 had landed since L5 as well, so L6 is the first measureme
 when the numbers move: 6 rungs, **16** CRN slot bases, n=320/rung, heat pinned, three-layer chunk
 assertions, Release binary from a gitignored snapshot.
 
-**224 chunks, every one asserted, zero `BAD` — 4,480 campaigns.** Raw round, every runner and every
-analysis script: `docs/measurements/l6/`. **No corrective lever was shipped.**
+**320 chunks, every one asserted, zero `BAD` — 6,400 campaigns** (224 on the `6a6ebee` snapshot,
+strictly checked; 96 on a milestone-5 snapshot, `--legacy`-checked because it predates P15). Raw
+round, every runner and every analysis script: `docs/measurements/l6/`. **No corrective lever was shipped.**
 
 ## 1. THE LADDER (base `6a6ebee`, pinned, 16 clusters of 20 per rung, n=320)
 
@@ -16116,9 +16117,13 @@ not zero:** the 16-set h4 estimate is −2.5 with an MDE of 4.1.
 |---|---|---|---|
 | L6 ladder (1,920) | **34** | **0** | 1.77% |
 | L6bridge (1,920) | 28 | 0 | 1.46% |
+| L6stale, the P20 arm (640) | 10 | 0 | 1.56% |
+| milestone-5 target (1,920) | 28 | 0 | 1.46% |
 
-**The run arm fired zero times again, in every arm of this round** (`runTurns` at the stall 51–75
-against a cap of 150) — W9's backstop is a backstop, three ladders running. L6's 1.77% against
+**The run arm fired zero times in all four arms, 6,400 campaigns** (`runTurns` at the stall 51–75
+against a cap of 150) — W9's backstop is a backstop, three ladders running. L6bridge and the
+milestone-5 target both read 28, a free cross-check on their 1,920/1,920 outcome identity from a
+field the bridge comparison never looked at. L6's 1.77% against
 L5's 1.41% is 7 campaigns in 1,920 and nothing here resolves that as a change rather than a draw.
 By objective: Escort 10, Eliminate 9, Evac 8, Rescue 6, Decapitate 1; missions 2–4 hold 26 of 34.
 **Slot 46's mission-1 Eliminate stalls at four rungs — h0/h2 sloppy, h6/h8 greedy, runTurns 51
