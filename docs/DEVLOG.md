@@ -16512,10 +16512,12 @@ SIGHTLINE_SEED=4242`, the HUD's own hostile chip — `docs/measurements/l7/m6-fo
 | **bodies on screen** | **6** | **7** | **7** | **8** | **9** | **9** | **9** | **9** | **9** |
 
 **The finale has not grown a hostile since heat 4**, and the body it grew at h3→h4 is the
-`Ai.Tier >= 1` trim gate flipping −4 to −3, not an EnemyDelta. At heats 7 and 8 the two screenshots
-are identical except for the `HEAT 7` / `HEAT 8` chip — same board, same 9 hostiles, same squad, same
-LEGION kit. (W9 recorded this exact shape for SKIRMISH: "the red chip was the only difference on
-screen".)
+`Ai.Tier >= 1` trim gate flipping −4 to −3, not an EnemyDelta. At heats 7 and 8 the two shots show the same arena, the same nine
+hostiles, the same four-soldier squad and the same LEGION kit, and **the only difference in CONTENT
+is the `HEAT 7` / `HEAT 8` chip**. Precisely: 5.93% of pixels differ and all of it is animation phase
+(46 wall-clock reads drive the render; a SIGHTLINE screenshot is never byte-identical). Nothing that
+carries information moved. (W9 recorded this exact shape for SKIRMISH: "the red chip was the only
+difference on screen".)
 
 So on the mission that decides a campaign, **both of rung 8's declared teeth are switched off** — the
 body by the clamp, the stat by `bump`. Its whole reach is missions 1-4, and its measured effect is
