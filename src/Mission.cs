@@ -204,6 +204,21 @@ public static class Mission
     /// DAILY's headline contract ("the same day deals the same board to everyone") is false.
     public static bool ClearGroundOnBuild = true;
 
+    /// P21 BUILD OWNS THE BOARD — clear the two HAZARD layers (Fire, Barrel) at the top of Build,
+    /// beside the ground clear, so `Mission.Build` owns all EIGHT of `Grid`'s per-tile arrays
+    /// rather than six. `SIGHTLINE_STALEHAZARDS=1` restores the pre-fix seam, in which Build
+    /// neither cleared nor was guaranteed clean hazards and its floor/connectivity queries could
+    /// read the PREVIOUS mission's barrels.
+    ///
+    /// UNLIKE `ClearGroundOnBuild`, THIS FLAG IS LIVE-PATH INERT AND THAT IS THE POINT.
+    /// `Game.SetupMission` — the only production caller of Build — calls `Grid.ClearHazards()`
+    /// unconditionally 28 lines before the Build call, and that call is DELIBERATELY KEPT (see the
+    /// comment there). So on every shipped path the arrays are already zero when Build runs and
+    /// this clear is a proven no-op; the defect L6 measured was LATENT, not live. What the flag
+    /// buys is the house rule (a change to the board seam must be switchable) and a detector that
+    /// can be shown to fail: MODETEST leg (14a-2) flips it to prove its own dirt still bites.
+    public static bool ClearHazardsOnBuild = true;
+
 
     // W2 arena telemetry: the authored layout index the LAST Build actually applied, or -1 for
     // the procedural fallback. Recorded only AFTER TryApplyLayout's connectivity guard accepted
@@ -271,6 +286,17 @@ public static class Mission
         // build is NO ground, and leaving the last one in place made the arena a function of the
         // board before it. MODETEST leg (14) is the gate.
         if (ClearGroundOnBuild) grid.ClearGround();
+        // P21 BUILD OWNS THE BOARD — and the same argument for the other two layers L6 found.
+        // `Grid.IsFloor` is `InBounds && Tiles==Floor && !Barrel[x,y] && !rift`: a BARREL sits in
+        // the same predicate the rift was added to, so every connectivity flood inside Build reads
+        // it — TryApplyLayout's accept/reject guard, EnsureConnectivity's carve ("a barrel keeps a
+        // tile non-walkable"), PlaceBarrels' own candidate filter — and Build then stamps its own
+        // barrels. Fire is not read here but is equally not Build's caller's business to leave
+        // behind. Measured by MODETEST (14a-2): dirtying Barrel alone moved Tiles, Height, CoverHp,
+        // CoverSeed and Barrel. That was LATENT, never live — Game.SetupMission has always cleared
+        // both immediately before calling this — but the invariant belonged HERE, in Build, exactly
+        // as the ground layer's did. Build now owns all eight per-tile arrays.
+        if (ClearHazardsOnBuild) grid.ClearHazards();
         for (int x = 0; x < grid.W; x++)
             for (int y = 0; y < grid.H; y++)
             {

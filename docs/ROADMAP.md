@@ -1051,8 +1051,12 @@ things open.
       untouched), so this is a re-measure, not a rebuild of the instrument. Six rungs × 16 slot
       sets, the L5 shape, `SIGHTLINE_HEATPIN` default on. **Until it is run, an absolute win rate
       from L5 may not be quoted against one measured on this tree.**
-- [ ] **2. Nothing else in the codebase reads a board layer before it is written — verify, don't
-      assume.** P20's leg (14a) pins exactly one statement: `Mission.Build` leaves the ground layer
+- [x] **2. Nothing else in the codebase reads a board layer before it is written — verify, don't
+      assume.** DONE — L6 extended the leg to all eight and found **6 of 8 failing**; P21 closed
+      the two it named (see the L6 docket below). The "accounting looks complete" text below is
+      kept as the finding it was: it was wrong, and it was wrong in exactly the way it warned.
+      **What is true now:** `Mission.Build` clears all eight itself, and MODETEST leg (14a-2)
+      asserts it at the Build seam with the detector proven able to fail on each owner separately. P20's leg (14a) pins exactly one statement: `Mission.Build` leaves the ground layer
       empty. The class of defect is wider: a per-mission layer that is stamped AFTER the thing that
       reads it. `Grid` carries seven such arrays (`Tiles`, `Height`, `Smoke`, `CoverHp`,
       `CoverSeed`, `Fire`, `Barrel`, `Ground`); Build wipes Tiles/Height/Smoke, `Grid.ClearHazards`
@@ -3402,7 +3406,8 @@ Detail in `docs/DEVLOG.md` §SHIPS AS v1.0.0; the contract is `docs/DISTRIBUTION
 pre-P20 ladder" warning is resolved. **No corrective lever was shipped** — two rungs under floor is
 a finding, as in L4 and L5. What L6 leaves open, in priority order:
 
-- [ ] **`Mission.Build` DOES NOT OWN ITS OWN GRID — MOVE `Grid.ClearHazards()` INTO IT.**
+- [x] **`Mission.Build` DOES NOT OWN ITS OWN GRID — MOVE `Grid.ClearHazards()` INTO IT.** DONE by
+      wave **P21 BUILD OWNS THE BOARD** (2026-09-04, base `108d9ac`); see the CLOSING NOTE below.
       **THE DESIGN IS SETTLED; THIS IS A DECISION, NOT A DISCUSSION.** `Grid` has eight per-tile
       arrays. Six are cleared by `Build` and leak nothing. `Fire` is uncleaned but inert (nothing in
       Build reads it). **`Barrel` MOVES THE BOARD**: `Grid.IsFloor` is
@@ -3427,7 +3432,21 @@ a finding, as in L4 and L5. What L6 leaves open, in priority order:
       then a CRN-paired inertness round to prove the no-op — chunks are ~8 s on this box, so
       2 rungs x 16 slot sets is about five minutes. Until it lands, **any new caller of
       `Mission.Build` must clear hazards first**, and `CLAUDE.md`'s `Grid.cs` entry says so.
-- [ ] **THE FORK PAYS HAS NO RESTORE FLAG, AND IT BROKE THE CRN CHAIN.** `Run.DepthBase` (10 -> 12),
+      **CLOSING NOTE (P21).** `Grid.ClearHazards()` is now called at the top of `Mission.Build`
+      behind `Mission.ClearHazardsOnBuild` (`SIGHTLINE_STALEHAZARDS=1` restores the old seam).
+      **`Game.SetupMission`'s own call was KEPT, not removed** — a decision with reasons, in
+      DEVLOG §P21: removing it is the only part of the change that could alter a live path (it
+      would leave the previous mission's fire and barrels live across the ~28 lines between the
+      two), it buys nothing once Build owns the invariant, and it keeps MODETEST leg (14b)'s
+      SetupMission-seam assertion describing something the caller actually does. MODETEST leg
+      (14a-2) now asserts **all eight** layers at the Build seam and its detector is proven able
+      to fail on **each owner separately** (`staleGridProbeInsensitive(ground|hazards)`).
+      **Inertness measured, not asserted:** 2 rungs x 16 slot sets x 40 campaigns = **1,280 CRN
+      campaigns per arm**, 32/32 chunks byte-identical (harness{} excluded) against BOTH the base
+      commit `108d9ac` AND the same binary under `SIGHTLINE_STALEHAZARDS=1`. Raw:
+      `docs/measurements/p21/`.
+- [x] **THE FORK PAYS HAS NO RESTORE FLAG, AND IT BROKE THE CRN CHAIN.** DONE by wave **P21**
+      (2026-09-04) — with a limit, stated below. `Run.DepthBase` (10 -> 12),
       `SupplyDiscount`, `PitchedPremium` and `ElitePremium` are `const int`s in `src/Run.cs` with no
       environment switch, against `CLAUDE.md`'s rule that every gameplay lever has one "because a
       wave that cannot be switched off cannot be attributed". L6's bridge to L5 failed on **96 of 96
@@ -3435,6 +3454,29 @@ a finding, as in L4 and L5. What L6 leaves open, in priority order:
       building milestone 5 as a second tree. **Give the four constants a `SIGHTLINE_FORKPRICE=0`
       arm** (statics read once at class load, the `Terrain.NewGround` pattern) so the chain becomes
       crossable and the L5 archive becomes reachable again. Cheap, and it retires a permanent hole.
+      **CLOSING NOTE (P21).** Shipped as `SIGHTLINE_FORKPRICES=0` -> `Run.SetForkPrices(false)`,
+      which restores all four pre-milestone-5 prices **as a set** (10 / 14 / 0 / 10 for
+      supply/elite/pitched/depth — a partial restore is an economy that never shipped, because the
+      depth bump was the redistribution that hands the premiums' intel back). FORKTEST leg (E)
+      pins the round trip against a **literal transcription** of the pre-wave `NodeIntel`, and
+      counts the re-pricing so a decorative flag fails: **405 of 481 dealt nodes over 40 maps**
+      (the 76 that do not move are Event nodes, which pay 0 under both tables).
+      **THE ITEM ABOVE OVERSTATED WHAT THIS BUYS, AND THE OVERSTATEMENT IS CORRECTED HERE:**
+      *"the L5 archive becomes reachable again"* is **FALSE**. L5's worlds were measured on a tree
+      that no longer exists and no flag brings them back; L6's bridge stays broken. What the flag
+      buys is that a FUTURE round can isolate that wave's contribution, which was impossible.
+      **AND IT IS NOT A COMPLETE ISOLATION.** THE FORK PAYS shipped a SECOND unflagged gameplay
+      change in the same commit — the SUPPLY full heal moved from *before* `Run.DebriefSurvivors`
+      to *inside* it (`DebriefSurvivors(bool fullHeal)`), so a soldier who ends a SUPPLY clear on
+      low HP can now be wounded by it. That is live in the flywheel (SUPPLY is 828 of 5,413 played nodes — 15.3% —
+      across P21's 1,280-campaign default arm) and `SIGHTLINE_FORKPRICES` does not touch it. Flagging it is a separate,
+      smaller item: see below.
+- [ ] **THE OTHER HALF OF THE FORK PAYS IS STILL UNSWITCHABLE (opened by P21).** The heal-ordering
+      change above (`Game.SetupMission` -> `cardFullHeal` -> `Run.DebriefSurvivors(bool)`) is a
+      gameplay change with no restore flag, so `SIGHTLINE_FORKPRICES=0` isolates the wave's PRICES
+      but not the wave. It is one bool and one branch; FORKTEST leg (C) already reproduces the
+      pre-wave ordering in-process (`Clear(true, true)`), so the behaviour is written down — it
+      simply is not reachable from the environment. P21 did not widen its own scope to take it.
 - [ ] **THE LADDER'S SOFT SPOT MOVED AND IS NOT LOCATED.** `h6 -> h8` buys **2.5** points, the
       smallest step in the L6 table, and `h0 -> h2` buys 8.4 where L5 read 14.1. C1 located the
       last flat step by measuring **all ten rungs** (a six-rung ladder cannot see which of two rungs

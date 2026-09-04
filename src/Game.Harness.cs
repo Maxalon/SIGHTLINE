@@ -11770,6 +11770,79 @@ public partial class Game
         if (plain.hp >= plain.maxHp) fails.Add($"C:plainHp={plain.hp}/{plain.maxHp} (a plain clear must not full-heal)");
         if (prewave.wound != 0) fails.Add($"C:prewaveWound={prewave.wound} (the defect no longer reproduces — leg C is vacuous)");
 
+        // ═══ (E) P21 — THE RESTORE FLAG THIS WAVE SHOULD HAVE SHIPPED, AND ITS ROUND TRIP ════
+        // THE FORK PAYS repriced the routing economy as four bare `const int`s with no off
+        // switch, so L6's bridge to the ladder of record reproduced 0 of 96 chunks and the
+        // bisect could name the milestone but nothing could isolate it. `SIGHTLINE_FORKPRICES=0`
+        // (Run.SetForkPrices) is that switch. Three things have to be true or it is decoration:
+        //   E1  the shipped defaults are the FORK PAYS table, and the restore is the pre-wave one
+        //       ON ALL FOUR VALUES — a partial restore is an economy that never shipped.
+        //   E2  under the restore, NodeIntel reproduces the pre-wave function VERBATIM. The
+        //       expectation below is a literal transcription of the pre-milestone-5 method
+        //       (`baseIntel = 10 + 4*n`; Supply +10, Elite +14, Event 0, everything else base),
+        //       not a re-derivation from the same constants the code reads — the same discipline
+        //       BANDTEST uses to pin its old rule.
+        //   E3  THE FLAG MUST NOT BE A NO-OP. A flag that changes nothing is worse than no flag,
+        //       so the two tables must actually re-price dealt nodes, and that is COUNTED.
+        int repriced = 0, nodesSeen = 0;
+        {
+            bool wasOn = Run.ForkPricesOn;
+            // the payout of every node on a fixed set of real dealt maps, under both tables
+            var mapsUnder = new Func<List<(NodeKind k, Objective o, int m, int intel)>>(() =>
+            {
+                var outv = new List<(NodeKind, Objective, int, int)>();
+                for (int s2 = 1; s2 <= 40; s2++)
+                {
+                    var r2 = new Run(); r2.GenerateMap(s2);
+                    foreach (var n in r2.Map)
+                        outv.Add((n.Kind, n.Card != null ? n.Card.Objective : Objective.Eliminate, n.Mission, n.Intel));
+                }
+                return outv;
+            });
+
+            Run.SetForkPrices(true);
+            if (Run.SupplyDiscount != Run.ForkSupplyDiscount || Run.ElitePremium != Run.ForkElitePremium
+                || Run.PitchedPremium != Run.ForkPitchedPremium || Run.DepthBase != Run.ForkDepthBase)
+                fails.Add($"E1:shipped table is {Run.SupplyDiscount}/{Run.ElitePremium}/{Run.PitchedPremium}/{Run.DepthBase}");
+            var shipped = mapsUnder();
+
+            Run.SetForkPrices(false);
+            if (Run.SupplyDiscount != 10 || Run.ElitePremium != 14 || Run.PitchedPremium != 0 || Run.DepthBase != 10)
+                fails.Add($"E1:restored table is {Run.SupplyDiscount}/{Run.ElitePremium}/{Run.PitchedPremium}/{Run.DepthBase} (want 10/14/0/10)");
+            // E2 — the pre-milestone-5 NodeIntel, transcribed
+            int PreWaveIntel(NodeKind k, int n)
+            {
+                int baseIntel = 10 + 4 * n;
+                switch (k)
+                {
+                    case NodeKind.Supply: return baseIntel + 10;
+                    case NodeKind.Elite:  return baseIntel + 14;
+                    case NodeKind.Event:  return 0;
+                    default:              return baseIntel;
+                }
+            }
+            var restored = mapsUnder();
+            for (int i = 0; i < restored.Count; i++)
+            {
+                int want = PreWaveIntel(restored[i].k, restored[i].m);
+                if (restored[i].intel != want)
+                { fails.Add($"E2:{restored[i].k} m{restored[i].m} restored {restored[i].intel} != prewave {want}"); break; }
+            }
+            // E3 — and it is not a no-op
+            nodesSeen = restored.Count;
+            for (int i = 0; i < restored.Count && i < shipped.Count; i++)
+                if (restored[i].intel != shipped[i].intel) repriced++;
+            if (repriced == 0) fails.Add("E3:SIGHTLINE_FORKPRICES=0 re-prices NOTHING — the flag is decoration");
+
+            // the ROUND TRIP: back on, and the whole payout table must be the shipped one again.
+            Run.SetForkPrices(true);
+            var again = mapsUnder();
+            for (int i = 0; i < again.Count && i < shipped.Count; i++)
+                if (again[i].intel != shipped[i].intel)
+                { fails.Add($"E1:round trip lost node {i} ({again[i].intel} != {shipped[i].intel})"); break; }
+            Run.SetForkPrices(wasOn);       // leave the dial exactly as the environment set it
+        }
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"FORKTEST: {seeds} maps — {rankPairs} cross-kind column pairs, {siblingPairs} PITCHED/TASKED "
                     + $"siblings, {premiumSeen} premium-paying nodes, {eventNodes} events, {hoverNodes} hovers composed");
@@ -11777,13 +11850,19 @@ public partial class Game
                     + $"PITCHED +{Run.PitchedPremium} (Combat/Elite only)");
         sb.AppendLine($"  supply clear at 1 HP -> wound {supply.wound}, hp {supply.hp}/{supply.maxHp}   "
                     + $"| pre-wave ordering -> wound {prewave.wound}");
+        sb.AppendLine($"  SIGHTLINE_FORKPRICES=0 restores {Run.PreForkSupplyDiscount}/{Run.PreForkElitePremium}/"
+                    + $"{Run.PreForkPitchedPremium}/{Run.PreForkDepthBase} (supply/elite/pitched/depth) and re-prices "
+                    + $"{repriced} of {nodesSeen} dealt nodes over 40 maps; round trip clean");
         foreach (var f in fails.Take(8)) sb.AppendLine("  " + f);
         sb.Append(fails.Count == 0
             ? "FORKTEST: PASS (ELITE > COMBAT > SUPPLY at equal depth for both classes and on every dealt "
               + "column; a PITCHED Combat/Elite node pays its same-column TASKED sibling exactly "
               + "+" + Run.PitchedPremium + " and PRINTS it; Event pays 0 and its hover names the signal with no "
               + "objective and no force; START/BOSS keep the bare base; a SUPPLY clear at 1 HP still wounds "
-              + "and still heals, while the pre-wave heal-then-debrief ordering still reads wound 0)"
+              + "and still heals, while the pre-wave heal-then-debrief ordering still reads wound 0; "
+              + "and SIGHTLINE_FORKPRICES=0 restores all four pre-milestone-5 prices as a set, "
+              + "reproduces the pre-wave NodeIntel verbatim on every dealt node, re-prices a "
+              + "counted majority of them, and round-trips)"
             : "FORKTEST: FAIL " + string.Join(", ", fails.Take(8)));
         return sb.ToString();
     }

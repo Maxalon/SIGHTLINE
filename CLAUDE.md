@@ -350,22 +350,26 @@ src/
                 HostileDamageTrim - see "Combat model"), OpenerTrim, the deployment shapes,
                 pods and the per-objective board furniture. Every hostile in the game is
                 built here; nothing else may construct one.
-                P20: Build CLEARS the biome ground layer at its top (`Mission.ClearGroundOnBuild`).
-                It wipes Tiles/Height/Smoke there and used not to wipe Ground, but it READS Ground
-                through Grid.IsFloor / Grid.CostMap (TryApplyLayout's accept/reject, SpawnEnemies'
-                scatter, PlaceBarrels, EnsureConnectivity) — and this mission's layer does not exist
-                yet, because Game.StampBiomeGround runs AFTER Build. So a board was a function of
-                the board before it. SIGHTLINE_STALEGROUND=1 restores that; never ship it on.
+                P20 + P21: Build OWNS ALL EIGHT of Grid's per-tile layers — it wipes
+                Tiles/Height/Smoke, and clears Ground (`Mission.ClearGroundOnBuild`, P20) and
+                Fire/Barrel (`Mission.ClearHazardsOnBuild`, P21) at its top. It READS both through
+                Grid.IsFloor / Grid.CostMap (TryApplyLayout's accept/reject, SpawnEnemies' scatter,
+                PlaceBarrels, EnsureConnectivity) before this mission's ground layer exists, because
+                Game.StampBiomeGround runs AFTER Build. Ground was LIVE (a board was a function of
+                the board before it, 8-15% of daily processes); Barrel was LATENT ONLY —
+                Game.SetupMission has always cleared hazards 28 lines earlier and still does.
+                SIGHTLINE_STALEGROUND=1 / SIGHTLINE_STALEHAZARDS=1 restore each seam; never ship
+                either on.
   Voice.cs      the squad's radio barks (line pools + the cooldown/priority picker)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra.
                 EIGHT per-tile arrays (Tiles/Height/Smoke/CoverHp/CoverSeed/Fire/Barrel/Ground).
-                L6: SIX are cleared by `Mission.Build` itself and leak nothing into its own
-                terrain decisions; **Fire and Barrel are cleared by the CALLER**
-                (`Game.SetupMission` -> `Grid.ClearHazards()`, the only production caller), and
-                `Barrel` is read by `IsFloor`, so a stale one would move the board exactly as the
-                stale Ground did. MODETEST leg (14a-2) gates the six at the Build seam and (14b)
-                all eight at the SetupMission seam. Moving the clear into Build is ROADMAP's next
-                item — until then, ANY new caller of Mission.Build must clear hazards first.
+                P21: ALL EIGHT are cleared by `Mission.Build` itself and none leaks into its own
+                terrain decisions. `Barrel` is read by `IsFloor` (same predicate as the rift), so a
+                stale one moves the board exactly as the stale Ground did — L6 measured that, and
+                it was LATENT ONLY, because `Game.SetupMission` (the only production caller) has
+                always called `Grid.ClearHazards()` first and STILL DOES, deliberately, as belt and
+                braces. MODETEST leg (14a-2) gates all eight at the Build seam and (14b) all eight
+                at the SetupMission seam, so a future caller that stops clearing is still caught.
   Terrain.cs    C4 + P16: the per-tile biome GROUND layer. FIVE of eight biomes are mechanical
                 on five axes - VERDANT undergrowth (cover) / TUNDRA ice (movement) / MAGMA
                 vents (sight) / VOID RIFT (topology: impassable, TRANSPARENT, no cover) /
@@ -737,6 +741,7 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P19** THE ROSTER CONTESTS | The named mid-boss now belongs to the map's **ELITE NODE** (`Mission.MidBossFor`), with the floor walked on the ROUTE (`Game.IsFinalApproach`) because an Event node can occupy a route's column-4 slot — **a `mission == 5` floor leaks on 8.1% of routes and the old `n == 3 \|\| n == 5` leaked on 2.7%.** Also: **BOMBARD/WARBRINGER's "0.8%/1.6%" are BODY rates and are the wrong denominator** — both are capped at one per mission, so exposure is **5.6% / 12.5% of missions**; and the arenas' "88% tile-identical" is the **85.3% floor-share baseline**, not duplication (one real near-duplicate: ZIGGURAT/FORGE, Jaccard 72.7%). | §P19 |
 | **P20** THE STALE GROUND | `Mission.Build` wiped Tiles, Height and Smoke but **not the biome GROUND layer**, and it asks for that layer through `Grid.IsFloor` / `Grid.CostMap` before `Game.StampBiomeGround` runs — so a board was a function of **the board before it**. Latent since C4, armed by P16 (the rift is the first ground that stops a mover). `Mission.ClearGroundOnBuild`; MODETEST leg (14). The fix moves the board — **but L6 re-priced it on 16 slot sets and its "-3.8 at h4, resolved" does NOT survive the doubling** (-0.6 on eight sets it never saw). | §P20 |
 | **L6** THE LADDER OF RECORD | Two things a fresh session must not re-derive. **(1) THE FORK PAYS has no restore flag**, so the CRN chain cannot cross milestone 5 and no bridge to L5 exists; ship a gameplay constant and its flag in the same commit. **(2) `Grid` has a SECOND stale layer: `Barrel`.** `IsFloor` reads it, so Build's connectivity floods read the previous mission's barrels — P20's defect, different array, same predicate. **Latent, not live**: `Game.SetupMission` clears hazards 28 lines before the Build call, and it is the only production caller. `BoardSignature()` was blind to it and now hashes all eight layers. | §L6 |
+| **P21** BUILD OWNS THE BOARD | Closes both of L6's items. `Mission.Build` now clears **Fire and Barrel** too (`Mission.ClearHazardsOnBuild`), so Build owns all eight layers — and `Game.SetupMission`'s own `Grid.ClearHazards()` is **kept on purpose**: removing it is the only part of that change that could touch a live path. **Proven inert, not asserted**: 1,280 CRN campaigns per arm, 32/32 chunks byte-identical against both `108d9ac` and `SIGHTLINE_STALEHAZARDS=1`. THE FORK PAYS finally gets `SIGHTLINE_FORKPRICES=0` — which **does not repair L6's broken bridge** (L5's worlds are gone) and covers the four PRICES only, not that wave's SUPPLY heal-ordering change, which is still unswitchable. | §P21 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be
 switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, exactly),
@@ -747,19 +752,29 @@ switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, ex
 single-mission modes), `SIGHTLINE_SECONDAXIS=0` / `SIGHTLINE_PERKPICK=0` / `SIGHTLINE_ASSISTLATCH=0`
 (the three halves of P18: the pre-P18 WAR ROOM, the random bonus-perk recipient, the live-heat assist),
 `SIGHTLINE_ELITEBOSS=0` (the pre-P19 mission-number mid-boss), `SIGHTLINE_ROSTERID=0` (the pre-P19
-SMG monoculture) and `SIGHTLINE_STALEGROUND=1` (the pre-P20 seam, in which `Mission.Build` read the
+SMG monoculture), `SIGHTLINE_STALEGROUND=1` (the pre-P20 seam, in which `Mission.Build` read the
 PREVIOUS mission's ground layer — never a shipping configuration; it makes the SEEDED DAILY's
-headline contract false). **Grep `Program.cs` for `SIGHTLINE_` for the authoritative set** — that list
+headline contract false), `SIGHTLINE_STALEHAZARDS=1` (the pre-P21 seam, in which `Mission.Build` did
+not clear Fire/Barrel — **live-path inert by construction**, because `Game.SetupMission` still clears
+them first) and `SIGHTLINE_FORKPRICES=0` (the pre-milestone-5 routing prices, all four as a set —
+never a shipping configuration; SUPPLY strictly dominates COMBAT again and FORKTEST leg (A) fails by
+design). **Grep `Program.cs` for `SIGHTLINE_` for the authoritative set** — that list
 is derived, this one is written down, and written-down lists in this repository go stale.
 
-> **⚠ ONE WAVE HAS NO FLAG, AND IT COST THE PROJECT A BRIDGE.** **THE FORK PAYS** (milestone 5,
-> `54147dc`) repriced the routing economy — `Run.DepthBase` 10->12, `SupplyDiscount`,
-> `PitchedPremium`, `ElitePremium` — as `const int`s in `src/Run.cs` with no environment switch.
-> L6 found it by bisection when its bridge to L5 failed on 96 of 96 chunks: **the chain is intact
-> on both sides of that one merge and cannot cross it.** L6 priced the wave anyway, by using
-> milestone 5 as the bridge target (`-0.36 pooled over 1,920 CRN pairs, 401 discordant, MDE 2.9`),
-> so the number exists — but only because a whole extra tree had to be built to get it. **If you
-> ship a gameplay constant, ship its flag in the same commit.**
+> **⚠ ONE WAVE SHIPPED WITH NO FLAG, AND IT COST THE PROJECT A BRIDGE. P21 GAVE IT ONE — LATE.**
+> **THE FORK PAYS** (milestone 5, `54147dc`) repriced the routing economy — `Run.DepthBase` 10->12,
+> `SupplyDiscount`, `PitchedPremium`, `ElitePremium` — as `const int`s in `src/Run.cs` with no
+> environment switch. L6 found it by bisection when its bridge to L5 failed on 96 of 96 chunks:
+> **the chain is intact on both sides of that one merge and cannot cross it.** L6 priced the wave
+> anyway, by using milestone 5 as the bridge target (`-0.36 pooled over 1,920 CRN pairs, 401
+> discordant, MDE 2.9`), so the number exists — but only because a whole extra tree had to be built
+> to get it. P21 shipped `SIGHTLINE_FORKPRICES=0` (`Run.SetForkPrices`, all four prices as a set).
+> **READ WHAT THAT DOES AND DOES NOT BUY: it does NOT repair the broken bridge** — L5's worlds were
+> measured on a tree that no longer exists and no flag brings them back — and it restores the four
+> PRICES only, **not** the same wave's second unflagged gameplay change (the SUPPLY full heal moved
+> from before `Run.DebriefSurvivors` to inside it, so a SUPPLY clear can now wound). What it buys is
+> that a FUTURE round can isolate most of that wave, which was impossible before. **If you ship a
+> gameplay constant, ship its flag in the same commit.**
 
 **PROGRAM PARALLAX is the twelfth and is current.** Its own thesis, earned twice over: the gates in
 this project fail QUIET rather than loud. It found the sweep's coverage guard blind to a whole class

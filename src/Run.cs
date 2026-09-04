@@ -988,9 +988,21 @@ public class Run
     // economy stop back above the fight it is supposed to be cheaper than. (The cost of that
     // choice is stated in the DEVLOG: a PITCHED SUPPLY is harder than a TASKED SUPPLY and pays
     // the same. It is a known un-priced cell, not an oversight.)
-    public const int SupplyDiscount = -6;   // the heal is the reward; safety costs intel
-    public const int ElitePremium   = 14;   // risk-for-reward: heavier force, the biggest payout
-    public const int PitchedPremium = 8;    // C3's class price, paid on Combat/Elite only
+    //
+    // P21 — THESE FOUR ARE NOW DIALS, NOT `const`s, AND THE REASON IS A MEASUREMENT FAILURE.
+    // THE FORK PAYS shipped all four as bare `const int` with NO restore flag, against this
+    // project's own rule that every gameplay lever gets one "because a wave that cannot be
+    // switched off cannot be attributed". L6's bridge to the ladder of record then reproduced
+    // 0 of 96 chunks; bisected by milestone with L5's own base commit as a passing control, the
+    // CRN chain was intact through milestone 4 and broke at milestone 5 — this wave — and NO
+    // BRIDGE COULD BE BUILT ACROSS IT, by construction. `SIGHTLINE_FORKPRICES=0` (see
+    // Run.SetForkPrices) restores the pre-wave routing prices as a set. It does NOT repair L6's
+    // bridge — L5's worlds were measured on a tree that no longer exists and no flag brings them
+    // back. What it buys is that a FUTURE round can isolate this wave's contribution, which was
+    // impossible before. See the DEVLOG for what the flag does and does not cover.
+    public static int SupplyDiscount = ForkSupplyDiscount;   // the heal is the reward; safety costs intel
+    public static int ElitePremium   = ForkElitePremium;     // risk-for-reward: heavier force, the biggest payout
+    public static int PitchedPremium = ForkPitchedPremium;   // C3's class price, paid on Combat/Elite only
 
     // THE PRICES ARE A REDISTRIBUTION, NOT A CUT — and this constant is what makes that true.
     // The depth term was `10 + 4*mission` for as long as the routing economy has existed. Taking
@@ -1005,7 +1017,37 @@ public class Run
     // through the economy stops banks less than it used to, a route through the hard fights banks
     // more, and the campaign as a whole banks what it always did. Anyone re-tuning the two prices
     // above owes this constant the same arithmetic.
-    public const int DepthBase = 12;        // was 10 before THE FORK PAYS; see the note above
+    public static int DepthBase = ForkDepthBase;   // was 10 before THE FORK PAYS; see the note above
+
+    // ── THE TWO PRICE TABLES, NAMED, so the restore is a SET and not four edits ────────────
+    // THE FORK PAYS' own prices (the shipped defaults) and the ones it replaced. Both are
+    // `const`, so neither table can drift: a future re-tune edits the Fork* row and the Pre* row
+    // keeps meaning "milestone 4".
+    public const int ForkSupplyDiscount = -6, ForkElitePremium = 14, ForkPitchedPremium = 8, ForkDepthBase = 12;
+    // Pre-milestone-5: NodeIntel was `10 + 4*mission`, Supply paid base+10 (the strictly
+    // dominating option this wave existed to remove), Elite paid base+14 (unchanged by the wave),
+    // and there was no class price at all — a PITCHED node paid its TASKED sibling exactly.
+    public const int PreForkSupplyDiscount = 10, PreForkElitePremium = 14, PreForkPitchedPremium = 0, PreForkDepthBase = 10;
+
+    /// TRUE when the routing economy is running THE FORK PAYS' prices (the shipped default).
+    public static bool ForkPricesOn = true;
+
+    /// Set the routing economy's four prices AS A SET. `on:false` is `SIGHTLINE_FORKPRICES=0`.
+    /// It must be all four or it is not a restore: the depth term moved 10 -> 12 as the
+    /// REDISTRIBUTION that hands back the ~1.9-2.1 intel/mission the discount and the premium
+    /// take out (see the note above), so undoing the premiums while keeping the base — or the
+    /// reverse — produces an economy that never shipped and prices nothing.
+    /// NOT a shipping configuration: with it off, SIGHTLINE_FORKTEST leg (A) fails by design
+    /// (SUPPLY pays above a plain fight again) and SAVETEST's map fingerprints move, because
+    /// SaveGame.MapFingerprint feeds each node's regenerated Intel.
+    public static void SetForkPrices(bool on)
+    {
+        ForkPricesOn    = on;
+        SupplyDiscount  = on ? ForkSupplyDiscount  : PreForkSupplyDiscount;
+        ElitePremium    = on ? ForkElitePremium    : PreForkElitePremium;
+        PitchedPremium  = on ? ForkPitchedPremium  : PreForkPitchedPremium;
+        DepthBase       = on ? ForkDepthBase       : PreForkDepthBase;
+    }
 
     /// The depth term every non-Event node's payout is built on.
     public static int BaseIntel(int mission) => DepthBase + 4 * mission;
