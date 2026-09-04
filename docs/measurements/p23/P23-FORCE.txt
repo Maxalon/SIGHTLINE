@@ -1,0 +1,29 @@
+### shipped tree (both levers on)
+FORCE MATRIX (seed 4242, columns RECRUIT,h0..h8):
+  m1  count  3  4  4  4  4  4  4  4  4  4   bump -1  0  0  0  0  0  0  0  0  0
+  m2  count  4  5  5  5  6  6  6  6  6  7   bump  0  1  1  1  1  1  1  2  2  3
+  m3  count  5  6  7  7  8  8  9  9  9 10   bump  1  2  2  3  3  3  3  4  5  6
+  m4  count  6  7  8  8  9  9 10 10 10 11   bump  2  3  3  4  4  4  4  5  6  7
+  m5  count  7  8  9  9 10 10 11 11 11 12   bump  3  4  4  5  5  5  5  6  7  8
+  m6  count  5  6  7  7  8  9 10 10 10 11   bump  4  5  5  6  6  6  6  7  8  9
+  seated worst-case: shipped=12 (ceiling 12), ceiling-16 stress=16
+FORCETEST: PASS (every rung's declared body AND stat reach the board at missions 3-6, all 3 seeds; the opener is flat across rungs 0-8 and m2 takes exactly half; the finale stat is on the BODIES not just the telemetry; every hostile on a distinct reachable tile at every mission x rung, worst seated 12/12 and 16 under a stressed ceiling of 16 with base 8; both dials real, independent, and both-off reproduces the pre-P23 finale; on the ROUTED tree 2 rung-steps are still short at the board's ceiling and 1 at an objective's floor, and nothing else is short; the ORDER moved 20 of 180 cells and none of them had a request that fitted under the ceiling)
+
+### pre-P23 tree (SIGHTLINE_CLAMPLAST=0 SIGHTLINE_FINALESTAT=0) - the RED run
+FORCE MATRIX (seed 4242, columns RECRUIT,h0..h8):
+  m1  count  3  4  4  4  4  4  4  4  4  4   bump -1  0  0  0  0  0  0  0  0  0
+  m2  count  4  5  5  5  6  6  6  6  6  7   bump  0  1  1  1  1  1  1  2  2  3
+  m3  count  5  6  7  7  8  8  9  9  9 10   bump  1  2  2  3  3  3  3  4  5  6
+  m4  count  6  7  8  8  9  9 10 10 10 11   bump  2  3  3  4  4  4  4  5  6  7
+  m5  count  7  8  9  9 10 10 11 11 11 11   bump  3  4  4  5  5  5  5  6  7  8
+  m6  count  5  6  7  7  8  9  9  9  9  9   bump  5  5  5  5  5  5  5  5  5  5
+  seated worst-case: shipped=11 (ceiling 12), ceiling-16 stress=15
+FORCETEST: FAIL bodyEaten s4242 m5 rung8(NO QUARTER) declared+1 got0 (11->11) | statEaten s4242 m6 rung2(HARDENED) declared+1 got0 (5->5) | bodyEaten s4242 m6 rung5(LINGERING WOUNDS) declared+1 got0 (9->9) | statEaten s4242 m6 rung6(EXPOSED) declared+1 got0 (5->5) | statEaten s4242 m6 rung7(RELENTLESS) declared+1 got0 (5->5) | bodyEaten s4242 m6 rung8(NO QUARTER) declared+1 got0 (9->9) | statEaten s4242 m6 rung8(NO QUARTER) declared+1 got0 (5->5) | bodyEaten s1337 m5 rung8(NO QUARTER) declared+1 got0 (11->11) | statEaten s1337 m6 rung2(HARDENED) declared+1 got0 (5->5) | bodyEaten s1337 m6 rung5(LINGERING WOUNDS) declared+1 got0 (9->9) | statEaten s1337 m6 rung6(EXPOSED) declared+1 got0 (5->5) | statEaten s1337 m6 rung7(RELENTLESS) declared+1 got0 (5->5) | bodyEaten s1337 m6 rung8(NO QUARTER) declared+1 got0 (9->9) | statEaten s1337 m6 rung8(NO QUARTER) declared+1 got0 (5->5) | bodyEaten s90210 m5 rung8(NO QUARTER) declared+1 got0 (11->11) | statEaten s90210 m6 rung2(HARDENED) declared+1 got0 (5->5) | bodyEaten s90210 m6 rung5(LINGERING WOUNDS) declared+1 got0 (9->9) | statEaten s90210 m6 rung6(EXPOSED) declared+1 got0 (5->5) | statEaten s90210 m6 rung7(RELENTLESS) declared+1 got0 (5->5) | bodyEaten s90210 m6 rung8(NO QUARTER) declared+1 got0 (9->9) | statEaten s90210 m6 rung8(NO QUARTER) declared+1 got0 (5->5) | routedBodyEaten s4242 m5 rung3(SHORT FUSE) declared+1 got0 at 11/12 | routedBodyEaten s4242 m5 rung5(LINGERING WOUNDS) declared+1 got0 at 11/12 | routedBodyEaten s4242 m5 rung8(NO QUARTER) declared+1 got0 at 11/12 | routedBodyEaten s4242 m6 rung5(LINGERING WOUNDS) declared+1 got0 at 9/12 | routedBodyEaten s4242 m6 rung8(NO QUARTER) declared+1 got0 at 9/12 | routedBodyEaten s1337 m6 rung5(LINGERING WOUNDS) declared+1 got0 at 9/12 | routedBodyEaten s1337 m6 rung8(NO QUARTER) declared+1 got0 at 9/12 | routedBodyEaten s90210 m5 rung8(NO QUARTER) declared+1 got0 at 11/12 | routedBodyEaten s90210 m6 rung5(LINGERING WOUNDS) declared+1 got0 at 9/12 | routedBodyEaten s90210 m6 rung8(NO QUARTER) declared+1 got0 at 9/12
+
+### lever A alone
+  m6  count  5  6  7  7  8  9 10 10 10 11   bump  5  5  5  5  5  5  5  5  5  5
+FORCETEST: FAIL statEaten s4242 m6 rung2(HARDENED) declared+1 got0 (5->5) | statEaten s4242 m6 rung6(EXPOSED) declared+1 got0 (5->5) | statEaten s4242 m6 rung7(RELENTLESS) declared+1 got0 (5->5) | sta
+
+### lever B alone
+  m6  count  5  6  7  7  8  9  9  9  9  9   bump  4  5  5  6  6  6  6  7  8  9
+FORCETEST: FAIL bodyEaten s4242 m5 rung8(NO QUARTER) declared+1 got0 (11->11) | bodyEaten s4242 m6 rung5(LINGERING WOUNDS) declared+1 got0 (9->9) | bodyEaten s4242 m6 rung8(NO QUARTER) declared+1 got0

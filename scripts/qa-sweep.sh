@@ -149,6 +149,10 @@ echo -n "HORDETEST  : "; verdict "$(SIGHTLINE_HORDETEST=1 run | grep -oE "HORDET
 echo -n "DEATHTEST  : "; verdict "$(SIGHTLINE_DEATHTEST=1 run | grep -oE "DEATHTEST: (PASS|FAIL)" | head -1)"
 echo -n "HEATLADDERTEST: "; verdict "$(SIGHTLINE_HEATLADDERTEST=1 run | grep -oE "HEATLADDERTEST: (PASS|FAIL)" | head -1)"
 echo -n "MIDTOOTHTEST: "; verdict "$(SIGHTLINE_MIDTOOTHTEST=1 run | grep -oE "MIDTOOTHTEST: (PASS|FAIL)" | head -1)"
+# P23 THE APEX BITES — the third heat gate, and the one that looks at the BOARD. The two above pin
+# the heat TABLE (cumulative and per-rung); both were green while the apex rung's body and stat were
+# being clamped and discarded in Mission.SpawnEnemies. This one asks what force was actually built.
+echo -n "FORCETEST  : "; verdict "$(SIGHTLINE_FORCETEST=1 run | grep -oE "FORCETEST: (PASS|FAIL)" | head -1)"
 echo -n "SNAPTEST   : "; verdict "$(SIGHTLINE_SNAPTEST=1 run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOTEST  : "; verdict "$(SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1)"

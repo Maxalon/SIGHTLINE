@@ -16908,3 +16908,195 @@ in L5. It is a property of that opener, not of a rung or a policy. Stalemates ov
 - `SIGHTLINE_MIDTOOTHTEST=1` — PASS (the check that says the cause is NOT a dead declaration).
 - 336/336 balance chunks asserted (`p15/check_chunk.py`), `LEAK-CHECK PASS` on all 160 ladder chunks
   (0 of 13,124 missions off-rung).
+
+# §P23 — "THE APEX BITES" (2026-09-04, `wave/apex-bites`, base `fd07d56`)
+
+**Brief:** L7 located a real defect and deliberately did not fix it inside a measurement round. This
+wave is the fix. **The hardest difficulty setting's two quantitative teeth could not reach the
+mission that decides a campaign.** Ship both halves as **two independently switchable levers** —
+L7's partial arm confounded them and that is exactly why its number did not resolve — plus the guard
+L7 said was missing, plus a measured round.
+
+Raw round, runners and analysis: [`docs/measurements/p23/`](measurements/p23/README.md).
+**544 chunks, every one asserted by `p15/check_chunk.py`, zero `BAD` — 10,880 campaigns, 43,537
+missions, `LEAK-CHECK PASS` (0 off-rung).**
+
+## P23-1. The defect, in one paragraph, and why two green tests could not see it
+
+`Mission.SpawnEnemies` computed `int count = Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12)` and
+then subtracted from that clamped value five times: the opener grace, the sabotage trim, the defend
+trim, **the finale's de-stack**, the pod trim. `12` is a BOARD-SEATING number. The finale's finished
+force is 6-11 bodies and never comes within one of it. So a seating limit that the finale cannot
+reach was nevertheless deciding the finale's size, and from heat 3 up — where the *request* crosses
+12 — every extra body the ladder declared was eaten before the de-stack could spend it. Then
+`bump = Math.Max(0, n - 1)` discarded heat's `StatDelta` outright, at every rung.
+
+**`HEATLADDERTEST` pins the CUMULATIVE heat vector. `MIDTOOTHTEST` pins the PER-RUNG deltas, the
+apex vector and the no-dead-declaration rule. Both were green, and both were RIGHT** — the table was
+never wrong. **Nothing in `src/` asked what force the board actually builds.** C1's defect was a
+declaration the vector could not carry; this is a vector the BUILD does not honour. Same class,
+arrow reversed, same two programs of silence.
+
+## P23-2. Two levers, and why the split is the methodological point rather than tidiness
+
+**LEVER A — `Mission.ClampLast` (`SIGHTLINE_CLAMPLAST=0` restores).** The seating ceiling moves to
+the END of the pipeline, so it bounds the force that is SEATED instead of the number that was
+ASKED FOR. One line moved; the ceiling itself is untouched at 12.
+
+**LEVER B — `Mission.FinaleHeatStat` (`SIGHTLINE_FINALESTAT=0` restores).** The finale's stat strip
+is SEPARATED. The old comment said it dropped "the boss-card/heat StatDelta for the screen", merging
+two decisions that are not the same one:
+
+- **the deployment CARD's stat is genuinely presentational and is still dropped, in both modes.**
+  The block's founding argument stands: the WARLORD *is* the elite, and an ELITE-shaped card on top
+  would double-count it. **Worth recording, because the comment was already stale:**
+  `Run.CardForNode`'s `NodeKind.Boss` ships `StatDelta 0` and `EnemyDelta 0` — it names the objective
+  and the reward and nothing else. So the strip's only live victim WAS heat's. The card half is kept
+  anyway, because the argument for it is about what a boss card *may* carry, not what today's does.
+- **the adaptive assist's relief is likewise still dropped** (unchanged behaviour).
+- **HEAT's stat is not presentational.** It is the rung the player dialled and the row `Heat.Mods`
+  publishes. Discarding it made rungs 2, 6, 7 and 8 statless on mission 6.
+
+Heat's own contribution reaches `SpawnEnemies` on its own new parameter (`heatStat`, defaulted 0 for
+every other caller) because **a sum cannot be un-summed**: `statDelta` is `card + heat − assist`.
+
+**Why not one lever.** L7 priced a partial relief with `SIGHTLINE_ENEMYBASE=2`, which eases the
+ceiling and cannot touch the stat strip. It measured the apex at +4.1 against −0.6 — and **z = −1.66
+on the odds scale, not resolved** — with the whole recovery coming from missions 2-5 because nothing
+had relieved `bump`. A combined lever here would have reproduced that ambiguity exactly. With two
+dials, this round can say *A is worth −1.30, B is worth −1.25, and they compose additively*, which
+no single-arm round can.
+
+## P23-3. IS 12 THE RIGHT CEILING? — asked, measured, and NOT spent
+
+The brief's own condition was "find out before raising it — if the board cannot seat 13 hostiles on
+some arenas, raising the clamp trades a dead lever for a spawn failure."
+
+**Measured** (`FORCETEST` leg (E), every mission x rung x 3 seeds, and again with the ceiling
+stressed): the relocate pool in `SpawnEnemies` is cols `W-4..W-2` over all `H` rows — **33 tiles on
+the 18x11 board** — and every seated body joins `Mission.Build`'s `occupied` set, which both arena
+paths keep open and `EnsureConnectivity` guarantees a lane to. With `ForceCeiling = 16` and
+`EnemyBaseCount = 8`, asking missions 4-6 for 13-16 bodies, the board seats **16, all on distinct
+tiles, all reachable from the squad**. **So 12 is not a layout constraint.**
+
+**And P23 did not raise it, because the defect was not the height of the ceiling — it was that the
+ceiling was measuring the wrong thing.** Under lever A the shipped finale asks for at most 11 and
+the whole board for at most 12: the same worst case it has always had. `SIGHTLINE_FORCECEILING=<n>`
+is shipped as a priced, unspent dial so a later round can ask the separate question of whether the
+mid-run ELITE nodes should be allowed past 12 (they are the cells still binding — see
+`ROADMAP`). Raising it here would have been a second lever inside a one-lever round.
+
+## P23-4. `SIGHTLINE_FORCETEST` — the guard, and it is the durable half of this wave
+
+Seven legs, all of which read the force `Mission.Build` actually assembled rather than the table it
+was assembled from. Three seeds, RECRUIT through heat 8, missions 1-6.
+
+| leg | what it asserts | RED on the pre-P23 tree? |
+|---|---|---|
+| **(A1)** | at m3-m6, every rung puts at least its declared `EnemyDelta` bodies and `StatDelta` stat points on the board, with a plain card so heat is the only variable | **YES** — `bodyEaten m6 rung5/rung8`, `statEaten m6 rung2/6/7/8`, `bodyEaten m5 rung8`, on all three seeds |
+| **(B)** | same statement about `Mission.LastStatBump` | **YES** (above) |
+| **(C)** | m1 is FLAT across rungs 0-8 and m2 takes exactly half the declared growth — §3.D's front-loaded-anxiety clause as an assertion | no (and must stay green) |
+| **(D)** | the stat is on the BODIES, not just the telemetry: toggling lever B consumes no RNG, so the two finales are the same classes on the same tiles and every non-boss body is tougher by exactly heat's `StatDelta` (x2 for AEGIS's `bump*2` line); the WARLORD takes no bump | n/a — it is the telemetry's own falsification |
+| **(E)** | every hostile on a DISTINCT tile, reachable from the squad, at every mission x rung — and again with the ceiling stressed to 16 and base 8 | no (this is the seating measurement) |
+| **(F)** | **two levers, independently switchable**: each `=0` restores the pre-P23 arithmetic for its own quantity and leaves the other exactly where it was; both off reproduce L7's artifact table | no (it is the wave's own contract) |
+| **(G)** | the ORDER is a no-op wherever `LastForceRequest <= ForceCeiling` — the scoping claim, checked on every cell | no |
+
+**It is a real instrument, not a pass/fail light.** Run with each dial alone and it names exactly the
+half that is still broken: `SIGHTLINE_FINALESTAT=0` leaves only `statEaten` lines,
+`SIGHTLINE_CLAMPLAST=0` leaves only `bodyEaten` lines. `SIGHTLINE_FORCEDUMP=1` prints the whole
+(mission x rung) headcount/bump matrix — the report L7 produced by photographing the HUD, derived.
+
+**Three fail-open shapes were closed deliberately, because this wave exists because of one.**
+Leg (D) refuses a vacuous pass (`leverDVacuous` if fewer than 3 bodies per seed were actually
+compared); leg (E) refuses a stress that did not stress (`stressDidNotStress`); leg (A1) refuses a
+build that produced no force. And leg (A2) — the same assertion on the REAL routed cards — needs two
+escape hatches, both NAMED and both counted in the PASS line rather than hidden: the board is at its
+**ceiling**, or the force is at a declared **floor** (Defend and Sabotage floor at 3 by design, FUL-4
+HOLDFAST). `Mission.LastForceFloored` is a witness published by the builder so the test does not have
+to re-derive the arithmetic it is auditing — **a control derived from the thing it controls cannot
+detect a change to the thing it controls** (C1's rule, applied).
+
+## P23-5. THE MEASURED ROUND
+
+Full tables, every caveat and the raw chunk assertions: `docs/measurements/p23/README.md`.
+Four arms x the ladder x 16 CRN slot bases, plus a 16-set out-of-sample extension at h4/h6/h8 and a
+RECRUIT arm. **Heat pinned; `LEAK-CHECK PASS` on all 544 chunks.**
+
+**The bridge, first: 80/80 chunks and 1,600/1,600 legs identical to the L7 archive** at h0/h2/h4/h6/h8
+(44.4 / 35.9 / 23.1 / 11.2 / 8.8). That certifies P22 inert, P23's non-lever edits stream-neutral
+with the dials off, and the CRN chain intact back to L6.
+
+**The force on the board.** m6 headcount at heats 0-8 goes **6/7/7/8/9/9/9/9/9 -> 6/7/7/8/9/10/10/10/11**
+and m6 `bump` goes **5 at every rung -> 4/5/5/6/6/6/6/7/8/9**. m5 gains one body at h8. **m1 and m2
+do not move at any rung in any arm.** Evidence image: `m6-force-by-heat-p23.png`.
+
+**The campaign row** (16 sets, n=320; h4/h6/h8 also at 32 sets, n=640):
+
+| rung | base | A | B | **AB** | band | after |
+|---|---|---|---|---|---|---|
+| RECRUIT | 70.6 | — | — | **73.4** | 67-83 | IN |
+| h0 | 44.4 | 44.4 | 44.4 | **44.4** | 47-63 | OUT −2.6 (inherited, untouched) |
+| h2 | 35.9 | 35.9 | 34.7 | **34.7** | 32-48 | IN |
+| h4 (32 sets) | 25.0 | 24.4 | 23.4 | **23.6** | 22-38 | IN |
+| h6 (32 sets) | 10.9 | 9.5 | 9.8 | **9.4** | 12-28 | **OUT −2.6** (was −1.1) |
+| h8 (32 sets) | 7.7 | 5.8 | 6.6 | **5.0** | 5-15 | IN, **exactly ON the >=5 hard floor** |
+
+**The inertness controls come back EXACT, which is worth more than any contrast.** At h0 all five
+contrasts are **0 discordant campaigns in 320** — no campaign came out differently at all — and
+lever A is likewise 0 discordant in 320 at h2. That is `FORCETEST`'s matrix predicting where the
+levers can fire, confirmed on the flywheel.
+
+**What resolves and what does not, stated the strict way.**
+
+| contrast | n | eff | n_disc | MDE80 | z | verdict |
+|---|---|---|---|---|---|---|
+| h8 base->AB (32 sets) | 640 | **−2.7** | 45 | 2.93 | **−2.53** | at the edge (t(31) = −2.87) |
+| h8 base->AB (NEW 16 sets only) | 320 | −3.1 | 12 (b=1, c=11) | 3.03 | **−2.89** | RESOLVED |
+| h6 base->AB (32 sets) | 640 | −1.6 | 70 | 3.66 | −1.20 | NOT RESOLVED |
+| h4 base->AB (32 sets) | 640 | −1.4 | 57 | 3.30 | −1.19 | NOT RESOLVED |
+| **pooled h4+h6+h8, base->A** | 1,920 | **−1.30** | 137 | 1.71 | **−2.14** | at the edge |
+| **pooled h4+h6+h8, base->B** | 1,920 | **−1.25** | 114 | 1.56 | **−2.25** | at the edge |
+| **pooled h4+h6+h8, base->AB** | 1,920 | **−1.88** | 172 | 1.91 | **−2.74** | at the edge |
+| RECRUIT base->AB | 320 | **+2.8** | 15 | 3.39 | **+2.32** | at the edge (t(15) = +4.39) |
+
+**"At the edge" is a real verdict and this wave will not round it either way.** The MDE80 is the
+smallest effect the design has 80% power to detect; several of these effects are just under their
+own MDE while the two-sided McNemar test rejects at p ≈ 0.006-0.03. The correct reading is *the
+effects are real at conventional significance and are the same size as the smallest thing this round
+could reliably see*. Nobody should quote −1.88 as a precise quantity, and a replication should
+expect it to bounce. The one contrast that resolves outright is the apex on the 16 slot sets the
+round had never seen, at **b=1 against c=11**.
+
+**The per-mission row, which is where L7's diagnostic actually lived.** L7's finding was not the
+campaign number, it was that *the mission-level ladder was monotone at all nine steps and only the
+campaign one broke*, with `m6` moving **the wrong way** (16.8 -> 23.9 across h7 -> h8). On 32 slot
+sets the shipped tree's finale conditional is **34.6 / 20.1 / 15.5** at h4 / h6 / h8 against
+**36.8 / 25.5 / 23.9** before — monotone in the rung, and the h6 -> h8 step is 4.6 points where it
+was 1.6. Restricted to worlds where BOTH arms reached mission 6, the finale moves **0.0 (h0, 182
+paired, 0 discordant) / −3.0 (h4) / −5.2 (h6) / −9.3 (h8)**; none of those resolves at 100-300
+paired finales, and the sizes are quoted as directions, not quantities.
+
+**Mission 1 and mission 2 are identical in every arm at every rung, cell and denominator** (93.9/640,
+93.3/640 …). §3.D's front-loaded-anxiety clause is satisfied on the artifact, not only by
+construction, and `FORCETEST` leg (C) is what keeps it that way.
+
+**Stalemates 0.9-1.4%, all MISSION-arm; the RUN arm fired 0 times in 10,880 campaigns.**
+
+## P23-6. Found and NOT fixed
+
+- **h6 goes further under its floor and h8 lands exactly on its hard floor.** Both are in the table
+  above and neither is tuned here. **A round that changes a mechanism may not also tune toward the
+  band inside itself** — the correction is a separate lever with its own fresh baseline, and it is
+  ROADMAP's top item out of this wave. h6 was already under the floor before P23 (−1.1 on 32 sets).
+- **The mid-run ceiling still binds on ELITE nodes, and it is now the only place it does.**
+  `FORCETEST` leg (A2) counts those cells rather than hiding them. `SIGHTLINE_FORCECEILING` prices
+  the question and P23 did not spend it. Measured headroom: the board seats 16.
+- **`Heat.IntelBonus` is still an accelerating carrot with no off-switch** (`Heat.IntelPerLevel` is a
+  `const`). L7 named it; P23 has now made the STICK reach the apex without touching the CARROT, so
+  the imbalance L7 described is, if anything, less lopsided — but it is still unpriced.
+- **Rung 5 is half-explained.** L7 showed its +1 body was eaten at the finale; lever A restores it
+  (m6 9 -> 10 at h5). Whether that is enough to make LINGERING WOUNDS buy anything is unmeasured —
+  P23 did not sample h5, h1, h3 or h7.
+- **The finale's `Ai.Tier >= 1` de-stack gate is still the only reason h3 -> h4 grows a body**, and
+  it is a *gate*, not a delta. It is legal and it is measured, but it means one step of the finale's
+  own ladder is bought by a boolean rather than by the heat table.

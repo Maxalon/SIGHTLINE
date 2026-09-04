@@ -1204,3 +1204,93 @@ ELITE node — and once more, unavoidably, on the way to the boss.**
 `SIGHTLINE_ROSTERTEST` goes red without it — with `eliteNodeNoNamedElite(4/25)` and
 `plainNodeFieldsNamedElite(20/61)`, the original defect, named. Round:
 `docs/measurements/p19/`; detail `docs/DEVLOG.md` §P19.
+
+---
+
+## 5.6 What a RUNG promises (decided 2026-09-04, PARALLAX wave P23 "THE APEX BITES")
+
+Same contract as §5, §5.2, §5.3, §5.4 and §5.5: on the record, alternatives named, cost stated.
+
+**The finding.** The heat selector renders a ladder of ten rungs and, beside each, the sentence it
+promises: NO QUARTER says *"+1 enemy; +1 stat"*. `Heat.Mods` publishes exactly that, and two
+self-tests pin it. **And on mission 6 — the mission that decides whether a campaign is a win —
+neither of those two things happened.** A board-seating clamp ate the body and a stat strip
+discarded the point, so the finale fielded the same nine hostiles at the same statline from heat 4
+to heat 8. L7 photographed it: at heat 7 and heat 8 the only thing that differed on screen was the
+red HEAT chip.
+
+**Why this is a §3 violation and not a tuning nit — it is §5.5's lesson in the other register.**
+P19 established that *a label the game does not honour is worse than no label*, on a fork the player
+reads once per node. The heat rung is the same statement made about a whole campaign, chosen once at
+the start and re-read on every deploy card: the promise is not "this run will be harder on average",
+it is "the force you fight carries one more body and one more point". A player who dials the apex
+and then wins the boss fight against the same nine bodies they beat at heat 4 has not been given a
+harder game at the moment the game is decided; they have been given a red chip. §3.A wants the
+player's choices **asymmetric and informed** — and the run-level choice was neither, on the one
+mission where it mattered most.
+
+**The decision, in one sentence: the ceiling bounds what the board can SEAT, not what the ladder may
+ASK for; and the finale drops the deployment CARD's stat, not heat's.**
+
+**Two levers, and the split is a design statement, not an implementation detail.** These are separate
+promises with separate reasons, so they get separate switches:
+
+- **`Mission.ClampLast`.** `ForceCeiling` = 12 is a LAYOUT number — it exists because bodies have to
+  fit on an 18x11 board. Layout numbers may bound layout. Applying one to a *request* and then
+  subtracting from the result made a geometry constant into a difficulty constant, and it did so
+  invisibly.
+- **`Mission.FinaleHeatStat`.** The finale's stat strip was written for a real reason and half of it
+  survives: **the WARLORD is the elite, so an ELITE-shaped deployment card on top would double-count
+  it.** That argument is about the CARD. It says nothing about the rung the player dialled, and the
+  two had been merged in a single line and a single comment.
+
+**The alternatives considered:**
+
+- **(a) Raise `ForceCeiling`.** Rejected, and it was measured before it was rejected — the brief's
+  own condition. The board seats **16** bodies, all distinct and reachable, on every mission x rung
+  with the ceiling at 16 and the base headcount at 8, so 12 is not a layout constraint. But raising
+  it treats the symptom: the finale's force is 6-11 bodies and never comes near 12, so a higher
+  ceiling would still be the wrong quantity, merely a less binding wrong quantity — and it would
+  land difficulty on missions 3-5 as well, confounding the fix with a second change.
+  `SIGHTLINE_FORCECEILING` ships as a priced, unspent dial for the separate mid-run question.
+- **(b) Add heat's delta AFTER the finale trim** (L7's own first suggestion). Rejected as the same
+  fix stated worse: it special-cases the finale, leaves the ordering wrong everywhere else, and
+  hides that the general statement — *clamp what you seat* — is what makes the guard's invariant
+  non-circular.
+- **(c) Give the apex a bespoke finale body.** Rejected on §3.A grounds: a rung that carries a
+  hidden extra beyond what its row says is the same class of un-informed choice as a rung whose
+  row does not arrive.
+- **(d) Shrink the carrot instead** (`Heat.IntelBonus` accelerates as `3n + n²/2`). Not rejected —
+  **deferred, and named.** It is a real counterweight and it remains unpriced (`Heat.IntelPerLevel`
+  is a `const` with no flag). But it repairs the reward side of a promise whose *stick* side was
+  simply not being delivered; fix the delivery first, then ask about the price.
+- **(e) SHIPPED — (i) the ceiling last, (ii) the finale keeps heat's stat and still drops the
+  card's.** The finale now fields 6/7/7/8/9/10/10/10/11 at heats 0-8 with `bump` 4/5/5/6/6/6/6/7/8/9.
+
+**The honest costs, stated:**
+
+1. **The ladder's top half went further under its band, and P23 did not tune it back.** On 32 CRN
+   slot sets: h6 **10.9 -> 9.4** against a band floor of 12 (it was already under), and h8
+   **7.7 -> 5.0**, which is *exactly* the >= 5 hard floor with no margin left. That is a real
+   difficulty cost and it is published rather than absorbed, because a round that changes a
+   mechanism may not also tune toward the band inside itself — the correction is a separate lever
+   against a fresh baseline (`docs/ROADMAP.md`). What the change bought for it is the thing the band
+   cannot express: **at the apex the finale is now a harder fight than at heat 6, which it was not.**
+2. **The effects are at the edge of measurability and are quoted as directions.** Pooled over the
+   three rungs where the levers act (n=1,920 per arm) they read −1.30 / −1.25 / −1.88 with McNemar
+   z of −2.14 / −2.25 / −2.74 — significant, and the same size as the smallest effect the round was
+   designed to detect. **The design case does not rest on the size.** It rests on the promise
+   arriving, which is measured directly on the artifact and is not a statistical claim at all.
+3. **RECRUIT got easier, on purpose.** The lever is symmetric: the relief rung's declared −1 stat now
+   reaches the finale too (70.6 -> 73.4, finale conditional 88.3 -> 91.8 on 256 paired worlds). A
+   rung that bites at one end and does not relieve at the other would be a worse promise, not a
+   safer one — and §3.D's on-ramp exists precisely so the bottom of the ladder is survivable.
+4. **It does not touch the opener, and that is asserted rather than assumed.** §3.D forbids
+   front-loaded anxiety; missions 1 and 2 are identical in all four arms at every rung, cell and
+   denominator, on 640 campaigns a rung, and `SIGHTLINE_FORCETEST` leg (C) is a standing assertion
+   that they stay that way.
+
+**Falsifiable:** `SIGHTLINE_CLAMPLAST=0` and `SIGHTLINE_FINALESTAT=0` restore each half exactly and
+independently, and `SIGHTLINE_FORCETEST` goes red without them — with `bodyEaten m6 rung8` and
+`statEaten m6 rung8`, the original defect, named. Round: `docs/measurements/p23/`; detail
+`docs/DEVLOG.md` §P23.

@@ -9699,6 +9699,359 @@ public partial class Game
             : "MIDTOOTHTEST: FAIL " + string.Join(", ", fails);
     }
 
+    /// SIGHTLINE_FORCETEST — PROGRAM PARALLAX P23 "THE APEX BITES". **THE GUARD L7 SAID WAS
+    /// MISSING**, and the more durable half of that wave.
+    ///
+    /// `SIGHTLINE_HEATLADDERTEST` pins the heat table's CUMULATIVE (enemy, stat, dmg, tier) vector
+    /// and `SIGHTLINE_MIDTOOTHTEST` pins the PER-RUNG deltas and the apex vector. Both were green
+    /// while the apex rung's two quantitative teeth were switched off on mission 6, because
+    /// **nothing in `src/` ever asked what force the board actually builds.** C1 found a rung
+    /// declaring a value the vector could not carry; L7 found the arrow reversed — a value that
+    /// reaches the vector perfectly and is then clamped or discarded one level up, in
+    /// `Mission.SpawnEnemies`. A data-row pin cannot see either failure. This test looks at the
+    /// OTHER end of the pipe: the headcount and the force-wide stat bump the board was actually
+    /// assembled with, per mission, across every rung.
+    ///
+    /// Legs:
+    ///   (A) NO RUNG'S DECLARED BODY IS EATEN. Missions 3-6 (past the m1-2 heat grace): every rung
+    ///       that declares `EnemyDelta` must put at least that many bodies on the board over the
+    ///       rung below. **RED on the pre-P23 tree at mission 6, rungs 5 and 8** (the clamp).
+    ///   (B) NO RUNG'S DECLARED STAT IS EATEN. The same statement about `StatDelta` against the
+    ///       bump the force was built with. **RED pre-P23 at mission 6, rungs 2, 6, 7 and 8** (the
+    ///       finale's `bump = Math.Max(0, n - 1)` strip).
+    ///   (C) THE OPENER IS FLAT, AND THAT IS THE CONTRACT. `docs/DESIGN.md` §3.D forbids
+    ///       front-loaded anxiety and `Game.SetupMission` ramps heat in over m1-2. So mission 1
+    ///       must field the SAME force at every rung 0-8 and mission 2 exactly HALF the declared
+    ///       growth. A fix that reaches the finale must not reach the opener; this leg is what
+    ///       says so. (RECRUIT is deliberately exempt: its rung is RELIEF, which the ramp must
+    ///       not cancel — the R1 review fix, pinned from the other side by ONRAMPTEST.)
+    ///   (D) THE TELEMETRY IS NOT A STORY. Legs (A)-(C) read `Mission.LastForceCount` /
+    ///       `LastStatBump`; this leg proves those numbers reach the BODIES. Toggling lever B
+    ///       consumes no RNG, so the two finales are the same force on the same tiles — same
+    ///       headcount, same class sequence — and every non-boss body must be strictly tougher
+    ///       with the lever on, by heat's own StatDelta (x2 for the SHIELD's `bump * 2` line).
+    ///       The WARLORD itself takes no bump and must be identical.
+    ///   (E) THE CEILING IS A SEATING LIMIT, AND THE BOARD HAS HEADROOM. Every hostile on a
+    ///       DISTINCT tile and reachable from the squad, at every mission x rung — and again with
+    ///       `Mission.ForceCeiling` stressed well past the shipped 12, so the answer to "is 12 a
+    ///       layout constraint?" is measured rather than assumed. P23 did NOT raise it.
+    ///   (F) TWO LEVERS, INDEPENDENTLY SWITCHABLE — the wave's methodological requirement, pinned.
+    ///       Each `=0` restores the pre-P23 arithmetic for ITS OWN quantity and leaves the other
+    ///       exactly where it was; both off reproduce the pre-P23 finale table L7 measured on the
+    ///       artifact (6/7/7/8/9/9/9/9/9).
+    ///   (G) MID-RUN INERTNESS. Missions 1-5 build identically with both levers on and both off —
+    ///       same count, same bump, same class sequence, same tiles. The change is finale-scoped.
+    ///
+    /// `SIGHTLINE_FORCEDUMP=1` prints the whole (mission x rung) headcount/bump matrix instead of
+    /// only the failures — the report L7 produced by photographing the HUD, derived.
+    public string ForceSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        bool dump = Environment.GetEnvironmentVariable("SIGHTLINE_FORCEDUMP") == "1";
+        bool sClamp = Sightline.Mission.ClampLast, sStat = Sightline.Mission.FinaleHeatStat;
+        int sCeil = Sightline.Mission.ForceCeiling;
+        int[] seeds = { 4242, 1337, 90210 };
+
+        // Build one campaign mission end-to-end (SetupMission -> Mission.Build -> SpawnEnemies) and
+        // hand back what the board got. `JumpTo` walks the map so mission 6 is the real BOSS node
+        // with its real card and faction stamp — the finale branch keys on both.
+        (int count, int bump, string classes, string tiles) BuildAt(int mission, int heat, int seed,
+                                                                     bool plainCard = true)
+        {
+            Util.Reseed(seed);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            if (mission > 1) _run.JumpTo(mission);
+            // ONE VARIABLE. `JumpTo` adopts the routed node's card, and an ELITE node carries
+            // +2 bodies / +1 stat of its own — a second difficulty input that would sit inside the
+            // rung-to-rung differences legs (A1)/(B)/(C) are trying to read. A plain STANDARD card
+            // zeroes it, so HEAT is the only thing moving. The NODE is untouched, so the finale is
+            // still the real Boss node with its real faction stamp (the de-stack keys on the
+            // faction and on Ai.Tier, not on the card). Leg (A2) puts the real cards back.
+            if (plainCard)
+                _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD",
+                                                     Reward = RewardKind.None, RewardText = "-" };
+            SetupMission(mission);
+            var cls = new System.Text.StringBuilder();
+            var til = new System.Text.StringBuilder();
+            foreach (var e in Enemies)
+            {
+                if (cls.Length > 0) { cls.Append(','); til.Append(','); }
+                cls.Append(e.Cls);
+                til.Append(e.X).Append(':').Append(e.Y);
+            }
+            return (Sightline.Mission.LastForceCount, Sightline.Mission.LastStatBump, cls.ToString(), til.ToString());
+        }
+
+        try
+        {
+            // ---- (A1)+(B) no rung's declared body or stat may be eaten -----------------------
+            // Missions 3-6 only: m1-2 are the heat GRACE and are leg (C)'s business. A plain card,
+            // so heat is the only variable and the assertion needs no escape hatch.
+            var matrix = new System.Text.StringBuilder();
+            foreach (int seed in seeds)
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                {
+                    var cnt = new int[Heat.Max + 2];     // index h+1 so RECRUIT (-1) sits at 0
+                    var bmp = new int[Heat.Max + 2];
+                    for (int h = -1; h <= Heat.Max; h++)
+                    {
+                        var b = BuildAt(m, h, seed);
+                        if (b.count <= 0) { fails.Add($"s{seed}m{m}h{h}:noForce"); continue; }
+                        cnt[h + 1] = b.count; bmp[h + 1] = b.bump;
+                    }
+                    if (dump && seed == seeds[0])
+                    {
+                        matrix.Append("  m").Append(m).Append("  count");
+                        for (int h = -1; h <= Heat.Max; h++) matrix.Append(' ').Append(cnt[h + 1].ToString().PadLeft(2));
+                        matrix.Append("   bump");
+                        for (int h = -1; h <= Heat.Max; h++) matrix.Append(' ').Append(bmp[h + 1].ToString().PadLeft(2));
+                        matrix.Append('\n');
+                    }
+                    if (m < 3) continue;
+                    for (int h = 1; h <= Heat.Max && h <= Heat.Mods.Length; h++)
+                    {
+                        var mod = Heat.Mods[h - 1];
+                        int dBody = cnt[h + 1] - cnt[h];
+                        int dStat = bmp[h + 1] - bmp[h];
+                        if (dBody < mod.EnemyDelta)
+                            fails.Add($"bodyEaten s{seed} m{m} rung{h}({mod.Name}) declared+{mod.EnemyDelta} got{dBody:+#;-#;0} ({cnt[h]}->{cnt[h + 1]})");
+                        if (dStat < mod.StatDelta)
+                            fails.Add($"statEaten s{seed} m{m} rung{h}({mod.Name}) declared+{mod.StatDelta} got{dStat:+#;-#;0} ({bmp[h]}->{bmp[h + 1]})");
+                    }
+                }
+
+            // ---- (C) the opener is flat, and mission 2 gets exactly half ---------------------
+            foreach (int seed in seeds)
+            {
+                var m1 = BuildAt(1, 0, seed);
+                var m2 = BuildAt(2, 0, seed);
+                for (int h = 1; h <= Heat.Max; h++)
+                {
+                    var a = BuildAt(1, h, seed);
+                    if (a.count != m1.count || a.bump != m1.bump)
+                        fails.Add($"openerNotFlat s{seed} h{h} {a.count}/{a.bump} vs {m1.count}/{m1.bump}");
+                    var b = BuildAt(2, h, seed);
+                    if (b.count - m2.count != Heat.EnemyDelta(h) / 2)
+                        fails.Add($"m2GraceBody s{seed} h{h} got{b.count - m2.count} want{Heat.EnemyDelta(h) / 2}");
+                    if (b.bump - m2.bump != Heat.StatDelta(h) / 2)
+                        fails.Add($"m2GraceStat s{seed} h{h} got{b.bump - m2.bump} want{Heat.StatDelta(h) / 2}");
+                }
+            }
+
+            // ---- (D) the stat reaches the BODIES, not just the telemetry ---------------------
+            // Lever B consumes no RNG (bump is an argument to the archetype constructors, never a
+            // draw), so ON and OFF are the same force on the same tiles at the same seed. Anything
+            // else here would mean the lever moved the stream, which is its own defect.
+            int bodiesChecked = 0;
+            foreach (int seed in seeds)
+            {
+                int heatStat = Heat.StatDelta(Heat.Max);
+                Sightline.Mission.FinaleHeatStat = false;
+                var off = BuildAt(Run.MaxMissions, Heat.Max, seed);
+                var offHp = new List<int>(); int offHvt = -1;
+                for (int i = 0; i < Enemies.Count; i++) { offHp.Add(Enemies[i].Hp); if (Enemies[i] == Hvt) offHvt = i; }
+                Sightline.Mission.FinaleHeatStat = true;
+                var on = BuildAt(Run.MaxMissions, Heat.Max, seed);
+                var onHp = new List<int>(); int onHvt = -1;
+                for (int i = 0; i < Enemies.Count; i++) { onHp.Add(Enemies[i].Hp); if (Enemies[i] == Hvt) onHvt = i; }
+                if (on.classes != off.classes || on.tiles != off.tiles)
+                { fails.Add($"leverBMovedTheStream s{seed}"); continue; }
+                if (onHp.Count == 0) { fails.Add($"leverBNoForce s{seed}"); continue; }
+                if (on.bump - off.bump != heatStat)
+                    fails.Add($"leverBBump s{seed} {off.bump}->{on.bump} want+{heatStat}");
+                if (onHp[0] != offHp[0]) fails.Add($"warlordTookABump s{seed} {offHp[0]}->{onHp[0]}");
+                for (int i = 1; i < onHp.Count; i++)
+                {
+                    // The DECAPITATE HVT is skipped, in both builds: Game.DesignateHvt picks the
+                    // TOUGHEST non-special body and adds +6+1*mission HP to it, so a force that
+                    // got tougher can legitimately hand the mark — and its flat bonus — to a
+                    // different body. That is the HVT rule doing its job, not the stat lever, and
+                    // HVTTEST is what pins it. (Observed: seed 4242's slot-5 REAVER went 20 -> 36,
+                    // which is +4 of bump and +12 of a mark it did not carry in the OFF build.)
+                    if (i == offHvt || i == onHvt) continue;
+                    int d = onHp[i] - offHp[i];
+                    bodiesChecked++;
+                    // every rank-and-file line is `base + bump` except AEGIS/SHIELD (`10 + bump*2`)
+                    if (d != heatStat && d != heatStat * 2)
+                        fails.Add($"bodyStatNotOnBoard s{seed} i{i} {off.classes.Split(',')[i]} {offHp[i]}->{onHp[i]}");
+                }
+            }
+            // A `for` loop that skipped every body would assert nothing and report PASS.
+            if (bodiesChecked < 3 * seeds.Length) fails.Add("leverDVacuous=" + bodiesChecked);
+
+            // ---- (E) seating: distinct tiles + reachable, shipped AND stressed ---------------
+            // Answers "is 12 a layout constraint?" with a measurement rather than a guess. The
+            // relocate pool is cols W-4..W-2 over all H rows (33 tiles on the 18x11 board) and
+            // every seated body joins Build's `occupied` set, which both arena paths keep open and
+            // `EnsureConnectivity` guarantees a lane to.
+            int worstSeated = 0;
+            void Seating(string tag, int mission, int heat, int seed)
+            {
+                BuildAt(mission, heat, seed);
+                var seen = new HashSet<(int, int)>();
+                foreach (var e in Enemies)
+                    if (!seen.Add((e.X, e.Y))) fails.Add($"stackedSpawn {tag} s{seed} m{mission} h{heat} at {e.X},{e.Y}");
+                worstSeated = Math.Max(worstSeated, Enemies.Count);
+                if (Players.Count == 0 || Enemies.Count == 0) { fails.Add($"emptyBoard {tag}"); return; }
+                var cost = Grid.CostMap(Players[0].X, Players[0].Y, (x, y) => false, out _, 9999);
+                foreach (var e in Enemies)
+                    if (cost[e.X, e.Y] < 0) fails.Add($"unreachableHostile {tag} s{seed} m{mission} h{heat} at {e.X},{e.Y}");
+            }
+            foreach (int seed in seeds)
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                    for (int h = -1; h <= Heat.Max; h++) Seating("shipped", m, h, seed);
+            if (worstSeated > Sightline.Mission.ForceCeiling)
+                fails.Add($"seatedOverCeiling={worstSeated}>{Sightline.Mission.ForceCeiling}");
+            int shippedWorst = worstSeated;
+            // ...and the same guarantees with the board REALLY stressed: ceiling 16 and a base
+            // headcount of 8, which asks missions 4-6 to seat 13-16 bodies. This is the leg that
+            // answers "is 12 a layout constraint?" — P23 did not raise the ceiling and did not need
+            // to, but a later round that spends SIGHTLINE_FORCECEILING has its spawn-failure guard
+            // already standing. (The relocate pool is 3 columns x 11 rows = 33 tiles, and every
+            // seated body joins Build's `occupied` set, which both arena paths keep open and
+            // EnsureConnectivity guarantees a lane to.)
+            int sEnemyBase = Sightline.Mission.EnemyBaseCount;
+            Sightline.Mission.ForceCeiling = 16; Sightline.Mission.EnemyBaseCount = 8;
+            worstSeated = 0;
+            foreach (int seed in seeds)
+                for (int m = 4; m <= Run.MaxMissions; m++) Seating("stress", m, Heat.Max, seed);
+            int stressWorst = worstSeated;
+            Sightline.Mission.ForceCeiling = sCeil; Sightline.Mission.EnemyBaseCount = sEnemyBase;
+            if (stressWorst <= sCeil) fails.Add("stressDidNotStress=" + stressWorst);
+
+            // ---- (F) two levers, independently switchable ------------------------------------
+            // The pre-P23 finale, transcribed from L7's artifact measurement rather than derived:
+            // `Math.Max(5, Math.Clamp(base + n + enemyDelta, 3, ceiling) - cut)` and `bump = n-1`.
+            foreach (int seed in seeds)
+            {
+                var baseline = new (int c, int b)[Heat.Max + 2];
+                Sightline.Mission.ClampLast = false; Sightline.Mission.FinaleHeatStat = false;
+                for (int h = -1; h <= Heat.Max; h++)
+                { var r = BuildAt(Run.MaxMissions, h, seed); baseline[h + 1] = (r.count, r.bump); }
+                for (int h = -1; h <= Heat.Max; h++)
+                    if (baseline[h + 1].b != Run.MaxMissions - 1)
+                        fails.Add($"offBumpNotPreP23 s{seed} h{h}={baseline[h + 1].b}");
+
+                // lever A alone: bodies move, the stat strip stays exactly where it was.
+                Sightline.Mission.ClampLast = true; Sightline.Mission.FinaleHeatStat = false;
+                bool aMoved = false;
+                for (int h = -1; h <= Heat.Max; h++)
+                {
+                    var r = BuildAt(Run.MaxMissions, h, seed);
+                    if (r.bump != baseline[h + 1].b) fails.Add($"leverAMovedTheStat s{seed} h{h}");
+                    if (r.count != baseline[h + 1].c) aMoved = true;
+                    if (r.count < baseline[h + 1].c) fails.Add($"leverAShrankTheForce s{seed} h{h}");
+                }
+                if (!aMoved) fails.Add($"leverAIsANoOp s{seed}");
+
+                // lever B alone: the stat moves, the headcount stays exactly where it was.
+                Sightline.Mission.ClampLast = false; Sightline.Mission.FinaleHeatStat = true;
+                bool bMoved = false;
+                for (int h = -1; h <= Heat.Max; h++)
+                {
+                    var r = BuildAt(Run.MaxMissions, h, seed);
+                    if (r.count != baseline[h + 1].c) fails.Add($"leverBMovedTheBody s{seed} h{h}");
+                    if (r.bump != baseline[h + 1].b) bMoved = true;
+                }
+                if (!bMoved) fails.Add($"leverBIsANoOp s{seed}");
+
+                // both on: the shipped tree. Each quantity must be at or above the pre-P23 one at
+                // every rung, and strictly above at the apex — the wave's whole claim in one line.
+                Sightline.Mission.ClampLast = true; Sightline.Mission.FinaleHeatStat = true;
+                var apexOff = baseline[Heat.Max + 1];
+                var apexOn = BuildAt(Run.MaxMissions, Heat.Max, seed);
+                if (apexOn.count <= apexOff.c || apexOn.bump <= apexOff.b)
+                    fails.Add($"apexStillToothless s{seed} {apexOff.c}/{apexOff.b} -> {apexOn.count}/{apexOn.bump}");
+            }
+            Sightline.Mission.ClampLast = sClamp; Sightline.Mission.FinaleHeatStat = sStat;
+
+            // ---- (A2) the ROUTED tree, with the real cards, and the ceiling's census ---------
+            // Leg (A1) removes the deployment card so heat is the only variable. This pass puts the
+            // real routed cards back — an ELITE node carries +2 bodies of its own — so the guard is
+            // not blind to what a player actually walks. Here a shortfall has exactly ONE legitimate
+            // cause and it is named: the board is FULL. Anything else is a body the ladder declared
+            // and the pipeline lost, which is L7's defect class.
+            int ceilingBound = 0, floorBound = 0;
+            foreach (int seed in seeds)
+                for (int m = 3; m <= Run.MaxMissions; m++)
+                {
+                    var cnt = new int[Heat.Max + 2];
+                    var flr = new bool[Heat.Max + 2];
+                    for (int h = -1; h <= Heat.Max; h++)
+                    {
+                        cnt[h + 1] = BuildAt(m, h, seed, plainCard: false).count;
+                        flr[h + 1] = Sightline.Mission.LastForceFloored;
+                    }
+                    for (int h = 1; h <= Heat.Max && h <= Heat.Mods.Length; h++)
+                    {
+                        int declared = Heat.Mods[h - 1].EnemyDelta;
+                        if (cnt[h + 1] - cnt[h] >= declared) continue;
+                        if (cnt[h + 1] >= Sightline.Mission.ForceCeiling) { ceilingBound++; continue; }
+                        // ...or the force is already at a declared MINIMUM. The Defend and Sabotage
+                        // trims floor at 3 by design (FUL-4 HOLDFAST: for those objectives the
+                        // reinforcement waves and the loud tempo ARE the force), so a rung's body
+                        // can be absent there without anything having lost it. Counted, not hidden.
+                        // EITHER end: if the rung BELOW sat on its floor the step is not readable
+                        // either — the floor lifted the smaller number, it did not eat the bigger.
+                        if (flr[h + 1] || flr[h]) { floorBound++; continue; }
+                        fails.Add($"routedBodyEaten s{seed} m{m} rung{h}({Heat.Mods[h - 1].Name}) "
+                                  + $"declared+{declared} got{cnt[h + 1] - cnt[h]} at {cnt[h + 1]}/"
+                                  + Sightline.Mission.ForceCeiling);
+                    }
+                }
+
+            // ---- (G) the ORDER is a no-op wherever the ceiling never bound --------------------
+            // Sufficient condition, and it is the whole scoping claim: if the REQUEST fits under
+            // the ceiling then clamping first and clamping last are the same function, because
+            // everything between them only subtracts. So P23's lever can only move a cell the
+            // pre-P23 ceiling was already eating — measured below at every mission x rung.
+            int orderMoved = 0, orderSame = 0;
+            foreach (int seed in seeds)
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                    for (int h = -1; h <= Heat.Max; h++)
+                    {
+                        Sightline.Mission.ClampLast = true; Sightline.Mission.FinaleHeatStat = false;
+                        var on = BuildAt(m, h, seed, plainCard: false);
+                        int req = Sightline.Mission.LastForceRequest;
+                        Sightline.Mission.ClampLast = false;
+                        var off = BuildAt(m, h, seed, plainCard: false);
+                        bool same = on.count == off.count && on.bump == off.bump
+                                 && on.classes == off.classes && on.tiles == off.tiles;
+                        if (same) orderSame++; else orderMoved++;
+                        if (!same && req <= Sightline.Mission.ForceCeiling)
+                            fails.Add($"orderMovedAnUnclippedCell s{seed} m{m} h{h} req{req}");
+                    }
+
+            if (dump)
+            {
+                Console.WriteLine("FORCE MATRIX (seed " + seeds[0] + ", columns RECRUIT,h0..h8):");
+                Console.Write(matrix.ToString());
+                Console.WriteLine($"  seated worst-case: shipped={shippedWorst} (ceiling {sCeil}), ceiling-16 stress={stressWorst}");
+            }
+
+            return fails.Count == 0
+                ? "FORCETEST: PASS (every rung's declared body AND stat reach the board at missions 3-6, all "
+                  + seeds.Length + " seeds; the opener is flat across rungs 0-8 and m2 takes exactly half; the "
+                  + "finale stat is on the BODIES not just the telemetry; every hostile on a distinct reachable "
+                  + "tile at every mission x rung, worst seated " + shippedWorst + "/" + sCeil
+                  + " and " + stressWorst + " under a stressed ceiling of 16 with base 8; both dials real, independent, and "
+                  + "both-off reproduces the pre-P23 finale; on the ROUTED tree " + ceilingBound
+                  + " rung-steps are still short at the board's ceiling and " + floorBound
+                  + " at an objective's floor, and nothing else is short; the ORDER "
+                  + "moved " + orderMoved + " of " + (orderMoved + orderSame) + " cells and none of them had a "
+                  + "request that fitted under the ceiling)"
+                : "FORCETEST: FAIL " + string.Join(" | ", fails);
+        }
+        finally
+        {
+            Sightline.Mission.ClampLast = sClamp;
+            Sightline.Mission.FinaleHeatStat = sStat;
+            Sightline.Mission.ForceCeiling = sCeil;
+        }
+    }
+
     /// C3 THE TWO GAMES (SIGHTLINE_CLASSTEST) — the wave's gate, in four legs.
     ///
     /// THE FINDING IT GUARDS. On mid-run campaign nodes, the two objectives that end only when
