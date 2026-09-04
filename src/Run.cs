@@ -1692,6 +1692,25 @@ public class Run
             if (u.Alive && !u.IsVip) PromoteEligible(u);
     }
 
+    /// P22 "NOTHING WITHOUT A SWITCH" — THE FORK PAYS' SECOND UNFLAGGED CHANGE, GIVEN ITS SWITCH.
+    /// `SIGHTLINE_HEALFIRST=1` puts the SUPPLY/RECON full heal back BEFORE the fresh-wound gauge,
+    /// which is the pre-milestone-5 ordering EXACTLY (Game.EnterBarracks used to run
+    /// `foreach (var u in _run.Squad) u.Hp = u.MaxHp;` immediately before calling this method with
+    /// no argument at all). Healing at the TOP of this loop is equivalent to healing the whole
+    /// squad before it: the loop body mutates only `u`, `AdvanceBonds` and the backfill both run
+    /// after it, and the list is `Squad.ToList()` taken before any recruit arrives.
+    ///
+    /// It is a SEPARATE dial from `SIGHTLINE_FORKPRICES`, deliberately. That wave shipped two
+    /// gameplay changes and they are two levers: the prices move the ROUTING ECONOMY (and with it
+    /// every node payout and the map fingerprints), while this one moves SQUAD ATTRITION on the
+    /// 15.3% of played nodes that are SUPPLY. A future round may want to price either without the
+    /// other. **To restore milestone 4 whole, set BOTH: `SIGHTLINE_FORKPRICES=0
+    /// SIGHTLINE_HEALFIRST=1`.** Neither is a shipping configuration.
+    ///
+    /// NEITHER FLAG REPAIRS L6's BROKEN BRIDGE — L5's worlds were measured on a tree that no longer
+    /// exists. What the pair buys is that a future round can isolate the WHOLE of that wave.
+    public static bool SupplyHealFirst = false;
+
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,
     /// then backfill empty squad slots with fresh rookie recruits.
     /// Each rank-up queues a perk choice (PendingPerks) the player resolves in the
@@ -1705,7 +1724,7 @@ public class Run
     /// subsidy stacked on a node that already paid more intel for a lighter force. The wound is now
     /// gauged from the HP the mission actually left, and the heal lands after it (and after the
     /// trait grants, so IronWill's +max HP is in the patch-up -- the same ordering the field-heal
-    /// below has always used).
+    /// below has always used). See Run.SupplyHealFirst above for the restore flag.
     public void DebriefSurvivors(bool fullHeal = false)
     {
         Report.Clear();
@@ -1725,6 +1744,11 @@ public class Run
             // one. Ending near-death wounds worse. -Aim/-Mobility apply while Wound > 0.
             // EXCEPTION: a benched soldier sat out the mission — they recover 2 steps and
             // get a full heal (no fresh-wound gauge, since they weren't in the field).
+            // P22 — the PRE-MILESTONE-5 ORDERING, restored under SIGHTLINE_HEALFIRST=1: the card's
+            // heal lands BEFORE the wound gauge, so a soldier who walked off a cleared SUPPLY node
+            // on one point of HP is gauged at full and cannot be wounded by it. The shipped path
+            // heals at the BOTTOM of this loop instead (see the block after the field medicine).
+            if (fullHeal && SupplyHealFirst) u.Hp = u.MaxHp;
             int w0 = u.Wound;
             if (u.Benched)
             {
@@ -1799,7 +1823,7 @@ public class Run
             // raised MaxHp is filled). It fires under HIGH STAKES too -- that contract removes the
             // FREE field-heal, not a reward the player routed for. A benched soldier is already
             // full above; this is a no-op for them.
-            if (fullHeal && u.Hp < u.MaxHp)
+            if (fullHeal && !SupplyHealFirst && u.Hp < u.MaxHp)
             {
                 int before = u.Hp;
                 u.Hp = u.MaxHp;

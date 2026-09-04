@@ -11770,6 +11770,78 @@ public partial class Game
         if (plain.hp >= plain.maxHp) fails.Add($"C:plainHp={plain.hp}/{plain.maxHp} (a plain clear must not full-heal)");
         if (prewave.wound != 0) fails.Add($"C:prewaveWound={prewave.wound} (the defect no longer reproduces — leg C is vacuous)");
 
+        // ═══ (F) P22 — THE RESTORE FLAG FOR THE ORDERING, AND ITS COUNT ══════════════════════
+        // THE FORK PAYS shipped TWO gameplay changes. P21 gave the four PRICES a switch and said
+        // so in its own words: "the new dial isolates that wave's prices, not that wave." This is
+        // the other half. `SIGHTLINE_HEALFIRST=1` (Run.SupplyHealFirst) puts the card's full heal
+        // back BEFORE the fresh-wound gauge. Three things have to be true or it is decoration:
+        //   F1  UNDER THE FLAG, THE SHIPPED PATH REPRODUCES THE PRE-WAVE ORDERING EXACTLY. The
+        //       expectation is not a re-derivation from the same field the code reads: it is
+        //       leg C's `healFirst` construction — `u.Hp = u.MaxHp` applied by the CALLER and then
+        //       `DebriefSurvivors(false)`, which is the pre-milestone-5 EnterBarracks verbatim.
+        //       Swept over EVERY surviving HP and both attrition regimes, because the two orderings
+        //       agree at full HP and differ only where the gauge bites.
+        //   F2  THE FLAG IS NOT A NO-OP, AND IT IS COUNTED. A dial that changes nothing is worse
+        //       than no dial, so the shipped ordering and the restored one must actually disagree
+        //       on a counted majority of the sweep.
+        //   F3  IT ROUND-TRIPS, and leaves Run.SupplyHealFirst exactly as the environment set it.
+        int healCells = 0, healChanged = 0, healMatched = 0;
+        {
+            bool healWas = Run.SupplyHealFirst;
+            // one soldier, one cleared node, three orderings — the ONLY difference is when the heal
+            // lands. `harsh` is Heat LINGERING WOUNDS, which deepens a fresh wound by one.
+            (int wound, int hp, int maxHp, int squad) At(int slot, int startHp, int heat,
+                                                          bool callerHealsFirst, bool flag, bool nearDeath, int wound0)
+            {
+                Run.SupplyHealFirst = flag;
+                Util.Reseed(20260904);
+                var r = new Run(); r.Start();
+                r.HeatLevel = heat;
+                int n = r.Squad.Count;
+                var u = r.Squad[Math.Clamp(slot, 0, n - 1)];
+                foreach (var o in r.Squad)                    // the rest walk off untouched and full
+                {
+                    o.Benched = false; o.Wound = 0; o.WasNearDeath = false; o.Hp = o.MaxHp;
+                    o.FeatMultiKill = o.FeatClutch = o.FeatVengeful = o.FeatBurned = false;
+                }
+                u.Wound = wound0; u.WasNearDeath = nearDeath;
+                u.Hp = Math.Clamp(startHp, 1, u.MaxHp);
+                if (callerHealsFirst) foreach (var o in r.Squad) o.Hp = o.MaxHp;   // <- pre-wave EnterBarracks, verbatim
+                r.DebriefSurvivors(!callerHealsFirst);
+                return (u.Wound, u.Hp, u.MaxHp, n);
+            }
+            int squadN = At(0, 1, 0, false, false, false, 0).squad;
+            for (int slot = 0; slot < squadN; slot++)
+            {
+                int maxHpProbe = At(slot, 1, 0, false, false, false, 0).maxHp;
+                foreach (int heat in new[] { 0, 5 })                    // normal / LINGERING WOUNDS
+                    foreach (bool nd in new[] { false, true })          // a survived near-death (IronWill)
+                        foreach (int w0 in new[] { 0, 2 })              // and a wound carried in
+                            for (int hp = 1; hp <= maxHpProbe; hp++)
+                            {
+                                var prewaveCell = At(slot, hp, heat, true,  false, nd, w0);   // the transcription
+                                var flagged     = At(slot, hp, heat, false, true,  nd, w0);   // the flag
+                                var shippedCell = At(slot, hp, heat, false, false, nd, w0);   // today
+                                healCells++;
+                                if (flagged.wound == prewaveCell.wound && flagged.hp == prewaveCell.hp
+                                    && flagged.maxHp == prewaveCell.maxHp) healMatched++;
+                                else if (fails.Count < 200)
+                                    fails.Add($"F1:s{slot} h{heat} hp{hp} nd{nd} w{w0} flag(w{flagged.wound},{flagged.hp}/{flagged.maxHp})"
+                                            + $" != prewave(w{prewaveCell.wound},{prewaveCell.hp}/{prewaveCell.maxHp})");
+                                if (flagged.wound != shippedCell.wound || flagged.hp != shippedCell.hp) healChanged++;
+                            }
+            }
+            if (healCells < 100) fails.Add($"F:VACUOUS only {healCells} heal cells swept");
+            if (healChanged == 0)
+                fails.Add("F2:SIGHTLINE_HEALFIRST=1 changes NOTHING — the flag is decoration");
+            // F3 — the round trip, on the cell the two orderings are guaranteed to disagree on.
+            var rtOn  = At(0, 1, 0, false, true,  false, 0);
+            var rtOff = At(0, 1, 0, false, false, false, 0);
+            if (rtOn.wound != 0) fails.Add($"F3:restoredWound={rtOn.wound} (want 0 — the subsidy must be back)");
+            if (rtOff.wound < 2) fails.Add($"F3:shippedWound={rtOff.wound} (want >=2 — the round trip lost the fix)");
+            Run.SupplyHealFirst = healWas;      // leave the dial exactly as the environment set it
+        }
+
         // ═══ (E) P21 — THE RESTORE FLAG THIS WAVE SHOULD HAVE SHIPPED, AND ITS ROUND TRIP ════
         // THE FORK PAYS repriced the routing economy as four bare `const int`s with no off
         // switch, so L6's bridge to the ladder of record reproduced 0 of 96 chunks and the
@@ -11850,6 +11922,8 @@ public partial class Game
                     + $"PITCHED +{Run.PitchedPremium} (Combat/Elite only)");
         sb.AppendLine($"  supply clear at 1 HP -> wound {supply.wound}, hp {supply.hp}/{supply.maxHp}   "
                     + $"| pre-wave ordering -> wound {prewave.wound}");
+        sb.AppendLine($"  SIGHTLINE_HEALFIRST=1 reproduces the pre-wave heal ORDERING on {healMatched}/{healCells} "
+                    + $"(HP x attrition) cells and moves {healChanged} of them off the shipped result");
         sb.AppendLine($"  SIGHTLINE_FORKPRICES=0 restores {Run.PreForkSupplyDiscount}/{Run.PreForkElitePremium}/"
                     + $"{Run.PreForkPitchedPremium}/{Run.PreForkDepthBase} (supply/elite/pitched/depth) and re-prices "
                     + $"{repriced} of {nodesSeen} dealt nodes over 40 maps; round trip clean");
@@ -11862,7 +11936,9 @@ public partial class Game
               + "and still heals, while the pre-wave heal-then-debrief ordering still reads wound 0; "
               + "and SIGHTLINE_FORKPRICES=0 restores all four pre-milestone-5 prices as a set, "
               + "reproduces the pre-wave NodeIntel verbatim on every dealt node, re-prices a "
-              + "counted majority of them, and round-trips)"
+              + "counted majority of them, and round-trips; and SIGHTLINE_HEALFIRST=1 reproduces "
+              + "the pre-wave heal ORDERING on every swept (soldier x HP x attrition x near-death x "
+              + "carried-wound) cell, moves a counted non-empty subset of them, and round-trips)"
             : "FORKTEST: FAIL " + string.Join(", ", fails.Take(8)));
         return sb.ToString();
     }

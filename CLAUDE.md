@@ -741,10 +741,15 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P19** THE ROSTER CONTESTS | The named mid-boss now belongs to the map's **ELITE NODE** (`Mission.MidBossFor`), with the floor walked on the ROUTE (`Game.IsFinalApproach`) because an Event node can occupy a route's column-4 slot — **a `mission == 5` floor leaks on 8.1% of routes and the old `n == 3 \|\| n == 5` leaked on 2.7%.** Also: **BOMBARD/WARBRINGER's "0.8%/1.6%" are BODY rates and are the wrong denominator** — both are capped at one per mission, so exposure is **5.6% / 12.5% of missions**; and the arenas' "88% tile-identical" is the **85.3% floor-share baseline**, not duplication (one real near-duplicate: ZIGGURAT/FORGE, Jaccard 72.7%). | §P19 |
 | **P20** THE STALE GROUND | `Mission.Build` wiped Tiles, Height and Smoke but **not the biome GROUND layer**, and it asks for that layer through `Grid.IsFloor` / `Grid.CostMap` before `Game.StampBiomeGround` runs — so a board was a function of **the board before it**. Latent since C4, armed by P16 (the rift is the first ground that stops a mover). `Mission.ClearGroundOnBuild`; MODETEST leg (14). The fix moves the board — **but L6 re-priced it on 16 slot sets and its "-3.8 at h4, resolved" does NOT survive the doubling** (-0.6 on eight sets it never saw). | §P20 |
 | **L6** THE LADDER OF RECORD | Two things a fresh session must not re-derive. **(1) THE FORK PAYS has no restore flag**, so the CRN chain cannot cross milestone 5 and no bridge to L5 exists; ship a gameplay constant and its flag in the same commit. **(2) `Grid` has a SECOND stale layer: `Barrel`.** `IsFloor` reads it, so Build's connectivity floods read the previous mission's barrels — P20's defect, different array, same predicate. **Latent, not live**: `Game.SetupMission` clears hazards 28 lines before the Build call, and it is the only production caller. `BoardSignature()` was blind to it and now hashes all eight layers. | §L6 |
-| **P21** BUILD OWNS THE BOARD | Closes both of L6's items. `Mission.Build` now clears **Fire and Barrel** too (`Mission.ClearHazardsOnBuild`), so Build owns all eight layers — and `Game.SetupMission`'s own `Grid.ClearHazards()` is **kept on purpose**: removing it is the only part of that change that could touch a live path. **Proven inert, not asserted**: 1,280 CRN campaigns per arm, 32/32 chunks byte-identical against both `108d9ac` and `SIGHTLINE_STALEHAZARDS=1`. THE FORK PAYS finally gets `SIGHTLINE_FORKPRICES=0` — which **does not repair L6's broken bridge** (L5's worlds are gone) and covers the four PRICES only, not that wave's SUPPLY heal-ordering change, which is still unswitchable. | §P21 |
+| **P21** BUILD OWNS THE BOARD | Closes both of L6's items. `Mission.Build` now clears **Fire and Barrel** too (`Mission.ClearHazardsOnBuild`), so Build owns all eight layers — and `Game.SetupMission`'s own `Grid.ClearHazards()` is **kept on purpose**: removing it is the only part of that change that could touch a live path. **Proven inert, not asserted**: 1,280 CRN campaigns per arm, 32/32 chunks byte-identical against both `108d9ac` and `SIGHTLINE_STALEHAZARDS=1`. THE FORK PAYS finally gets `SIGHTLINE_FORKPRICES=0` — which **does not repair L6's broken bridge** (L5's worlds are gone) and covers the four PRICES only, not that wave's SUPPLY heal-ordering change (**P22 closed that half — `SIGHTLINE_HEALFIRST=1`; the pair is the milestone-4 restore**). | §P21 |
+| **P22** NOTHING WITHOUT A SWITCH | The restore-flag rule was audited rather than asserted: **35 wave-granularity commits from W1's merge to milestone 14, by a diff of the sixteen gameplay files grouped by enclosing method, plus a census of every mutable gameplay static.** **One live unflagged LEVER, and it was already known** — THE FORK PAYS' heal ordering, now `SIGHTLINE_HEALFIRST=1`. Everything else unflagged is presentation, mode-only/campaign-inert, or a defect repair. **The methods' blind spot is the shape that produced BOTH known breaches: a change of ORDER leaves no dial to census, and a bare `const` is invisible until somebody parameterises it.** | §P22 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be
-switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, exactly),
+switched off cannot be attributed. **P22 gave that rule an operational form, because "gameplay
+lever" was doing all the work and nothing said where it stopped: a change earns a flag when it
+MOVES THE CRN STREAM a future round will need to bridge or isolate.** Presentation, mode-only /
+campaign-inert, and defect-repair changes do not — and a flag on a change nobody can measure is
+decoration (see the P22 row below). `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, exactly),
 `SIGHTLINE_AIDECLINE=0` (the pre-C2 opponent), `SIGHTLINE_AILANE=0` (the pre-P10 overwatch),
 `SIGHTLINE_MIDTOOTH=0` (the pre-C1 heat table), `SIGHTLINE_OPENERTRIM=0` (the pre-X2 opener),
 `SIGHTLINE_KILLTREADMILL=1` (C3's clock arm back on), `SIGHTLINE_HEATPIN=0` (the heat leak back),
@@ -756,10 +761,18 @@ SMG monoculture), `SIGHTLINE_STALEGROUND=1` (the pre-P20 seam, in which `Mission
 PREVIOUS mission's ground layer — never a shipping configuration; it makes the SEEDED DAILY's
 headline contract false), `SIGHTLINE_STALEHAZARDS=1` (the pre-P21 seam, in which `Mission.Build` did
 not clear Fire/Barrel — **live-path inert by construction**, because `Game.SetupMission` still clears
-them first) and `SIGHTLINE_FORKPRICES=0` (the pre-milestone-5 routing prices, all four as a set —
+them first) `SIGHTLINE_FORKPRICES=0` (the pre-milestone-5 routing prices, all four as a set —
 never a shipping configuration; SUPPLY strictly dominates COMBAT again and FORKTEST leg (A) fails by
-design). **Grep `Program.cs` for `SIGHTLINE_` for the authoritative set** — that list
-is derived, this one is written down, and written-down lists in this repository go stale.
+design) and `SIGHTLINE_HEALFIRST=1` (P22 — THE FORK PAYS' *other* change: the SUPPLY/RECON full heal
+back BEFORE `Run.DebriefSurvivors`' fresh-wound gauge, so a SUPPLY clear cannot wound anyone who
+walks off the field. **The pair `SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1` is what "restore
+milestone 4" means** — two dials because the prices move the ECONOMY and the ordering moves
+ATTRITION, and a round may want one alone). **Grep `src/` — NOT `Program.cs` — for `SIGHTLINE_` for the
+authoritative set.** That list is derived, this one is written down, and written-down lists in this
+repository go stale. **P22 found the derivation itself was narrower than its description**: 236
+names appear in `Program.cs` against 269 across `src/`, with **59 `GetEnvironmentVariable` sites
+outside it** — including one GAMEPLAY dial, `SIGHTLINE_BIOMEDEAL=hash` in `src/Util.cs`, which
+re-deals the arena on 28.9% of missions.
 
 > **⚠ ONE WAVE SHIPPED WITH NO FLAG, AND IT COST THE PROJECT A BRIDGE. P21 GAVE IT ONE — LATE.**
 > **THE FORK PAYS** (milestone 5, `54147dc`) repriced the routing economy — `Run.DepthBase` 10->12,
@@ -773,8 +786,10 @@ is derived, this one is written down, and written-down lists in this repository 
 > measured on a tree that no longer exists and no flag brings them back — and it restores the four
 > PRICES only, **not** the same wave's second unflagged gameplay change (the SUPPLY full heal moved
 > from before `Run.DebriefSurvivors` to inside it, so a SUPPLY clear can now wound). What it buys is
-> that a FUTURE round can isolate most of that wave, which was impossible before. **If you ship a
-> gameplay constant, ship its flag in the same commit.**
+> that a FUTURE round can isolate most of that wave, which was impossible before. **P22 then closed
+> the other half — `SIGHTLINE_HEALFIRST=1` restores the pre-wave SUPPLY heal ORDERING, and the PAIR
+> `SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1` is what "restore milestone 4" means.** **If you ship
+> a gameplay constant, ship its flag in the same commit.**
 
 **PROGRAM PARALLAX is the twelfth and is current.** Its own thesis, earned twice over: the gates in
 this project fail QUIET rather than loud. It found the sweep's coverage guard blind to a whole class
