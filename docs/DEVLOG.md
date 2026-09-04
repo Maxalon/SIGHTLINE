@@ -15772,3 +15772,210 @@ with distance for two pairs that used to be separated by a constant.
   TIMEOUT, `SWEEP-EXIT-CODE=0`.
 - Screenshots: `docs/measurements/p19/eliteshot-on.png` / `eliteshot-off.png`,
   `docs/measurements/p19/bandshot-on.png` / `bandshot-off.png`.
+
+---
+
+## PROGRAM PARALLAX — wave P20 "THE STALE GROUND" (2026-09-04, base `dac9f2f`)
+
+**A merge blocker, not a feature wave.** Milestone 12's composed tree failed
+`bash scripts/qa-sweep.sh --full` intermittently — roughly 1 run in 8 — on one line:
+
+```
+MODETEST   : MODETEST: FAIL (dailyBoardNonDeterministic)
+```
+
+`ModeSelfTest` leg (2) calls `BeginDaily()` twice and compares `BoardSignature()`. The SEEDED
+DAILY's headline contract is that the same day's stamp deals the same board to everyone, so this
+is not a test artefact — it is the contract failing.
+
+### 1. The mechanism, and how it was pinned
+
+Three facts had already been established before this wave started, and are reproduced here because
+they are what made the hunt short: the failure is **first-call-only** (a third `BeginDaily` always
+agrees with the second), the differing signature is **different every time** (so it is not a fixed
+alternative board), and the day's board is a **VOID** board — the biome whose RIFT ground P16
+shipped one milestone earlier.
+
+The instrument that closed it in one run was a **draw counter**. `Util.Rng` was temporarily turned
+from a field into a property whose getter increments a counter and, under a flag, records the top
+six stack frames. That costs nothing in stream terms — every `Util` helper touches `Rng` exactly
+once per draw and `Reseed` goes through the setter — so the counted run is the same run.
+
+It reported, immediately:
+
+```
+call0: draws=879 board=469808df  hgt=c98ee6ed nBarrel=0 nHigh=8   <- the failing first call
+call1: draws=31  board=c2a75b4f  hgt=46a0b69d nBarrel=4 nHigh=0
+call2: draws=31  board=c2a75b4f  hgt=46a0b69d nBarrel=4 nHigh=0
+```
+
+**848 extra draws**, and the two traces agree for exactly 21 draws and then fork:
+
+```
+good  #22: Util.RandInt < Mission.PlaceBarrels    < Mission.Build < Game.SetupMission < Game.BeginDaily
+bad   #22: Util.RandInt < Mission.BuildProcedural < Mission.Build < Game.SetupMission < Game.BeginDaily
+```
+
+The failing call did not stamp the day's authored arena at all. `Mission.Build` sets
+`ForcedLayout` to the day's arena, calls `TryApplyLayout`, and that call **returned false** — its
+connectivity guard rejected the arena — so the daily fell through to `BuildProcedural`. That is a
+completely different board (8 high-ground tiles instead of none, no barrels) and 424 extra
+rejection-loop iterations in `PlaceBarrels` on top.
+
+`TryApplyLayout` takes **zero** RNG draws. Its accept/reject decision is a flood fill:
+
+```csharp
+var cost = g.CostMap(players[0].X, players[0].Y, (x, y) => false, out _, 9999);
+```
+
+and `Grid.CostMap` calls `Grid.IsFloor`, which since P16 reads:
+
+```csharp
+&& !(Terrain.NewOn && AnyRift && Ground[x, y] == GroundKind.Rift);
+```
+
+**`Mission.Build` was reading the PREVIOUS mission's ground layer.** Build wipes `Tiles`, `Height`
+and `Smoke` at its top; it never wiped `Ground`. And this mission's ground layer cannot exist yet —
+`Game.StampBiomeGround` runs *after* Build, because its `reserved` set is derived from the board
+Build produces. So the correct ground during a build is **no ground**, and what was actually there
+was the last board's.
+
+In `ModeSelfTest` the board before the first `BeginDaily` is a **SKIRMISH**, which is clock-seeded.
+One board in eight is a VOID board. When it was, its leftover rift severed the flood between the
+squad's deploy band (cols 0–3) and the hostiles' (cols 14–17), the day's arena was rejected, and
+the daily dealt a procedural board. The second and third `BeginDaily` inherit the *daily's own*
+ground, which is deterministic — which is exactly why only the first call ever differed.
+
+The stale read reaches further than the daily. It is inside `Mission.Build`, so it also feeds
+`SpawnEnemies`' pod scatter, `PlaceBarrels`' candidate filter and `EnsureConnectivity`'s carve, on
+**every** mission of every mode: a campaign's mission *n* board was a function of mission *n−1*'s
+ground.
+
+### 2. Attribution — pre-existing, and dated
+
+Stated plainly, because the hand-off asked for it: **this was not introduced by the composition of
+`wave/the-fork-choice` and `wave/roster-contests`.** Measured, MODETEST run to a tally:
+
+| tree | failures |
+|---|---|
+| `f81d3fa` — milestone 10, the commit **before** P16 merged | **0 / 60** |
+| `3d5c405` — milestone 11, P16 merged (the composed tree's merge base) | **5 / 60 (8.3%)** |
+| `dac9f2f` — the composed tree | **6 / 40 (15%)**, and 1/20 and 2/18 in earlier tallies |
+| `dac9f2f` with `SIGHTLINE_NEWGROUND=0` (VOID back to paint) | **0 / 40** |
+| `dac9f2f` with `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board) | **0 / 40** |
+
+So: **latent since C4** (which introduced the ground layer and the after-Build stamp order), and
+**armed by P16 GROUND TRUTH**, which made VOID's rift the first ground that stops a mover — the
+first ground a connectivity flood can see. The two levers that restore the pre-P16 / pre-C4 board
+both take the failure to zero, which is the same finding by a second road.
+
+The composed tree reads 15% against the merge base's 8.3%; at 6/40 vs 5/60 that difference is not
+resolved (z ≈ 1.0) and no claim is made about it. The earlier "12/12 clean at the merge base" was
+the ~1-in-5 chance of missing an 8% failure in twelve draws.
+
+### 3. The fix
+
+One line, at the top of `Mission.Build`, beside the `Tiles`/`Height` wipe it belongs with:
+
+```csharp
+if (ClearGroundOnBuild) grid.ClearGround();
+```
+
+`Mission.ClearGroundOnBuild` defaults **true**; `SIGHTLINE_STALEGROUND=1` restores the pre-fix
+read. The flag exists for the house reason (a change that moves the board must be switchable so it
+can be attributed and priced) and because the regression test flips it to prove its own detector
+can fail.
+
+### 4. The regression test — RED before, GREEN after, and reliably so
+
+`MODETEST` leg **(14)**, three parts. Leg (2) can only catch this by luck — it needs the skirmish
+before it to have left a VOID board — so leg (14) forces the mechanism instead of re-running the
+board and hoping.
+
+* **(14a) the invariant, on a scratch grid.** A hand-written RIFT wall down one mid-field column,
+  then `Mission.Build`, then assert the ground layer is empty. Build never stamps ground itself, so
+  "empty when Build returns" is the whole statement — and it holds for the campaign, not just the
+  daily. The dirt is written by hand rather than stamped so the leg depends on no stamper staying
+  as it is today and on no seed dealing a severing pattern by luck.
+* **(14b) the consequence, end to end.** `BeginDaily()` from a clean grid and from a dirtied one
+  must give the same `BoardSignature`. This is leg (2)'s assertion with the luck removed.
+* **(14c) the detector must be able to fail.** The same pair re-run with
+  `Mission.ClearGroundOnBuild = false`: the dirt **must** move the board there, or (14b) is
+  asserting nothing. Skipped when the rift is not a mechanic at all (`SIGHTLINE_BIOMEMECH=0` /
+  `SIGHTLINE_NEWGROUND=0`), where there is by construction nothing to bite on.
+
+Measured, on the same binary:
+
+| | result |
+|---|---|
+| default (fixed) | **PASS 25 / 25**, and the draw-counter probe 0 anomalies in 40 |
+| `SIGHTLINE_STALEGROUND=1` | **FAIL 5 / 5**, always the same three tokens: `buildReadsStaleGround(11 tiles survived Build)`, `buildLeftStaleGroundFlags`, `dailyBoardReadsPreviousGround(clean=c2a75b4f afterDirt=8fdb0bed)` |
+
+No new hook, so no `qa-sweep.sh` edit: MODETEST is already wired once, through `verdict`.
+
+### 5. What the fix costs — the board moves, and the ladder is now a pre-P20 ladder
+
+**This is not an inert change and must not be filed as one.** Removing a stale read that fed
+terrain generation changes the terrain. CRN-paired on `dac9f2f`, `SIGHTLINE_STALEGROUND=1` as the
+control arm, heat pinned, `docs/measurements/p20/`:
+
+Two rungs, 8 CRN slot sets each (bases 0–70), 20 campaigns × greedy+sloppy per chunk,
+**n = 320 per rung per arm, 1,280 campaigns**, 32/32 chunks `runs=40` asserted and heat-pin clean:
+
+| rung | fix (default) | stale (control) | delta | worlds that play out differently | McNemar (fix-only / stale-only wins) | chunk-paired t(7) |
+|---|---|---|---|---|---|---|
+| h0 | 42.5% | 40.3% | **+2.2** | **25.3%** | 16 / 9, z = +1.40 | +1.05 (mean +2.2 ± 2.1) |
+| h4 | 18.1% | 21.9% | **−3.8** | **16.6%** | 2 / 14, z = **−3.00** | **−3.97** (mean −3.8 ± 0.9) |
+
+Read it in that order:
+
+1. **The board really moves.** A quarter of h0 worlds and a sixth of h4 worlds end differently on
+   the same slot seed. This is not an inert change and nobody should file it as one.
+2. **h0 is not resolved** (+2.2, both tests under 1.5σ). Do not quote it as an effect.
+3. **h4 is resolved and it is a tightening**: −3.8 points, McNemar z = −3.00 on 16 discordant
+   pairs, and the chunk-paired t is −3.97 with **all eight slot sets negative** (−10, −2, −2, −2,
+   −2, −2, −2, −5). The fix makes heat 4 harder. The direction is what you would expect: the stale
+   layer's main visible effect was to make `TryApplyLayout` REJECT the dealt arena and fall through
+   to `BuildProcedural`, and the procedural board is evidently the friendlier one at that rung.
+4. **This round is a price, not a ladder.** It compares the fix against its own control on one
+   tree and one 8-set slot space; it is not comparable with L5's rungs, and no attempt was made to
+   make it so.
+
+**The consequence for the ladder of record.** L5's absolute win rates were measured on the stale
+board. The CRN *machinery* is intact — a slot is still a slot, the chunk runner and the heat pin
+are untouched — but an absolute number from L5 may not be compared with one measured after P20
+without saying so. `CLAUDE.md`'s ladder block now carries that warning, and **the ladder owes a
+re-measure**. That is a measurement round's job, not a merge blocker's.
+
+**No corrective lever was shipped**, for the same reason: a bug fix's job is to be correct, and
+h4 moving −3.8 is a finding to publish, not to repair inside the fix.
+
+### 6. Why the fix is not smaller than this
+
+A narrower fix — clear the ground only at the mode seam (`ResetModeState`) — would have closed the
+reported symptom (the daily's contract) and left every campaign board bit-identical, i.e. zero
+ladder cost. It was rejected: it leaves the defect in place everywhere else. The stale read is
+inside `Mission.Build`, so a campaign's mission-*n* board is a function of mission *n−1*'s ground,
+which means the same mission built in a fresh process (an empty ground layer — a loaded save) and
+built after playing the mission before it **need not agree**. That is the daily's bug wearing a
+save file. `Game.StampBiomeGround`'s design already says what the right answer is: it reserves
+every unit tile, the evac zone, the terminal, the sabotage sites and the cache *because the board
+is built first and the ground is laid around it*. During a build there is no ground. The fix makes
+that true instead of nearly true.
+
+### 7. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `SIGHTLINE_MODETEST=1` × 25 on the shipped binary — **25 PASS / 0 FAIL**. Pre-fix, the same
+  binary with `SIGHTLINE_STALEGROUND=1` — **5 FAIL / 5**, identical tokens every time. The
+  draw-counter probe that found the defect: 0 anomalies in 40 with the fix, 6 in 40 without.
+- `bash scripts/qa-sweep.sh --full` — **85/85 self-tests PASS**, no COVERAGE GAP, autoplay ×3
+  (LOSE m5 / WIN m6 / WIN m6), no TIMEOUT, **`SWEEP-EXIT-CODE=0`**.
+- Raw round + runner + `analyse.py`: `docs/measurements/p20/`.
+
+**One thing the sweep caught, worth recording because it is the guard doing its job.** The first
+`--full` run **failed** with `COVERAGE GAP: SIGHTLINE_GROUNDSEAMTEST`. There is no such hook — the
+name existed only in a comment this wave wrote in `src/Mission.cs`, pointing at a self-test that
+was folded into MODETEST instead. The guard scans `src/` for hook-shaped names and does not care
+that the occurrence is a comment, so naming a hook you did not build is a hard failure. That is the
+right behaviour and the opposite of the failure mode PARALLAX opened on: it failed **loud**.

@@ -1035,6 +1035,33 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
 pass, and other waves own parts of that file). The biome signature pass stays floor-tile-only,
 so its emissive cues do not creep around cover bases.
 
+## OPEN — left by PARALLAX P20 "THE STALE GROUND" (2026-09-04, base `dac9f2f`)
+
+P20 removed a read of the PREVIOUS mission's ground layer from `Mission.Build`
+(`Mission.ClearGroundOnBuild`; `SIGHTLINE_STALEGROUND=1` restores it). It closed the
+`dailyBoardNonDeterministic` merge blocker — the SEEDED DAILY dealt a different board on its first
+build than on its second in 8–15% of processes — and it **moves the terrain**, so it leaves two
+things open.
+
+- [ ] **1. RE-MEASURE THE LADDER. L5 is now a pre-P20 ladder.** Priced CRN-paired at two rungs
+      (n=320/rung/arm, 8 slot sets, `docs/measurements/p20/`): **25.3% of h0 worlds and 16.6% of h4
+      worlds play out differently**, h0 moves +2.2 (**not resolved**) and h4 moves **−3.8, McNemar
+      z=−3.00, chunk-paired t(7)=−3.97 with all eight slot sets negative** — a real tightening. The
+      pairing machinery is intact (a slot is still a slot; the runner and the heat pin are
+      untouched), so this is a re-measure, not a rebuild of the instrument. Six rungs × 16 slot
+      sets, the L5 shape, `SIGHTLINE_HEATPIN` default on. **Until it is run, an absolute win rate
+      from L5 may not be quoted against one measured on this tree.**
+- [ ] **2. Nothing else in the codebase reads a board layer before it is written — verify, don't
+      assume.** P20's leg (14a) pins exactly one statement: `Mission.Build` leaves the ground layer
+      empty. The class of defect is wider: a per-mission layer that is stamped AFTER the thing that
+      reads it. `Grid` carries seven such arrays (`Tiles`, `Height`, `Smoke`, `CoverHp`,
+      `CoverSeed`, `Fire`, `Barrel`, `Ground`); Build wipes Tiles/Height/Smoke, `Grid.ClearHazards`
+      wipes Fire/Barrel, `ResetCoverHp` recharges CoverHp at the end, `CoverSeed` is declared
+      purely visual — that accounting looks complete, and **"looks complete" is what the ground
+      layer looked like for two programs.** The cheap gate is one more assertion in leg (14a): a
+      hand-dirtied value in every array, and a statement about which ones Build is allowed to
+      carry.
+
 ## OPEN — found by PARALLAX P19 "THE ROSTER CONTESTS" and deliberately NOT fixed
 
 **Read the corrected numbers here before acting on the roster docket** — two of its four items were

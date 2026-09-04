@@ -1073,6 +1073,90 @@ public partial class Game
             for (int m = 1; m <= Run.MaxMissions; m++)
                 if (Sightline.Mission.DepthFor(m) != m) fails.Add($"depthFunnelNotIdentityInCampaign(m{m})");
 
+            // ── (14) P20 THE STALE GROUND — THIS BOARD MUST NOT BE A FUNCTION OF THE BOARD BEFORE IT.
+            //  The defect this leg exists for: `Mission.Build` wiped Tiles, Height and Smoke at its
+            //  top but NOT the biome GROUND layer — and it then asks for that layer three ways
+            //  before the layer for THIS mission is stamped. `Grid.IsFloor` says a RIFT tile is not
+            //  floor; `Grid.CostMap` says a rift is impassable and ice/sand/vent reprice a step; and
+            //  every connectivity flood built on those two (TryApplyLayout's accept/reject guard,
+            //  SpawnEnemies' pod scatter, PlaceBarrels' candidate filter, EnsureConnectivity's
+            //  carve) inherits both. This mission's layer CANNOT exist during its own Build —
+            //  Game.StampBiomeGround runs after Build because its `reserved` set is derived from the
+            //  board Build produces — so what Build was reading was the PREVIOUS mission's ground.
+            //  The symptom was leg (2)'s `dailyBoardNonDeterministic` at 8-15% of processes: the
+            //  first BeginDaily in a process inherits the ground of whatever ran before it (in this
+            //  test, a clock-seeded SKIRMISH), and when that happened to be a VOID board the leftover
+            //  rift severed the flood, TryApplyLayout REJECTED the day's authored arena and the
+            //  daily fell through to BuildProcedural — a different board, 848 extra Util.Rng draws.
+            //  Latent since C4 (ground layer); armed by P16, which made VOID's rift IMPASSABLE.
+            //
+            //  Leg (2) can only catch that by luck. This leg forces the mechanism, so it is a gate:
+            //  the dirt is stamped by hand, deterministically, and the SAME dirt is fed to both arms.
+            {
+                NoPersist = true;
+                // THE DIRT: a deterministic RIFT WALL down one mid-field column, written by hand
+                // rather than stamped, so this leg depends on no stamper staying the way it is
+                // today and on no seed dealing a severing pattern by luck. A rift is the one ground
+                // that makes a tile NOT FLOOR (Grid.IsFloor), so a full column severs the squad's
+                // deploy band (cols 0-3) from the hostiles' (cols 14-17) — which is exactly the
+                // shape a leftover VOID board had when it made leg (2) fail in the wild.
+                const int WallX = 9;
+                void DirtyGround(Grid g)
+                {
+                    for (int gy = 0; gy < g.H; gy++) g.Ground[WallX, gy] = GroundKind.Rift;
+                    g.RefreshGroundFlags();
+                    if (!g.AnyRift) fails.Add("staleGroundProbeWroteNoRift");
+                }
+
+                // (14a) THE INVARIANT, where it belongs: Mission.Build must not carry a caller's
+                //       ground into its own terrain decisions. Asserted on a SCRATCH grid, so it
+                //       holds for the campaign too and does not depend on which arena a day deals.
+                //       Build never stamps ground itself (Game.StampBiomeGround does, afterwards),
+                //       so "empty when Build returns" is the whole statement.
+                var scratch = new Grid();
+                DirtyGround(scratch);
+                var probeSquad = Sightline.Mission.TrainingSquad();
+                var probeFoes = new List<Unit>();
+                Sightline.Mission.Build(scratch, probeSquad, probeFoes, 3);
+                int dirtAfter = 0;
+                for (int gx = 0; gx < scratch.W; gx++)
+                    for (int gy = 0; gy < scratch.H; gy++) if (scratch.Ground[gx, gy] != GroundKind.None) dirtAfter++;
+                if (dirtAfter != 0) fails.Add($"buildReadsStaleGround({dirtAfter} tiles survived Build)");
+                if (scratch.AnyRift || scratch.AnyIce || scratch.AnyVent || scratch.AnyFoliage || scratch.AnySand)
+                    fails.Add("buildLeftStaleGroundFlags");
+
+                // (14b) THE CONSEQUENCE, end to end: the SEEDED DAILY's headline contract is that
+                //       the same stamp deals the same board to everyone. A cold board (clean grid)
+                //       and a warm one (a dirty grid) must agree. This is leg (2)'s assertion with
+                //       the luck taken out — leg (2) only sees this when the SKIRMISH before it
+                //       happened to leave a VOID board behind, which is 1 process in 8.
+                BeginDaily();
+                string cleanBoard = BoardSignature();
+                DirtyGround(Grid);
+                BeginDaily();
+                string dirtyBoard = BoardSignature();
+                if (dirtyBoard != cleanBoard)
+                    fails.Add($"dailyBoardReadsPreviousGround(clean={cleanBoard} afterDirt={dirtyBoard})");
+
+                // (14c) THE DETECTOR MUST BE ABLE TO FAIL. Re-run (14b) against the PRE-FIX seam
+                //       (what SIGHTLINE_STALEGROUND=1 restores): the same dirt MUST move the board
+                //       there, or (14b) is asserting nothing and would sit green through a
+                //       regression. Skipped when the rift is not a mechanic at all
+                //       (SIGHTLINE_BIOMEMECH=0 / SIGHTLINE_NEWGROUND=0), where there is by
+                //       construction nothing for the stale read to bite on.
+                if (Terrain.NewOn)
+                {
+                    Sightline.Mission.ClearGroundOnBuild = false;
+                    BeginDaily();
+                    string staleClean = BoardSignature();
+                    DirtyGround(Grid);
+                    BeginDaily();
+                    string staleDirty = BoardSignature();
+                    Sightline.Mission.ClearGroundOnBuild = true;
+                    if (staleDirty == staleClean) fails.Add("staleGroundProbeInsensitive");
+                }
+            }
+
             // ── (13) P14 — THE DAILY'S CROSS-PROCESS CONTRACT, ASSERTED RATHER THAN PRINTED.
             //  Leg (9) proves the same stamp deals the same force TWICE IN ONE PROCESS and then
             //  PRINTS "(must match across processes)". Nobody was comparing it: the sweep runs
@@ -1094,7 +1178,7 @@ public partial class Game
         }
         catch (Exception e) { return "MODETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched; a skirmish fields the full roster, pods of 3 from heat 4 and one mid-boss from heat 4, at a pinned 4/6/8 bodies; the escort asset, the HVT bonus and the DEFEND wave all answer the dial too; no mode force is a single pod or entirely immobile; the depth funnel is the identity in the campaign; and the same daily stamp fields the same force IN A SECOND PROCESS; BOTH end-card doors to the main menu clear an ended run's mode, so the intro's DEPLOY plate opens a campaign and not the drill; and the FIELD MANUAL's SKIRMISH SETUP row names every key that screen's own legend advertises)"
+            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched; a skirmish fields the full roster, pods of 3 from heat 4 and one mid-boss from heat 4, at a pinned 4/6/8 bodies; the escort asset, the HVT bonus and the DEFEND wave all answer the dial too; no mode force is a single pod or entirely immobile; the depth funnel is the identity in the campaign; and the same daily stamp fields the same force IN A SECOND PROCESS; BOTH end-card doors to the main menu clear an ended run's mode, so the intro's DEPLOY plate opens a campaign and not the drill; and the FIELD MANUAL's SKIRMISH SETUP row names every key that screen's own legend advertises; and Mission.Build carries NO ground layer into its own terrain decisions, so the day's board is not a function of the board before it)"
             : "MODETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

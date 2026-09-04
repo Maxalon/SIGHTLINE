@@ -222,6 +222,17 @@ public static class Program
 
         string biomeMechEnv = Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEMECH");
         if (biomeMechEnv == "1") Terrain.Enabled = true; else if (biomeMechEnv == "0") Terrain.Enabled = false;
+        // P20 "THE STALE GROUND" — SIGHTLINE_STALEGROUND=0/1. =1 restores the pre-fix seam, in
+        // which Mission.Build's floor / cost / connectivity queries read the PREVIOUS mission's
+        // ground layer (Build wiped Tiles, Height and Smoke but not Ground, and this mission's
+        // layer is not stamped until after Build returns). That made the arena a function of the
+        // board before it: measured at 8-15% of processes, the SEEDED DAILY dealt a different
+        // board on its first build than on its second. Kept as an off switch so the board change
+        // is attributable and priceable, and because MODETEST leg (14) flips it to prove its own
+        // detector can fail. Never ship it on.
+        string staleGroundEnv = Environment.GetEnvironmentVariable("SIGHTLINE_STALEGROUND");
+        if (staleGroundEnv == "1") Mission.ClearGroundOnBuild = false;
+        else if (staleGroundEnv == "0") Mission.ClearGroundOnBuild = true;
         // ---- P18 "THE SECOND AXIS" — the wave's three off switches (house pattern: =0 restores
         // the pre-P18 behaviour EXACTLY, so every change is attributable). ----
         // SIGHTLINE_ASSISTLATCH=0/1: the adaptive assist reads the heat the run STARTED at instead

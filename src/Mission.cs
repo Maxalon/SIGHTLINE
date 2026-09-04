@@ -195,6 +195,15 @@ public static class Mission
 
     // test hook (SIGHTLINE_MAP): force a specific authored layout index; -1 = normal roll
     public static int ForcedLayout = -1;
+    /// P20 THE STALE GROUND — clear the biome GROUND layer at the top of Build (the default and
+    /// the correct behaviour: see the note in Build). `SIGHTLINE_STALEGROUND=1` restores the
+    /// pre-fix read, in which Build's floor/cost/connectivity queries saw the PREVIOUS mission's
+    /// ground. It exists for two reasons: the house rule that a change which moves the board must
+    /// be switchable so it can be attributed and priced, and because MODETEST leg (14) flips it to
+    /// prove its own detector can fail. NEVER a shipping configuration — with it on, the SEEDED
+    /// DAILY's headline contract ("the same day deals the same board to everyone") is false.
+    public static bool ClearGroundOnBuild = true;
+
 
     // W2 arena telemetry: the authored layout index the LAST Build actually applied, or -1 for
     // the procedural fallback. Recorded only AFTER TryApplyLayout's connectivity guard accepted
@@ -251,6 +260,17 @@ public static class Mission
     {
         enemies.Clear();
         grid.ClearSmoke();
+        // P20 THE STALE GROUND — the ground layer belongs to the PREVIOUS mission here, and this
+        // build must not read it. Tiles, Height and Smoke are wiped above/below; Ground was not,
+        // and Build asks for it three ways before it is restamped: Grid.IsFloor (a RIFT tile is
+        // not floor), Grid.CostMap (rift blocks, ice/sand/vent reprice a step) and every
+        // connectivity flood built on them — TryApplyLayout's accept/reject guard, SpawnEnemies'
+        // pod scatter, PlaceBarrels' candidate filter and EnsureConnectivity's carve. THIS
+        // mission's layer cannot exist yet: Game.StampBiomeGround runs AFTER Build because its
+        // `reserved` set is derived from the board Build produces. So the correct ground during a
+        // build is NO ground, and leaving the last one in place made the arena a function of the
+        // board before it. MODETEST leg (14) is the gate.
+        if (ClearGroundOnBuild) grid.ClearGround();
         for (int x = 0; x < grid.W; x++)
             for (int y = 0; y < grid.H; y++)
             {
