@@ -328,6 +328,37 @@ the auto-backfill-to-4 currently softens it (good anti-spiral, weak stakes). Wou
 - **Don't** let a snowball (or a death-spiral) make the outcome a foregone conclusion
   with many turns still to play.
 
+> **AMENDMENT — the reward curve's DOMAIN must be the difficulty curve's domain**
+> *(PROGRAM PARALLAX, wave P18 "THE SECOND AXIS", 2026-09-04).*
+> §F said what a meta unlock should BE (horizontal, option-widening). It said nothing about how
+> LONG the meta should keep paying, and the gap showed: the WAR ROOM's six salvage unlocks cost 330
+> in total against ~61 income for a heat-0 clear, so it emptied in about five wins — while
+> `Game.UnlockHeatOnWin` kept raising the heat cap once per win at the cap, to `Heat.Max = 8`.
+> A permanent-progression curve that flattens to zero while the challenge curve keeps climbing is
+> the run-to-run pillar with one of its two curves switched off.
+>
+> **The rule this adds:** a permanent-reward track should be gated on the same axis the difficulty
+> runs on, so the two start and stop together. In SIGHTLINE that axis is HEAT, and the three
+> COMMISSIONS are gated on a rung CLEARED (2 / 5 / 8, the last **on** `Heat.Max`) rather than on
+> salvage banked. §F's horizontal rule still governs WHAT they grant — all three widen a recurring
+> choice (a perk offer, the requisition slate, the veteran reserve) and none adds a point of
+> anything. The residual is recorded rather than argued away: a wider menu is a small edge by
+> SELECTION, bounded at one pick either way, and unpriced (the flywheel has no meta profile).
+> Two design shapes were rejected in reaching this and the reasons belong here: **repeatable
+> price-scaling purchases** are vertical progression and feed the difficulty curve from behind, and
+> **another salvage-to-run-advantage sink** was already shipped by W9 — the missing thing was never
+> a place to SPEND, it was a place to PROGRESS. Detail: `docs/DEVLOG.md` §THE SECOND AXIS.
+
+> **AMENDMENT — a mercy the player did not opt out of may not be confiscated by a gamble**
+> *(same wave).* The adaptive assist (`Run.AssistLevel`) responds to a LOSS STREAK, not to a
+> difficulty rung — but it tested the run's LIVE heat, and three field-event arms raise that
+> mid-run. A player who took a "+1 Heat (tougher rest of run)" gamble therefore also lost up to
+> five tiers of force-wide enemy relief, as a second cost no screen ever named. §3.A's rule about
+> informed decisions covers this: an option whose real price is hidden is not a decision. The
+> assist is now latched to the rung the player DIALLED (`Run.StartHeat`), the heat rise is
+> unchanged, and the arm says which way it went. **The general form:** a difficulty relief granted
+> for a reason OUTSIDE the run may only be withdrawn by the thing that granted it.
+
 ### G. Teaching & onboarding
 
 **Performance before competence; teach with low-cost failure and well-ordered

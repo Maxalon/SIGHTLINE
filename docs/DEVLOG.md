@@ -15030,3 +15030,192 @@ the monitor and round-trips; release archive named, checksummed (digest RECOMPUT
 | `bash scripts/publish.sh --no-archive` | stop at the directory (the pre-P17 behaviour). |
 | `Display.AllowLaunchFit` | default **false**; the real launch sets it. The structural reason the harness's window size cannot move. |
 | `Display.LaunchChromeH` | 64 px — the stated, conservative title-bar/taskbar allowance. Not measurable from raylib. |
+
+---
+
+## §THE SECOND AXIS — PROGRAM PARALLAX wave P18 (2026-09-04, base `f81d3fa`)
+
+**Thesis (from the lead's docket): the loop stops offering decisions, in three places.** One dev,
+one branch (`wave/the-fork-choice`). All three items were checked against the source before
+anything was written; **all three CONFIRMED, none stale.** What follows is the reasoning, not the
+diff — in particular *why this second axis and not another*, which is the part the docket asked for.
+
+### The verdicts, with the trace
+
+**1. THE WAR ROOM EXHAUSTS AND THE DIFFICULTY DOES NOT — CONFIRMED (not fixed by any earlier wave).**
+`MetaProg.AllUnlocks` was six purchases costing **40+70+90+50+35+45 = 330 salvage**.
+`Game.AwardMetaRunEnd` pays a full six-mission heat-0 clear `(25 + 6*6) * (10+h)/10` = **61** (h4 85,
+h8 109), plus one-time 20-salvage achievement bounties. So the shop empties in **~5 wins**.
+`Game.UnlockHeatOnWin` raises `UnlockedHeat` by one per win **at** the cap, and the cap runs to
+`Heat.Max = 8` — **eight** such wins. From roughly win 5 to win 8 the challenge curve keeps climbing
+against a permanent-reward curve that is flat at zero, which is the run-to-run pillar with one of
+its two curves switched off.
+
+**One half of the docket's framing is refuted and is recorded as such:** salvage is *not* worthless
+after the sixth unlock. W9 (SIGNAL) already shipped the "convert salvage into run-scoped advantage"
+sink — the priced veteran recall (`MetaProg.RecallCost`), the draft-pool re-roll, the scar rehab and
+the shop-slate re-roll. What was missing was never a place to SPEND. It was a place to PROGRESS.
+
+**2. THE PLAYER NEVER CHOOSES WHO GETS THE REWARD — CONFIRMED.** `Run.TryQueueBonusPerk` did
+`var u = eligible[Util.RandInt(0, eligible.Count - 1)]`. Three callers, all of them rewards:
+`Run.AddBonusPerk` (the ELITE / ONSLAUGHT card's `RewardKind.BonusPerk`, via `Game.cs`), the
+ADV. TRAINING requisition (`Game.cs`), and `EventCatalog`'s training arm (`Events.cs`).
+
+**3. A MID-RUN EVENT SILENTLY SWITCHES THE ASSIST OFF — CONFIRMED, and it is worse than "silent".**
+`Run.AssistLevel` read `HeatLevel > 0 ? 0 : Math.Min(AssistMax, LossStreak)` — the run's **live**
+heat. Three catalogue arms (`relic:0` "Claim it", `informant:1` "Turn them in", `reservecall:1`
+"Keep the roster") raise it. So a player on a loss streak, running the assist at heat 0, who takes a
+gamble whose preview reads "+1 Heat (tougher rest of run)", also lost **up to five tiers of
+force-wide enemy `-HP/-Aim` relief** for the rest of the run, with nothing on any screen saying so.
+`EventCatalog.HeatPinned` (wave THE HEAT PIN) makes `AddHeat` a no-op in every measured batch, and
+`_metaLossStreak` is 0 under `NoPersist` — **so this defect is invisible to the flywheel twice over
+and only a player ever meets it.** That is why nine win-rate-driven programs never saw it.
+
+### Why THIS second axis: THE LADDER PAYS IN WIDTH
+
+Three shapes were weighed against `docs/DESIGN.md` §3.F and §3.D.
+
+- **(1) Repeatable purchases that scale in price. Rejected.** An unbounded ladder of paid upgrades
+  is *vertical* progression, and §3.F is explicit that the goal is the opposite: "a player on run
+  100 should have **more options**, not be 10x stronger". It also feeds the difficulty curve from
+  behind — every purchase makes the next rung easier — which flattens the stair-step §3.D asks for.
+- **(2) A sink converting salvage into run-scoped advantage. Rejected as already built** (W9, above).
+  Building a second one would have been a wave spent re-shipping a wave.
+- **(3) Unlocks gated on heat REACHED. Chosen**, for one structural reason the other two cannot
+  match: **its domain is the difficulty curve's own domain.** The thing that keeps climbing after
+  the shop empties *is* the heat ladder, so gating on the ladder makes the two curves start and stop
+  together. The gates are **2 / 5 / 8**, and the top one is deliberately `Heat.Max`: the ladder's
+  final climb is also the axis's final purchase. It cannot be farmed at RECRUIT — `UnlockHeatOnWin`
+  already refuses to advance the ceiling below heat 0.
+
+**What they grant is WIDTH, not power** — each widens one recurring *choice*, and none adds a point
+of anything:
+
+| gate | unlock | cost | what widens |
+|---|---|---|---|
+| clear heat 2 | **COMBAT TRIALS** | 60 | every perk offer is a pick-1-of-**three** (both the rank-up and the bonus path) |
+| clear heat 5 | **DEEP RESERVE** | 95 | the cross-run veteran reserve holds **20** records instead of 12 |
+| clear heat 8 | **DEEP STORES** | 150 | one more requisition slate slot (stacks with QUARTERMASTER's) |
+
+You still take exactly one perk, still pay Intel for what you buy, still recall at most two or three
+veterans. **The honest residual, recorded rather than argued away:** a wider menu *is* a small edge
+by selection — best-of-3 beats best-of-2 — and it is bounded by exactly that, one pick either way.
+Nobody has priced it (see "not measured", below).
+
+**The currency needed a new persisted field and could not be derived.** `MetaDto.MaxHeat` is a
+CEILING, and `UnlockHeatOnWin` stops raising it at `Heat.Max` — so a heat-8 clear moves nothing
+there and a gate at 8 would have been permanently unreachable. `MetaDto.BestHeatWon` is appended
+(raises-only), and `SaveGame.LoadBestHeatWon` migrates every pre-P18 profile through `MaxHeat - 1`,
+which is exact for every rung below the ceiling.
+
+**`MetaUnlock` is one of the thirteen persisted-by-ordinal enums.** The three members were appended
+at the END; `SIGHTLINE_SAVETEST` duly failed with
+`enumShape:MetaUnlock (golden 0xC672FAD5, actual 0xE19D7A3A)` and the printed hash was pasted into
+`SaveGame.PersistedEnums`. No reorder, no insertion, no removal.
+
+### The WAR ROOM had EIGHT PIXELS of slack, and that decided the presentation
+
+The first cut gave the three new unlocks ordinary cards. `SIGHTLINE_FITTEST` failed immediately:
+`textEllipsized: WARROOM @90/100/110%` on **four** unlock descriptions, including three that were
+there before P18. The arithmetic: in the state FITTEST stages (2 owned / 4 unowned) the compact
+cards want `4*70-8 = 202px` in `210px` of room, so **any** added row compresses the pitch, drops the
+cards from two description rows to one, and sends `Hud.Clip` to work.
+
+So a heat-gated unlock **never takes card space**. It is one 24px ledger row — the NEXT COMMISSION —
+naming the lowest-gate unowned commission plus a count of what stands behind it, reading `BUY <cost>`
+once the rung is cleared and `CLEAR HEAT n` before. That is the column's own NEXT UNLOCK idiom
+applied to the second axis, it is what 8px of slack can buy, and it means clearing a rung visibly
+changes the same row rather than reshuffling the column. The row's description lives in a hover card
+(`Hud._warCommHover`), painted after the CAREER footer so it is never overdrawn — without it a
+commission would be a name and a price with no statement of what it does, and the WAR ROOM is the
+only screen in the game where an unlock is described at all.
+
+### Item 2 in detail: keeping the ROLL is what made the picker free
+
+`TryQueueBonusPerk` still rolls its recipient, unchanged, and that roll is now the offer's
+**default**. The player re-targets it in the chooser. Two consequences that were the whole design:
+
+- **The RNG stream is untouched.** The headless paths never open the chooser, so a batch, an autoplay
+  run and PAIRTEST draw exactly what they drew before P18.
+- **A retarget cannot be scummed.** Every non-rolled recipient's pair is derived from the offer's
+  `Seed` by a pure FNV hash (`Run.Mix` / `Run.StrHash` — deliberately **not** `string.GetHashCode`,
+  which .NET randomises per process), mirroring `MakePerkOffer`'s class-line bias. Zero `Util.Rng`
+  draws, stable under toggling, and re-selecting the rolled soldier restores the pair the RNG dealt.
+
+A **rank-up** offer is not re-targetable: it belongs to the soldier who earned it. `PerkOffer.Bonus`
+is the discriminator, and the card is retitled `FIELD TRAINING` for a bonus offer — it had said
+`PROMOTION` over a reward given to a soldier who had not been promoted.
+
+### Item 3 in detail: latch it AND say it
+
+`Run.StartHeat` is the rung the player **dialled**, latched beside `HeatLevel` on every path that
+seats a run and persisted (`RunDto.StartHeatEnc`, encoded as value+2 so `0` can mean "absent" —
+`Heat.Recruit` is `-1`, so no in-range value was free). `AssistLevel` now tests it. The heat rise
+itself is unchanged: the enemy still gets the rung the arm promised; only the confiscation of relief
+the player already had is gone. And the arm's result line now names the assist either way —
+`Heat rises to 1 - FIELD SUPPORT holds at tier 3`, or `... is WITHDRAWN` with the latch off — so the
+message can never disagree with the rule.
+
+A pleasant side effect: `Game.AssistPreview` tests `PendingHeat > 0`, which is now *exactly* the same
+predicate at run start, so the intro's FIELD SUPPORT chip is truthful for the whole run instead of
+only until its first event.
+
+### Tests — each proven to FAIL before the fix and PASS after
+
+The house pattern: the shipped behaviour is asserted **unconditionally**, so the wave's own off
+switch reproduces the pre-P18 defect and the test fails on it. That is the proof the leg can see it.
+
+| item | hook | with the lever OFF (== pre-P18) | shipped |
+|---|---|---|---|
+| assist latch | `SIGHTLINE_EVENTTEST` | `SIGHTLINE_ASSISTLATCH=0` -> `FAIL (assistRevokedByEvent=0, assistReliefRevoked=0)` | `PASS` |
+| recipient picker | `SIGHTLINE_REWARDTEST` (new) | `SIGHTLINE_PERKPICK=0` -> `FAIL (retargetRefused,retargetDidNotMove)` | `PASS` |
+| the second axis | `SIGHTLINE_METATEST` | `SIGHTLINE_SECONDAXIS=0` -> `FAIL (axisUnbuyableAfterGateMet,axisNotCharged,reserveCapUnlock)` | `PASS` |
+| DEEP RESERVE, through the real enshrine | `SIGHTLINE_VETTEST` | `SIGHTLINE_SECONDAXIS=0` -> `FAIL (deepReserveCap=12,deepReserveEnshrine=12(want 20))` | `PASS` |
+| `StartHeat` round-trip + pre-P18 fallback | `SIGHTLINE_SAVETEST` | (a naive `StartHeat=0` default would fail `startHeatLegacy`) | `PASS` |
+| the two new screens at all four text sizes | `SIGHTLINE_FITTEST` | first cut: `screenNotStaged:BONUSPERK-WIDE (identical frame to BONUSPERK)` — the hook was not calling `DebriefSurvivors`, so **neither** case was drawing the chooser | `PASS`, 50 screens |
+
+`SIGHTLINE_REWARDTEST` is the wave's one new hook — the perk OFFER surface genuinely had no owner
+(CONTRACTTEST owns the class-line table behind it, SAVETEST the ordinal, METATEST the WAR ROOM).
+It is wired into `scripts/qa-sweep.sh` through `verdict`; the sweep derives **83 exist / 83 run**
+with an empty coverage guard.
+
+### Measurement: the wave is campaign-INERT, and that is proved rather than asserted
+
+`docs/measurements/p18/` — three CRN-paired batches (heat 0 / 4 / 8, slot bases 0 / 10 / 20,
+`SIGHTLINE_BALANCE=20` = 40 greedy+sloppy campaigns per arm per rung, `runs=40` asserted on all six
+chunks, exit code checked, JSON `rm -f`'d first). **240 campaigns; base binary `f81d3fa` vs this
+branch; 2,356 aggregate leaf fields per pair; ZERO differences on all three pairs.** Every read of
+the new state is `!NoPersist`-gated, the retarget spends no draws, and `LossStreak` is 0 in a batch —
+so there was no rung round to run, and running one would have restated the base tree's numbers under
+a P18 heading. The README states what the round does **not** establish.
+
+### Found, recorded, NOT fixed
+
+- **The COLD WAR ROOM ellipsizes four unlock descriptions, and FITTEST cannot see it.** `DebugWarRoom`
+  stages the rich twelve-run demo; the zero-state (`SIGHTLINE_COLD=1`) has no `ScreenCase`, so the
+  profile every new player is in is unaudited. It is **pre-existing** — at 0 owned / 6 unowned the
+  plan already landed `cardH = 49` and `descRows = 1` before P18 — but P18's ledger row makes it
+  marginally tighter (`cardH 49 -> 44`). Adding the case would fail the gate on a condition P18 did
+  not create, and fixing it needs 342px of cards in 264px of column. ROADMAP.
+- **Nobody has priced the width.** The flywheel has no meta profile (`NoPersist`), so COMBAT TRIALS'
+  third perk, DEEP STORES' extra slot and DEEP RESERVE's deeper roster are unmeasurable, not merely
+  unmeasured. ROADMAP.
+- **An `AddHeat` arm can still push a run above the heat CEILING the player chose** (`Heat.Clamp`
+  clamps to `Heat.Max`, not to `UnlockedHeat`). Considered and left: the arm's preview says "+1 Heat"
+  and delivers exactly that, the HUD's heat chip reads live, and clamping it would neuter the arm for
+  a player already at their cap. Recorded so the next wave decides deliberately rather than by
+  inheritance.
+- **The dossier stat line on the perk chooser runs under the EDIT TAG button** (visible as
+  `SUPPR. FI` in `shots/p18-bonus-perk-picker-wide.png`). Pre-existing on `PERKCHOOSER`; it is an
+  overdraw, not a clip, so FITTEST does not see it. ROADMAP.
+
+### The wave's off switches
+
+`SIGHTLINE_ASSISTLATCH=0` (pre-P18 live-heat assist test), `SIGHTLINE_PERKPICK=0` (no recipient
+choice), `SIGHTLINE_SECONDAXIS=0` (the heat-gated column is neither listed nor applied — the pre-P18
+WAR ROOM exactly). All three are wired in `Program.cs` beside `SIGHTLINE_BIOMEMECH`/`AIDECLINE`.
+
+**Screenshots:** `shots/p18-warroom-second-axis.png` (the axis with its first commission earned),
+`shots/p18-warroom-cold-locked.png` (the fresh profile's signpost, `CLEAR HEAT 2`),
+`shots/p18-warroom-commission-hover.png` (the hover card),
+`shots/p18-bonus-perk-picker.png` and `shots/p18-bonus-perk-picker-wide.png`.

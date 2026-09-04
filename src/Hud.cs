@@ -3647,6 +3647,22 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             }
         }
 
+        // P18: the NEXT COMMISSION row's hover card, painted LAST so it sits over the footer and
+        // the neighbouring column rather than under them. Set by DrawWarUnlocks, cleared here.
+        if (_warCommHover.HasValue)
+        {
+            var cu = _warCommHover.Value;
+            bool cmet = MetaProg.UnlockHeatMet(cu, p.BestHeatWon);
+            // (WrapText splits on spaces only — no newline handling — so the two sentences are
+            // joined with a space and wrap naturally.)
+            string cbody = MetaProg.UnlockDesc(cu) + "  "
+                         + (cmet ? $"Costs {MetaProg.UnlockCost(cu)} salvage."
+                                 : $"Locked until a campaign is WON at heat {MetaProg.UnlockHeatGate(cu)} or above.");
+            DrawHoverCard(MetaProg.UnlockName(cu), cbody, _warCommHoverAt.X, _warCommHoverAt.Y,
+                          cmet ? Pal.Good : Pal.VipGold);
+            _warCommHover = null;
+        }
+
         // ---- BACK button (centred, under the footer) ----
         float backIn = PanelAnim("warBack", 0.3f, 0.5f);
         int by = footerY + footerH + 18;
@@ -3998,6 +4014,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         return (panelH, pitch, cardH, descRows, bodySize, drawn);
     }
 
+    // P18: the NEXT COMMISSION row the pointer is over this frame (DrawWarUnlocks sets it,
+    // DrawWarRoom paints and clears it after the footer so the card is never overdrawn).
+    static MetaUnlock? _warCommHover;
+    static Vector2 _warCommHoverAt;
+
     static void DrawWarUnlocks(Game g, Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
     {
         WarRoomBuyBtns.Clear();
@@ -4161,6 +4182,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Cfg.Text(right, new Vector2((int)(x + w - 16 - rw), rowY + 2), 12, 1f,
                      Raylib.Fade(met ? (afford ? Pal.Good : Pal.TxtDim) : Pal.VipGold, 0.9f * anim));
             WarRoomBuyBtns.Add((u, commChip));
+            // The row has no body text (24px is all the column's 8px of slack can buy — see
+            // WarUnlockPlan), so the DESCRIPTION lives in a hover card. Without it a commission is
+            // a name and a price with no statement of what it does, and the WAR ROOM is the only
+            // screen in the game where an unlock is described at all.
+            var commRow = new Rectangle(x + 12, rowY - 2, w - 24, 22);
+            if (Raylib.CheckCollisionPointRec(Mouse(), commRow))
+            {
+                _warCommHover = u;
+                _warCommHoverAt = new Vector2(x - 316, rowY - 52);
+            }
             rowY += 24;
         }
 
@@ -6155,9 +6186,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             int rowW = w - 40;
             int chipW = Math.Min(150, (rowW - chipGap * (whoList.Count - 1)) / whoList.Count);
             int usedW = chipW * whoList.Count + chipGap * (whoList.Count - 1);
+            // No lead label: at five candidates the chip strip already spans the card, and a
+            // "GIVE IT TO" caption at the left margin printed UNDER the first chip. The subtitle
+            // above ("CHOOSE THE SOLDIER, THEN THE PERK") carries the instruction instead.
             int rowX = x + w / 2 - usedW / 2;
-            string lead = "GIVE IT TO";
-            Cfg.Text(lead, new Vector2(x + 20, rowY + 5), 12, 1f, Pal.TxtDim);
             for (int i = 0; i < whoList.Count; i++)
             {
                 var u = whoList[i];
