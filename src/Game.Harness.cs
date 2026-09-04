@@ -4143,7 +4143,7 @@ public partial class Game
                 foreach (int bi in mechIdx)
                 {
                     Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", bi.ToString());
-                    int lo = int.MaxValue, hi = 0, sum = 0, boards = 0, thin = 0, raised = 0;
+                    int lo = int.MaxValue, hi = 0, sum = 0, boards = 0, thin = 0, raised = 0, orphanRifts = 0;
                     for (int sd = 0; sd < 10; sd++)
                         for (int m = 1; m <= 4; m++)
                         {
@@ -4165,7 +4165,21 @@ public partial class Game
                             int n = CountGroundTiles();
                             for (int x = 0; x < Grid.W; x++)
                                 for (int y = 0; y < Grid.H; y++)
+                                {
                                     if (Grid.Ground[x, y] != GroundKind.None && Grid.HeightAt(x, y) > 0) raised++;
+                                    // P16 — NO CONFETTI. A lone 1-tile hole is not a weak chasm, it
+                                    // is a tile the player routes around for no reason and which
+                                    // reads as a rendering artefact (the first VOID capture had six
+                                    // of them and no chasm). Terrain.CullOrphanRifts removes them;
+                                    // this is the leg that says it ran on the boards that SHIP.
+                                    if (Grid.Ground[x, y] != GroundKind.Rift) continue;
+                                    bool near = false;
+                                    for (int dx = -1; dx <= 1 && !near; dx++)
+                                        for (int dy = -1; dy <= 1 && !near; dy++)
+                                            if ((dx != 0 || dy != 0) && Grid.InBounds(x + dx, y + dy)
+                                                && Grid.Ground[x + dx, y + dy] == GroundKind.Rift) near = true;
+                                    if (!near) orphanRifts++;
+                                }
                             lo = Math.Min(lo, n); hi = Math.Max(hi, n); sum += n; boards++;
                             if (n < (bi == Terrain.BiomeMagma || bi == Terrain.BiomeVoid ? 7 : 12)) thin++;
                         }
@@ -4187,6 +4201,11 @@ public partial class Game
                     // (c) and it must not VANISH on a minority of seeds — the failure this wave
                     //     claimed to have fixed on an open grid and had NOT fixed in play.
                     if (lo < 4) fails.Add($"realMin[{Biome.All[bi].Name}]={lo}");
+                    // P16 — VOID is held to its OWN floor, not the generic 4, because the stamper
+                    // guarantees one by WALKING AGAIN (Terrain.RiftFloor / RiftTries) rather than
+                    // by hoping. A regression that reinstated the thin tail would slip past `lo < 4`.
+                    if (bi == Terrain.BiomeVoid && lo < Terrain.RiftFloor) fails.Add($"riftFloorMissed={lo}");
+                    if (bi == Terrain.BiomeVoid && orphanRifts != 0) fails.Add($"orphanRifts={orphanRifts}");
                     if (thin * 4 > boards) fails.Add($"realThinBoards[{Biome.All[bi].Name}]={thin}/{boards}");
                     if (hi > 52) fails.Add($"realFlood[{Biome.All[bi].Name}]={hi}");
                     BiomeDensityNote += $" {Biome.All[bi].Name}~{mean:F1}({lo}-{hi})";
@@ -4736,6 +4755,7 @@ public partial class Game
               + "CostMap toll zeroed, jitter pinned; a RIFT is impassable through IsFloor yet moves no "
               + "sightline and no hit%, and its stamper's guard strands ZERO tiles on 180 walled boards; "
               + "SOFT SAND costs the literal 3/5 half-tiles and SHRINKS the shared reach; "
+              + "no VOID board ships a lone orphan hole or fewer than Terrain.RiftFloor rift tiles; "
               + "stamp pure, off-switch clean; REAL-BOARD density"
               + BiomeDensityNote + ")"
             : "BIOMETEST: FAIL (" + string.Join(",", fails) + ")";

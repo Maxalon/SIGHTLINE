@@ -2851,10 +2851,25 @@ public static class Renderer
                     // all trace their whole boundary; a rift traces only where it meets floor you
                     // could walk from, so the eye follows the WALKABLE side of the chasm — which is
                     // the side the decision lives on.
-                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(3, 2, 6), 0.90f));
-                    Color lip = cb ? Pal.RGBA(228, 228, 234) : Pal.RGBA(196, 172, 240);
-                    if (!gr.IsRift(x - 1, y)) Raylib.DrawLineEx(new Vector2(r.X + 1f, r.Y), new Vector2(r.X + 1f, r.Y + r.Height), 2.4f, Raylib.Fade(lip, 0.50f));
-                    if (!gr.IsRift(x, y - 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y + 1f), new Vector2(r.X + r.Width, r.Y + 1f), 2.4f, Raylib.Fade(lip, 0.50f));
+                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(3, 2, 6), 0.94f));
+                    // a BROKEN LIP, not a clean line: the near edge of a hole is torn floor, so the
+                    // highlight is drawn as three offset segments with a per-tile jitter. A ruler-
+                    // straight bright edge reads as UI (the game's selection language); a ragged one
+                    // reads as rock. The jitter is Hash3 on the tile, so it never crawls.
+                    Color lip = cb ? Pal.RGBA(236, 236, 242) : Pal.RGBA(206, 182, 250);
+                    void Lip(bool open, Vector2 a0, Vector2 b0, int salt)
+                    {
+                        if (!open) return;
+                        for (int k = 0; k < 3; k++)
+                        {
+                            float u0 = k / 3f + GH(x, y, salt + k) * 0.07f;
+                            float u1 = (k + 1) / 3f - GH(x, y, salt + 8 + k) * 0.10f;
+                            Raylib.DrawLineEx(a0 + (b0 - a0) * u0, a0 + (b0 - a0) * u1,
+                                              2.6f, Raylib.Fade(lip, 0.62f));
+                        }
+                    }
+                    Lip(!gr.IsRift(x - 1, y), new Vector2(r.X + 1.4f, r.Y), new Vector2(r.X + 1.4f, r.Y + r.Height), 900);
+                    Lip(!gr.IsRift(x, y - 1), new Vector2(r.X, r.Y + 1.4f), new Vector2(r.X + r.Width, r.Y + 1.4f), 920);
                     // the far edges get a DARK shoulder instead — the floor beyond falls into the
                     // hole's shadow, which is what makes the black read as a volume going down
                     // rather than as a flat black square painted on the floor.

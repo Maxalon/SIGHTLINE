@@ -138,6 +138,14 @@ public static class Terrain
     // sand is always a price and never a wall. At 5 it would be one tile per action and sand would
     // BE terrain; BIOMETEST asserts the literal 3 and the >= 2-tiles-per-action invariant, so
     // raising it fails loudly instead of quietly turning a basin into a barrier.
+    // ---- P16 / VOID: the RIFT's shape floor ---------------------------------------------
+    // How hard the stamper works to put a REAL chasm on the board. A rift that shrinks to two
+    // scattered tiles is not a weak mechanic, it is a rendering artefact the player has to route
+    // around for no reason, so the walk repeats until the board carries a chasm or the tries run
+    // out. BIOMETEST pins the resulting real-board minimum, which is the number that matters.
+    public static int RiftFloor = 8;       // rift tiles that must survive the orphan cull
+    public static int RiftTries = 8;       // max cracks walked to get there (2 is the usual answer)
+
     public static int SandStepOrth = 3;    // total half-tiles for an orthogonal step ONTO sand
     public static int SandStepDiag = 5;    // total half-tiles for a diagonal step ONTO sand
 
@@ -279,7 +287,7 @@ public static class Terrain
             case BiomeTundra:  StampLanes(grid, s, GroundKind.Ice, Put);           break;
             case BiomeMagma:   StampFissure(grid, s, Put);                          break;
             case BiomeArid:    StampBasins(grid, s, Put);                           break;
-            case BiomeVoid:    StampRift(grid, s, PutRift);                         break;
+            case BiomeVoid:    StampRift(grid, s, PutRift); CullOrphanRifts(grid);  break;
         }
         grid.RefreshGroundFlags();
     }
@@ -404,24 +412,93 @@ public static class Terrain
     /// 2-wide impassable band is not twice as interesting, it is twice as likely to be a wall.
     static void StampRift(Grid grid, int s, Func<int, int, bool> put)
     {
-        const int n = 2;
+        // FIRST CAPTURE, AND WHAT IT CHANGED. The first cut walked like MAGMA's fissure (a free
+        // start anywhere on the board, wander 0.50, 15-19 steps) and the screenshots showed exactly
+        // the failure C4's review recorded against MAGMA's first cut: SIX ISOLATED BLACK SQUARES,
+        // not a chasm. The cause is the board, not the walker — cover, barrels and the reserved
+        // rings eat ~60% of a walk, and once a meandering line is gapped that hard, nothing about
+        // the survivors says they were ever one line. Three changes, all aimed at that:
+        //   (a) EDGE-ANCHORED. A crack starts ON a board edge and heads across, so it spans the
+        //       short axis instead of wandering in the middle of the room.
+        //   (b) NEARLY STRAIGHT (wander 0.22 against the fissure's 0.55). A straight line still
+        //       reads as a line when a third of it is missing; a meander does not.
+        //   (c) NO ORPHANS. Stamp.CullOrphanRifts drops any rift tile with no rift neighbour at
+        //       all, because a lone 1-tile hole is confetti: it neither reads as a chasm nor asks
+        //       anything of a player, who simply steps around it.
+        // (d) A FLOOR, MET BY WALKING AGAIN — never by relaxing the guard. Two cracks is the
+        // usual answer, but an edge-anchored straight line that happens to start against a wall of
+        // cover can lay almost nothing, and the orphan cull then takes the rest: the first version
+        // of this measured realMin = 0 over 40 real boards, which is precisely the thin tail
+        // CLAUDE.md records against MAGMA ("about 1 board in 240") and tells the next wave not to
+        // reproduce. So the stamper keeps walking — up to RiftTries cracks — until the board
+        // carries RiftFloor tiles that will SURVIVE the cull. Deterministic (each attempt is its
+        // own salt), bounded, and it cannot overrun: `budget` still stops it.
+        int n = RiftTries;
         for (int i = 0; i < n; i++)
         {
+            if (i >= 2 && ConnectedRiftCount(grid) >= RiftFloor) break;
+            // (a) start on the TOP or BOTTOM edge and head into the board. The short axis is 11
+            // tiles, so a crack that crosses it genuinely divides the room left from right — the
+            // axis the squad advances along, which is what makes the bridge a decision.
+            bool fromTop = H(s, i, 63) < 0.5f;
             float px = 2f + H(s, i, 61) * (grid.W - 4f);
-            float py = 0.5f + H(s, i, 62) * (grid.H - 1f);
-            float ang = (H(s, i, 63) < 0.5f ? MathF.PI * 0.5f : -MathF.PI * 0.5f)
-                        + (H(s, i, 64) - 0.5f) * 1.4f;
+            float py = fromTop ? 0f : grid.H - 1f;
+            float ang = (fromTop ? MathF.PI * 0.5f : -MathF.PI * 0.5f)
+                        + (H(s, i, 64) - 0.5f) * 0.9f;     // a slanted crack, never a scribble
             int len = 15 + HI(s, i, 65, 5);                // 15..19 steps each
             for (int k = 0; k < len; k++)
             {
                 put((int)MathF.Round(px), (int)MathF.Round(py));
-                ang += (H(s, i, 280 + k) - 0.5f) * 0.50f;  // lower wander even than the fissure: a
-                                                           // hole you cannot cross has to read as a
-                                                           // LINE, or it is just missing tiles
+                ang += (H(s, i, 280 + k) - 0.5f) * 0.22f;  // (b)
                 px += MathF.Cos(ang) * 1.05f; py += MathF.Sin(ang) * 1.05f;
                 Reflect(grid, ref px, ref py, ref ang);
             }
         }
+    }
+
+    /// How many rift tiles would SURVIVE CullOrphanRifts — i.e. have at least one rift neighbour.
+    /// Non-destructive on purpose: culling between attempts would delete tiles the next crack was
+    /// about to adjoin, so the walk counts what it would keep and only culls once, at the end.
+    static int ConnectedRiftCount(Grid grid)
+    {
+        int n = 0;
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++)
+            {
+                if (grid.Ground[x, y] != GroundKind.Rift) continue;
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int ax = x + dx, ay = y + dy;
+                        if (grid.InBounds(ax, ay) && grid.Ground[ax, ay] == GroundKind.Rift)
+                        { n++; dx = 2; break; }
+                    }
+            }
+        return n;
+    }
+
+    /// (c) Drop every rift tile that has no rift neighbour in any of the eight directions. Removing
+    /// an impassable tile can only ADD reachability, so this cannot break the guard's invariant —
+    /// which is why it is safe to run after the walk rather than inside it.
+    static void CullOrphanRifts(Grid grid)
+    {
+        var doomed = new List<(int x, int y)>();
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++)
+            {
+                if (grid.Ground[x, y] != GroundKind.Rift) continue;
+                bool friend = false;
+                for (int dx = -1; dx <= 1 && !friend; dx++)
+                    for (int dy = -1; dy <= 1 && !friend; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx, ny = y + dy;
+                        if (grid.InBounds(nx, ny) && grid.Ground[nx, ny] == GroundKind.Rift) friend = true;
+                    }
+                if (!friend) doomed.Add((x, y));
+            }
+        foreach (var (x, y) in doomed) grid.Ground[x, y] = GroundKind.None;
     }
 
     /// Keep a walker on the board by REFLECTING its heading off the edge rather than stopping.
