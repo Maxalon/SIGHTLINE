@@ -2679,11 +2679,15 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
       the DIFFICULTY panel's body line paints to x≈1266 against a panel edge at x≈1239 — outside its
       own panel — and the `[K]`/`[U]` chips overlap their labels. The first screen in the game had
       never been checked at any scale but 100%.
-- [ ] **`display.json` load-back cannot be verified headlessly.** `Display.Init` calls `Load()`
-      after its `if (!enabled) return`, and every shot/autoplay path passes `false`. Deliberate
-      (headless byte-stability), and it means the settings round trip has no coverage past "the
-      file is written correctly". SHIPTEST's second-launch fork closes the equivalent gap for
-      `meta.json` only.
+- [x] **`display.json` load-back cannot be verified headlessly.** **STALE — CLOSED before P17 went
+      looking for it, and P17 verified that rather than re-fixing it.** `SIGHTLINE_SETTINGSTEST`
+      leg (B3) does a REAL disk round trip through `Display.SaveForTest()` / `LoadForTest()`
+      (which are `Save()` / `Load()`), asserting animation speed and text scale come back, that an
+      out-of-range file CLAMPS, and that a pre-W5 profile reads as the shipped defaults;
+      `SIGHTLINE_TUTTEST` does the same for every tip/seen flag. P17 added `WinW`/`WinH` to that
+      pattern in SHIPTEST leg (8b). **The one half still true:** it is `Load()` that is exercised,
+      not `Display.Init`'s call to it — `Init(false)` still returns before `Load()` on every
+      headless path, deliberately, for byte-stability.
 - [x] **No crash reporter and no log file.** **CRASH REPORTER CLOSED by PARALLAX wave P11 THE CRASH
       FILE** (DEVLOG §THE CRASH FILE; contract in `docs/DISTRIBUTION.md` §6). `Program.Main` is now
       `Crash.Guard` around the whole launch plus `Crash.Install` for background-thread throws; a
@@ -2718,10 +2722,14 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
       been observed.** The exact command a Windows machine must run to close it, from the published
       directory in `cmd.exe`, is `set SIGHTLINE_SAVETEST=1 && Sightline.exe` — PASS is a
       `SAVETEST: PASS` line in that same window. See `docs/DISTRIBUTION.md` §7.
-- [ ] **No installer, icon, window-title art or `.desktop` file**; on Windows the binary is
+- [ ] **No installer, ~~icon~~, window-title art or `.desktop` file**; on Windows the binary is
       unsigned and SmartScreen will warn. **Code signing costs money and is out of scope
       permanently** under this project's rules — but say so out loud rather than leaving it as a
-      surprise. (P11 fixed the console window on this line's platform; none of the rest of it.)
+      surprise. (P11 fixed the console window on this line's platform; **P17 fixed the ICON** —
+      `Ship.IconPixels` generates it in engine from the palette, no committed binary, no licence
+      entry, `SIGHTLINE_SHIPTEST` leg (7) asserts the art and `SIGHTLINE_ICONSHOT=1` photographs
+      it; **whether a desktop displays it is unverified here** — Xvfb has no window manager and
+      GLFW ignores window icons on Wayland by design. Installer, `.desktop` and signing: untouched.)
 - [ ] **macOS was never even cross-published**, and the Windows build is unverified beyond its
       file list (nothing here can run either).
 - [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns
@@ -3151,3 +3159,60 @@ AND THE MODES). These are the ones deliberately NOT fixed, and why.
   with the funnel and is reported, but it was never a measured lever — the flywheel does not cover
   skirmish at all, so no rung has ever included one. If the modes ever want a measured ladder of
   their own, that is the wave.
+
+
+## PROGRAM PARALLAX — wave P17 "SHIPS AS v1.0.0" (2026-09-04, base `e57e151`, branch `wave/ships-v1`)
+
+Detail in `docs/DEVLOG.md` §SHIPS AS v1.0.0; the contract is `docs/DISTRIBUTION.md` §8.
+
+- [x] **The release artefact.** `scripts/publish.sh` produced a directory and stopped. It now also
+      derives `CHANGELOG.md`, packs `dist/SIGHTLINE-v<version>-<rid>[-<mode>].{tar.gz,zip}`, writes
+      a `sha256sum(1)`-format checksum beside it with a bare filename (so `sha256sum -c` works
+      where the file was downloaded), verifies that checksum, and then **re-runs SHIPTEST from
+      inside the payload with `SIGHTLINE_RELEASEDIR` set** so the archive's digest is recomputed
+      in-process and compared. The version in the name is scraped off the binary's own SHIPTEST
+      line, not read out of the csproj twice.
+- [x] **The changelog is DERIVED, not written** — `scripts/changelog.sh`, from
+      `git log --first-parent`, cut into sections at `v*` tags. 71 entries for 676 commits, because
+      this project lands one merge per wave and those subjects already read like release notes.
+      Reasoning and the honest scope (it reports what MERGED, not what a player NOTICES) in
+      DISTRIBUTION §8.3.
+- [x] **The tag is implemented but NOT CREATED.** `--tag` makes a LOCAL annotated `v<version>` and
+      never contacts a remote; it refuses on a dirty tree, on a missing repo, and on an existing
+      tag. A publish without `--tag` prints the exact `git tag -a … && git push origin …` pair.
+      **`v1.0.0` does not exist in this repository** — creating and pushing it is the lead's call.
+- [x] **The window icon.** Procedural, in-engine, from the palette (`Ship.IconPixels` →
+      `Raylib.SetWindowIcon`): the game's own aim reticle, brackets in `Pal.Friend` around a
+      `Pal.Foe` core. No committed binary ⇒ no `CREDITS.txt` / `THIRD-PARTY-NOTICES.txt` entry, no
+      cost, no licence risk. `SIGHTLINE_ICONSHOT=1` writes `sightline_icon.png` + a 256× blow-up.
+- [x] **The first-launch window size.** `Display.FitLaunchSize` (pure) asks the monitor and only
+      ever SHRINKS: 1366×768 → **1126×704** measured live, 1280×800 → 1176×736, 1920×1080 →
+      unchanged and nothing written. Persisted as additive `WinW`/`WinH` in `display.json`, so it is
+      decided once. `Display.AllowLaunchFit` defaults to **false** and is set true only by the real
+      launch path in `Program.RealMain` — that is what keeps the harness's window size fixed.
+- [x] **The version in-game** — **already done by C6 and the docket was stale.** It is painted on
+      the main-menu footer and the pause card. P17 verified it by screenshot and added a
+      72-character budget guard on the (centred, therefore doubly-overflowing) footer string.
+
+### Left OPEN by P17
+
+- [ ] **The archive is not bit-reproducible.** `tar` is invoked with `--owner=0 --group=0
+      --numeric-owner --sort=name` so the *packing* adds no variance, but `dotnet publish` does not
+      emit a byte-identical binary run to run, so two publishes of the same commit hash
+      differently. Closing this means a deterministic publish (`-p:Deterministic`, a fixed
+      `SOURCE_DATE_EPOCH` and mtime normalisation in the stage) and is its own small wave.
+- [ ] **No release page, no download location.** The archive and checksum land in `dist/`, which is
+      gitignored. Where a person actually GETS the file is unanswered — and it cannot be answered
+      by anything in this sandbox, nor (per the hard rules) by any CI. A GitHub Release created by
+      hand from the tag is the obvious home; that is the owner's call.
+- [ ] **The Windows and macOS archives are unverified beyond their file lists.** A `--rid win-x64`
+      publish writes and `sha256sum -c`-verifies its `.zip`, but the release legs do not run (the
+      binary cannot execute here) and macOS has still never been cross-published.
+- [ ] **The window icon is asserted, not observed.** SHIPTEST checks the pixels; nothing here can
+      see a title bar. On Wayland GLFW ignores window icons entirely, so on that desktop the fix is
+      a no-op by design and a `.desktop` file is the only answer — which is still open above.
+- [ ] **`Display.Sizes` still has no entry below 1280×800**, so a 1366×768 player who cycles WINDOW
+      in settings walks a ladder where every rung is bigger than their screen (the P17 fit is
+      retired the moment they do). Adding smaller rungs is safe only by APPENDING (the index is
+      persisted as `SizeIdx`), which makes the cycle order strange — the honest fix is to sort the
+      ladder at use and filter it against the monitor, which is a settings-screen wave.

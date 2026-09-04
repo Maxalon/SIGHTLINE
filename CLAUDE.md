@@ -381,10 +381,16 @@ src/
   Audio.cs      procedural SFX + music (device-free-safe)
   Audio.CueMap.cs    THE CUE MAP: the injective event->cue table (one meaning, one sound)
   Audio.Analysis.cs  the measured numbers (peak/RMS/length) the AUDIO CHECK screen prints
-  Display.cs    render-target, post-FX shader, brightness/colorblind, settings
+  Display.cs    render-target, post-FX shader, brightness/colorblind, settings. P17: the
+                FIRST-LAUNCH WINDOW FIT (Display.FitLaunchSize — pure, only ever SHRINKS; persisted
+                as WinW/WinH). Gated on `Display.AllowLaunchFit`, which defaults to FALSE and is
+                set true ONLY by the real launch in Program.RealMain — that is what keeps every
+                headless window at exactly Cfg.ScreenW x Cfg.ScreenH.
   Stats.cs      SIGHTLINE_BALANCE analytics harness
   Ship.cs       C6: the DISTRIBUTABLE's contract — version stamp (Ship.Version, off the assembly),
-                the bundled-file manifest (Ship.RequiredFiles) and SIGHTLINE_SHIPTEST
+                the bundled-file manifest (Ship.RequiredFiles) and SIGHTLINE_SHIPTEST.
+                P17 added the procedural WINDOW ICON (Ship.IconPixels, pure; ApplyWindowIcon) and
+                the RELEASE legs (archive / checksum / changelog), gated on SIGHTLINE_RELEASEDIR.
   Crash.cs      P11: the top-level crash handler. `Program.Main` is now nothing but
                 `Crash.Guard(...)` around `RealMain` (+ Crash.Install for background-thread
                 throws), so **the "MUST STAY FIRST IN Main" SHIPCHILD branch is now first in
@@ -395,7 +401,10 @@ src/
                 nothing; also runs in publish.sh against the published binary.
 scripts/dev-setup.sh   sandbox setup
 scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST); counts DERIVED
-scripts/publish.sh     hand-run distributable build + persistence re-proof
+scripts/publish.sh     hand-run distributable build + persistence re-proof + the RELEASE
+                       artefact (versioned archive, .sha256, CHANGELOG.md; --tag makes a LOCAL
+                       tag and NEVER pushes). docs/DISTRIBUTION.md §8.
+scripts/changelog.sh   CHANGELOG.md derived from `git log --first-parent`. Never hand-written.
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 LICENSE                the project's own terms (all rights reserved); ALSO copied to build output
 docs/screenshot.png    README image
@@ -944,6 +953,24 @@ branch to 10-15% of acts) makes the opponent 5.6-9.0 points WEAKER, p ≤ 0.008 
 ROADMAP's "a real lane would justify a much higher ratio" is refuted, `SIGHTLINE_DECLINEWATCH` is
 a priced-but-unspent dial, and the flywheel still has no term for an ordinary enemy lane (that fix
 is its own wave, per ROADMAP). DEVLOG §THE HELD LANE.
+
+**PROGRAM PARALLAX — wave P17 "SHIPS AS v1.0.0" (2026-09-04, base `e57e151`)** made the build a
+thing you can *give* someone rather than only *hand* someone. `scripts/publish.sh` now derives
+`CHANGELOG.md` from `git log --first-parent` (`scripts/changelog.sh` — DERIVED, because six
+hand-maintained registries in this repo have already rotted), packs
+`dist/SIGHTLINE-v<version>-<rid>.tar.gz` **named from the version the BINARY reports**, writes a
+`sha256sum -c`-checkable checksum, and re-runs SHIPTEST from inside the payload with
+`SIGHTLINE_RELEASEDIR` set so the digest is RECOMPUTED and the changelog's shape asserted. `--tag`
+makes a LOCAL annotated tag and never pushes; **`v1.0.0` does not exist yet** — creating and
+pushing it is the owner's call. It also shipped the first **window icon** (procedural,
+`Ship.IconPixels`, no committed binary and so no licence entry — but whether a desktop *shows* it
+is UNVERIFIED here, and GLFW ignores window icons on Wayland by design), and fixed a real
+first-launch bug: a 1280x800 window was opened without ever asking the monitor, so on a
+**1366x768** laptop the action bar sat off-screen on frame one. `Display.FitLaunchSize` only ever
+SHRINKS (1366x768 -> 1126x704, measured live) and is OFF in the harness by default. Two docket
+items were found ALREADY CLOSED and were verified rather than re-fixed: the version IS painted
+(C6 — main menu footer + pause card) and `display.json` DOES round-trip (SETTINGSTEST leg B3).
+Contract `docs/DISTRIBUTION.md` §8; detail `docs/DEVLOG.md` §SHIPS AS v1.0.0.
 
 **PROGRAM PARALLAX — wave P12 "THE CONFIRMED EIGHT" (2026-09-03, base `a933cfe`)** fixed eight
 adversarially-found, doubly-verified defects that all sat under a **green `--full` sweep**, five of

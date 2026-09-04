@@ -14806,3 +14806,227 @@ MODETEST's `depthFunnelNotIdentityInCampaign` leg.
 | `SIGHTLINE_MODEDEPTH=0` | restore the pre-P14 single-mission modes exactly (`Mission.ModeDepth` never published; the immobility guard off with it). |
 | `Audio.Spy` | harness-only cue log in `Audio.Play` (id / pan / foe, recorded before the device check). Null in play. |
 | `Audio.SilentCue` | `ShowBanner` sentinel: this banner's beat already has a sound on this frame. |
+
+---
+
+# §SHIPS AS v1.0.0 — PROGRAM PARALLAX wave P17 (2026-09-04, `wave/ships-v1`, base `e57e151`)
+
+**Thesis.** C6 made the build a thing you can *hand* someone. It was still not a thing you can
+*give* someone. `dist/linux-x64-release/` is a directory: it cannot be attached to a message,
+downloaded, checked for damage, or told apart from the one you built last week. There was no tag,
+no changelog, no archive, no checksum — and two first-impression defects that only ever land on a
+brand-new player, which is exactly the population no self-test in this repository has ever
+represented: **no window icon at all**, and **a first-launch window that never asks the monitor
+whether it fits.**
+
+The contract that came out of it is `docs/DISTRIBUTION.md` §8. This section is what happened.
+
+## 1. The release artefact
+
+`scripts/publish.sh` now continues past the directory:
+
+```
+>> deriving CHANGELOG.md from git history
+   71 entries, 7112 bytes
+   the shippable directory is now 11 files
+>> packing SIGHTLINE-v1.0.0-linux-x64.tar.gz
+   13M  (13300463 bytes)
+   4e697027c44c5d4e880029350826d9ea3d2ea626715014a8c8b7894c1a4cc3d7  SIGHTLINE-v1.0.0-linux-x64.tar.gz
+>> verifying the release artefact against the published binary
+   SHIPTEST: PASS (… release archive named, checksummed (digest RECOMPUTED) and changelogged)
+```
+
+**The archive is not bit-reproducible, and that is measured rather than assumed:** three publishes
+of the same commit within an hour produced **13,298,368 / 13,300,476 / 13,300,463** bytes and three
+different digests. `dotnet publish` does not emit a byte-identical binary run to run. `tar` is invoked with
+`--owner=0 --group=0 --numeric-owner --sort=name` so the packing itself adds no variance and no
+container uid leaks into a distributable, but the checksum verifies **the file you sent**, not a
+rebuild. Left open in ROADMAP.
+
+Three decisions worth recording:
+
+**The version in the archive's name is the one the BINARY reports.** It is scraped out of the
+SHIPTEST line the script already prints (`build stamped v1.0.0`), not read out of
+`Sightline.csproj` a second time. A name and the build inside it therefore cannot disagree — which
+is the same defect class as `Ship.RequiredFiles` shipping six entries while the document it guards
+said ten. If the scrape fails the script falls back to the csproj *and says so on stderr*.
+
+**The checksum is verified, twice, by two mechanisms.** `sha256sum -c` in the script, and then
+SHIPTEST **recomputes the digest in-process** and compares. Presence is not the assertion: a stale
+`.sha256` beside a rebuilt archive is the realistic failure and it fails loudly (`FAIL
+(releaseChecksumMismatch:…)`, reproduced below).
+
+**The changelog is DERIVED.** `scripts/changelog.sh`, from `git log --first-parent`. This
+repository has been burned by hand-maintained registries five separate times — the sweep's test
+count wrong **six** times, the free-key list advertising four bound letters, `RequiredFiles`
+disagreeing with its own document, a `Heat.Mods` row declaring a tooth that could never fire for
+two programs. A hand-written changelog is the same object and rots worse, because nobody re-reads a
+changelog to check it. First-parent is the right granularity *because of how this project lands
+work*: one merge per wave, with subjects that already read like release notes — **71 entries for
+676 commits**. Sections cut at `v*` tags, so the next release only lists what came after `v1.0.0`.
+Honest scope, in the script and in DISTRIBUTION §8.3: it reports what MERGED, not what a player
+will NOTICE.
+
+## 2. The tag — implemented, not created
+
+`--tag` creates a **local annotated** `v<version>` and never contacts a remote. It refuses on a
+dirty tree (a release tag must name the tree that was built and verified), on a missing repo, and
+on an existing tag. A publish without it prints the pair of commands. **This wave did not create
+`v1.0.0`** — the lead does that:
+
+```bash
+git tag -a v1.0.0 -m 'SIGHTLINE v1.0.0' && git push origin v1.0.0
+```
+
+Both were built, because the brief allowed either: the flag so the step is in the tool and cannot
+be mis-typed, the printed command so the human keeps the decision.
+
+## 3. The window icon
+
+There was none — taskbar, alt-tab and title bar all showed GLFW's blank default.
+`Ship.IconPixels()` is a **pure** `Color[64*64]` built from axis-aligned rectangles and the `Pal`
+palette; `ApplyWindowIcon()` blits it into a `GenImageColor` image and calls
+`Raylib.SetWindowIcon`. The mark is the game's own aim reticle — four brackets in `Pal.Friend`
+around a `Pal.Foe` core, on `Pal.Bg` inside a `Pal.BoardEdge` frame — which is `docs/DESIGN.md`
+§3.H's semantic colour table read literally: your sights on a hostile. No committed binary, so **no
+`assets/*/CREDITS.txt` entry, no `THIRD-PARTY-NOTICES.txt` entry, no cost, no licence risk.**
+
+**UNVERIFIED, said plainly:** the call is made and does not throw; whether a desktop SHOWS it
+cannot be observed here (Xvfb has no window manager), and **GLFW ignores window icons on Wayland
+entirely, by design**, so on that desktop this is a no-op and a `.desktop` file is the only answer.
+The pixels are what is asserted. `SIGHTLINE_ICONSHOT=1` writes `sightline_icon.png` and a 256×
+nearest-neighbour blow-up so a human can look at it.
+
+## 4. The first-launch window size — the one real player-facing bug in this wave
+
+`Display.Sizes[0]` is 1280×800 and the launch never asked the monitor. On a **1366×768** laptop the
+window is 32 px taller than the screen, so the ACTION BAR — the row carrying every verb — is under
+the bottom edge on the **first frame of the first launch**, before the player knows a settings
+screen exists.
+
+The fix is cheap because the machinery already existed: `Display` renders into a virtual 1280×800
+render target and letterbox-scales it (`Scaled`/`Scale`/`Offset`/`UpdateMouse`), so a smaller
+window costs pixels and nothing else. `Display.FitLaunchSize(monW, monH)` is pure, and **only ever
+shrinks** — on any monitor where the authored size fits inside `(monW, monH − LaunchChromeH = 64)`
+first launch is byte-for-byte what it always was. Otherwise it scales by the tighter ratio, holds
+16:10 so the letterbox is empty and nothing is cropped, and rounds down to even pixels. The result
+is persisted (`WinW`/`WinH`, additive; absent = 0 = pre-P17 behaviour) so it is decided **once**.
+
+Measured live under Xvfb, first launch against an empty profile:
+
+| monitor | `display.json` |
+|---|---|
+| 1366×768 | `WinW 1126, WinH 704` |
+| 1280×800 | `WinW 1176, WinH 736` |
+| 1920×1080 | *nothing written — the authored size fits* |
+
+Relaunch on the same monitor keeps 1126×704; moving that profile to a 1920×1080 screen also keeps
+it (a first-launch decision, not a per-boot one). Cycling WINDOW in settings retires the fit.
+
+**A defect this wave found in its OWN diff, before anyone else read it.** The first version had a
+WRITER (`FitLaunchSize`, which would fit down to a 2 px window) and a READER (`Display.Load`, which
+clamped anything under 320×240 to "unset") that did not agree. On a 320×320 screen launch one would
+open a fitted 320×200 window and launch two would snap back to the 1280×800 that does not fit —
+**worse than never fitting at all**. Both now use one pair of constants, `LaunchMinW`/`LaunchMinH`,
+the fit refuses below 512×400 (exactly the point where it could stop clearing that floor), and
+SHIPTEST asserts `w >= LaunchMinW && h >= LaunchMinH` on every fitted result. This is the same
+shape as `Ship.RequiredFiles` disagreeing with the document it guards: two halves of one rule, kept
+in sync by intention.
+
+**HOW THE HARNESS IS KEPT FIXED — the question the brief asked.** `Display.AllowLaunchFit` defaults
+to **false**. The single caller that sets it true is the real launch in `Program.RealMain`, and
+even there only when neither `SIGHTLINE_SHOT` nor `SIGHTLINE_AUTOPLAY` is set. Every headless path
+— the screenshot hook, autoplay, `SIGHTLINE_PAIRTEST` (this project's real determinism gate), the
+balance flywheel, and every `*TEST` that calls `Display.Init(true)` for a render target — leaves it
+false and gets exactly `Cfg.ScreenW × Cfg.ScreenH` from `InitWindow`. Window size is therefore not
+a function of anything that varies here, and **SHIPTEST leg (8) asserts the flag is off while it
+runs**. `PAIRTEST: PASS` in the merge sweep is the empirical half.
+
+## 5. The version in-game — the docket item that was already closed
+
+The research docket said the version is "painted nowhere a player looks". **That was stale.** C6
+put `Ship.VersionLabel` on the main-menu footer (`Hud.IntroFooter`) and the pause card's top-right
+corner, and SHIPTEST leg (6) has been asserting the footer since. P17 verified it by SCREENSHOT
+rather than by reading the code (`evidence/mainmenu-version.png`:
+`GEOMETRY · PARTICLES · NO QUARTER   ·   SIGHTLINE v1.0.0`) and added one guard: a **72-character
+budget** on that string, because it is CENTRED and therefore overflows both edges at once. Stated
+honestly in the code: that is a character budget, not a measurement — `LoadGameFonts()` does not run
+in the SHIPTEST hook, so `Cfg.Measure` there would report the raylib fallback face's metrics.
+`SIGHTLINE_FITTEST` measures for real.
+
+The second docket item to check first — *"`display.json` settings never round-trip in any
+self-test"* — was **also already closed**, by `SIGHTLINE_SETTINGSTEST` leg (B3) and
+`SIGHTLINE_TUTTEST`: both do a real `Save()`/`Load()` disk round trip, with clamping and
+legacy-default legs. P17 added `WinW`/`WinH` to that pattern rather than re-fixing it, and ticked
+the ROADMAP item with the evidence.
+
+## 6. Every new leg, RED before and GREEN after
+
+Each was made to fail by putting the tree (or the release directory) into its pre-P17 state.
+Verbatim:
+
+```
+(7) ICON — the pre-P17 state, no mark at all (IconPixels returns a flat field)
+    SHIPTEST: FAIL (iconMarkCoverage=0.0%,iconSquintContrast)
+(7) ICON — an off-palette, asymmetric, unreserved-red mark
+    SHIPTEST: FAIL (iconOffPalette:36,iconNotSymmetric,iconDangerAccentNotReserved)
+(8) WINDOW FIT — the pre-P17 rule (always Sizes[0], whatever the monitor)
+    SHIPTEST: FAIL (fitDoesNotFit@1366x768=1280x800,fitDoesNotFit@1280x800=1280x800,
+                    fitDoesNotFit@1024x768=1280x800,fitDoesNotFit@800x600=1280x800)
+(8b) THE FIT IS REMEMBERED — WinW/WinH dropped from Display.Save (the pre-P17 Dto)
+    SHIPTEST: FAIL (winFitRoundTrip=0x0)
+(8) THE WRITER/READER FLOOR — the pre-review 320x320 bar, which lets the fit emit 320x200
+    SHIPTEST: FAIL (fitShouldBeAuthored@320x320=320x200)
+(8) ...and the same assertion shown red directly, by raising LaunchMinH above every fit
+    SHIPTEST: FAIL (winFitRoundTrip=0x0,fitBelowPersistFloor@1366x768=1126x704,
+                    fitBelowPersistFloor@1280x800=1176x736,fitBelowPersistFloor@1024x768=1024x640,
+                    fitBelowPersistFloor@800x600=800x500,fitBelowPersistFloor@512x400=512x320)
+(9) ARCHIVE — publish.sh produced a directory and no archive
+    SHIPTEST: FAIL (releaseNoArchive:SIGHTLINE-v1.0.0-*)
+(10) CHECKSUM — an archive with no .sha256 beside it
+    SHIPTEST: FAIL (releaseNoChecksum:SIGHTLINE-v1.0.0-linux-x64.tar.gz,changelogMissing:CHANGELOG.md)
+(10) CHECKSUM — a .sha256 that does not match the archive (stale or tampered)
+    SHIPTEST: FAIL (releaseChecksumMismatch:SIGHTLINE-v1.0.0-linux-x64.tar.gz,changelogMissing:CHANGELOG.md)
+(11) CHANGELOG — none generated
+    SHIPTEST: FAIL (changelogMissing:CHANGELOG.md)
+(11) CHANGELOG — a heading with no entries under it
+    SHIPTEST: FAIL (changelogNoEntries)
+(11) CHANGELOG — entries, but no section for the version being shipped
+    SHIPTEST: FAIL (changelogNoVersionSection:v1.0.0)
+(11) CHANGELOG — an untitled file
+    SHIPTEST: FAIL (changelogTitle)
+```
+
+After, from inside the published payload with `SIGHTLINE_RELEASEDIR` set:
+
+```
+SHIPTEST: PASS (8 bundled files resolve next to the binary, none via the cwd fallback; notices name
+all 5 redistributed components and all 3 of their licences; player-data dir rooted; profile
+round-trips through disk and survives a real second launch of this binary; save/meta/display all
+written by rename, proven by an open-handle inode probe (process death and concurrent readers, NOT
+power loss - no fsync); a failed write sweeps its own .tmp; 3 persisted DTOs source-generated; build
+stamped v1.0.0 and painted; window icon generated in-engine and legible; first-launch window fits
+the monitor and round-trips; release archive named, checksummed (digest RECOMPUTED) and changelogged)
+```
+
+## 7. Gates
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `bash scripts/publish.sh` — **exit 0**, SAVETEST / METATEST / SHIPTEST / CRASHTEST all PASS
+  against the published binary, then the release SHIPTEST PASS above.
+- `bash scripts/qa-sweep.sh --full` — **exit 0**, every line PASS (`PAIRTEST: PASS`), **no COVERAGE
+  GAP**, derived counts **82 exist / 82 run**, autoplay WIN / WIN / WIN, no TIMEOUT.
+
+**NO CI was added, and none may be.** Every one of these is hand-run, including the release.
+
+## 8. New hooks and dials
+
+| name | what |
+|---|---|
+| `SIGHTLINE_RELEASEDIR=<dir>` | a PARAMETER, not a hook: names the directory holding the archive + checksum, which turns on SHIPTEST legs (9)(10)(11). Unset (qa-sweep, a hand run) ⇒ they SKIP and the PASS line says so. Correctly invisible to the coverage guard's `TEST\|GATE\|PROBE` alphabet. |
+| `SIGHTLINE_ICONSHOT=1` | writes `sightline_icon.png` (64×64) + `sightline_icon_256.png` (nearest-neighbour blow-up). A `*SHOT` hook — prints a path, never a verdict — like `SIGHTLINE_SHOT` / `PODSHOT` / `BIOMESHOT`. |
+| `bash scripts/changelog.sh` | derive `CHANGELOG.md` from git; `--version`, `--out`. Runnable standalone to preview. |
+| `bash scripts/publish.sh --tag` | create the LOCAL annotated release tag. Never pushes. |
+| `bash scripts/publish.sh --no-archive` | stop at the directory (the pre-P17 behaviour). |
+| `Display.AllowLaunchFit` | default **false**; the real launch sets it. The structural reason the harness's window size cannot move. |
+| `Display.LaunchChromeH` | 64 px — the stated, conservative title-bar/taskbar allowance. Not measurable from raylib. |

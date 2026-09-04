@@ -257,6 +257,86 @@ void main() {
     public static int SizeIdx;
     public static bool Fullscreen;
 
+    // ── P17 SHIPS AS v1.0.0 — THE FIRST-LAUNCH WINDOW FIT ────────────────────────────────────
+    // THE DEFECT. `Sizes[0]` is 1280x800 and the launch never asked the monitor whether that
+    // fits. On a 1366x768 laptop — a size millions of machines still are — the window is 32 px
+    // taller than the screen, so the ACTION BAR (Cfg.BarY..ScreenH, the row carrying every verb
+    // the player needs) is under the bottom edge on the FIRST frame of the FIRST launch. That is
+    // the worst class of bug this project can ship: it is not degraded, it is unplayable, and it
+    // happens before the player has any settings screen they know how to reach.
+    //
+    // THE FIX IS A SHRINK AND ONLY A SHRINK. Display already renders the game into a virtual
+    // 1280x800 render target and letterbox-scales it to whatever the window actually is (see
+    // Scaled/Scale/Offset below and UpdateMouse), so a SMALLER window costs nothing but pixels —
+    // every layout constant, every hit-test and every self-test still works in 1280x800 space.
+    // So the fit never enlarges: on any monitor where the authored size fits, first launch is
+    // byte-for-byte what it always was. It only shrinks, and only when it must.
+    //
+    // WHY IT CANNOT REACH THE HARNESS: `AllowLaunchFit` defaults to FALSE. The single caller that
+    // turns it on is the real game launch in Program.RealMain, and even there only when neither
+    // SIGHTLINE_SHOT nor SIGHTLINE_AUTOPLAY is set. Every headless hook — the screenshot path,
+    // the autoplay smoke test, PAIRTEST's byte-identity gate, the balance flywheel, and every
+    // *TEST that calls Display.Init(true) for a real render target — leaves it false and gets
+    // exactly Cfg.ScreenW x Cfg.ScreenH from InitWindow, as before. The window size in this
+    // sandbox is therefore not a function of anything that varies.
+
+    /// Vertical allowance for the window manager's title bar plus a desktop panel/taskbar. A
+    /// window exactly as tall as the monitor is still clipped once a WM adds decoration, which is
+    /// the 1366x768 case one notch worse. Not measurable from inside raylib (GLFW exposes no
+    /// work-area on every backend), so it is a stated, conservative constant.
+    public const int LaunchChromeH = 64;
+
+    /// OFF by default; the real launch turns it on. See the block comment above.
+    public static bool AllowLaunchFit;
+
+    /// The chosen window size when it is NOT one of `Sizes` (0 = unset, use Sizes[SizeIdx]).
+    /// Persisted, so the fit is decided once on first launch and not re-derived every boot.
+    public static int WinW, WinH;
+
+    /// The floor a persisted window size has to clear. ONE pair of constants for the WRITER
+    /// (FitLaunchSize) and the READER (Load), because a writer that can emit a value its own
+    /// reader rejects is a bug waiting for a small screen: the first launch would open fitted and
+    /// the second would snap back to the 1280x800 that did not fit, which is worse than never
+    /// having fitted at all. Found in review of this wave's own diff.
+    public const int LaunchMinW = 320, LaunchMinH = 240;
+
+    /// PURE. Given a monitor of `monW` x `monH`, the window size a FIRST launch should use.
+    /// This is the function SIGHTLINE_SHIPTEST asserts — a live window is not needed to know
+    /// whether the answer fits, and a test that needed one could not run in this sandbox.
+    ///
+    ///   • a monitor query that failed (raylib returns 0 before/without a monitor) or is absurdly
+    ///     small returns the AUTHORED size — never guess a window off a number we do not trust;
+    ///   • if 1280x800 fits inside (monW, monH - LaunchChromeH), return it unchanged;
+    ///   • otherwise scale 1280x800 down by the tighter of the two ratios, preserving 16:10 so
+    ///     the letterbox is empty and nothing is cropped, and round DOWN to even pixels.
+    public static (int w, int h) FitLaunchSize(int monW, int monH)
+    {
+        // A query that failed (raylib returns 0 when there is no monitor) or a screen smaller than
+        // any window worth opening: use the AUTHORED size rather than guess off a number we do not
+        // trust. The 512x400 bar is not arbitrary — it is exactly the point below which the result
+        // could stop clearing LaunchMinW/H, the floor Load() enforces on the way back in.
+        if (monW < 512 || monH < 400) return (Cfg.ScreenW, Cfg.ScreenH);
+        int usableW = monW, usableH = monH - LaunchChromeH;
+        if (Cfg.ScreenW <= usableW && Cfg.ScreenH <= usableH) return (Cfg.ScreenW, Cfg.ScreenH);
+        float s = MathF.Min(usableW / (float)Cfg.ScreenW, usableH / (float)Cfg.ScreenH);
+        int w = (int)MathF.Floor(Cfg.ScreenW * s), h = (int)MathF.Floor(Cfg.ScreenH * s);
+        w -= w & 1; h -= h & 1;                                             // even pixels: no half-pixel blit
+        return (w, h);
+    }
+
+    /// Run once, on the launch that finds no display.json. Writes the decision so the second
+    /// launch does not re-derive it (and so moving to a bigger monitor does not silently undo a
+    /// size the player has since got used to — the settings ladder is how you change it).
+    static void FitFirstLaunchWindow(bool firstLaunch)
+    {
+        if (!AllowLaunchFit || !firstLaunch || Fullscreen) return;
+        int mon = Raylib.GetCurrentMonitor();
+        var (w, h) = FitLaunchSize(Raylib.GetMonitorWidth(mon), Raylib.GetMonitorHeight(mon));
+        if (w == Cfg.ScreenW && h == Cfg.ScreenH) return;   // it fits: change nothing, write nothing
+        WinW = w; WinH = h;
+        Save();
+    }
+
     // accessibility (3.13): a screen brightness post-pass + a colorblind palette toggle
     public static readonly float[] BrightLevels = { 0.70f, 0.85f, 1.00f, 1.15f, 1.30f };
     public static int BrightIdx = 2;   // 1.00 = neutral (no overlay)
@@ -272,7 +352,9 @@ void main() {
     public static float Gamma => GammaLevels[Math.Clamp(GammaIdx, 0, GammaLevels.Length - 1)];
     public static string GammaLabel => $"{Gamma:0.00}";
 
-    public static string SizeLabel => Fullscreen ? "FULLSCREEN" : $"{Sizes[SizeIdx].w} x {Sizes[SizeIdx].h}";
+    public static string SizeLabel => Fullscreen ? "FULLSCREEN"
+        : WinW > 0 && WinH > 0 ? $"{WinW} x {WinH}"          // P17: a fitted size is not on the ladder
+        : $"{Sizes[SizeIdx].w} x {Sizes[SizeIdx].h}";
 
     public static void CycleBrightness()
     {
@@ -458,7 +540,12 @@ void main() {
             Raylib.SetTextureFilter(_noise, TextureFilter.Point);
         }
 
+        // P17: "was there a settings file before this launch?" is the whole definition of a FIRST
+        // launch, and it has to be read BEFORE Load() (which does not report absence) and before
+        // FitFirstLaunchWindow, which writes one.
+        bool firstLaunch = !File.Exists(FilePath);
         Load();
+        FitFirstLaunchWindow(firstLaunch);
         Apply();
     }
 
@@ -725,7 +812,9 @@ void main() {
     {
         if (!Enabled) return;
         if (Fullscreen) Fullscreen = false;                 // leaving fullscreen lands on the current size
-        else SizeIdx = (SizeIdx + 1) % Sizes.Length;
+        // P17: an explicit pick off the ladder RETIRES the first-launch fit — the player has now
+        // said what they want, and a remembered 1126x704 must not keep overriding it.
+        else { SizeIdx = (SizeIdx + 1) % Sizes.Length; WinW = WinH = 0; }
         Apply();
         Save();
     }
@@ -742,7 +831,7 @@ void main() {
         else
         {
             if (Raylib.IsWindowFullscreen()) Raylib.ToggleFullscreen();
-            var (w, h) = Sizes[SizeIdx];
+            var (w, h) = WinW > 0 && WinH > 0 ? (WinW, WinH) : Sizes[SizeIdx];   // P17 fit wins if set
             Raylib.SetWindowSize(w, h);
             int mon = Raylib.GetCurrentMonitor();
             Raylib.SetWindowPosition((Raylib.GetMonitorWidth(mon) - w) / 2,
@@ -775,6 +864,12 @@ void main() {
         // exactly the pre-W5 behaviour (1x playback, 100% text).
         public int AnimSpeedIdx { get; set; }        // absent = 0 = 1x
         public int UiScaleIdx { get; set; } = 1;     // absent = 1 = 100%
+        // P17 SHIPS AS v1.0.0 — the first-launch window fit, additive again. Absent (= 0) in every
+        // display.json written before P17, which reads as "no fit was needed", i.e. exactly the
+        // pre-P17 behaviour of using Sizes[SizeIdx]. Both must be > 0 for the override to apply,
+        // so a half-written or hand-edited file cannot produce a 0-wide window.
+        public int WinW { get; set; }
+        public int WinH { get; set; }
     }
     // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
     // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
@@ -799,7 +894,7 @@ void main() {
     /// now asserts the mechanism on all three files.
     static void Save()
     {
-        try { SaveGame.WriteAtomic(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx }, DisplayJson.Default.Dto)); }
+        try { SaveGame.WriteAtomic(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx, WinW = WinW, WinH = WinH }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -843,6 +938,12 @@ void main() {
                 VolUi     = Math.Clamp(d.VolUi, 0f, 1f);
                 AnimSpeedIdx = Math.Clamp(d.AnimSpeedIdx, 0, AnimSpeedLevels.Length - 1);
                 UiScaleIdx   = Math.Clamp(d.UiScaleIdx, 0, UiScaleLevels.Length - 1);
+                // P17: a fitted size, clamped to something a window can actually be. Anything
+                // under the floor reads as "unset" and falls back to the Sizes ladder rather
+                // than opening a window nobody can see.
+                WinW = d.WinW >= LaunchMinW && d.WinW <= 16384 ? d.WinW : 0;
+                WinH = d.WinH >= LaunchMinH && d.WinH <= 16384 ? d.WinH : 0;
+                if (WinW == 0 || WinH == 0) { WinW = 0; WinH = 0; }
                 ApplyUiScale();
             }
         }
