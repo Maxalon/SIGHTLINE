@@ -1,0 +1,371 @@
+══════════════════════ SIGHTLINE BALANCE REPORT ══════════════════════
+runs=20  missions=64
+
+RUN OUTCOMES (campaign):  win-rate    0%   avg missions cleared 2.5
+
+POLICY GAP (optimal vs human-error; campaign runs only):
+  greedy win-rate    0%  (n=10)
+  sloppy win-rate    0%  (n=10)
+  GAP    0 pts  (healthy slack)
+  PAIRED (same-seed slots): pairs=10  concordant=10  discordant greedy-only-won=0 / sloppy-only-won=0  paired gap    0 pts
+  PER-SLOT RECORDS (greedy | sloppy: outcome + missions cleared; margin = g−s):
+    slot 260 @h8: L 2 | L 4   margin -2
+    slot 261 @h8: L 4 | L 4   margin +0
+    slot 262 @h8: L 1 | L 3   margin -2
+    slot 263 @h8: L 2 | L 1   margin +1
+    slot 264 @h8: L 2 | L 2   margin +0
+    slot 265 @h8: L 3 | L 2   margin +1
+    slot 266 @h8: L 2 | L 3   margin -1
+    slot 267 @h8: L 3 | L 3   margin +0
+    slot 268 @h8: L 2 | L 2   margin +0
+    slot 269 @h8: L 2 | L 2   margin +0
+  PAIRED MARGIN (missions cleared, all pairs): -0.30 ±0.33 SE  (n=10 pairs)
+  by objective (greedy / sloppy / gap):
+    Decapitate :    0% /   25% / gap  -25
+    Defend     :   57% /   43% / gap   14
+    Eliminate  :   77% /   83% / gap   -6
+    Escort     :    0% /    0% / gap    0
+    Hack       :  100% /  100% / gap    0
+    Rescue     :    0% /   50% / gap  -50
+    Sabotage   :    0% /    0% / gap    0
+
+DECISION RICHNESS / SWING:
+  meaningful-choices/turn 1.77   lead-swings/match 0.8   avg max-swing 72.3
+  [shot-gate] acting-soldiers/turn 2.63   armed-soldiers/turn 0.77   armed-fraction 29%   turns-with-a-shot 42%   choices/ARMED-soldier-turn 2.29
+  [choice-split] los-targets/ARMED 2.24   target-choices/ARMED 0.37   position-choices/ARMED 1.93
+
+RUN COMPLETION BY HEAT (full-campaign clears):
+  heat 8:    0% ±0  (n=20 runs, avg 2.5 missions)
+  HEAT LEAK: pinned=yes  heat-raising picks=2  campaigns raised=0  missions off-rung=0/64
+
+INTEL ECONOMY BY HEAT (campaign runs; heat-bonus = the Heat.IntelBonus share of income):
+  heat 8: earned  148.5/run   heat-bonus  86.8 (  58% of income)   spent  133.2   unspent   15.3
+
+MISSION WIN-RATE BY HEAT:
+  heat 8:   48%  (n=64, avg 5.8 turns)
+
+MISSION WIN-RATE BY OBJECTIVE:
+  Eliminate  :   80% ±8  (n=25, avg 4.3 turns)
+  Defend     :   50% ±13  (n=14, avg 7.7 turns)
+  Decapitate :   13% ±12  (n=8, avg 6.4 turns)
+  Sabotage   :    0% ±0  (n=6, avg 6.8 turns)
+  Rescue     :   25% ±22  (n=4, avg 6.3 turns)
+  Escort     :    0% ±0  (n=3, avg 4.0 turns)
+  Evac       :    0% ±0  (n=2, avg 7.0 turns)
+  Hack       :  100% ±0  (n=2, avg 5.5 turns)
+
+MISSION WIN-RATE BY OBJECTIVE x NODE KIND (a capstone must never pool with a mid-run node):
+  Eliminate  : Start: 100%(n=20)  Combat:   0%(n=4)  Elite:   0%(n=1)
+               depth: m1:100%(20) m3:0%(4) m4:0%(1)
+  Defend     : Combat:  29%(n=7)  Supply:  75%(n=4)  Elite:  67%(n=3)
+               depth: m2:75%(4) m3:29%(7) m4:67%(3)
+  Decapitate : Combat:   0%(n=5)  Supply:  33%(n=3)
+               depth: m3:33%(3) m4:0%(2) m5:0%(3)
+  Sabotage   : Supply:   0%(n=4)  Elite:   0%(n=2)
+               depth: m3:0%(6)
+  Rescue     : Combat:  50%(n=2)  Supply:   0%(n=2)
+               depth: m2:50%(2) m4:0%(2)
+  Escort     : Supply:   0%(n=2)  Elite:   0%(n=1)
+               depth: m3:0%(2) m4:0%(1)
+  Evac       : Elite:   0%(n=2)
+               depth: m5:0%(2)
+  Hack       : Elite: 100%(n=2)
+               depth: m2:100%(2)
+
+ENCOUNTER COMPLETION on MID-RUN nodes (Combat+Elite) — clear% is the share of the fight actually fought:
+  objective     n   win%   turns   force    +rf  killed  clear%   prs  WONclear%
+  Defend        10   40%     7.4    9.30   3.50    1.10     8.6  0.00     13.2 (n=4)
+  Decapitate     5    0%     7.0   11.00   0.80    0.60     5.1  1.40      0.0 (n=0)
+  Eliminate      5    0%     6.8   10.20   0.00    1.80    17.6  1.20      0.0 (n=0)
+  Evac           2    0%     7.0   11.00   0.00    0.00     0.0  0.00      0.0 (n=0)
+  Rescue         2   50%     6.5    7.00   0.00    0.50     7.1  0.00      0.0 (n=1)
+  Sabotage       2    0%     5.0    9.00   0.00    0.50     5.6  0.00      0.0 (n=0)
+  Hack           2  100%     5.5    9.00   0.00    2.00    22.2  0.50     22.2 (n=2)
+  Escort         1    0%     3.0   11.00   0.00    3.00    27.3  0.00      0.0 (n=0)
+  ---- the two classes ----
+  KILL          10    0%     6.9   10.60   0.40    1.20    10.9  1.30      0.0 (n=0)
+  NON-KILL      19   37%     6.6    9.26   1.84    1.05     9.5  0.05     14.1 (n=7)
+
+DECAPITATE HVT (buff = +6+1*mission HP, +6 aim; ELITE exempt):
+  EXEMPT  :    0% ±0  (n=3, avg 7.7 turns, HVT 27.0 max HP)  [m5:0%(3)]
+  BUFFED  :   20% ±18  (n=5, avg 5.6 turns, HVT 26.8 max HP)  [m3:33%(3) m4:0%(2)]
+
+MISSION WIN-RATE BY MISSION #:
+  m1:  100% ±0  (n=20)
+  m2:   75% ±15  (n=8)
+  m3:   14% ±7  (n=22)
+  m4:   22% ±14  (n=9)
+  m5:    0% ±0  (n=5)
+
+LOSS CAUSES (missions):
+  RUN OVER              : 15
+  REDEPLOYED            : 13
+  VIP LOST              : 3
+  CAPTIVE LOST          : 2
+
+MISSION WIN-RATE BY ARENA (authored layouts, n>=3; procedural fallback   20% of 64 missions):
+  arena  4:   33% ±27  (n=3, avg 7.7 turns)  [m3:33%(3)]
+  arena  9:   33% ±27  (n=3, avg 5.3 turns)  [m2:50%(2) m4:0%(1)]
+  arena 10:   11% ±10  (n=9, avg 6.8 turns)  [m2:50%(2) m3:0%(3) m4:0%(2) m5:0%(2)]
+  arena 12:   50% ±25  (n=4, avg 6.3 turns)  [m1:100%(2) m5:0%(2)]
+  arena 15:   33% ±27  (n=3, avg 5.3 turns)  [m3:33%(3)]
+  arena 17:    0% ±0  (n=5, avg 6.2 turns)  [m3:0%(5)]
+  arena 31:   50% ±25  (n=4, avg 5.0 turns)  [m1:100%(2) m3:0%(2)]
+  procedural:   54% ±14  (n=13, avg 5.8 turns)  [m1:100%(4) m2:100%(2) m3:20%(5) m4:0%(1) m5:0%(1)]
+
+DEPLOYMENT GEOMETRY (opening shape; choices/ARMED is the wave's real gate):
+  FRONTAL   :   52% ±9  (n=29, avg 6.0 turns)  choices/turn 1.51  choices/ARMED 2.50  los-targets/ARMED 2.22
+  PINCER    :   53% ±12  (n=17, avg 5.1 turns)  choices/turn 2.13  choices/ARMED 2.47  los-targets/ARMED 2.22
+  CROSSFIRE :  100% ±0  (n=2, avg 4.0 turns)  choices/turn 1.00  choices/ARMED 2.00  los-targets/ARMED 1.25
+  ENVELOP   :   31% ±12  (n=16, avg 6.3 turns)  choices/turn 1.99  choices/ARMED 1.94  los-targets/ARMED 2.31
+
+ARENA FUNNEL (Mission.Build exits, n=64 builds, all modes):
+  authored-applied    :  79.7%  (n=51)
+  connectivity-reject :   3.1%  (n=2)
+  procedural-roll     :  17.2%  (n=11)
+
+DECK EXPOSURE (campaign runs n=20):
+  distinct authored arenas/run : 2.15 mean (all runs)
+  Defend dealt on the route    :   50% of runs (n=10)
+
+ENEMY DECISION MIX (contested acts=822; all-downed acts not counted=491):
+  shoot           459    56%
+  hunker          219    27%
+  move             69     8%
+  item             15     2%
+  grenade          14     2%
+  brace            11     1%
+  reload           11     1%
+  siege            10     1%
+  shove             4     0%
+  staleplan         4     0%
+  overwatch         3     0%
+  sap               3     0%
+
+  the shot on the table (acts where the chosen tile HAD a shot = 506):
+    hit% band     taken   share   E[dmg]/shot   declined   share   E[dmg]/shot
+      0-19           1      0%          0.26          0      0%          0.00
+     20-39          11      2%          1.34          1     25%          0.64
+     40-59          74     16%          2.43          1     25%          1.43
+     60-79         176     38%          3.33          2     50%          1.65
+      80+          197     43%          4.26          0      0%          0.00
+    TOTAL           459                              4
+  taken   91% / DECLINED    1% / preempted by another verb    8%
+  enemy lanes held (overwatch+brace) 14; reaction shots fired 8  ->   57% of lanes paid off   [C2: DeclineWatchRatio is a bet on this number]
+
+ACTION MIX (verbs issued, by policy):
+  verb                  greedy        sloppy
+  MOVE               326   40%     308   40%
+  SHOOT              188   23%     193   25%
+  OVERWATCH           52    6%      45    6%
+  FOCUS               30    4%      37    5%
+  BRACE               41    5%      20    3%
+  SLIPSTREAM          25    3%      26    3%
+  INTEL               23    3%      26    3%
+  STABILIZE           19    2%      24    3%
+  HUNKER              23    3%      12    2%
+  RELOAD              19    2%      15    2%
+  ITEM:SMOKE          20    2%      13    2%
+  PIN                 13    2%       8    1%
+  MARK                 6    1%      13    2%
+  GRENADE              6    1%       6    1%
+  PATCH                7    1%       2    0%
+  PLANT                5    1%       3    0%
+  DRAG                 4    0%       3    0%
+  GRAPPLE              3    0%       3    0%
+  REARM                1    0%       5    1%
+  HACK                 2    0%       2    0%
+  ITEM:BARRICADE       1    0%       0    0%
+  BEACON               0    0%       1    0%
+  ITEM:FLASH           0    0%       1    0%
+
+PLAYER CLASS PERFORMANCE:
+  class        shots   hit%   dmg   kills
+  SHARPSHOOTER    108    94%    715     47
+  GUNNER         130    79%    569     32
+  RANGER          85    81%    454     30
+  ASSAULT        103    81%    410     16
+  CORPSMAN        20    70%     53      4
+  VIP              3    33%      3      0
+
+SOLDIER DEATHS BY ENEMY CLASS (threat ranking):
+  BERSERKER  : 21
+  BURN       : 20
+  BRUISER    : 13
+  SHIELD     : 12
+  LANCER     : 9
+  HUNTER     : 9
+  GRUNT      : 8
+  STRIKER    : 7
+  SAPPER     : 7
+  DRONE      : 6
+  HOUND      : 4
+  PIKEMAN    : 4
+  SCOUT      : 3
+  SNIPER     : 3
+  STRIKE     : 3
+  SPOTTER    : 3
+  ELITE      : 2
+  SCREENER   : 2
+  SLAM       : 1
+  VENT       : 1
+  MORTAR     : 1
+  WARBRINGER : 1
+  TURRET     : 1
+
+SOLDIER DOWNS (FUL-7 bleed-out): 159 downs -> revived 5 / recovered 17 / bled out 117 / finished 13  (save-rate   18%)
+  corpsman fielded in 13 missions
+
+ENEMY COMPOSITION (spawns; faction-stamped fights n=321 / default-cascade fights n=211):
+  class        faction         default
+  SCOUT            6    2%       70   33%
+  GRUNT           31   10%       26   12%
+  BERSERKER       41   13%       12    6%
+  BRUISER         44   14%        5    2%
+  HUNTER          19    6%       13    6%
+  DRONE           25    8%        4    2%
+  HOUND           11    3%       17    8%
+  SHIELD          22    7%        6    3%
+  STRIKER         17    5%       10    5%
+  LANCER          13    4%        9    4%
+  SAPPER          18    6%        3    1%
+  SNIPER           9    3%       11    5%
+  SCREENER        13    4%        4    2%
+  ELITE           14    4%        0    0%
+  PIKEMAN          2    1%       10    5%
+  CUSTODIAN        9    3%        2    1%
+  SPOTTER         10    3%        0    0%
+  TURRET           8    2%        0    0%
+  MORTAR           3    1%        4    2%
+  WARBRINGER       4    1%        0    0%
+  MEDIC            2    1%        2    1%
+  BOMBARD          0    0%        3    1%
+
+PERK PICK FREQUENCY:
+  MRK           : 12
+  SKR           : 10
+  EXC           : 9
+  CQB           : 7
+  GUN           : 7
+  VNT           : 5
+  RFX           : 5
+  GRD           : 5
+  LCK           : 4
+  HRD           : 4
+  TNK           : 4
+  CLH           : 3
+  SGE           : 3
+  OUT           : 3
+  FST           : 3
+  PLT           : 3
+  MOM           : 3
+  BND           : 2
+
+SHOP PURCHASE FREQUENCY:
+  WPN: HOLLOW POINT : 49
+  WPN: BIPOD        : 39
+  FIELD MEDKIT      : 31
+  WPN: SCOPE        : 26
+  WPN: SUPPRESSOR   : 17
+  FRAG CACHE        : 15
+  COMBAT STIMS      : 14
+  ADV. TRAINING     : 13
+  BALLISTIC PLATING : 11
+  COUNTER-PREP      : 10
+  WPN: STABILIZER   : 7
+  WPN: EXTENDED MAG : 6
+  ARMORY            : 6
+
+BOON PICK FREQUENCY (PROCS = effect fires at instrumented sites; '-' = not instrumented;
+                      PYR counts the +2-turn-burn half only — the Burning-immunity half is uninstrumented):
+  code                 picks   PROCS
+  EXE               :     5       -
+  MRK               :     4       -
+  FRT               :     3       -
+  ADR               :     2       -
+  FST               :     2      18
+  GHO               :     2       -
+  GRN               :     2       -
+  RCL               :     2       0
+  RPD               :     2       -
+  SCV               :     2       -
+  TRR               :     2       4
+  FDR               :     1       0
+  PYR               :     1       0
+  VNM               :     1       -
+
+RUN WIN-RATE BY BOON (campaign runs holding it):
+  EXE               :    0% ±0  (in 5 runs)
+  MRK               :    0% ±0  (in 4 runs)
+  FRT               :    0% ±0  (in 3 runs)
+  ADR               :    0% ±0  (in 2 runs)
+  FST               :    0% ±0  (in 2 runs)
+  GHO               :    0% ±0  (in 2 runs)
+  GRN               :    0% ±0  (in 2 runs)
+  RCL               :    0% ±0  (in 2 runs)
+  RPD               :    0% ±0  (in 2 runs)
+  SCV               :    0% ±0  (in 2 runs)
+  TRR               :    0% ±0  (in 2 runs)
+  FDR               :    0% ±0  (in 1 runs)
+  PYR               :    0% ±0  (in 1 runs)
+  VNM               :    0% ±0  (in 1 runs)
+
+RUN WIN-RATE BY SPEC (campaign runs fielding it):
+  SNT               :    0% ±0  (in 3 runs)
+  HHT               :    0% ±0  (in 2 runs)
+  PHN               :    0% ±0  (in 2 runs)
+  ADN               :    0% ±0  (in 1 runs)
+
+RUN WIN-RATE BY PERK (campaign runs holding it):
+  MRK               :    0% ±0  (in 9 runs)
+  SKR               :    0% ±0  (in 9 runs)
+  EXC               :    0% ±0  (in 8 runs)
+  CQB               :    0% ±0  (in 5 runs)
+  GRD               :    0% ±0  (in 5 runs)
+  GUN               :    0% ±0  (in 5 runs)
+  RFX               :    0% ±0  (in 5 runs)
+  VNT               :    0% ±0  (in 5 runs)
+  HRD               :    0% ±0  (in 4 runs)
+  LCK               :    0% ±0  (in 4 runs)
+  TNK               :    0% ±0  (in 4 runs)
+  CLH               :    0% ±0  (in 3 runs)
+  FST               :    0% ±0  (in 3 runs)
+  MOM               :    0% ±0  (in 3 runs)
+  OUT               :    0% ±0  (in 3 runs)
+  PLT               :    0% ±0  (in 3 runs)
+  SGE               :    0% ±0  (in 3 runs)
+  BND               :    0% ±0  (in 2 runs)
+
+RUN WIN-RATE BY PURCHASE (campaign runs buying it):
+  WPN: HOLLOW POINT :    0% ±0  (in 13 runs)
+  WPN: BIPOD        :    0% ±0  (in 12 runs)
+  FIELD MEDKIT      :    0% ±0  (in 11 runs)
+  ADV. TRAINING     :    0% ±0  (in 10 runs)
+  COUNTER-PREP      :    0% ±0  (in 10 runs)
+  FRAG CACHE        :    0% ±0  (in 9 runs)
+  WPN: SCOPE        :    0% ±0  (in 9 runs)
+  WPN: SUPPRESSOR   :    0% ±0  (in 9 runs)
+  COMBAT STIMS      :    0% ±0  (in 8 runs)
+  BALLISTIC PLATING :    0% ±0  (in 6 runs)
+  ARMORY            :    0% ±0  (in 5 runs)
+  WPN: EXTENDED MAG :    0% ±0  (in 4 runs)
+  WPN: STABILIZER   :    0% ±0  (in 4 runs)
+
+RUN WIN-RATE BY EVENT-CHOICE (campaign runs taking id:arm):
+  blackmarket:2     :    0% ±0  (in 4 runs)
+  defector:2        :    0% ±0  (in 2 runs)
+  grave:1           :    0% ±0  (in 2 runs)
+  informant:2       :    0% ±0  (in 2 runs)
+  medic:0           :    0% ±0  (in 2 runs)
+  relic:0           :    0% ±0  (in 2 runs)
+  warpension:1      :    0% ±0  (in 2 runs)
+  drill:1           :    0% ±0  (in 1 runs)
+  quartermaster:2   :    0% ±0  (in 1 runs)
+═══════════════════════════════════════════════════════════════════════
+
+batch wall-time: 2.5s  (20 matches across 10 campaigns × 2 policy, frame-cap hits: 0)
+aggregate JSON -> /home/user/wt/apex-bites/docs/measurements/p23/P23-B-h8-b260.json
+INFO: TEXTURE: [ID 2] Unloaded texture data from VRAM (GPU)
+INFO: SHADER: [ID 3] Default shader unloaded successfully
+INFO: TEXTURE: [ID 1] Default texture unloaded successfully
+INFO: Window closed successfully

@@ -3572,7 +3572,22 @@ campaign for campaign (96/96 chunks, 1,920/1,920 legs), so `CLAUDE.md` keeps L6 
 L7 supplies the four rungs nobody had ever measured. **No corrective lever was shipped and no `src/`
 file was edited.** What L7 leaves open, in priority order:
 
-- [ ] **THE APEX RUNG CANNOT REACH THE MISSION THAT DECIDES A CAMPAIGN. THIS IS THE ONE TO FIX.**
+- [x] **THE APEX RUNG CANNOT REACH THE MISSION THAT DECIDES A CAMPAIGN. THIS IS THE ONE TO FIX.**
+      **DONE by wave P23 "THE APEX BITES"** (2026-09-04, base `fd07d56`, DEVLOG §P23, raw round
+      `docs/measurements/p23/`). Both halves shipped as **two independently switchable levers**:
+      `Mission.ClampLast` (`SIGHTLINE_CLAMPLAST=0`) applies the board-seating ceiling to the force
+      that is SEATED instead of to the number the ladder ASKED for, and `Mission.FinaleHeatStat`
+      (`SIGHTLINE_FINALESTAT=0`) separates the finale's stat strip so the deployment CARD's stat is
+      still dropped and HEAT's is not. The finale now fields **6/7/7/8/9/10/10/10/11** at heats 0-8
+      against 6/7/7/8/9/9/9/9/9, and its `bump` **4/5/5/6/6/6/6/7/8/9** against a flat 5.
+      **The ceiling was NOT raised** — leg (E) measured the board seating 16 bodies, distinct and
+      reachable, so 12 is not a layout constraint, but the defect was the ORDER and the order fix
+      needs no extra seat. Priced: pooled over h4/h6/h8 (n=1,920/arm) lever A is −1.30 (z −2.14),
+      lever B −1.25 (z −2.25), both −1.88 (z −2.74), **additive within ±0.9**; h8 base->AB −2.7 at
+      32 slot sets (z −2.53, t(31) −2.87) and −3.1 out of sample (b=1 c=11, z −2.89, RESOLVED).
+      RECRUIT moves the other way, +2.8. **The costs are published, not tuned away** — see the new
+      top item below.
+      **The original L7 finding, kept for provenance:**
       `Mission.Build` sizes a force as `Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12)` and the
       finale then runs `count = Math.Max(5, count - 3or4); bump = Math.Max(0, n - 1)`. At mission 6
       the request is `10 + EnemyDelta` against a ceiling of 12, so **from heat 3 up heat's bodies
@@ -3589,7 +3604,15 @@ file was edited.** What L7 leaves open, in priority order:
       stat and takes heat's with it — those could be separated), or a smaller carrot (below)? Each
       is one lever and each needs its own CRN round against a fresh baseline. **Whichever is chosen,
       it must be measured at 16 slot sets minimum** — rung 8's step has an MDE of 3.7 at n=640.
-- [ ] **NO TEST IN `src/` ASKS WHAT FORCE THE BOARD ACTUALLY BUILDS.** `HEATLADDERTEST` pins the
+- [x] **NO TEST IN `src/` ASKS WHAT FORCE THE BOARD ACTUALLY BUILDS.** **DONE by wave P23** —
+      `SIGHTLINE_FORCETEST` (in `qa-sweep.sh`, routed through `verdict`, visible to the COVERAGE
+      GUARD). Seven legs over 3 seeds x RECRUIT-h8 x m1-6, all reading the force `Mission.Build`
+      actually assembled: no rung's declared body or stat may be eaten (RED pre-fix on all three
+      seeds), the opener stays FLAT across rungs (§3.D as an assertion), the stat is on the BODIES
+      and not just the telemetry, every hostile on a distinct reachable tile (shipped and with the
+      ceiling stressed to 16), both dials real and independent, and the ordering a no-op wherever
+      the ceiling never bound. `SIGHTLINE_FORCEDUMP=1` prints the whole matrix.
+      **The original L7 finding, kept for provenance:** `HEATLADDERTEST` pins the
       cumulative heat vector; `MIDTOOTHTEST` pins the per-rung deltas, the apex vector and the
       no-dead-declaration rule. Both were **green** while rung 8's correct `EnemyDelta 4` was being
       clamped away and its `StatDelta 4` discarded. C1's defect was a declaration the vector could
@@ -3617,7 +3640,12 @@ file was edited.** What L7 leaves open, in priority order:
       for them rather than interpolating a band and grading against it. Now that a per-rung ladder
       is affordable (~8 s a chunk), setting the four missing bands is cheap and would make the
       shape a gradeable property instead of an eyeballed one.
-- [ ] **THE FINALE'S `bump` STRIP CANNOT BE MEASURED AT ALL.** `SIGHTLINE_ENEMYBASE` relieves the
+- [x] **THE FINALE'S `bump` STRIP CANNOT BE MEASURED AT ALL.** **DONE by wave P23** —
+      `SIGHTLINE_FINALESTAT=0` is that restore flag, and P23's round is the first to price the stat
+      half on its own arm: pooled over h4/h6/h8, **−1.25 (n=1,920, n_disc 114, z −2.25)**, against
+      lever A's −1.30. The two are worth about the same, which is precisely what L7's combined arm
+      could not have told anyone.
+      **The original L7 finding, kept for provenance:** `SIGHTLINE_ENEMYBASE` relieves the
       headcount clamp (L7's clamp arm used it: rung 8 buys +4.1 with the ceiling clear against -0.6
       with it binding, DiD +4.7 +-2.0, t=2.39 on the absolute scale but **z = -1.66 on the odds
       scale, NOT resolved**). Nothing relieves `bump = Math.Max(0, n - 1)`. That is why the base-2
@@ -3631,3 +3659,51 @@ file was edited.** What L7 leaves open, in priority order:
       worth a pass of its own: **ask of each gate what it would have said if the thing it guards
       were broken.** (P18's open item about `FITTEST` having no drawn-string-vs-plate overlap check
       is the other live instance.)
+
+## PROGRAM PARALLAX — wave "P23 THE APEX BITES" (2026-09-04, base `fd07d56`, DEVLOG §P23)
+
+P23 closed three of L7's six items (the apex's dead teeth, the missing force guard, the finale
+stat's restore flag). What it leaves open, in priority order:
+
+- [ ] **THE LADDER'S TOP HALF IS NOW UNDER ITS BAND, AND P23 DELIBERATELY DID NOT TUNE IT.**
+      This is the first thing a later round should spend a lever on, and it must do so against its
+      own fresh baseline — a round that changes a mechanism may not also tune toward the band inside
+      itself. On 32 CRN slot sets (n=640/rung), the shipped tree reads **h4 23.6** (band 22-38, IN),
+      **h6 9.4** (band 12-28, **OUT by 2.6** — it was OUT by 1.1 before P23), and **h8 5.0**
+      (band 5-15, IN but **exactly ON the >= 5 hard floor, with no margin**). The RECRUIT rung moved
+      the other way and is nearer its centre (70.6 -> 73.4). **h0 is unchanged at 44.4 and is
+      2.6 under its floor — that miss is inherited from L5 onward and P23 did not touch it, so it is
+      a BASE-difficulty question, not a P23 one** (see the older item on that). The obvious dials to
+      reach for are named and unspent: `SIGHTLINE_FORCECEILING`, `SIGHTLINE_ENEMYBASE`,
+      `SIGHTLINE_AIMTRIM`, `SIGHTLINE_TOUGH`, `SIGHTLINE_TRIM`, and the two P23 dials themselves
+      (a partial `FinaleHeatStat` is expressible as a fraction of `heatStat`, which this wave did
+      not build because it had no evidence it was wanted).
+- [ ] **THE MID-RUN CEILING STILL BINDS, AND IT IS NOW THE ONLY PLACE IT DOES.** With the ordering
+      fixed, the remaining cells where a rung's declared body does not reach the board are the ones
+      where the board is genuinely full: ELITE mid-run nodes (`+2` from the card) at heat 3 and up,
+      and plain m5 at heat 8. `SIGHTLINE_FORCETEST` leg (A2) COUNTS those cells and prints the
+      count in its PASS line rather than hiding them, and the question is whether they should be
+      allowed past 12. **The seating answer is already measured: they can be** — with
+      `Mission.ForceCeiling = 16` and `EnemyBaseCount = 8`, asking for 13-16 bodies, the board seats
+      **16, all on distinct tiles, all reachable from the squad, on every mission x rung x 3 seeds**.
+      So this is purely a difficulty decision, and `SIGHTLINE_FORCECEILING=<n>` is the dial. It
+      would need its own CRN round; note it lands on missions 3-5, not on the finale, so it is a
+      DIFFERENT lever from P23's and should not be folded into a re-measure of it.
+- [ ] **FOUR OF P23's SEVEN CONTRASTS SIT AT THE EDGE OF THE ROUND'S OWN MDE, and one of them is
+      the headline.** Pooled over h4/h6/h8 (n=1,920/arm) the levers read −1.30 / −1.25 / −1.88 with
+      McNemar z of −2.14 / −2.25 / −2.74 against an MDE80 of 1.71 / 1.56 / 1.91 — significant at
+      p ≈ 0.006-0.03 and the same size as the smallest effect the design can reliably see. The apex
+      resolves outright only on the 16 slot sets the round had never seen (−3.1, b=1 c=11,
+      z = −2.89). **Nobody should quote these as precise quantities.** If a later wave needs the
+      size rather than the sign, it needs roughly 4x the clusters — which is affordable now
+      (~8-20 s a chunk) and was not when the convention was set.
+- [ ] **THE FINALE'S OWN LADDER STILL HAS ONE STEP BOUGHT BY A BOOLEAN.** `h3 -> h4` grows a finale
+      body because the de-stack gate flips −4 to −3 when `Ai.Tier >= 1`, not because the heat table
+      declared a body there. It is legal, deliberate (W6 SIGNAL) and now measured — but it means one
+      rung of the finale's curve is a step function riding a different axis, and if `Heat.AiTier`
+      ever moves, the finale's headcount moves with it silently. `SIGHTLINE_FORCETEST` would see the
+      result but would not name the cause.
+- [ ] **P23 SAMPLED SIX RUNGS OF TEN.** RECRUIT, h0, h2, h4, h6, h8. h1/h3/h5/h7 are unmeasured on
+      this tree, so L7's "rung 5 buys ~nothing" is only half-answered: lever A restores the body the
+      finale was eating at h5 (m6 9 -> 10), but whether LINGERING WOUNDS now buys anything is not
+      measured. A per-rung re-run is ~10 minutes of wall time on this container.

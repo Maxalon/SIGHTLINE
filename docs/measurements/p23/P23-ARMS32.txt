@@ -1,0 +1,47 @@
+(slot bases: both — 32 sets)
+===== ARMS =====
+  rung  arm     k     n   win%  binSE   clSE
+  h4    base   32   640   25.0   1.71   1.85
+  h4    A      32   640   24.4   1.70   1.93
+  h4    B      32   640   23.4   1.67   1.61
+  h4    AB     32   640   23.6   1.68   1.77
+  h6    base   32   640   10.9   1.23   1.34
+  h6    A      32   640    9.5   1.16   1.53
+  h6    B      32   640    9.8   1.18   1.37
+  h6    AB     32   640    9.4   1.15   1.42
+  h8    base   32   640    7.7   1.05   0.90
+  h8    A      32   640    5.8   0.92   1.27
+  h8    B      32   640    6.6   0.98   1.04
+  h8    AB     32   640    5.0   0.86   0.95
+
+===== CONTRASTS (CRN-paired, effect = second arm minus first) =====
+  rung  contrast        eff    b    c n_disc pairSE  MDE80      z  chunkD  clSE      t  verdict
+  h4    base->A        -0.6    7   11     18   0.66   1.86  -0.94    -0.6  0.62  -1.00  NOT RESOLVED (|-0.6| < MDE 1.9)
+  h4    base->B        -1.6   19   29     48   1.08   3.03  -1.44    -1.6  1.20  -1.31  NOT RESOLVED (|-1.6| < MDE 3.0)
+  h4    base->AB       -1.4   24   33     57   1.18   3.30  -1.19    -1.4  1.29  -1.09  NOT RESOLVED (|-1.4| < MDE 3.3)
+  h4    A->AB          -0.8   19   24     43   1.02   2.87  -0.76    -0.8  1.21  -0.64  NOT RESOLVED (|-0.8| < MDE 2.9)
+  h4    B->AB           0.2   10    9     19   0.68   1.91   0.23     0.2  0.53   0.30  NOT RESOLVED (|0.2| < MDE 1.9)
+  h6    base->A        -1.4   30   39     69   1.30   3.63  -1.08    -1.4  1.29  -1.09  NOT RESOLVED (|-1.4| < MDE 3.6)
+  h6    base->B        -1.1   15   22     37   0.95   2.66  -1.15    -1.1  0.95  -1.16  NOT RESOLVED (|-1.1| < MDE 2.7)
+  h6    base->AB       -1.6   30   40     70   1.31   3.66  -1.20    -1.6  1.24  -1.26  NOT RESOLVED (|-1.6| < MDE 3.7)
+  h6    A->AB          -0.2   11   12     23   0.75   2.10  -0.21    -0.2  0.65  -0.24  NOT RESOLVED (|-0.2| < MDE 2.1)
+  h6    B->AB          -0.5   31   34     65   1.26   3.53  -0.37    -0.5  1.28  -0.37  NOT RESOLVED (|-0.5| < MDE 3.5)
+  h8    base->A        -1.9   19   31     50   1.10   3.09  -1.70    -1.9  1.09  -1.71  NOT RESOLVED (|-1.9| < MDE 3.1)
+  h8    base->B        -1.1   11   18     29   0.84   2.36  -1.30    -1.1  0.86  -1.27  NOT RESOLVED (|-1.1| < MDE 2.4)
+  h8    base->AB       -2.7   14   31     45   1.05   2.93  -2.53    -2.7  0.93  -2.87  NOT RESOLVED (|-2.7| < MDE 2.9)
+  h8    A->AB          -0.8    8   13     21   0.72   2.00  -1.09    -0.8  0.75  -1.04  NOT RESOLVED (|-0.8| < MDE 2.0)
+  h8    B->AB          -1.6   13   23     36   0.94   2.62  -1.67    -1.6  0.82  -1.90  NOT RESOLVED (|-1.6| < MDE 2.6)
+
+===== POOLED over the acting rungs h4,h6,h8 =====
+  contrast        eff    b    c n_disc pairSE  MDE80      z
+  base->A       -1.30   56   81    137   0.61   1.71  -2.14
+  base->B       -1.25   45   69    114   0.56   1.56  -2.25
+  base->AB      -1.88   68  104    172   0.68   1.91  -2.74
+  A->AB         -0.57   38   49     87   0.49   1.36  -1.18
+  B->AB         -0.62   54   66    120   0.57   1.60  -1.10
+
+===== ADDITIVITY (interaction = eff(base->AB) - eff(base->A) - eff(base->B)) =====
+  rung        A      B    A+B    sum   inter
+  h4       -0.6   -1.6   -1.4   -2.2     0.8
+  h6       -1.4   -1.1   -1.6   -2.5     0.9
+  h8       -1.9   -1.1   -2.7   -3.0     0.3

@@ -142,6 +142,22 @@ public static class Program
         //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
             Mission.OpenerTrim = xopen;
+        // P23 "THE APEX BITES" — TWO INDEPENDENT DIALS, and their independence is the point.
+        // L7 located the apex rung's dead teeth in Mission.SpawnEnemies and priced them with a
+        // COMBINED arm (SIGHTLINE_ENEMYBASE=2) that could only ease the ceiling; its +4.1 could
+        // not resolve because the stat half was not in it. These two must be switchable alone.
+        //   SIGHTLINE_CLAMPLAST=0   : LEVER A off — the board ceiling is applied to the REQUEST
+        //                             rather than to the force that is seated, so every trim below
+        //                             it subtracts from an already-clipped number (the pre-P23
+        //                             order, in which the finale's bodies stop growing at heat 4).
+        //   SIGHTLINE_FINALESTAT=0  : LEVER B off — the finale discards heat's StatDelta along
+        //                             with the deployment card's (the pre-P23 strip).
+        //   SIGHTLINE_FORCECEILING=<n> : Mission.ForceCeiling, the board-SEATING limit (shipped
+        //                             12, unchanged by P23). Priced by FORCETEST leg (E), unspent.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CLAMPLAST") == "0") Mission.ClampLast = false;
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FORCECEILING"), out int xceil) && xceil >= 3)
+            Mission.ForceCeiling = xceil;
         // P19 THE ROSTER CONTESTS — SIGHTLINE_ELITEBOSS=0 restores the pre-P19 mid-boss rule
         // (`n == 3 || n == 5`, blind to the node the player routed through) EXACTLY. It is what
         // HORDETEST's P19 legs were shown to FAIL against.
@@ -921,6 +937,20 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "midtoothtest");   // SetupMission uses tile math
             Console.WriteLine(new Game().MidToothSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_FORCETEST=1 : PARALLAX P23 "THE APEX BITES" — THE FORCE THE BOARD ACTUALLY
+        // BUILDS. HEATLADDERTEST and MIDTOOTHTEST pin the heat table's cumulative and per-rung
+        // vectors, and both were green while the apex rung's body and stat were being clamped and
+        // discarded one level up in Mission.SpawnEnemies (L7). This asks the other end of the pipe:
+        // per mission x rung, does the declared body/stat reach the board, is the opener still
+        // flat, is every hostile seated on a distinct reachable tile, and are the two P23 dials
+        // real and independent. SIGHTLINE_FORCEDUMP=1 prints the whole matrix.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FORCETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "forcetest");   // SetupMission uses tile math
+            Console.WriteLine(new Game().ForceSelfTest());
             Raylib.CloseWindow();
             return;
         }

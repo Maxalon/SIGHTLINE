@@ -271,7 +271,7 @@ public static class Mission
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
                              int dmgDelta = 0, bool defend = false, int defendKeep = 0,
                              int rosterTier = -1, bool midBossSlot = false, bool eliteNode = false,
-                             bool finalApproach = false)
+                             bool finalApproach = false, int heatStat = 0)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -349,7 +349,7 @@ public static class Mission
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
         SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep, shape,
-                     rosterTier, midBossSlot, eliteNode, finalApproach);
+                     rosterTier, midBossSlot, eliteNode, finalApproach, heatStat);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -649,6 +649,69 @@ public static class Mission
     /// Default 4 = the historical force size.
     public static int EnemyBaseCount = 4;
 
+    // ── P23 "THE APEX BITES" — THE CEILING BOUNDS THE BOARD, NOT THE LADDER ──────────────────
+    //  L7 EVERY RUNG measured the finale's hostile count at heats 0-8 on the artifact and got
+    //  6/7/7/8/9/9/9/9/9: **the boss mission has not grown a hostile since heat 4.** The heat
+    //  table is correct (HEATLADDERTEST/MIDTOOTHTEST pin the cumulative vector and are green and
+    //  right to be) — the loss is one level up, here, in two independent places:
+    //    (A) `count` was CLAMPED to the board ceiling and the finale's de-stack subtracted from
+    //        the CLAMPED value, so from heat 3 up the ladder's extra bodies were eaten by a
+    //        ceiling the finale force never came near (its post-cut size is 6-11, against 12).
+    //    (B) `bump` was reset to the bare per-mission growth, discarding heat's StatDelta.
+    //  Both of rung 8's declared teeth were therefore switched off on the one mission that
+    //  decides a campaign; L7 measured the apex rung at -0.6 (n=640, MDE 3.7) with mission 6
+    //  moving the WRONG WAY (16.8 -> 23.9).
+    //
+    //  The two halves are SEPARATE DIALS on purpose. L7's partial arm (SIGHTLINE_ENEMYBASE=2)
+    //  could only ease the ceiling, could not touch the stat strip, and its recovery therefore
+    //  came from missions 2-5 rather than the finale — which is exactly why its +4.1 did not
+    //  resolve on the odds scale. A combined lever would repeat that mistake.
+
+    /// The BOARD-SEATING ceiling on an initial hostile force. It is a LAYOUT number, not a
+    /// difficulty number: `SpawnEnemies`' collision-relocate pool is cols W-4..W-2 over all H
+    /// rows (3 x 11 = 33 tiles on the 18x11 board) and every seated body is added to Build's
+    /// `occupied` set, which both arena paths and `EnsureConnectivity` keep open. Shipped at 12,
+    /// unchanged since it was raised from 10. `SIGHTLINE_FORCECEILING=<n>` prices it; P23
+    /// deliberately did NOT spend it (see FORCETEST leg (E), which measures the real headroom).
+    public static int ForceCeiling = 12;
+
+    /// LEVER A — THE ORDER. `true` (shipped): the seating ceiling is applied LAST, to the force
+    /// that is actually put on the board, instead of first, to the number the ladder ASKED for.
+    /// Everything between the request and the seating is a SUBTRACTION (the opener grace, the
+    /// sabotage and defend trims, the finale de-stack, the pod trim), so clamping first meant a
+    /// ceiling the final force never came near still decided its size. `SIGHTLINE_CLAMPLAST=0`
+    /// restores the pre-P23 order exactly.
+    ///
+    /// It cannot raise what the board must seat: the final value is clamped to `ForceCeiling`
+    /// either way, so the worst case is the same 12 it has always been (FORCETEST leg (E)
+    /// measures the seated worst case at 12, and 16 with the ceiling stressed to 16). And it is a
+    /// NO-OP wherever the ceiling never bound — if
+    /// `LastForceRequest <= ForceCeiling` the two orders are identical by construction, which is
+    /// what leg (G) asserts. On the shipped tree that confines it to the finale from heat 5 up
+    /// and to late/ELITE mid-run nodes at the top of the ladder.
+    public static bool ClampLast = true;
+
+    /// LEVER B. `true` (shipped): the finale keeps HEAT's own StatDelta and drops only the
+    /// deployment CARD's (and the adaptive assist's) — the separation the pre-P23 comment's own
+    /// wording ("the boss-card/heat StatDelta") had merged. The card's strip is the presentational
+    /// half and is genuinely deliberate: the WARLORD *is* the elite, so its retinue should not be
+    /// double-counted as one. Heat's is not presentational — it is the rung the player dialled.
+    /// `SIGHTLINE_FINALESTAT=0` restores the pre-P23 strip (both discarded) exactly.
+    public static bool FinaleHeatStat = true;
+
+    /// Harness telemetry (SIGHTLINE_FORCETEST): the headcount and the force-wide stat bump the
+    /// LAST `SpawnEnemies` actually built with, published after every trim, the finale de-stack
+    /// and the pod trim — i.e. the numbers that reached the board, not the numbers requested.
+    /// Written unconditionally (three int stores) and read by nothing in a live path.
+    public static int LastForceCount = -1, LastStatBump = -1, LastForceRequest = -1;
+
+    /// ...and whether any of the five declared FLOORS actually bound on that build (the opener,
+    /// sabotage and defend trims and the pod trim floor at 3; the finale de-stack at 5). A rung
+    /// whose body is missing because the force is already at its minimum is a different statement
+    /// from a rung whose body was lost — FORCETEST leg (A2) needs to tell them apart, and it may
+    /// not do it by re-deriving the arithmetic it is auditing.
+    public static bool LastForceFloored = false;
+
     /// X2 (SIGHTLINE_OPENERTRIM): bodies removed from the BASE force on the opening missions —
     /// the full trim on mission 1, half (rounded up) on mission 2, none from mission 3. The same
     /// shape as Game.SetupMission's heat grace, applied to the force heat's grace cannot reach.
@@ -760,7 +823,7 @@ public static class Mission
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
                              int dmgDelta = 0, bool defend = false, int defendKeep = 0,
                              int shape = DeployFrontal, int rosterTier = -1, bool midBossSlot = false,
-                             bool eliteNode = false, bool finalApproach = false)
+                             bool eliteNode = false, bool finalApproach = false, int heatStat = 0)
     {
         // THE MODES GET THE BESTIARY — ROSTER DEPTH is its own axis. `n` has always carried two
         // jobs: the NUMERIC ramp (headcount, the (n-1) stat bump, the opener trim, W9's heat
@@ -785,7 +848,19 @@ public static class Mission
         // now-strong squad faces a real fight; Heat's deltas still stack for the mastery ladder.
         // X2: the base headcount is a static (default 4 — the historical `4 + n`) so a measured
         // round can price the BODY lever against the ACCURACY lever without a rebuild.
-        int count = Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
+        // P23 THE APEX BITES — LEVER A. The REQUEST is what the deployment card and the heat ladder
+        // ask for; `ForceCeiling` is what the BOARD can seat. Clamping here — before the five
+        // subtractions below — let a ceiling the finished force never reaches decide its size, and
+        // L7 measured the cost: the boss mission stopped growing a hostile at heat 4 and the apex
+        // rung's declared body was eaten on the one mission that decides a campaign. Under
+        // `ClampLast` the clamp moves to the END of the pipeline (just before the telemetry), so it
+        // bounds what is SEATED. The seated worst case is unchanged (still <= ForceCeiling).
+        int request = EnemyBaseCount + n + enemyDelta;                     // deployment-card + Heat modifier
+        int count = ClampLast ? request : Math.Clamp(request, 3, ForceCeiling);
+        // Every trim below is floored. `Floor` is the same `Math.Max` with a witness attached, so
+        // the harness can say "the force is at its minimum" without re-deriving the pipeline.
+        bool floored = false;
+        int Floor(int v, int f) { if (v < f) { floored = true; return f; } return v; }
         // R1 REVIEW FIX — the floor was `Math.Max(0, ...)`, which silently ATE the RECRUIT rung's
         // advertised relief on MISSION 1, the exact mission the on-ramp exists for: at n == 1 the
         // growth term is 0, so heat 0 gave max(0, 0) = 0 and RECRUIT (statDelta -1) gave
@@ -817,12 +892,12 @@ public static class Mission
         // DepthFor is >= 3 and the trim is skipped; the campaign reads DepthFor(n) == n, unchanged.
         int trimDepth = DepthFor(n);
         if (OpenerTrim > 0 && trimDepth <= 2)
-            count = Math.Max(3, count - (trimDepth == 1 ? OpenerTrim : (OpenerTrim + 1) / 2));
+            count = Floor(count - (trimDepth == 1 ? OpenerTrim : (OpenerTrim + 1) / 2), 3);
         // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
         // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
         // Heat ladder still applies on top, so the mastery curve is preserved.
-        if (sabotage) count = Math.Max(3, count - 2);
+        if (sabotage) count = Floor(count - 2, 3);
         // FUL-4 HOLDFAST (Defend 38% h0 measured pre-fix, target 60-80): DEFEND's real force is
         // the INITIAL screen PLUS every SpawnDefendWave reinforcement, so an untrimmed opener
         // double-counts the objective's difficulty — the timer IS the pressure. Mirror the
@@ -833,7 +908,7 @@ public static class Mission
         // defend-pinned h8, still 95-100% after the R1 wave-stat lever alone). defendKeep gives
         // back half the GRACED heat bodies (0 at h0-2, 1 at h4-6, 2 at h8; the m1-2 grace zeroes
         // it with heatEnemy) so heat reaches the hold without re-breaking FUL-4's h0 repair.
-        if (defend) count = Math.Max(3, count - 3 + Math.Clamp(defendKeep, 0, 2));
+        if (defend) count = Floor(count - 3 + Math.Clamp(defendKeep, 0, 2), 3);
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
@@ -863,8 +938,29 @@ public static class Mission
             // h2 55% completion (well under the ~75-80 ladder-top goal) with the W5 finale
             // eating ~1/5 of otherwise-cleared runs; the ladder's top half keeps the
             // full-bite finale it was tuned against. Faction.None still means count-4.
-            count = Math.Max(5, count - (Combat.MissionFaction != Faction.None && Ai.Tier >= 1 ? 3 : 4));
-            bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
+            // The de-stack is a DIFFICULTY subtraction and reads the ladder's real request under
+            // LEVER A. Measured finale headcount at heats 0-8 goes 6/7/7/8/9/9/9/9/9 ->
+            // 6/7/7/8/9/10/10/10/11: rungs 5 and 8 land the body they declare, and the apex's
+            // tooth reaches the mission that decides the campaign.
+            count = Floor(count - (Combat.MissionFaction != Faction.None && Ai.Tier >= 1 ? 3 : 4), 5);
+            // P23 LEVER B — THE STAT STRIP, SEPARATED. The line below used to read
+            // `bump = Math.Max(0, n - 1)` with the comment "drop the boss-card/heat StatDelta for
+            // the screen", merging two strips that are not the same decision:
+            //   * the deployment CARD's StatDelta is genuinely presentational — the WARLORD IS the
+            //     elite, and an ELITE-shaped card on top would double-count it (that is this
+            //     block's founding argument, and it stands). The card's contribution is still
+            //     dropped, in BOTH modes. (Today NodeKind.Boss ships StatDelta 0 anyway, so the
+            //     strip's only live victim was heat's — see DEVLOG §P23.)
+            //   * the adaptive assist's relief is likewise still dropped (unchanged).
+            //   * HEAT's StatDelta is not presentational. It is the rung the player dialled, it is
+            //     what `Heat.Mods` publishes, and discarding it made rungs 2/6/7/8 statless on
+            //     mission 6 — half of L7's located defect.
+            // `heatStat` is heat's OWN contribution, already m1-2-graced by Game.SetupMission and
+            // arriving on its own parameter precisely so this line can separate it from the sum in
+            // `statDelta`. Every other caller passes 0, so nothing but the campaign finale moves.
+            bump = FinaleHeatStat
+                 ? Math.Max(0, (n - 1) + heatStat)           // drop the card's/assist's stat, KEEP heat's
+                 : Math.Max(0, n - 1);                       // pre-P23: drop the boss-card AND heat StatDelta
         }
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
@@ -897,7 +993,14 @@ public static class Mission
         // a link can make it 6), so the unchanged body count priced a harder mission than the
         // budget allows. m1-2 and the finale are untouched (no pod stack there); floored at 3
         // like the sabotage/defend trims above.
-        if (podsOf3) count = Math.Max(3, count - 1);
+        if (podsOf3) count = Floor(count - 1, 3);
+        // P23 LEVER A — the seating ceiling, applied to the force that is actually seated. This is
+        // the LAST thing that touches `count`; nothing below it may subtract again without moving
+        // this line down with it.
+        if (ClampLast) count = Math.Clamp(count, 3, ForceCeiling);
+        // P23 telemetry (SIGHTLINE_FORCETEST): the numbers the board is about to be built with,
+        // after EVERY trim and the ceiling. Three int stores; read by no live path.
+        LastForceRequest = request; LastForceCount = count; LastStatBump = bump; LastForceFloored = floored;
         int[] podOf = null, memberOf = null;
         int[] podAnchor = null, podAnchorX = null;
         // P14 — A MODE FORCE IS NEVER ENTIRELY IMMOBILE. Measured on the pre-P14 tree

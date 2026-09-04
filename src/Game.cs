@@ -2270,7 +2270,13 @@ public partial class Game
                       // pressuring the hold; it's h8's +4 stats that bite. The residual h6 cell
                       // is recorded in DEVLOG §FUL-13 with this mechanism.
                       Objective == Objective.Defend ? heatEnemy / 2 : 0,
-                      rosterTier, modeMidBoss, eliteNode, finalApproach);
+                      rosterTier, modeMidBoss, eliteNode, finalApproach,
+                      // P23 THE APEX BITES — heat's OWN stat contribution, on its own parameter.
+                      // `statDelta` above is the SUM (card + heat - assist) and the campaign
+                      // FINALE strips it; Mission.FinaleHeatStat needs the heat half back, and a
+                      // sum cannot be un-summed. Already m1-2-graced by the block above, so the
+                      // opener is untouched by construction. Every other Build caller passes 0.
+                      heatStat);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
