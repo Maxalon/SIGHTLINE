@@ -1,0 +1,26 @@
+===== L7 — WHAT EACH RUNG BUYS (step DOWN from the rung below; + = harder) =====
+  step         easier% harder%   buys  indSE    b    c n_disc pairSE  MDE80      z  chunk  clSE  t(15)  verdict
+  hR->h0           70.6    44.4   26.2   3.77  115   31    146   3.78  10.57   6.95  26.25  2.87   9.15   0.33   -6.62  RESOLVED at 80% power
+  h0->h1           44.4    41.9    2.5   3.91   50   42     92   3.00   8.39   0.83   2.50  3.59   0.70   0.90   -0.64  NOT RESOLVED (|2.5| < MDE 8.4)
+  h1->h2           41.9    35.9    5.9   3.85   62   43    105   3.20   8.97   1.85   5.94  3.20   1.85   0.78   -1.54  NOT RESOLVED (|5.9| < MDE 9.0)
+  h2->h3           35.9    26.2    9.7   3.64   69   38    107   3.23   9.05   3.00   9.69  3.01   3.22   0.64   -2.63  RESOLVED at 80% power
+  h3->h4           26.2    23.1    3.1   3.41   47   37     84   2.86   8.02   1.09   3.12  3.41   0.92   0.85   -0.91  NOT RESOLVED (|3.1| < MDE 8.0)
+  h4->h5           23.1    22.5    0.6   3.32   39   37     76   2.72   7.63   0.23   0.62  2.66   0.24   0.97   -0.19  NOT RESOLVED (|0.6| < MDE 7.6)
+  h5->h6           22.5    11.2   11.2   2.93   60   24     84   2.86   8.02   3.93  11.25  2.21   5.08   0.44   -3.72  RESOLVED at 80% power
+  h6->h7           11.2     6.6    4.7   2.24   28   13     41   2.00   5.60   2.34   4.69  2.16   2.17   0.56   -2.04  NOT RESOLVED (|4.7| < MDE 5.6)
+  h7->h8            6.6     8.8   -2.2   2.10   14   21     35   1.85   5.18  -1.18  -2.19  1.71  -1.28   1.36    1.03  NOT RESOLVED (|-2.2| < MDE 5.2)
+
+  RESOLVED steps (3/9): hR->h0 +26.2, h2->h3 +9.7, h5->h6 +11.2
+  NOT RESOLVED  (6/9): h0->h1 +2.5, h1->h2 +5.9, h3->h4 +3.1, h4->h5 +0.6, h6->h7 +4.7, h7->h8 -2.2
+  SUM of the 9 steps: 61.88 points (RECRUIT -> h8)
+
+  ODDS-RATIO VIEW (scale-free; OR<1 = the harder rung cut the player's odds; |z|>1.96 = resolved):
+    hR->h0    OR  0.33  lnOR z  -6.62  RESOLVED
+    h0->h1    OR  0.90  lnOR z  -0.64  not resolved
+    h1->h2    OR  0.78  lnOR z  -1.54  not resolved
+    h2->h3    OR  0.64  lnOR z  -2.63  RESOLVED
+    h3->h4    OR  0.85  lnOR z  -0.91  not resolved
+    h4->h5    OR  0.97  lnOR z  -0.19  not resolved
+    h5->h6    OR  0.44  lnOR z  -3.72  RESOLVED
+    h6->h7    OR  0.56  lnOR z  -2.04  RESOLVED
+    h7->h8    OR  1.36  lnOR z  +1.03  not resolved
