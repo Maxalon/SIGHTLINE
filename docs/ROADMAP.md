@@ -3216,3 +3216,60 @@ Detail in `docs/DEVLOG.md` §SHIPS AS v1.0.0; the contract is `docs/DISTRIBUTION
       retired the moment they do). Adding smaller rungs is safe only by APPENDING (the index is
       persisted as `SizeIdx`), which makes the cycle order strange — the honest fix is to sort the
       ladder at use and filter it against the monitor, which is a settings-screen wave.
+
+---
+
+## PROGRAM PARALLAX — wave P16 "GROUND TRUTH" (2026-09-04, base `e57e151`, details in DEVLOG §GROUND TRUTH)
+
+- [x] **VOID → RIFT.** Impassable, but **transparent** and giving **no cover** — the only shape on
+      this board that stops movement while hiding nothing. Lives in `Grid.IsFloor` (one word, beside
+      barrels); deliberately absent from `BlocksSight` / `IsVapor` / `GetCover`, and BIOMETEST
+      measures each of those three absences rather than asserting a field is unset.
+- [x] **ARID → SOFT SAND.** A step onto sand costs **3** half-tiles (diagonal **5**) instead of 2/3
+      — the exact inverse of TUNDRA's ice, and one line in `Grid.CostMap`. `Ai.cs` gained **zero
+      lines** for either mechanic; the opponent re-prices itself off the shared cost map.
+- [x] **The rift cannot strand anything.** `Terrain.StampRift` re-floods the board through
+      `Grid.CostMap` after every candidate tile and reverts any that costs more than itself, so a
+      chasm can never seal and the gaps it leaves ARE the bridges. `SIGHTLINE_RIFTTEST`: 576 real
+      VOID boards (8 objectives x 6 missions x 6 seeds x heats 0+8), **zero stranded tiles**; with
+      the guard disabled the same sweep strands up to 69 tiles on 32 boards.
+- [x] **`Terrain.cs`'s contract updated: five mechanical, three paint (STEEL / ASH / NEON)**, with
+      the count asserted in both directions.
+- [x] **Measured, and reported honestly.** 960 CRN-paired campaigns on `ba34279`
+      (`docs/measurements/p16/`): **−2.5 / −1.2 / +1.2** at h0/h4/h8, pooled McNemar z = −0.43,
+      95% CI **[−4.7, +3.0]** — near-inert on win rate at **18.3% discordance** (88 of 480 worlds
+      played out differently, so this is a bounded effect, not an absent one). **The opener cell is
+      clean: `byNodeKind` Start +0.0 / +0.6 / +0.0**, the cell C4's own layer failed at −4.37.
+
+### OPEN, from P16
+
+- [ ] **THE BIOME DEAL IS EIGHT OF FIFTY-SIX, AND FIXING IT IS ITS OWN WAVE.** Verified: `Biome.IndexFor`
+      is a fixed 8-cycle with a per-run offset, so over 4,000 seeds only **8 of the 56 ordered biome
+      adjacencies** occur and there are only **8 distinct 6-mission sequences** — TUNDRA is followed
+      by VERDANT in every campaign ever played. With five biomes now carrying a rule that is a real
+      loss of variety. P16 did **not** fix it, for a cost the docket did not know: `Mission.DeckPick`
+      reads `Biome.IndexFor` for its theme hint, so re-dealing the biome **re-deals the arena on a
+      measured 28.9% of missions**, which severs the CRN chain for every archive under
+      `docs/measurements/` exactly as W1 did. `SIGHTLINE_BIOMEDEAL=hash` is the priced, default-OFF
+      dial; the wave that spends it owes a re-measured ladder and must say "re-measure, do not
+      rescale" in the same breath.
+- [ ] **THE SAVE-FORMAT GUARD HAS A HOLE: it cannot see the biome deal.** Measured — with
+      `Biome.IndexFor` replaced by a hash, **all three `SIGHTLINE_SAVETEST` map goldens PASS**.
+      `MapFingerprint` feeds `Run.GenerateMap`'s output, and the deal is a pure function of
+      `(MapSeed, mission)` computed outside the generator. So a change that re-deals **every existing
+      save's arenas and biomes** is invisible to the guard whose whole job is to catch exactly that.
+      The fix is to feed the regenerated per-mission `(biomeIndex, DeckPick)` pair into
+      `MapFingerprint` for the pinned seeds — a golden move, and it should be done BEFORE anyone
+      touches the deal, not after.
+- [ ] **LANETEST's second vacuity gate still fails under `SIGHTLINE_AIDECLINE=0`** —
+      `vacuousWalk(ordinaryLanesArmed=0)` on the 64-campaign dial-ON walk. Pre-existing on base
+      `e57e151` and reproduced there; P16 fixed only the dial-OFF walk (16 → 128 campaigns, floor
+      unchanged). Same cause: the enemy `overwatch` branch fires on 0.15–0.46% of acts, so any gate
+      counting it needs hundreds of campaigns, not tens. **A gate that fails under the project's own
+      shipped restore-the-old-behaviour dials is a gate a measurement round cannot use.**
+- [ ] **The round cannot separate RIFT from SOFT SAND.** They rode one flag, and each biome is 1
+      mission in 8. A per-mechanic price needs `SIGHTLINE_FORCEBIOME` pinned per arm and its own
+      slot space — and, at 1-in-8 exposure, a much larger n than 160/rung to resolve anything.
+- [ ] **Nobody has looked at whether a chasm makes a fight more INTERESTING.** Win rate is the only
+      axis P16 measured. A rift is a positioning lever at constant threat, which W4 identified as
+      the one kind of lever that could move `choices/ARMED-soldier-turn` — and nobody read it.

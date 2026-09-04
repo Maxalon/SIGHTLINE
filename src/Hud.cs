@@ -2593,6 +2593,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             case GroundKind.Vent:
                 lines.Add((here ? "THERMAL VENT — you are burning; nothing sees across this tile"
                                 : "THERMAL VENT — blocks sight; standing here sets you alight", Pal.Foe)); break;
+            // P16. The RIFT line names the ABSENCES as well as the block, because the absences are
+            // the surprising half: every other impassable thing on this board also stops a bullet.
+            case GroundKind.Rift:
+                lines.Add(("RIFT — nothing crosses; fire and sight cross freely, and it gives no cover", Pal.Foe)); break;
+            case GroundKind.Sand:
+                lines.Add((here ? "SOFT SAND — leaving costs nothing; entering sand costs half a step more"
+                                : "SOFT SAND — a step onto sand costs half a step more", Pal.Suspect)); break;
         }
 
         const int pad = 11, lh = 16;

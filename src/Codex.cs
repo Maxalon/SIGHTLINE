@@ -183,11 +183,32 @@ public static class Codex
                 "gives no cover at all), and touching one sets you alight. Stepping ONTO a vent costs " +
                 (2 + Terrain.VentStepExtra) + " half-tiles - a full-mobility soldier's ENTIRE walk, so crossing takes both " +
                 "actions and a wounded one cannot cross at all. The gaps in the crack are the fords.");
+            // P16 GROUND TRUTH — the two the docket named as the cheapest to make real, on two axes
+            // the layer did not use: one that changes what the board IS, one that changes what a
+            // step COSTS.
+            if (Terrain.NewGround)
+            {
+            Add("RIFT", "VOID",
+                "The chasms on a VOID board are HOLES: NOTHING CROSSES A RIFT. But it is not a wall - sight and fire " +
+                "cross it as if it were open floor, and it gives NO COVER to anyone, on it or beside it. A rift turns " +
+                "a room into lanes without hiding a thing. The gaps in a chasm are the BRIDGES, and there is always " +
+                "at least one: the board is checked, and a rift that would cut the map in two is never laid.");
+            Add("SOFT SAND", "ARID",
+                "The basins on an ARID board drag. Stepping ONTO sand costs " + Terrain.SandStepOrth + " half-tiles " +
+                "instead of 2 (a diagonal " + Terrain.SandStepDiag + " instead of 3), so a full-mobility soldier " +
+                "crosses two sand tiles in one action instead of four of open floor. It is the exact inverse of " +
+                "TUNDRA's ice, and like ice it is movement only: no cover, no sight change. Going around is often " +
+                "faster - and the hostiles work that out too, off the same map you do.");
+            }
             // C4 review: a player cannot tell "this room has no rule" from "this room's rule is
             // undocumented". The manual has to say the silence is deliberate.
-            Add("PLAIN GROUND", "5 ROOMS",
-                "STEEL, ARID, ASH, VOID and NEON have NO ground rule - their floor is ordinary in every way. " +
-                "If the mission banner names no ground, there is none. Only VERDANT, TUNDRA and MAGMA change the fight.");
+            Add("PLAIN GROUND", Terrain.NewGround ? "3 ROOMS" : "5 ROOMS",
+                (Terrain.NewGround ? "STEEL, ASH and NEON have" : "STEEL, ARID, ASH, VOID and NEON have") +
+                " NO ground rule - their floor is ordinary in every way. " +
+                "If the mission banner names no ground, there is none. " +
+                (Terrain.NewGround
+                   ? "The other five - VERDANT, TUNDRA, MAGMA, VOID and ARID - all change the fight."
+                   : "Only VERDANT, TUNDRA and MAGMA change the fight."));
         }
         Add("DIAGONALS", "CORNERS",
             "A diagonal shot at range past ONE facing block is HALF cover (-10 low / -20 high). A TRUE corner " +

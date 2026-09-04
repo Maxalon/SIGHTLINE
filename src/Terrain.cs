@@ -20,17 +20,38 @@ public enum GroundKind
     Undergrowth,   // VERDANT — dense fern: low cover from EVERY angle, but only against distant fire
     Ice,           // TUNDRA  — slick frost drift: costs half a step to cross
     Vent,          // MAGMA   — a steaming fissure: opaque, dear to cross, and it sets you alight
+    Rift,          // VOID    — P16: a hole in the floor. IMPASSABLE, but TRANSPARENT and giving NO cover
+    Sand,          // ARID    — P16: soft sand. Crossing costs MORE than a step — the inverse of ice
 }
 
-/// The BIOME MECHANIC layer (wave C4 "EIGHT BIOMES ARE PAINT").
+/// The BIOME MECHANIC layer (wave C4 "EIGHT BIOMES ARE PAINT", extended by P16 "GROUND TRUTH").
 ///
-/// THREE biomes are mechanical, on three DIFFERENT axes, and each one is the mechanic its own
+/// FIVE biomes are mechanical, on FIVE DIFFERENT axes, and each one is the mechanic its own
 /// art already implied:
 ///   VERDANT -> UNDERGROWTH  (the COVER axis)     "the ferns hide you from anything far away"
 ///   TUNDRA  -> SLICK ICE    (the MOVEMENT axis)  "the drift is a fast lane"
 ///   MAGMA   -> THERMAL VENTS(the SIGHT axis)     "you cannot see across the crack, and it burns"
-/// The other five (STEEL / ARID / ASH / VOID / NEON) are still paint. That is declared, not
-/// hidden — see docs/DEVLOG.md §C4 "what I did not do".
+///   VOID    -> RIFT         (the TOPOLOGY axis)  "you cannot cross the hole - but you can see and
+///                                                 shoot clean across it"                    (P16)
+///   ARID    -> SOFT SAND    (the DRAG axis)      "the basin drags: the exact inverse of ice" (P16)
+/// The other three (STEEL / ASH / NEON) are still paint. That is declared, not hidden — see
+/// docs/DEVLOG.md §C4 "what I did not do" and §GROUND TRUTH. `SIGHTLINE_BIOMETEST` asserts the
+/// split in BOTH directions (a mechanical biome must stamp, a paint biome must not), so promoting
+/// a sixth has to come here and restate it.
+///
+/// P16 — WHY THESE TWO, AND WHY ONLY ONE OF THEM HAS A GUARD. A RIFT is the first ground that
+/// changes what the board IS rather than what a tile COSTS: it is the only shape on this board
+/// that stops MOVEMENT without stopping SIGHT and without granting COVER, so it cuts open floor
+/// into lanes and chokepoints while hiding nothing — the exact opposite of a MAGMA vent, which
+/// hides everything and can still be walked through. That power is also the hazard: one
+/// impassable tile in the wrong place cuts a spawn from the evac zone and makes a mission
+/// unwinnable, which is far worse than a biome that is merely paint. So `StampRift` is the ONLY
+/// stamper in this file that VALIDATES: each candidate tile is laid, the board is re-flooded
+/// through `Grid.CostMap` — the same cost map both teams path with — and the tile is REVERTED
+/// unless the reachable set shrank by exactly itself. A chasm therefore cannot seal, and the gaps
+/// the guard refuses to fill ARE the bridges. They are the only gap source: unlike MAGMA's fords
+/// there is no decorative gap roll, so every gap in a rift means "this is where you cross".
+/// SOFT SAND needs no guard and no argument: it is one line in `Grid.CostMap` and nothing else.
 ///
 /// SYMMETRY is structural, not promised: every rule lives in one of the three functions BOTH
 /// sides already ask for the truth — `Grid.GetCover`, `Grid.CostMap`, `Grid.HasLineOfSight` —
@@ -53,9 +74,24 @@ public static class Terrain
     /// at the stamper, so a hand-stamped harness board is inert too.
     public static bool Enabled = true;
 
+    /// P16's OWN off switch (SIGHTLINE_NEWGROUND=0), and the arm P16's measurement round was
+    /// actually run against. `Terrain.Enabled` (SIGHTLINE_BIOMEMECH=0) restores the pre-**C4**
+    /// board — no ground layer at all — so an A/B on it would have priced C4 and P16 TOGETHER and
+    /// called the sum P16's. This one restores the pre-**P16** board exactly: VERDANT / TUNDRA /
+    /// MAGMA keep their mechanics, VOID and ARID go back to being paint. One lever per round
+    /// (CLAUDE.md), which the coarser flag could not give.
+    /// Gated at the PREDICATES as well as at the stamper, for the same reason Enabled is: a board
+    /// a harness stamped by hand has to be inert too.
+    public static bool NewGround = true;
+
+    /// Both gates at once — the condition every RIFT and SAND rule reads.
+    public static bool NewOn => Enabled && NewGround;
+
     // Indices into Biome.All (STEEL ARID TUNDRA VERDANT ASH VOID NEON MAGMA).
+    public const int BiomeArid    = 1;
     public const int BiomeTundra  = 2;
     public const int BiomeVerdant = 3;
+    public const int BiomeVoid    = 5;
     public const int BiomeMagma   = 7;
 
     // ---- VERDANT: UNDERGROWTH ----------------------------------------------------------
@@ -89,13 +125,39 @@ public static class Terrain
     // could never have failed. A tuning number a test asserts must be readable at runtime.
     public static int VentBurnTurns = 2;   // Burning turns applied to whoever touches a vent
 
+    // ---- P16 / ARID: SOFT SAND ---------------------------------------------------------
+    // The exact inverse of ice, in the same units (Grid.CostMap is in HALF-tiles: orthogonal 2,
+    // diagonal 3). Ice HALVES a step; sand costs HALF A STEP MORE — 2 -> 3 and 3 -> 5 (4.5,
+    // rounded AGAINST the mover, which is the same direction ice's 1.5 -> 2 rounds; both round
+    // away from the mover's advantage, so the pair is symmetric in spirit as well as in sign).
+    // NOT const, for the reason VentStepExtra is not: a const folds at compile time, so
+    // BIOMETEST's literal pin on it would become unreachable code and could never fail.
+    //
+    // BOUND, and it is load-bearing the way the vent's 8 is. A full-mobility (4) soldier's single
+    // action is 8 half-tiles: at 3 that is TWO sand tiles crossed and 2 half-tiles left over, so
+    // sand is always a price and never a wall. At 5 it would be one tile per action and sand would
+    // BE terrain; BIOMETEST asserts the literal 3 and the >= 2-tiles-per-action invariant, so
+    // raising it fails loudly instead of quietly turning a basin into a barrier.
+    // ---- P16 / VOID: the RIFT's shape floor ---------------------------------------------
+    // How hard the stamper works to put a REAL chasm on the board. A rift that shrinks to two
+    // scattered tiles is not a weak mechanic, it is a rendering artefact the player has to route
+    // around for no reason, so the walk repeats until the board carries a chasm or the tries run
+    // out. BIOMETEST pins the resulting real-board minimum, which is the number that matters.
+    public static int RiftFloor = 8;       // rift tiles that must survive the orphan cull
+    public static int RiftTries = 8;       // max cracks walked to get there (2 is the usual answer)
+
+    public static int SandStepOrth = 3;    // total half-tiles for an orthogonal step ONTO sand
+    public static int SandStepDiag = 5;    // total half-tiles for a diagonal step ONTO sand
+
     /// The board-space tag shown beside the biome name in the mission banner ("VERDANT ·
-    /// UNDERGROWTH"), or null for the five biomes that are still paint.
+    /// UNDERGROWTH"), or null for the three biomes that are still paint.
     public static string Tag(int biomeIndex) => !Enabled ? null : biomeIndex switch
     {
         BiomeVerdant => "UNDERGROWTH",
         BiomeTundra  => "SLICK ICE",
         BiomeMagma   => "THERMAL VENTS",
+        BiomeVoid    => NewGround ? "RIFT" : null,
+        BiomeArid    => NewGround ? "SOFT SAND" : null,
         _            => null,
     };
 
@@ -107,6 +169,10 @@ public static class Terrain
         BiomeTundra  => "SLICK ICE: crossing a frost drift costs HALF a step, so the drift is a fast lane - for both sides.",
         BiomeMagma   => "THERMAL VENTS: no one can see across a steaming fissure, forcing a crossing costs movement, "
                         + "and touching one sets you alight.",
+        BiomeVoid    => !NewGround ? null : "RIFT: nothing crosses the chasm - but sight and fire cross it freely, and it gives no cover. "
+                        + "Find the bridge, or shoot across.",
+        BiomeArid    => !NewGround ? null : "SOFT SAND: the basins drag. A step onto sand costs half a step MORE, so going around is "
+                        + "often faster - for both sides.",
         _            => null,
     };
 
@@ -133,7 +199,14 @@ public static class Terrain
         // twenty puts three patches on top of each other — and a board where a third of the floor
         // is fern is a board where cover has stopped meaning anything. The budget is the ceiling
         // BIOMETEST pins; the walkers just stop when they hit it.
-        int budget = biomeIndex switch { BiomeVerdant => 44, BiomeTundra => 34, BiomeMagma => 24, _ => 0 };
+        // P16: ARID's basins get the biggest budget of any biome (sand is the mildest rule on the
+        // board — a slow tile, no cover, no sight change — so it has to cover enough floor that
+        // routing AROUND one is a real decision rather than a rounding error). VOID's gets the
+        // smallest: a rift tile is the only ground that removes a tile from the board entirely, and
+        // the guard below rejects a large share of the walk anyway.
+        int budget = biomeIndex switch { BiomeVerdant => 44, BiomeTundra => 34, BiomeMagma => 24,
+                                         BiomeArid => NewGround ? 46 : 0, BiomeVoid => NewGround ? 26 : 0,
+                                         _ => 0 };
         bool Free(int x, int y)
         {
             if (budget <= 0) return false;
@@ -155,13 +228,82 @@ public static class Terrain
         }
         void Put(int x, int y, GroundKind k) { if (Free(x, y)) { grid.Ground[x, y] = k; budget--; } }
 
+        // ---- P16 / VOID: the RIFT's REACHABILITY GUARD --------------------------------------
+        // The one stamper here that can make a mission UNWINNABLE, so it is the one stamper that
+        // proves it did not. `Mission.TryApplyLayout` already refuses an arena whose cover cuts a
+        // soldier off from the objective; a rift is laid AFTER that check has passed, so it needs
+        // its own — and a stronger one, because a rift also has to survive things that appear LATER
+        // than the stamp (DEFEND reinforcement waves, endless hordes, the pressure clock's
+        // spawns, a shoved body, a planted evac beacon). Those pick their tile at spawn time, so
+        // "the objectives I know about today are reachable" is not enough.
+        //
+        // The invariant is therefore the strongest one available and the cheapest to state:
+        // THE RIFT MAY NOT DISCONNECT ANYTHING AT ALL. Every tile that was reachable from the
+        // anchor before the stamp is still reachable after it, except the rift tiles themselves.
+        // A candidate is laid, the board is re-flooded through Grid.CostMap — the SAME cost map
+        // Ai.Plan, the move overlay, the VIP leash and every reachability probe already use, so
+        // there is no second connectivity model to drift — and reverted unless the reachable set
+        // shrank by exactly one. A cut vertex can never be laid; a pocket can never be sealed.
+        //
+        // Cost: one Dijkstra over 198 tiles per candidate, ~30 candidates per board, once per
+        // mission. Measured in the noise beside SetupMission's own work.
+        int anchorX = -1, anchorY = -1, reach = 0;
+        if (biomeIndex == BiomeVoid)
+        {
+            // The flags are recomputed at the end of Stamp, but IsFloor has to see a rift tile as
+            // non-floor WHILE we are laying them or the flood below is measuring the wrong board.
+            grid.AnyRift = true;
+            // The anchor must be a walkable tile the stamp can never take. Prefer a RESERVED one
+            // (a unit's own tile — Free already excludes those); fall back to the first walkable
+            // tile and exclude it explicitly. Scanned in grid order, never over the HashSet, so
+            // the choice is deterministic by construction rather than by hash-order luck.
+            for (int x = 0; x < grid.W && anchorX < 0; x++)
+                for (int y = 0; y < grid.H && anchorX < 0; y++)
+                    if (grid.IsFloor(x, y) && reserved != null && reserved.Contains((x, y))) { anchorX = x; anchorY = y; }
+            for (int x = 0; x < grid.W && anchorX < 0; x++)
+                for (int y = 0; y < grid.H && anchorX < 0; y++)
+                    if (grid.IsFloor(x, y)) { anchorX = x; anchorY = y; }
+            reach = anchorX >= 0 ? ReachCount(grid, anchorX, anchorY) : 0;
+        }
+        bool PutRift(int x, int y)
+        {
+            if (anchorX < 0) return false;
+            if (x == anchorX && y == anchorY) return false;   // never eat the anchor
+            if (!Free(x, y)) return false;
+            grid.Ground[x, y] = GroundKind.Rift;
+            int after = ReachCount(grid, anchorX, anchorY);
+            // >= reach-1 rather than == reach-1 on purpose: a candidate that was ALREADY
+            // unreachable (a pocket the pre-existing cover had sealed) leaves the count flat, and
+            // removing an unreachable tile disconnects nothing. Anything that costs MORE than
+            // itself is a cut and goes back.
+            if (after < reach - 1) { grid.Ground[x, y] = GroundKind.None; return false; }
+            reach = after; budget--;
+            return true;
+        }
+
         switch (biomeIndex)
         {
             case BiomeVerdant: StampPatches(grid, s, GroundKind.Undergrowth, Put); break;
             case BiomeTundra:  StampLanes(grid, s, GroundKind.Ice, Put);           break;
             case BiomeMagma:   StampFissure(grid, s, Put);                          break;
+            case BiomeArid:    StampBasins(grid, s, Put);                           break;
+            case BiomeVoid:    StampRift(grid, s, PutRift); CullOrphanRifts(grid);  break;
         }
         grid.RefreshGroundFlags();
+    }
+
+    /// How many tiles the shared cost map can reach from (ax,ay), the anchor included. The rift
+    /// guard's whole measurement — deliberately routed through `Grid.CostMap` rather than a
+    /// bespoke flood fill, so "reachable" means exactly what it means to `Ai.Plan` and to the
+    /// player's move overlay (8-directional, no corner-cutting past a blocker, barrels and rifts
+    /// excluded by `Grid.IsFloor`).
+    static int ReachCount(Grid grid, int ax, int ay)
+    {
+        var cost = grid.CostMap(ax, ay, null, out _, 1 << 22);
+        int n = 0;
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++) if (cost[x, y] >= 0) n++;
+        return n;
     }
 
     /// VERDANT — 4..6 lobed fern patches, each a short walk of overlapping radius-1 discs.
@@ -228,6 +370,135 @@ public static class Terrain
                 Reflect(grid, ref px, ref py, ref ang);
             }
         }
+    }
+
+    /// ARID — 3..4 broad SAND BASINS: overlapping radius-2 discs walked a short way, so a basin is
+    /// a wide soft bowl rather than a lane. Deliberately the opposite SHAPE from TUNDRA's drift as
+    /// well as the opposite SIGN: a drift is a line you ride ALONG, a basin is an area you route
+    /// AROUND, and if sand came in lanes the two biomes would read as the same board painted twice.
+    /// It is also the widest ground on the board, because sand is the mildest rule on it — a basin
+    /// nobody has to detour around is a rule nobody meets.
+    static void StampBasins(Grid grid, int s, Action<int, int, GroundKind> put)
+    {
+        int n = 3 + HI(s, 0, 13, 2);                       // 3..4 basins
+        for (int i = 0; i < n; i++)
+        {
+            float px = 2f + H(s, i, 51) * (grid.W - 4f);
+            float py = 1f + H(s, i, 52) * (grid.H - 2f);
+            float ang = H(s, i, 53) * MathF.Tau;
+            const int lobes = 2;                           // two overlapping discs = one oval bowl
+            for (int k = 0; k < lobes; k++)
+            {
+                int cx = (int)MathF.Round(px), cy = (int)MathF.Round(py);
+                for (int dx = -2; dx <= 2; dx++)
+                    for (int dy = -2; dy <= 2; dy++)
+                        if (dx * dx + dy * dy <= 4) put(cx + dx, cy + dy, GroundKind.Sand);  // a rounded disc, not a diamond
+                ang += (H(s, i, 240 + k) - 0.5f) * 1.4f;
+                float step = 1.7f + H(s, i, 260 + k) * 1.3f;
+                px += MathF.Cos(ang) * step; py += MathF.Sin(ang) * step;
+                Reflect(grid, ref px, ref py, ref ang);
+            }
+        }
+    }
+
+    /// VOID — 2 RIFTS: long, low-wander cracks biased toward vertical, so a chasm tends to divide
+    /// the board across the squad's left-to-right axis and the run has to commit to a side.
+    ///
+    /// WIDTH 1 AND NO DELIBERATE GAPS — both are deliberate, and both are the opposite of MAGMA.
+    /// A fissure needs decorative gaps because a continuous 1-wide crack would be a total SIGHT
+    /// barrier; a rift blocks no sight at all, so it needs none, and every gap in it is one the
+    /// reachability guard REFUSED to fill. That makes a gap mean something exact — "this is the
+    /// bridge" — instead of meaning "the walker rolled a gap here". Width stays 1 because a
+    /// 2-wide impassable band is not twice as interesting, it is twice as likely to be a wall.
+    static void StampRift(Grid grid, int s, Func<int, int, bool> put)
+    {
+        // FIRST CAPTURE, AND WHAT IT CHANGED. The first cut walked like MAGMA's fissure (a free
+        // start anywhere on the board, wander 0.50, 15-19 steps) and the screenshots showed exactly
+        // the failure C4's review recorded against MAGMA's first cut: SIX ISOLATED BLACK SQUARES,
+        // not a chasm. The cause is the board, not the walker — cover, barrels and the reserved
+        // rings eat ~60% of a walk, and once a meandering line is gapped that hard, nothing about
+        // the survivors says they were ever one line. Three changes, all aimed at that:
+        //   (a) EDGE-ANCHORED. A crack starts ON a board edge and heads across, so it spans the
+        //       short axis instead of wandering in the middle of the room.
+        //   (b) NEARLY STRAIGHT (wander 0.22 against the fissure's 0.55). A straight line still
+        //       reads as a line when a third of it is missing; a meander does not.
+        //   (c) NO ORPHANS. Stamp.CullOrphanRifts drops any rift tile with no rift neighbour at
+        //       all, because a lone 1-tile hole is confetti: it neither reads as a chasm nor asks
+        //       anything of a player, who simply steps around it.
+        // (d) A FLOOR, MET BY WALKING AGAIN — never by relaxing the guard. Two cracks is the
+        // usual answer, but an edge-anchored straight line that happens to start against a wall of
+        // cover can lay almost nothing, and the orphan cull then takes the rest: the first version
+        // of this measured realMin = 0 over 40 real boards, which is precisely the thin tail
+        // CLAUDE.md records against MAGMA ("about 1 board in 240") and tells the next wave not to
+        // reproduce. So the stamper keeps walking — up to RiftTries cracks — until the board
+        // carries RiftFloor tiles that will SURVIVE the cull. Deterministic (each attempt is its
+        // own salt), bounded, and it cannot overrun: `budget` still stops it.
+        int n = RiftTries;
+        for (int i = 0; i < n; i++)
+        {
+            if (i >= 2 && ConnectedRiftCount(grid) >= RiftFloor) break;
+            // (a) start on the TOP or BOTTOM edge and head into the board. The short axis is 11
+            // tiles, so a crack that crosses it genuinely divides the room left from right — the
+            // axis the squad advances along, which is what makes the bridge a decision.
+            bool fromTop = H(s, i, 63) < 0.5f;
+            float px = 2f + H(s, i, 61) * (grid.W - 4f);
+            float py = fromTop ? 0f : grid.H - 1f;
+            float ang = (fromTop ? MathF.PI * 0.5f : -MathF.PI * 0.5f)
+                        + (H(s, i, 64) - 0.5f) * 0.9f;     // a slanted crack, never a scribble
+            int len = 15 + HI(s, i, 65, 5);                // 15..19 steps each
+            for (int k = 0; k < len; k++)
+            {
+                put((int)MathF.Round(px), (int)MathF.Round(py));
+                ang += (H(s, i, 280 + k) - 0.5f) * 0.22f;  // (b)
+                px += MathF.Cos(ang) * 1.05f; py += MathF.Sin(ang) * 1.05f;
+                Reflect(grid, ref px, ref py, ref ang);
+            }
+        }
+    }
+
+    /// How many rift tiles would SURVIVE CullOrphanRifts — i.e. have at least one rift neighbour.
+    /// Non-destructive on purpose: culling between attempts would delete tiles the next crack was
+    /// about to adjoin, so the walk counts what it would keep and only culls once, at the end.
+    static int ConnectedRiftCount(Grid grid)
+    {
+        int n = 0;
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++)
+            {
+                if (grid.Ground[x, y] != GroundKind.Rift) continue;
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int ax = x + dx, ay = y + dy;
+                        if (grid.InBounds(ax, ay) && grid.Ground[ax, ay] == GroundKind.Rift)
+                        { n++; dx = 2; break; }
+                    }
+            }
+        return n;
+    }
+
+    /// (c) Drop every rift tile that has no rift neighbour in any of the eight directions. Removing
+    /// an impassable tile can only ADD reachability, so this cannot break the guard's invariant —
+    /// which is why it is safe to run after the walk rather than inside it.
+    static void CullOrphanRifts(Grid grid)
+    {
+        var doomed = new List<(int x, int y)>();
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++)
+            {
+                if (grid.Ground[x, y] != GroundKind.Rift) continue;
+                bool friend = false;
+                for (int dx = -1; dx <= 1 && !friend; dx++)
+                    for (int dy = -1; dy <= 1 && !friend; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx, ny = y + dy;
+                        if (grid.InBounds(nx, ny) && grid.Ground[nx, ny] == GroundKind.Rift) friend = true;
+                    }
+                if (!friend) doomed.Add((x, y));
+            }
+        foreach (var (x, y) in doomed) grid.Ground[x, y] = GroundKind.None;
     }
 
     /// Keep a walker on the board by REFLECTING its heading off the edge rather than stopping.

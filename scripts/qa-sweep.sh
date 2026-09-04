@@ -129,6 +129,16 @@ echo -n "SHOVETEST  : "; verdict "$(SIGHTLINE_SHOVETEST=1 run | grep -oE "SHOVET
 echo -n "CONCEALTEST: "; verdict "$(SIGHTLINE_CONCEALTEST=1 run | grep -oE "CONCEALTEST: (PASS|FAIL)" | head -1)"
 echo -n "HAZARDTEST : "; verdict "$(SIGHTLINE_HAZARDTEST=1 run | grep -oE "HAZARDTEST: (PASS|FAIL)" | head -1)"
 echo -n "BIOMETEST  : "; verdict "$(SIGHTLINE_BIOMETEST=1 run | grep -oE "BIOMETEST: (PASS|FAIL)" | head -1)"
+# P16 GROUND TRUTH: the RIFT is the project's first IMPASSABLE ground, so it is the first that can
+# STRAND a unit or seal a mission's objective away from its squad. This walks 576 real VOID boards
+# (8 objectives x 6 missions x 6 seeds x heats {0,8}) through the real SetupMission and asserts the
+# DIFFERENTIAL - every tile reachable without the ground layer is still reachable with it, except
+# the rift tiles themselves - plus every named fixture. The differential is the strong form on
+# purpose: DEFEND waves, the pressure clock's spawns and a planted beacon pick their tile AFTER the
+# stamp, so enumerating today's fixtures would pass a board whose only sealed pocket is where the
+# third wave lands.
+echo -n "RIFTTEST   : "; verdict "$(SIGHTLINE_RIFTTEST=1 run | grep -oE "RIFTTEST: (PASS|FAIL)" | head -1)"
+echo -n "RIFTTEST   : "; verdict "$(SIGHTLINE_RIFTTEST=1 run | grep -oE "RIFTTEST: (PASS|FAIL)" | head -1)"
 echo -n "BENCHTEST  : "; verdict "$(SIGHTLINE_BENCHTEST=1 run | grep -oE "BENCHTEST: (PASS|FAIL)" | head -1)"
 echo -n "DRAFTTEST  : "; verdict "$(SIGHTLINE_DRAFTTEST=1 run | grep -oE "DRAFTTEST: (PASS|FAIL)" | head -1)"
 echo -n "METATEST   : "; verdict "$(SIGHTLINE_METATEST=1 run | grep -oE "METATEST: (PASS|FAIL)" | head -1)"

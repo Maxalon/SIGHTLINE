@@ -15030,3 +15030,212 @@ the monitor and round-trips; release archive named, checksummed (digest RECOMPUT
 | `bash scripts/publish.sh --no-archive` | stop at the directory (the pre-P17 behaviour). |
 | `Display.AllowLaunchFit` | default **false**; the real launch sets it. The structural reason the harness's window size cannot move. |
 | `Display.LaunchChromeH` | 64 px — the stated, conservative title-bar/taskbar allowance. Not measurable from raylib. |
+
+---
+
+## PROGRAM PARALLAX — wave P16 "GROUND TRUTH" (2026-09-04, base `e57e151`, branch `wave/ground-truth`)
+
+**Two of the five paint biomes become mechanical, on two axes the ground layer did not use.**
+C4 "EIGHT BIOMES ARE PAINT" gave VERDANT / TUNDRA / MAGMA a rule each and said out loud, in
+`src/Terrain.cs` and in `SIGHTLINE_BIOMETEST`, that the other five were paint on purpose. P16
+takes the two the research docket named as cheapest:
+
+| biome | ground | axis | the rule |
+|---|---|---|---|
+| **VOID** | **RIFT** | **TOPOLOGY** | impassable — but **transparent**, and it gives **no cover** |
+| **ARID** | **SOFT SAND** | **DRAG** | a step onto sand costs **3** half-tiles (diagonal **5**) instead of 2/3 |
+
+`Terrain.cs`'s header now declares **five mechanical, three paint (STEEL / ASH / NEON)**, and
+BIOMETEST asserts the split in both directions with an explicit count, so a sixth promotion has to
+come to the file and restate it.
+
+### Why a RIFT is worth a wave, and why it is the dangerous one
+
+Every other blocker on this board hides something. High cover stops sight *and* shelters. Smoke and
+a MAGMA vent stop sight. A barrel stops movement and explodes. **A rift stops movement and hides
+nothing** — you shoot straight across it, and standing beside one shelters you from exactly
+nothing. That combination is new, and it is the opposite of MAGMA: a vent hides everything and can
+still be walked through; a rift can never be walked through and hides nothing. It turns open floor
+into lanes and chokepoints without adding a single thing the player cannot see.
+
+That is also the hazard. **An impassable tile placed carelessly makes a mission unwinnable** — it
+cuts a spawn from the evac zone, or a soldier from the terminal — and a biome that occasionally
+does that is far worse than a biome that is paint.
+
+### The guard, and what it is worth
+
+`Terrain.StampRift` is the only stamper in the file that **validates**. Each candidate tile is
+laid, the board is re-flooded through **`Grid.CostMap`** — deliberately the same cost map `Ai.Plan`,
+the move overlay, the VIP leash and every reachability probe already use, so there is no second
+connectivity model to drift — and the tile is **reverted unless the reachable set shrank by exactly
+itself**. A cut vertex can never be laid and a pocket can never be sealed, so:
+
+* **a chasm cannot seal**, and
+* **the gaps the guard refuses to fill ARE the bridges** — and, unlike MAGMA's fords, they are the
+  *only* gap source. There is no decorative gap roll, so every gap in a rift means "cross here".
+
+The invariant is stronger than "today's objectives are reachable" on purpose, because the things a
+rift could strand mostly **do not exist yet at stamp time**: DEFEND reinforcement waves, the
+anti-turtle clock's spawns, LAST STAND hordes, a shoved body, a planted forward evac beacon. They
+pick their tile at spawn time. A test that enumerated the fixtures would have passed a board whose
+only sealed pocket is where wave 3 lands.
+
+**`SIGHTLINE_RIFTTEST`** is the gate: 8 objectives x 6 missions x 6 seeds x heats {0,8} =
+**576 real VOID boards** through the real `SetupMission`, asserting the **differential** (every tile
+reachable without the ground layer is still reachable with it, except the rift tiles) plus every
+named fixture — soldier, hostile, evac tile, terminal, sabotage charge, intel cache, ESCORT/RESCUE
+asset — reachable and not *in* the hole. **576/576, zero stranded tiles.**
+
+**It is not a formality.** With the guard's revert disabled (`if (false) …`), the same sweep strands
+**up to 69 tiles on 32 of 576 boards**, and BIOMETEST's synthetic walled board strands **106 of 131**
+on its very first seed. The soft-lock was real and would have shipped.
+
+### The first capture was six black squares, and that changed the stamp
+
+The rift's first cut walked like MAGMA's fissure (free start, wander 0.50). On a real board cover,
+barrels and the reserved rings eat ~60% of a walk, and the screenshots showed **six isolated black
+tiles and no chasm** — precisely the failure C4's own review recorded against MAGMA's first cut
+("ten scattered singles rather than a crack"). A lone 1-tile hole is not a weak chasm; it is a tile
+the player detours around for no reason and which reads as a rendering artefact. Four changes:
+
+1. **Edge-anchored** — a crack starts ON a board edge and heads across the short (11-tile) axis, so
+   it divides the room along the axis the squad advances.
+2. **Wander 0.50 → 0.22.** A straight line still reads as a line when a third of it is missing; a
+   meander does not.
+3. **`Terrain.CullOrphanRifts`** — any hole with no rift neighbour in eight directions is removed.
+   Safe by construction: removing an impassable tile can only ADD reachability.
+4. **A shape floor met by WALKING AGAIN** (`Terrain.RiftFloor = 8`, `RiftTries = 8`). (2)+(3) alone
+   measured **`realMin[VOID] = 0`** over 40 real boards — a stamp that sometimes vanishes, which is
+   the MAGMA thin tail CLAUDE.md explicitly tells the next wave not to reproduce. The floor is met
+   by walking another crack, **never** by relaxing the guard or lowering the test's bar.
+
+Real-board density is now **VOID 12.9 (8–24)**, **ARID 32.0 (12–46)**, beside C4's TUNDRA 17.7,
+VERDANT 34.0, MAGMA 12.9. BIOMETEST pins the VOID minimum against `Terrain.RiftFloor` (not the
+generic `< 4`) and asserts **zero orphan rifts** on the 40 boards that ship.
+
+### Symmetry: `Ai.cs` is untouched, and that is the claim
+
+Both rules live where both teams already ask: **`Grid.IsFloor`** (one word — the rift joins barrels)
+and **`Grid.CostMap`** (one line for sand). `Ai.cs` gained **zero lines**. The opponent re-prices
+itself because its candidate set *is* the cost map, and it cannot path onto a rift because
+`IsFloor` is the one chokepoint pathing, deployment, shove/extract destinations, reinforcement and
+horde spawn seats, `LightFire` and `PlaceIntelCache` all go through. The rift is deliberately
+**absent** from `BlocksSight`, `IsVapor` and `GetCover` — those three absences ARE the mechanic, so
+BIOMETEST measures each of them (a sightline, a commanding sightline, a diagonal sightline, a cover
+level, an adjacency, and the hit% of a real shot fired across the chasm) rather than asserting a
+field is unset.
+
+### Watch your own test fail — four mutations
+
+| mutation | BIOMETEST / RIFTTEST said |
+|---|---|
+| rift guard's revert disabled | `riftStranded[seed0m1]=106vs25, riftGuardBoards=0, riftGuardStampedNothing` — and RIFTTEST **FAIL (32 violations)**, up to 69 tiles stranded |
+| rift dropped from `Grid.IsFloor` | `riftIsStillFloor, riftPathable=14, riftNoDetour=28vs28, riftCaughtFire, riftStranded…` |
+| rift added to `Grid.BlocksSight` (built as a vent) | `riftBlockedSight, riftBlocksSight, riftBlockedDiagonalSight` |
+| sand cost 3/5 → 2/3 (the pre-P16 board) | `sandStepOrth=2, sandStepDiag=3, sandConst=2/3, sandCostNothing=79vs79` |
+
+and restored: **PASS**. `SIGHTLINE_BIOMEMECH=0` still makes BIOMETEST fail loudly (it reads ambient
+`Terrain.Enabled` by design) and makes RIFTTEST vacuous — both the C4 proof, unchanged.
+
+### The measurement — near-inert on win rate, at 18.3% discordance
+
+`SIGHTLINE_BIOMEMECH=0` is the **wrong arm** for this wave: it restores the pre-**C4** board, so a
+round against it prices C4 and P16 together. **`SIGHTLINE_NEWGROUND=0`** was added for it and
+restores the pre-**P16** board exactly (VOID and ARID paint again; C4's three untouched, proven by a
+byte-comparison leg in BIOMETEST). Base `ba34279`, Release snapshot, 3 rungs x 8 CRN slot bases x 20
+= **160/rung/arm, 960 campaigns**, 48/48 chunks `runs=20` asserted, heat pinned. Raw round:
+`docs/measurements/p16/`.
+
+| rung | A win% | B win% | delta | McNemar SE | cluster SE | t(7) | discordant | MDE(80%) |
+|---|---|---|---|---|---|---|---|---|
+| h0 | 43.1 | 45.6 | **−2.5** | 4.05 | 4.12 | −0.61 | 42/160 | ±11.3 |
+| h4 | 22.5 | 23.8 | **−1.2** | 3.75 | 3.24 | −0.39 | 36/160 | ±10.5 |
+| h8 | 6.2 | 5.0 | **+1.2** | 1.98 | 2.06 | +0.61 | 10/160 | ±5.5 |
+
+**Pooled McNemar, all 480 CRN pairs: b=42 / c=46, discordant 88, z = −0.43, delta −0.83, 95% CI
+[−4.7, +3.0].**
+
+**Read the discordance first.** This is NOT the shape this project has misread before (a flat row at
+low discordance, which is absence of evidence dressed as neutrality): **88 of 480 paired worlds —
+18.3% — came out differently**, so the lever demonstrably changes the game. What the round says is
+that the change does not resolve into a win-rate shift at this n — ±10 points per rung, ±4 pooled.
+**A real effect smaller than ±4 points pooled is not excluded, and is not claimed either way.**
+
+**THE OPENER CELL IS CLEAN — the cell C4 failed.** `byNodeKind` **Start: +0.0 / +0.6 / +0.0** at
+h0/h4/h8, n=160 per arm per rung, unpaired SE ≈ 3.1. C4's layer landed **−4.37 (t = −4.53)** there
+and owed a stamp-density change for it; P16's lands nothing. The mechanism is plain in hindsight:
+neither a rift nor sand can kill you or hide a shooter, so neither adds lethality to a fight the
+squad opens with no promotion, perk, mod or boon. They change routing, and routing is the thing a
+four-rookie opener has the most slack in.
+
+**A control that says how noisy the per-biome cells are.** `byBiome` STEEL is paint in **both** arms
+and cannot have moved — it reads **−4.8 / +0.9 / −1.8**. So a per-biome cell at n ≈ 80 carries about
+±5 of pure noise, and none of VOID (+2.3 / −0.5 / +5.7) or ARID (−1.1 / −1.3 / −8.8, its own
+unpaired SE 8.8) is a result. **Do not quote a per-biome cell from this round.**
+
+**What the round cannot say:** it cannot separate RIFT from SOFT SAND (one flag, and each biome is
+1 mission in 8 — splitting halves an already under-powered design); it cannot see feel or decision
+density; and it is a 3-rung round, not a ladder. **L5 remains the ladder of record.**
+
+### THE DEAL — verified, quantified, and deliberately NOT changed
+
+The docket's claim holds **exactly**. `Biome.IndexFor(m, seed) = (seed + m − 1) % 8` is a fixed
+8-cycle with a per-run offset, so `biome(m+1) = biome(m)+1` always. Enumerated over 4,000 seeds:
+**8 of the 56 possible ordered biome adjacencies**, and only **8 distinct 6-mission sequences** —
+every campaign in the game is one of eight rotations of a single list, and **TUNDRA is followed by
+VERDANT in every run ever played**. With five biomes now carrying a rule, that is eight of
+fifty-six possible "what did the last room teach me / what does this one ask" transitions.
+
+**It was not changed, and the cost is bigger than the docket knew.** Two findings:
+
+1. **The deal is coupled to the ARENA.** `Mission.DeckPick` reads `Biome.IndexFor` for its 25%
+   theme-hint pull. Re-dealing the biome therefore re-deals the arena on a measured **28.9% of
+   missions** (2,000 seeds x 6, computed against the shipped `DeckPick`). A different arena is a
+   different board, so flipping it **severs the CRN chain for every archive under
+   `docs/measurements/`** exactly as W1 did — re-measure, do not rescale — and it would have
+   confounded P16's own A/B round beyond reading.
+2. **`SIGHTLINE_SAVETEST` CANNOT SEE IT.** Measured: with the deal replaced by a hash, **all three
+   map goldens PASS**. `MapFingerprint` feeds `Run.GenerateMap`'s output, and the deal lives outside
+   the generator. **So the project's save-format guard has a hole here**: a change that re-deals
+   every existing save's arenas is invisible to it. The brief's premise ("changing the deal is a
+   save-format change; SAVETEST pins it") is false as stated. This is in ROADMAP as its own item.
+
+`SIGHTLINE_BIOMEDEAL=hash` is left as a **priced, unspent, default-OFF** dial (read once at class
+load, so the shipped build is byte-identical), and BIOMETEST **pins that it is off** and that the
+shipped deal really reaches exactly 8 adjacencies — so "priced but unspent" cannot quietly become
+"spent and unmeasured", and the finding cannot rot into a claim nobody re-derives.
+
+### Found on the way: LANETEST's vacuity gate was under-powered, and already failing on base
+
+The sweep's `LANETEST` failed on this tree with `vacuousWalkOff(ordinaryWatches=1)`. It is **not**
+a P16 regression. The enemy `overwatch` branch fires on **0.15–0.46% of acts** (P10's own archive),
+so its dial-off walk of 16 campaigns yielded a count of 2 against a floor of 2 — a near-Poisson(2)
+draw, and every board change in the game is one draw of it. **Measured on the base commit `e57e151`,
+before any P16 code: `SIGHTLINE_BIOMEMECH=0` gives 0 and `SIGHTLINE_AIDECLINE=0` gives 0.** The gate
+already failed under two of the project's own shipped restore-the-old-behaviour dials — the exact
+flags a measurement round is expected to use. P16's board change knocked it to 1 and surfaced it.
+
+**The floor was not lowered** (the MAGMA-thin-tail lesson, applied): the **sample** is 8x, 16 → 128
+campaigns. Count 4 on the shipped board and 4 with `BIOMEMECH=0`; costs ~5 s of the sweep.
+
+**FOUND AND NOT FIXED:** `SIGHTLINE_AIDECLINE=0` *still* fails LANETEST, at a **different** guard —
+`vacuousWalk(ordinaryLanesArmed=0)`, the 64-campaign dial-ON walk. Also pre-existing on base. It is
+P10's gate and its own fix; ROADMAP.
+
+### New hooks and dials
+
+| name | what |
+|---|---|
+| `SIGHTLINE_RIFTTEST=1` | the VOID chasm's **blocker gate**: 576 real boards, the reachability differential + every named fixture. `=<N>` widens the per-cell seed count. In `qa-sweep.sh`. |
+| `SIGHTLINE_NEWGROUND=0` | restore the **pre-P16** board exactly (VOID and ARID paint again; C4's three untouched). The A/B arm of the round. |
+| `SIGHTLINE_BIOMEDEAL=hash` | **priced, unspent**: replace the fixed 8-cycle biome deal with a per-(seed,mission) hash. Re-deals the arena on 28.9% of missions — its own wave, its own ladder. |
+| `Terrain.NewGround` / `Terrain.NewOn` | the gate every RIFT and SAND rule reads (predicates, not just the stamper). |
+| `Terrain.SandStepOrth` / `SandStepDiag` | 3 / 5 half-tiles. BIOMETEST pins the literals **and** the ≥2-tiles-per-action invariant. |
+| `Terrain.RiftFloor` / `RiftTries` | 8 / 8. The shape floor, met by walking another crack. |
+| `Terrain.CullOrphanRifts` | drops any hole with no neighbour. BIOMETEST asserts zero orphans on the boards that ship. |
+
+### Gate
+
+- `dotnet build -c Release` **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — see the closing lines in the wave's report.
+- Screenshots: `shots/p16-void-m2.png`, `shots/p16-void-m3.png`, `shots/p16-arid.png`.
