@@ -1035,6 +1035,57 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
 pass, and other waves own parts of that file). The biome signature pass stays floor-tile-only,
 so its emissive cues do not creep around cover bases.
 
+## OPEN — found by PARALLAX P19 "THE ROSTER CONTESTS" and deliberately NOT fixed
+
+**Read the corrected numbers here before acting on the roster docket** — two of its four items were
+re-derived to different figures, and one of them would have sent a wave in the wrong direction.
+
+- [ ] **The enemy hover card names the CODEX ENTRY, not the unit.** `src/Hud.cs:2503`:
+      `string title = $"{Codex.NameFor(d.Cls)} — {d.Cls}";`. Every named elite and finale boss —
+      BREAKER / BULWARK / WARDEN / MARSHAL / SIEGELORD / SPYMASTER — has been captioned
+      **"WARLORD — ELITE"** since SIGNAL W5, and P19 made that far more visible by putting a named
+      elite on every ELITE node (see `docs/measurements/p19/eliteshot-on.png`). One line:
+      `string title = (!string.IsNullOrEmpty(d.Name) && d.Name != Codex.NameFor(d.Cls)) ? $"{d.Name} — {d.Cls}" : $"{Codex.NameFor(d.Cls)} — {d.Cls}";`
+      `src/Hud.cs:2375` carries the same expression for the sibling card. P19 left it because
+      `src/Hud.cs` belonged to another developer that wave.
+- [ ] **The ELITE node's PRICE is still blind to what it fields** (C3's open item, now sharper).
+      `Run.ElitePremium` = 14 was set when an ELITE node was "+2 bodies, +1 stat"; it now reliably
+      fields the named elite as well. The premium is at least honest for the first time — but it has
+      never been priced against the fight, and P19's round measured the node getting materially
+      heavier (`byNodeKind` Elite at h8: **38.7% -> 30.1%**, n≈150-166/arm, descriptive not paired).
+- [ ] **CORRECTED — the "contest archetypes almost never appear" figure.** The 0.8% / 1.6% body
+      rates are real (P19 re-derived **BOMBARD 0.69%**, **WARBRINGER 1.55%** over **30,624 spawns /
+      3,796 missions / 960 campaigns**) but they are the WRONG DENOMINATOR: both carry a
+      **one-per-mission cap** in `Mission.SpawnEnemies`, so what decides exposure is per-MISSION
+      presence — **BOMBARD 5.6% of missions, WARBRINGER 12.5%** (exact, because of the cap), i.e.
+      roughly **20%** and **40%** of campaigns at 3.95 missions/campaign. Thin, but not "almost
+      never". CUSTODIAN 1.87%/mission-rate 0.151, PIKEMAN 2.02%/0.163, SPOTTER 2.69%/0.217.
+      **If a future wave wants these commoner, raise the CAP or the per-mission gate, not the body
+      rate**, and price it: P19's own instrument could not resolve either lever it shipped
+      (MDE 4.9-8.6 points at n=320/rung/arm), so a rate change needs a bigger round than one wave.
+- [ ] **CORRECTED — "two authored arena pairs are ~88% tile-identical".** Naive character agreement
+      is meaningless on these templates: they are **85.3% floor on average** (min 69.7%, max 95.5%),
+      so two INDEPENDENT layouts agree on ~73% of tiles for free. On Jaccard over NON-FLOOR tiles
+      (pairwise mean **16.7%**) there is **exactly ONE** structural near-duplicate,
+      **ZIGGURAT / FORGE at 72.7%** — both "commanding raised core" set-pieces. The runner-up is
+      ZIGGURAT/STEPWELL at 54.5%, a different arena. The pairs the naive metric flags at 88.4%
+      (GARRISON/REFINERY, HOOK/GARRISON, CHASM/GARRISON) share **16.0% / 12.5% / 11.5**% of their
+      structure. **De-duplicating one of ZIGGURAT/FORGE is the only defensible arena-diversity item.**
+- [ ] **STILL OPEN AND REAL — `Mission.DeckPick` is objective-blind.** `DeckPick(int seed, int
+      missionNum)` takes no objective and has no objective-aware caller. An EVAC on a plaza and an
+      EVAC whose only open ground is the far corner are the same blind draw. This is a whole wave:
+      it needs a per-arena objective-suitability model, and the deck's ZERO-DRAW purity is
+      load-bearing for every CRN pairing in the project, so any objective term must be a pure
+      derivation off `(seed, mission, objective)` and must be measured (it re-deals arenas, which
+      moves every archived world).
+- [ ] **REFUTED, for the record — "four archetype pairs are stat twins one planner weight apart".**
+      There is **exactly ONE exact statline twin**, SPOTTER/CUSTODIAN (`Smg 5/48/6`), and it is not a
+      planner twin (SPOTTER owns a standoff positioning branch at `Ai.cs:858` plus the focus-fire
+      grant at `Ai.cs:1555`; CUSTODIAN owns the objective-undo branch at `Ai.cs:406`). The near-pair
+      HUNTER/STRIKER differs by HP **and** four planner terms. The roster's AI is well
+      differentiated; what was undifferentiated was the NUMBER the player reads, which is what P19
+      fixed. Do not re-open this as a planner item.
+
 ## OPEN — found by PARALLAX P12 "THE CONFIRMED EIGHT" and deliberately NOT fixed
 
 - [ ] **Delete `Hud.DrawIntro`'s dead caption chain (~35 lines).** It still carries the

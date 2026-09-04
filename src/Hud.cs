@@ -2378,7 +2378,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             string clause = Codex.BlurbClause(d.Cls);
             if (!string.IsNullOrEmpty(clause))
             {
-                idTitle = $"{Codex.NameFor(d.Cls)} — {d.Cls}";
+                // P19 handed this back and the lead applied it. `Codex.NameFor(d.Cls)` is the
+                // CLASS's display name, so every NAMED elite — BREAKER / BULWARK / WARDEN / MARSHAL
+                // and the finale bosses — has been captioned "WARLORD - ELITE" since SIGNAL W5,
+                // its own callsign nowhere on the card. `Unit.Name` carries the callsign
+                // (Mission.MakeMidBoss passes it to MakeHostile beside the class "ELITE"); prefer
+                // it, and fall back to the class name for an ordinary body whose Name IS its class.
+                idTitle = (!string.IsNullOrEmpty(d.Name) && d.Name != Codex.NameFor(d.Cls))
+                    ? $"{d.Name} — {d.Cls}" : $"{Codex.NameFor(d.Cls)} — {d.Cls}";
                 idLines = WrapText(clause, 12, 300);
             }
         }
@@ -2506,7 +2513,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         string clause = Codex.BlurbClause(d.Cls);
         if (string.IsNullOrEmpty(clause)) return;   // unknown archetype: no half-empty card
 
-        string title = $"{Codex.NameFor(d.Cls)} — {d.Cls}";
+        // P19's finding, same shape as the ID card above: prefer the body's own callsign.
+        string title = (!string.IsNullOrEmpty(d.Name) && d.Name != Codex.NameFor(d.Cls))
+            ? $"{d.Name} — {d.Cls}" : $"{Codex.NameFor(d.Cls)} — {d.Cls}";
         var lines = WrapText(clause, 12, 300);
         // the alert-state line mirrors the real awareness tiers (4.3) + rout, worst-first
         (string txt, Color col) state =

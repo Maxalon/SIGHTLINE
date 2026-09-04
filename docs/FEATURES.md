@@ -20,7 +20,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   **THE MODES GET THE BESTIARY (PARALLAX P4):** both modes now draw from the WHOLE roster. `Mission.Build` /
   `SpawnEnemies` take a `rosterTier` decoupled from the stat bump (default −1 = the mission number, so the campaign
   is byte-identical; skirmish/daily pass 3 at heat 0-2, 4 at 3-5, 5 at 6-8 — the campaign's own m3/m4/m5 tiers),
-  pods of 3, and the named mid-boss from heat 4 (`midBossSlot`; the campaign's `n == 3 || n == 5` is untouched).
+  pods of 3, and the named mid-boss from heat 4 (`midBossSlot` — untouched by P19, which changed only the
+  CAMPAIGN half of `Mission.MidBossFor`).
   And a FACTION: the skirmish card's OPPOSITION dial (ANY / SYNDICATE / LEGION / WARDENS — `< >`, TAB / SHIFT+TAB;
   ANY is dealt at deploy off the map seed among MIXED + the three, zero draws), the daily's derived from the date
   seed like its objective/arena/heat (always a named faction). `Game.ModeFaction` is published through
@@ -143,6 +144,16 @@ seeds (mix of WIN/LOSE, no exceptions):
   harsher close RangeMod); Ranger owns close range (+4 aim, pairs with the Shotgun's close bonus); MARK is now an
   aim-only designator (squad-wide crit amp removed). Each class has a clearer niche (close/long/tanky-area/flex).
   (`Unit.RangeMod`/`Weapon.Make`/`Combat.MarkCrit`.)
+- **THE SMG IS THREE GUNS (PARALLAX P19):** twelve of the twenty-two hostile archetypes carried a
+  byte-identical `Weapon.Make(Smg)`, so a swarmer at eight tiles and an artillery body at one
+  presented the same hit% in the shot tooltip and the incoming-fire card. `Weapon.SmgProfile` gives
+  the HOSTILE half three range bands at the same WeaponKind, damage band, clip and crit — **CQB**
+  `clamp((5-d)*4,-20,16)` for the four bodies whose plan is to close (HOUND / STRIKER / SCOUT /
+  DRONE; kiting them is now a real counter), **STANDOFF** `clamp((9-d)*1,-8,8)` for the two that
+  hold a standoff by design (MORTAR / BOMBARD; charging them is), and **STANDARD** — the shipped
+  curve, byte-for-byte — for the other six and for every player weapon. `Ai.cs`'s kite-to-ideal-range
+  term reads the same `RangeMod`, so both sides price distance off one function.
+  (`Mission.SmgProfileFor`; `SIGHTLINE_ROSTERTEST`; `SIGHTLINE_ROSTERID=0` restores the monoculture.)
 - **MISSION-STATIC LIFECYCLE (TEMPO W4):** the 5 per-mission `Combat` statics (RunBoons/AllUnits/MissionFaction/
   PrepFaction/PressureAim) are owned by `Combat.BeginMission/EndMission/EndRun` (one set + one clear per lifecycle),
   replacing ~14 scattered defensive resets — stale-static bleed is now structurally impossible.
@@ -354,7 +365,12 @@ seeds (mix of WIN/LOSE, no exceptions):
   (WASP — hovers, ignores cover/elevation, beelines), **Shield** (AEGIS — full frontal
   cover that re-faces the nearest soldier each turn, must be flanked or hit from above),
   **Sapper** (BREACH — demolishes the squad's
-  cover), a recurring **mid-boss** (BREAKER m3 / WARDEN m5), and a capstone **Elite boss**
+  cover), a **named mid-boss** — which since **PARALLAX P19** belongs to the campaign map's **ELITE
+  NODE** rather than to a mission number: route into an ELITE and you fight the named elite it
+  advertises (BREAKER / BULWARK / WARDEN / MARSHAL, by the node's faction), and the **last fight
+  before the finale** always fields one so every route still meets the content
+  (`Mission.MidBossFor` + `Game.IsFinalApproach`; `SIGHTLINE_ELITEBOSS=0` restores the old
+  `n == 3 || n == 5`) — and a capstone **Elite boss**
   (WARLORD) on the final mission with 2
   grenades + a one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
 - **Secondary objectives:** an optional per-mission bonus goal (NO LOSSES / SWIFT ≤7
