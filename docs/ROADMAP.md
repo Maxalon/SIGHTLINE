@@ -3477,11 +3477,23 @@ a finding, as in L4 and L5. What L6 leaves open, in priority order:
       but not the wave. It is one bool and one branch; FORKTEST leg (C) already reproduces the
       pre-wave ordering in-process (`Clear(true, true)`), so the behaviour is written down — it
       simply is not reachable from the environment. P21 did not widen its own scope to take it.
-- [ ] **THE LADDER'S SOFT SPOT MOVED AND IS NOT LOCATED.** `h6 -> h8` buys **2.5** points, the
-      smallest step in the L6 table, and `h0 -> h2` buys 8.4 where L5 read 14.1. C1 located the
-      last flat step by measuring **all ten rungs** (a six-rung ladder cannot see which of two rungs
-      is the flat one, which is how a dead `AiTier` row survived two programs). **A per-RUNG L6 is
-      the diagnostic**, and at ~8 s a chunk it is affordable now in a way it was not for C1.
+- [x] **THE LADDER'S SOFT SPOT MOVED AND IS NOT LOCATED.** DONE by wave **L7 EVERY RUNG**
+      (2026-09-04, base `935d719`, DEVLOG §L7, raw round `docs/measurements/l7/`). `h6 -> h8` buys
+      **2.5** points, the smallest step in the L6 table, and `h0 -> h2` buys 8.4 where L5 read 14.1.
+      C1 located the last flat step by measuring **all ten rungs** (a six-rung ladder cannot see
+      which of two rungs is the flat one, which is how a dead `AiTier` row survived two programs).
+      **A per-RUNG L6 is the diagnostic**, and at ~8 s a chunk it is affordable now in a way it was
+      not for C1.
+      **CLOSING NOTE (L7).** Ten rungs x 16 CRN slot sets x n=320, heat pinned, `LEAK-CHECK PASS`:
+      **70.6 / 44.4 / 41.9 / 35.9 / 26.2 / 23.1 / 22.5 / 11.2 / 6.6 / 8.8**, buys
+      26.2 / 2.5 / 5.9 / 9.7 / 3.1 / **0.6** / 11.2 / 4.7 / **-2.2**. `h6 -> h8` is ONE REAL RUNG
+      (rung 7, +4.7) AND ONE THAT BUYS NOTHING (rung 8). The negative sign did not replicate out of
+      sample (+0.9 on 16 new sets); pooled over 32 sets, n=640, rung 8 is **-0.6, n_disc 70,
+      MDE 3.7** — the flattest rung on the ladder. **Six of the nine steps are unresolved at
+      n=320/rung** and the round says so rung by rung. The six rungs L6 also sampled reproduced
+      **96/96 chunks, 1,920/1,920 legs**, which certifies L6 valid on `935d719` and P21 inert.
+      **CAUSE LOCATED, and it is NOT a dead declaration** (`MIDTOOTHTEST` is green and rung 8's
+      cumulative vector is correct) — see the new item below. No corrective lever shipped.
 - [ ] **h0 IS UNDER ITS FLOOR ON TWO SUCCESSIVE LADDERS** (L5 -0.1, L6 -2.6; 1.23 cluster-SE under).
       L4/C1 flagged the LEVEL at the top of the ladder as the biggest open number and it has not
       moved. An apex-neutral `Heat.Mods` lever cannot fix it — it is a BASE-difficulty lever, and it
@@ -3494,11 +3506,72 @@ a finding, as in L4 and L5. What L6 leaves open, in priority order:
       split-half and W2's four-vs-sixteen.
 - [ ] **SLOT 46's MISSION-1 `Eliminate` DEADLOCKS BOTH POLICIES.** It stalls at h0/h2 (sloppy) and
       h6/h8 (greedy), `runTurns` 51 every time; L5 saw the same world stall at h0/h2/h4 on sloppy
-      alone, so it has survived a board-moving wave and spread to the other policy. That makes it a
+      alone, so it has survived a board-moving wave and spread to the other policy. **L7's per-rung
+      ladder widened it again: SEVEN of the ten rungs** (h0/h1/h2/h3 sloppy, h6/h7/h8 greedy). That makes it a
       property of the opener, not of a rung or a policy — and the most reproducible autopilot case
       anyone will get: `SIGHTLINE_BALANCE_BASE=40`, slot 46. The stalemate arm is 1.77% of L6's
       1,920 campaigns and it is an instrument floor, not a ladder effect (the RUN arm has now fired
       **zero** times across three ladders).
+## PROGRAM PARALLAX — wave "L7 EVERY RUNG" (2026-09-04, base `935d719`, DEVLOG §L7)
+
+**L7 is a per-rung SUPPLEMENT to L6, not a new ladder of record** — it reproduced L6's six rungs
+campaign for campaign (96/96 chunks, 1,920/1,920 legs), so `CLAUDE.md` keeps L6 as the headline and
+L7 supplies the four rungs nobody had ever measured. **No corrective lever was shipped and no `src/`
+file was edited.** What L7 leaves open, in priority order:
+
+- [ ] **THE APEX RUNG CANNOT REACH THE MISSION THAT DECIDES A CAMPAIGN. THIS IS THE ONE TO FIX.**
+      `Mission.Build` sizes a force as `Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12)` and the
+      finale then runs `count = Math.Max(5, count - 3or4); bump = Math.Max(0, n - 1)`. At mission 6
+      the request is `10 + EnemyDelta` against a ceiling of 12, so **from heat 3 up heat's bodies
+      stop arriving**, and `bump` **discards heat's StatDelta outright at every rung**. NO QUARTER's
+      two declared teeth are +1 body and +1 stat, so **both are switched off on mission 6** and the
+      rung's whole reach is missions 1-4. Measured on the artifact (one seed, the HUD's own hostile
+      chip, `docs/measurements/l7/m6-force-by-heat.png`): the finale fields **6/7/7/8/9/9/9/9/9**
+      hostiles at heats 0-8 — **it has not grown a body since heat 4**, and the h3->h4 body is the
+      `Ai.Tier >= 1` trim gate, not an EnemyDelta. At h7 and h8 the two screenshots differ in
+      nothing but the HEAT chip.
+      **THE FIX IS A DESIGN DECISION, NOT A BUG FIX**, which is why L7 did not ship it: does the
+      apex deserve a body the clamp cannot eat (raise the ceiling, or apply heat's delta AFTER the
+      finale trim), a stat the finale does not discard (`bump` was written to strip the BOSS CARD's
+      stat and takes heat's with it — those could be separated), or a smaller carrot (below)? Each
+      is one lever and each needs its own CRN round against a fresh baseline. **Whichever is chosen,
+      it must be measured at 16 slot sets minimum** — rung 8's step has an MDE of 3.7 at n=640.
+- [ ] **NO TEST IN `src/` ASKS WHAT FORCE THE BOARD ACTUALLY BUILDS.** `HEATLADDERTEST` pins the
+      cumulative heat vector; `MIDTOOTHTEST` pins the per-rung deltas, the apex vector and the
+      no-dead-declaration rule. Both were **green** while rung 8's correct `EnemyDelta 4` was being
+      clamped away and its `StatDelta 4` discarded. C1's defect was a declaration the vector could
+      not carry; this is a vector the BUILD does not honour — the same class with the arrow
+      reversed, and the same two programs of silence. **A probe that walks (rung x mission) and
+      prints the force `Mission.Build` actually produces would have caught both**, and it is the
+      natural companion to `MIDTOOTHTEST`. Name it `...PROBE`/`...TEST` so the sweep's COVERAGE
+      GUARD can see it (its alphabet is `TEST|GATE|PROBE`).
+- [ ] **`Heat.IntelBonus` IS AN ACCELERATING CARROT WITH NO OFF-SWITCH.** `3n + n^2/2`, so the
+      per-rung reward increments are +3 +5 +5 +7 +7 +9 +9 **+11** — the reward side of a rung grows
+      monotonically and un-clamped while the stick's two quantitative components saturate, and the
+      **biggest carrot on the ladder is attached to the rung with no stick left**. Measured
+      (n=320/rung): heat-bonus income 94.8 -> 108.2 per run and total earned 184.9 -> 190.2 from h7
+      to h8 **despite h8 clearing 0.19 fewer missions**. `Heat.IntelPerLevel` is a `const` with no
+      restore flag, so no arm in L7 could switch it off — it is NAMED as a counterweight, not
+      attributed as a cause. Give it a flag (the `Run.SetForkPrices` pattern) before pricing it.
+- [ ] **RUNG 5 STILL BUYS ~NOTHING, THREE PROGRAMS ON.** C1 measured LINGERING WOUNDS at 0.0 +-3.2
+      and left two hypotheses. L7 settles one: **the +1 body IS eaten at the finale** (h4 and h5
+      both field 9 hostiles at m6, on the artifact) and on ELITE nodes from mission 4. The other —
+      "HarshAttrition compounds over a run length the bot rarely reaches" — is **still unmeasured**;
+      `avgMissionsCleared` at h5 is 3.56, but no arm isolates the flag. Pooled over 32 slot sets the
+      rung reads **+2.3, MDE 5.7 — not resolved**, so "it buys nothing" is still not a measured zero.
+- [ ] **FOUR RUNGS OF THE SHIPPED LADDER HAVE NO GOAL BAND.** The FUL-13 band exists only for
+      `{RECRUIT, 0, 2, 4, 6, 8}`. h1/h3/h5/h7 have never had one, so L7's `cluster.py` prints `-`
+      for them rather than interpolating a band and grading against it. Now that a per-rung ladder
+      is affordable (~8 s a chunk), setting the four missing bands is cheap and would make the
+      shape a gradeable property instead of an eyeballed one.
+- [ ] **THE FINALE'S `bump` STRIP CANNOT BE MEASURED AT ALL.** `SIGHTLINE_ENEMYBASE` relieves the
+      headcount clamp (L7's clamp arm used it: rung 8 buys +4.1 with the ceiling clear against -0.6
+      with it binding, DiD +4.7 +-2.0, t=2.39 on the absolute scale but **z = -1.66 on the odds
+      scale, NOT resolved**). Nothing relieves `bump = Math.Max(0, n - 1)`. That is why the base-2
+      arm's whole recovery came from missions 2-5 and its m6 conditional still read h7 25.5% vs h8
+      27.5%. **A restore flag on the finale's stat strip is a precondition for pricing the fix
+      above.**
+
 - [ ] **THE SCREEN AUDIT STILL HAS NO OVERLAP CHECK, AND NOW NEITHER HALF OF THE BOARD GATE DID.**
       L6 widened `BoardSignature()` from Tiles + Height + seats to all eight layers, because the
       gate that caught P20 was blind to the layer next door. That is one instance of a pattern

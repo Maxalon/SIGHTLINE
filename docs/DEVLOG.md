@@ -16432,3 +16432,165 @@ reachable from the environment. `docs/ROADMAP.md` carries it as its own item.
 - `SIGHTLINE_FORKTEST=1` — PASS at defaults; FAIL by design under `SIGHTLINE_FORKPRICES=0`.
 - 128/128 balance chunks asserted (`check_chunk.py`, four arms × 32), re-verified individually.
 - Raw round, runner and README: `docs/measurements/p21/`.
+
+---
+
+# WAVE "L7 — EVERY RUNG" (2026-09-04, dev on `wave/ladder-l7`, base `935d719`)
+
+**Brief:** L6's ladder buys 2.5 points across `h6 → h8`, the smallest step in its table, and L6 said
+outright that locating a flat step needs a per-RUNG ladder — C1's diagnostic. Measure every rung at
+16 CRN slot sets and n=320, say which steps are resolved, locate the cause the way C1 did, and
+**ship no corrective lever.**
+
+**No `src/` file was edited.** Raw round, runners and analysis: [`docs/measurements/l7/`](measurements/l7/README.md).
+**336 chunks, every one asserted by `p15/check_chunk.py`, zero `BAD` — 6,720 campaigns.**
+
+## L7-1. The free consistency check came back perfect, and it is worth more than the ladder
+
+L7's base is one milestone past L6's (`935d719` vs `6a6ebee`) and exactly one wave separates them:
+P21 BUILD OWNS THE BOARD, which claims to be live-path inert. Same protocol, same runner, same 16
+slot bases, same N, same pin, so L7's six shared rungs are a direct reproduction test:
+
+**96/96 chunks and 1,920/1,920 legs identical.** RECRUIT 70.6, h0 44.4, h2 35.9, h4 23.1, h6 11.2,
+h8 8.8 — L6's published row, campaign for campaign. So P21 is campaign-inert as it claimed, the CRN
+chain is intact across milestone 14, and **L6's numbers are certified valid on `935d719`.** L7 is
+therefore a per-rung SUPPLEMENT on the identical tree, not a new ladder of record; it supersedes
+nothing and `CLAUDE.md` keeps L6 as the headline.
+
+## L7-2. The ten-rung table, and the answer to L6's question
+
+| rung | RECRUIT | h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **win%** | **70.6** | **44.4** | **41.9** | **35.9** | **26.2** | **23.1** | **22.5** | **11.2** | **6.6** | **8.8** |
+| cluster SE | 2.41 | 2.13 | 3.12 | 2.89 | 2.17 | 3.09 | 1.37 | 2.17 | 1.27 | 1.41 |
+| **rung N buys** | — | 26.2 | 2.5 | 5.9 | 9.7 | 3.1 | **0.6** | 11.2 | 4.7 | **−2.2** |
+
+**`h6 → h8` is one real rung and one rung that buys nothing.** Rung 7 (RELENTLESS) buys +4.7; rung 8
+(NO QUARTER) buys **−2.2** — the apex reads EASIER than the rung below it, and **the ladder is not
+monotone**. Every ladder this project has published was monotone at every step, and every one of
+them sampled `{R,0,2,4,6,8}`, which steps straight over h7.
+
+**Then the sign did not replicate.** Rungs 4-8 were re-run on 16 slot sets the round had never seen
+(bases 160-310). Out of sample rung 8 reads **+0.9**; pooled over 32 sets, n=640, it is **−0.6 with
+n_disc 70 and an MDE of 3.7.** So the honest claim is not "the apex is easier" — that was one draw
+of sixteen clusters, the fourth time this project has caught that shape (L5's split-half, W2's band
+floor, L6's P20 re-price, here). The claim is: **NO QUARTER buys nothing. It is the flattest rung on
+the ladder.** Rung 5 (LINGERING WOUNDS) is second at **+2.3, MDE 5.7** — C1 measured it at 0.0 ±3.2
+on its own tree and it has not moved.
+
+**THREE OF NINE STEPS ARE RESOLVED AT n=320/RUNG** (R→h0 +26.2, rung 3 +9.7, rung 6 +11.2). A rung's
+tooth is worth 3-6 points and a 16-set rung resolves 5-10, so **six of the nine steps are absences of
+evidence, not sizes.** Anyone ranking all nine is reading noise. The odds-ratio view (scale-free,
+because an absolute step cannot tell a flat rung from a floor) adds rung 7 — OR 0.56, lnOR z −2.04 —
+and puts rung 8 on the wrong side of 1.0 at **OR 1.36**.
+
+## L7-3. THE CAUSE: the cumulative vector is right and the board never hears it
+
+`SIGHTLINE_MIDTOOTHTEST` is **green** on this tree, and rung 8 publishes `EnemyDelta 4 / StatDelta 4`
+into the cumulative vector correctly. So, per the brief, the cause is not a dead declaration. It is
+one line up the stack, in `Mission.Build`:
+
+```csharp
+int count = Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12);    // EnemyBaseCount = 4
+if (n >= Run.MaxMissions) {                                        // THE FINALE
+    count = Math.Max(5, count - (... && Ai.Tier >= 1 ? 3 : 4));
+    bump  = Math.Max(0, n - 1);        // drop the boss-card/heat StatDelta for the screen
+}
+```
+
+At mission 6 the request is `10 + EnemyDelta` against a ceiling of 12, so **from heat 3 up heat's
+bodies stop arriving**; and `bump = Math.Max(0, n - 1)` **discards heat's StatDelta outright** at
+every rung — that is the line's stated purpose. The WARLORD's own statline is `14 + n`, heat-free,
+and the anti-turtle clock's reinforcements pass `heatStat = 0`, so there is no other channel.
+
+Predicted, then **measured on the artifact** (`SIGHTLINE_MISSION=6 SIGHTLINE_HEAT=<h>
+SIGHTLINE_SEED=4242`, the HUD's own hostile chip — `docs/measurements/l7/m6-force-by-heat.png`):
+
+| heat | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|---|
+| requested `10+d` | 10 | 11 | 11 | 12 | 12 | **13** | **13** | **13** | **14** |
+| **bodies on screen** | **6** | **7** | **7** | **8** | **9** | **9** | **9** | **9** | **9** |
+
+**The finale has not grown a hostile since heat 4**, and the body it grew at h3→h4 is the
+`Ai.Tier >= 1` trim gate flipping −4 to −3, not an EnemyDelta. At heats 7 and 8 the two screenshots
+are identical except for the `HEAT 7` / `HEAT 8` chip — same board, same 9 hostiles, same squad, same
+LEGION kit. (W9 recorded this exact shape for SKIRMISH: "the red chip was the only difference on
+screen".)
+
+So on the mission that decides a campaign, **both of rung 8's declared teeth are switched off** — the
+body by the clamp, the stat by `bump`. Its whole reach is missions 1-4, and its measured effect is
+exactly that shape (32 sets, h7 → h8): m2 78.7 → **69.8**, m3 42.9 → **38.4**, m4 47.5 → 44.8, m5
+41.8 → 36.7, **m6 16.8 → 23.9 — the wrong way.** `avgMissionsCleared` falls 3.12 → 2.88 and the
+pooled MISSION win rate falls 58.4% → 57.7%. **The MISSION-level ladder is monotone at all nine
+steps; only the CAMPAIGN-level one breaks.** Rung 8 raises the price of every mission on the way and
+adds nothing to the gate at the end.
+
+**THIS IS C1'S DEFECT CLASS WITH THE ARROW REVERSED, and it is worth naming.** C1's rung declared a
+value the cumulative vector could not carry. Rung 8's value reaches the vector perfectly and is then
+clamped or discarded by `Mission.Build`. `HEATLADDERTEST` pins the cumulative vector; `MIDTOOTHTEST`
+pins the per-rung deltas and the apex vector. **Neither of them — and nothing else in `src/` — ever
+asks what force the board actually builds.** That is why this sat green for as long as C1's did.
+
+## L7-4. The clamp arm, priced, and the caveat that halves it
+
+`SIGHTLINE_ENEMYBASE=2` (X2's shipped dial) drops the base headcount by two, which puts m5 and m6
+back under the ceiling. It does NOT restore the finale's stat strip — no flag exists — so it isolates
+the BODY half. Rungs 6-8, 32 CRN slot sets, n=640/rung/arm:
+
+| step | base 4 (ceiling binds) | base 2 (ceiling clear) | DiD | SE | t |
+|---|---|---|---|---|---|
+| h6→h7 | +3.9 (z +2.71) | **+9.2 (z +4.49)** | +5.3 | 2.31 | 2.30 |
+| h7→h8 | **−0.6 (z −0.48)** | **+4.1 (z +2.35)** | +4.7 | 1.96 | **2.39** |
+
+Directionally as predicted — and the prediction is written into `run_cap.sh`'s header, above the
+data. **Two caveats, recorded straight.** (1) **On the odds scale it is not resolved**: base 2 wins
+more and so has more points to lose. OR 1.10 at base 4 against OR 0.70 at base 2, ratio 0.64,
+**z = −1.66, p ≈ 0.10**. Same data, two scales; the honest verdict is the weaker one — *consistent
+with the clamp, not resolved.* (2) **Relieving the ceiling does not make the finale respond to
+heat**: the base-2 m6 conditional still reads h7 25.5% vs h8 27.5%, and all of rung 8's recovered
++4.1 comes from missions 2-5. The clamp is half the mechanism; `bump` is the other half, it has no
+flag, and this round could not price it.
+
+## L7-5. The counterweight nobody has priced
+
+`Heat.IntelBonus(n) = 3n + n²/2` is **accelerating by design** ("the carrot keeps pace with the
+steeper difficulty"). Per-rung increments: +3 +5 +5 +7 +7 +9 +9 **+11**. The reward side of a rung
+grows monotonically and un-clamped while the stick's two quantitative components saturate — and the
+biggest carrot on the ladder is attached to the rung with no stick left. Measured (n=320/rung):
+heat-bonus income 94.8 → 108.2 per run and total earned 184.9 → 190.2 from h7 to h8, **despite h8
+clearing 0.19 fewer missions.** `Heat.IntelPerLevel` is a `const` with no restore flag, so no arm
+here could switch it off: this is a NAMED, UNPRICED counterweight, not a measured cause.
+
+## L7-6. Two things measured on the way
+
+**The `force` row is the clamp's fingerprint from the other side.** Mean hostiles at mission start
+(mid-run) moves +0.79 / −0.01 / +1.04 / +0.01 / +0.66 / +0.03 / −0.03 / +0.86 across the eight rung
+steps — up on exactly the four rungs that declare a body (1, 3, 5, 8) and flat to within ±0.03 on
+the four that do not. Rung 8's +0.86 is a full body short of +1 because the clamp has already begun
+eating it mid-run.
+
+**Slot 46 has spread again.** Its mission-1 `Eliminate` deadlock now fires at **seven of the ten
+rungs** (h0/h1/h2/h3 sloppy, h6/h7/h8 greedy, `runTurns` 51 every time) after four in L6 and three
+in L5. It is a property of that opener, not of a rung or a policy. Stalemates overall: mission arm
+54 of 3,200 (1.69%), **run arm 0 — zero across three consecutive ladders.**
+
+## L7-7. What L7 did NOT do
+
+- **Ships no corrective lever and edited no gameplay source.** L4, L5 and L6 all found rungs out of
+  band or flat and all declined to repair inside a measurement round. The finale fix is a design
+  decision (a body the clamp cannot eat? a stat the finale does not discard? a smaller carrot?) and
+  it needs its own wave, one lever at a time, against a fresh baseline.
+- **Does not resolve six of nine steps.** Rungs 1, 2, 4, 5 and 8 are absences of evidence.
+- **Does not price the finale's `bump` strip** — no restore flag exists, and it is the bigger half.
+- **Does not price `Heat.IntelBonus`** — `Heat.IntelPerLevel` is a `const`.
+- **Sets no band for h1/h3/h5/h7.** Four rungs of the shipped ladder still have no goal of record,
+  and `cluster.py` prints `—` rather than interpolating one and grading against it.
+- **Does not measure FEEL.** Same blind spot C1 recorded against `AiTier 2`; nobody has looked.
+
+## L7-8. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — see the run recorded at the close of this section.
+- `SIGHTLINE_MIDTOOTHTEST=1` — PASS (the check that says the cause is NOT a dead declaration).
+- 336/336 balance chunks asserted (`p15/check_chunk.py`), `LEAK-CHECK PASS` on all 160 ladder chunks
+  (0 of 13,124 missions off-rung).

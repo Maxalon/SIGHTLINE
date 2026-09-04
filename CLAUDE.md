@@ -654,6 +654,7 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > robustness claim (h4 clears its floor by 0.36 cluster-SE — inside the noise the other way).
 > **The soft spot MOVED: h6->h8 buys 2.5, the smallest step in the table, and h0->h2 buys 8.4 where
 > L5 read 14.1.** Locating a flat step is what C1's per-RUNG ladder is for; L6 sampled six rungs.
+> **L7 ran it — see the per-rung block below: that 2.5 is rung 7 (+4.7) plus rung 8 (nothing).**
 >
 > **THE BRIDGE BROKE, AND WHERE IT BROKE IS THE FINDING.** The bridge arm — the same 96 cells with
 > every post-L5 gameplay lever restored (`AILANE=0 NEWGROUND=0 SECONDAXIS=0 PERKPICK=0
@@ -689,6 +690,25 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 >
 > **No corrective lever was shipped.** Two rungs under floor is a finding to publish, not to repair
 > inside a measurement round — as in L4 and L5.
+>
+> #### L7 EVERY RUNG — the PER-RUNG detail on the SAME tree. **L6 is still the ladder of record.**
+> **Base `935d719`**, L6's protocol exactly, 10 rungs x 16 CRN slot bases, n=320/rung, pinned,
+> `LEAK-CHECK PASS` (0 of 13,124 missions off-rung), 336 chunks / 6,720 campaigns, zero BAD. Raw:
+> `docs/measurements/l7/`. **It reproduced L6's six rungs 96/96 chunks and 1,920/1,920 legs** — so it
+> supersedes nothing, it certifies L6 valid on `935d719`, and it proves **P21 campaign-inert**.
+>
+> | rung | RECRUIT | h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |
+> |---|---|---|---|---|---|---|---|---|---|---|
+> | **win%** | **70.6** | **44.4** | **41.9** | **35.9** | **26.2** | **23.1** | **22.5** | **11.2** | **6.6** | **8.8** |
+> | cluster SE | 2.41 | 2.13 | 3.12 | 2.89 | 2.17 | 3.09 | 1.37 | 2.17 | 1.27 | 1.41 |
+> | **rung N buys** | — | 26.2 | 2.5 | 5.9 | 9.7 | 3.1 | **0.6** | 11.2 | 4.7 | **−2.2** |
+>
+> **L6's `h6->h8 = 2.5` is ONE REAL RUNG (7, +4.7) AND ONE THAT BUYS NOTHING (8).** The ladder is
+> **not monotone** at h7->h8 — but that sign **did not replicate**: 16 NEW slot sets read +0.9, and
+> pooled over 32 sets (n=640) rung 8 is **−0.6, n_disc 70, MDE 3.7**. So the claim is "the apex buys
+> nothing", NOT "the apex is easier". **Only 3 of the 9 steps are resolved at n=320/rung** (R->h0,
+> rung 3, rung 6); rung 7 joins on the odds scale (OR 0.56, z −2.04). h1/h3/h5/h7 **have no band of
+> record** and this round did not invent one.
 >
 > ---
 > **SUPERSEDED LADDERS ARE NOT HERE ANY MORE — they are in `docs/DEVLOG.md` and under
@@ -742,6 +762,7 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P20** THE STALE GROUND | `Mission.Build` wiped Tiles, Height and Smoke but **not the biome GROUND layer**, and it asks for that layer through `Grid.IsFloor` / `Grid.CostMap` before `Game.StampBiomeGround` runs — so a board was a function of **the board before it**. Latent since C4, armed by P16 (the rift is the first ground that stops a mover). `Mission.ClearGroundOnBuild`; MODETEST leg (14). The fix moves the board — **but L6 re-priced it on 16 slot sets and its "-3.8 at h4, resolved" does NOT survive the doubling** (-0.6 on eight sets it never saw). | §P20 |
 | **L6** THE LADDER OF RECORD | Two things a fresh session must not re-derive. **(1) THE FORK PAYS has no restore flag**, so the CRN chain cannot cross milestone 5 and no bridge to L5 exists; ship a gameplay constant and its flag in the same commit. **(2) `Grid` has a SECOND stale layer: `Barrel`.** `IsFloor` reads it, so Build's connectivity floods read the previous mission's barrels — P20's defect, different array, same predicate. **Latent, not live**: `Game.SetupMission` clears hazards 28 lines before the Build call, and it is the only production caller. `BoardSignature()` was blind to it and now hashes all eight layers. | §L6 |
 | **P21** BUILD OWNS THE BOARD | Closes both of L6's items. `Mission.Build` now clears **Fire and Barrel** too (`Mission.ClearHazardsOnBuild`), so Build owns all eight layers — and `Game.SetupMission`'s own `Grid.ClearHazards()` is **kept on purpose**: removing it is the only part of that change that could touch a live path. **Proven inert, not asserted**: 1,280 CRN campaigns per arm, 32/32 chunks byte-identical against both `108d9ac` and `SIGHTLINE_STALEHAZARDS=1`. THE FORK PAYS finally gets `SIGHTLINE_FORKPRICES=0` — which **does not repair L6's broken bridge** (L5's worlds are gone) and covers the four PRICES only, not that wave's SUPPLY heal-ordering change, which is still unswitchable. | §P21 |
+| **L7** EVERY RUNG | **The heat ladder's two quantitative levers are both switched off on MISSION 6.** `Mission.Build` clamps the headcount at 12 (`4 + n + enemyDelta`), so from heat 3 up the finale's request is already over the ceiling; then `bump = Math.Max(0, n - 1)` **discards heat's StatDelta outright**. Measured on the artifact: the finale fields **6/7/7/8/9/9/9/9/9** hostiles at heats 0-8 — **it has not grown a body since heat 4**, and at h7 vs h8 the only difference on screen is the HEAT chip. So **NO QUARTER (+1 body, +1 stat) cannot reach the mission that decides a campaign**, and it buys −0.6 (n=640, MDE 3.7). **This is C1's defect class with the arrow reversed**: the cumulative vector is CORRECT and the BUILD does not honour it, so `HEATLADDERTEST` and `MIDTOOTHTEST` — both cumulative-vector pins — are green. **Nothing in `src/` asks what force the board actually builds.** | §L7 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be
 switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, exactly),

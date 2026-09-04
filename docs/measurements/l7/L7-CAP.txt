@@ -1,0 +1,84 @@
+===== ARM SIZES: 32 CRN slot sets per rung per arm, n=640 =====
+
+===== SHIPPED BASE 4 — the 12-body ceiling BINDS at m5/m6 (the ladder round's own chunks) =====
+  rung       n   win%  m6cond%   m6 n  avgMis
+  h6       640   10.9                           
+  h7       640    7.0                           
+  h8       640    7.7                           
+  step           buys    b    c n_disc  MDE80      z  chunk t  verdict
+  h6->h7           3.9   55   30     85   4.03   2.71     2.87  NOT RESOLVED (|3.9| < MDE 4.0)
+  h7->h8          -0.6   33   37     70   3.66  -0.48    -0.55  NOT RESOLVED (|-0.6| < MDE 3.7)
+
+===== BASE 2 (SIGHTLINE_ENEMYBASE=2) — the ceiling is CLEAR at every mission (32 sets) =====
+  rung       n   win%  m6cond%   m6 n  avgMis
+  h6       640   24.2                           
+  h7       640   15.0                           
+  h8       640   10.9                           
+  step           buys    b    c n_disc  MDE80      z  chunk t  verdict
+  h6->h7           9.2  116   57    173   5.75   4.49     4.94  RESOLVED
+  h7->h8           4.1   74   48    122   4.83   2.35     2.55  NOT RESOLVED (|4.1| < MDE 4.8)
+
+--- the same two arms on the ORIGINAL 16 sets only, for the split-half ---
+
+===== base 4, sets 0-150 =====
+  rung       n   win%  m6cond%   m6 n  avgMis
+  h6       320   11.2                           
+  h7       320    6.6                           
+  h8       320    8.8                           
+  step           buys    b    c n_disc  MDE80      z  chunk t  verdict
+  h6->h7           4.7   28   13     41   5.60   2.34     2.17  NOT RESOLVED (|4.7| < MDE 5.6)
+  h7->h8          -2.2   14   21     35   5.18  -1.18    -1.28  NOT RESOLVED (|-2.2| < MDE 5.2)
+
+===== base 2, sets 0-150 =====
+  rung       n   win%  m6cond%   m6 n  avgMis
+  h6       320   22.8                           
+  h7       320   16.2                           
+  h8       320   11.9                           
+  step           buys    b    c n_disc  MDE80      z  chunk t  verdict
+  h6->h7           6.6   50   29     79   7.78   2.36     2.41  NOT RESOLVED (|6.6| < MDE 7.8)
+  h7->h8           4.4   38   24     62   6.89   1.78     1.73  NOT RESOLVED (|4.4| < MDE 6.9)
+
+--- and on the NEW 16 sets only ---
+
+===== base 4, sets 160-310 =====
+  rung       n   win%  m6cond%   m6 n  avgMis
+  h6       320   10.6                           
+  h7       320    7.5                           
+  h8       320    6.6                           
+  step           buys    b    c n_disc  MDE80      z  chunk t  verdict
+  h6->h7           3.1   27   17     44   5.80   1.51     1.84  NOT RESOLVED (|3.1| < MDE 5.8)
+  h7->h8           0.9   19   16     35   5.18   0.51     0.64  NOT RESOLVED (|0.9| < MDE 5.2)
+
+===== base 2, sets 160-310 =====
+  rung       n   win%  m6cond%   m6 n  avgMis
+  h6       320   25.6                           
+  h7       320   13.8                           
+  h8       320   10.0                           
+  step           buys    b    c n_disc  MDE80      z  chunk t  verdict
+  h6->h7          11.9   66   28     94   8.48   3.92     4.84  RESOLVED
+  h7->h8           3.8   36   24     60   6.78   1.55     1.86  NOT RESOLVED (|3.8| < MDE 6.8)
+
+===== THE DIFFERENCE-IN-DIFFERENCES: does rung 8 buy anything once its body can land? =====
+  step           base4   base2     DiD  SE(DiD)      t
+  h6->h7           3.91    9.22   +5.31     2.31   2.30
+  h7->h8          -0.62    4.06   +4.69     1.96   2.39
+
+  ODDS-SCALE DiD (the absolute scale flatters base 2, which wins more and so has more
+  points to lose; the odds ratio does not):
+  step          OR base4  OR base2   ratio      z
+  h6->h7             0.62      0.55    0.89  -0.45
+  h7->h8             1.10      0.70    0.64  -1.66
+
+  (the two arms share their slot sets but not their worlds — base 2 changes the board's force
+   size from mission 1, so the arms diverge immediately. The DiD is chunk-paired on the slot
+   SET, which is why its SE is the two cluster SEs added in quadrature and not a McNemar SE.)
+
+===== MISSION WIN RATE BY MISSION, both arms (where the ceiling was eating the rung) =====
+  -- base 4 (shipped), sets 0-150 --
+    h6: m1: 92.2%(n320)  m2: 81.6%(n152)  m3: 51.8%(n257)  m4: 43.4%(n205)  m5: 40.2%(n117)  m6: 26.1%(n138)
+    h7: m1: 92.2%(n320)  m2: 80.9%(n152)  m3: 44.6%(n278)  m4: 41.6%(n202)  m5: 44.4%(n108)  m6: 15.7%(n134)
+    h8: m1: 92.2%(n320)  m2: 73.7%(n152)  m3: 36.2%(n276)  m4: 45.3%(n170)  m5: 36.9%(n92)  m6: 25.2%(n111)
+  -- base 2, both halves --
+    h6: m1: 96.4%(n640)  m2: 87.1%(n303)  m3: 63.8%(n525)  m4: 64.1%(n459)  m5: 53.9%(n382)  m6: 35.9%(n432)
+    h7: m1: 96.4%(n640)  m2: 91.1%(n303)  m3: 59.4%(n544)  m4: 57.7%(n475)  m5: 44.7%(n371)  m6: 25.5%(n377)
+    h8: m1: 96.4%(n640)  m2: 81.5%(n303)  m3: 46.5%(n563)  m4: 49.3%(n408)  m5: 36.4%(n302)  m6: 27.5%(n255)
