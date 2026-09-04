@@ -463,6 +463,33 @@ public static partial class SaveGame
     /// Adaptive-assist meta: how many runs the player has lost in a row (0 on a fresh profile).
     public static int LoadMetaLossStreak() => Math.Max(0, LoadMetaDto().LossStreak);
 
+    /// P18: the highest heat rung ever CLEARED, migrated for profiles written before the field
+    /// existed. UnlockedHeat rises by exactly one per win AT the cap (Game.WinRun) and never
+    /// otherwise, so `MaxHeat - 1` is the exact best-cleared rung for every profile below the
+    /// ceiling; at the ceiling it under-reports by one until the next win records the field.
+    /// -1 == nothing cleared yet.
+    public static int LoadBestHeatWon()
+    {
+        var d = LoadMetaDto();
+        int migrated = Math.Clamp(d.MaxHeat, 0, Heat.Max) - 1;
+        return Math.Clamp(Math.Max(Math.Clamp(d.BestHeatWon, Heat.Min, Heat.Max), migrated), -1, Heat.Max);
+    }
+
+    /// Record a cleared rung (read-modify-write like every other meta field; only ever raises).
+    public static void RecordBestHeatWon(int heat)
+    {
+        int h = Math.Clamp(heat, Heat.Min, Heat.Max);
+        var d = LoadMetaDto();
+        if (h <= d.BestHeatWon) return;
+        d.BestHeatWon = h; WriteMetaDto(d);
+    }
+
+    /// P18 DEEP RESERVE: the reserve cap this profile actually runs at. MaxVeterans is the ungated
+    /// floor; the unlock raises it. Never consulted under NoPersist (EnshrineVeterans is a real-play
+    /// path only), so the harness cap is the constant, exactly as before.
+    public static int VeteranCapNow()
+        => MetaProg.SecondAxis && HasUnlock((int)MetaUnlock.DeepReserve) ? MetaProg.DeepReserveCap : MaxVeterans;
+
     public static void SaveMetaLossStreak(int streak)
     {
         var d = LoadMetaDto(); d.LossStreak = Math.Max(0, streak); WriteMetaDto(d);
@@ -646,6 +673,12 @@ public static partial class SaveGame
         // W9 SIGNAL (append-only): the last daily stamp that PAID its win bounty (unfarmable key) +
         // the consecutive-day daily-win streak. Old profiles default 0/0 (no streak, nothing paid).
         public int DailyWinStamp, DailyStreak;
+        // P18 "THE SECOND AXIS" (append-only): the HIGHEST heat rung a campaign was ever WON at —
+        // the currency of the heat-gated WAR ROOM column. It is NOT derivable from MaxHeat at the
+        // top of the ladder: MaxHeat is a CEILING and Game.WinRun stops raising it at Heat.Max, so
+        // a heat-8 clear moves nothing there. Old profiles carry 0 and LoadBestHeatWon migrates
+        // them through MaxHeat - 1, which is exact for every rung below the ceiling.
+        public int BestHeatWon;
     }
 
     /// A HALL OF FAME entry (WAR ROOM): a soldier snapshot at run end — a fallen KIA (Won=false) or a
@@ -776,7 +809,8 @@ public static partial class SaveGame
         }
         // keep the most-storied (kills, then rank) when over the cap
         d.Veterans.Sort((x, y) => (y.Kills * 4 + y.Rank).CompareTo(x.Kills * 4 + x.Rank));
-        if (d.Veterans.Count > MaxVeterans) d.Veterans.RemoveRange(MaxVeterans, d.Veterans.Count - MaxVeterans);
+        int vcap = VeteranCapNow();   // P18 DEEP RESERVE raises it; MaxVeterans stays the ungated floor
+        if (d.Veterans.Count > vcap) d.Veterans.RemoveRange(vcap, d.Veterans.Count - vcap);
         WriteMetaDto(d);
     }
 
@@ -809,6 +843,7 @@ public static partial class SaveGame
             CheckpointUsed = r.CheckpointUsed,
             Contract = (int)r.Contract,
             PendingSalvageReward = r.PendingSalvageReward,
+            StartHeatEnc = Heat.Clamp(r.StartHeat) + 2,   // P18: +2 so 0 == "absent" (Recruit is -1)
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(ToUnitDto(u));
@@ -850,6 +885,9 @@ public static partial class SaveGame
         r.CheckpointUsed = dto.CheckpointUsed;      // append-only: old saves default false
         r.Contract = EnumOr(dto.Contract, Contract.None);        // append-only: old saves default 0 == Contract.None
         r.PendingSalvageReward = dto.PendingSalvageReward;   // append-only: FUL-10 event salvage claim (old saves default 0)
+        // P18: 0 == a pre-P18 save with no latched start rung -> fall back to the live heat, which is
+        // what the pre-P18 assist test read anyway. A hand-edited value is clamped like every other.
+        r.StartHeat = dto.StartHeatEnc == 0 ? r.HeatLevel : Heat.Clamp(dto.StartHeatEnc - 2);
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
         {
@@ -936,6 +974,13 @@ public static partial class SaveGame
         public bool CheckpointUsed;   // append-only: the one-time REINFORCEMENTS redeploy spent (old saves default false)
         public int Contract;   // append-only: W6 run contract (old saves default 0 == Contract.None)
         public int PendingSalvageReward;   // append-only: FUL-10 event salvage awaiting the run-end commit (old saves default 0)
+        // P18 "THE SECOND AXIS": the heat the run STARTED at (Run.StartHeat), ENCODED as value+2 so
+        // that 0 means ABSENT. A plain int could not: Heat.Recruit is -1 and heat 0 is a real rung,
+        // so no in-range value is free to mean "a save written before P18". FromDto falls back to
+        // HeatLevel when it reads 0, which is the right answer for every pre-P18 save except one
+        // mid-run heat leak — and that one only costs the assist it would already have lost.
+        // Append-only like every field above; no schema bump (a default RESCUES this one).
+        public int StartHeatEnc;
     }
 
     internal class UnitDto
@@ -968,7 +1013,10 @@ public static partial class SaveGame
         string saved = Exists ? File.ReadAllText(FilePath) : null;  // preserve any real save
         try
         {
-            var src = new Run { Mission = 4, Intel = 23, Squad = new List<Unit>(), HeatLevel = 5 };
+            // P18: StartHeat is DELIBERATELY unequal to HeatLevel here — a run dialled at 2 whose
+            // heat has since leaked to 5 is exactly the state a naive `StartHeat = HeatLevel` load
+            // would silently repair, and the assist's whole correctness rests on the difference.
+            var src = new Run { Mission = 4, Intel = 23, Squad = new List<Unit>(), HeatLevel = 5, StartHeat = 2 };
             src.Fallen.Add("DOWNED-GUY");
             src.PrepFaction = Faction.Legion;   // a staged faction counter-prep must round-trip
             src.CheckpointUsed = true;          // the one-time REINFORCEMENTS flag must round-trip
@@ -1028,6 +1076,16 @@ public static partial class SaveGame
             var fails = new List<string>();
             if (diskSchema != CurrentSchema) fails.Add("runSchemaVersion");
             if (got.Mission != src.Mission) fails.Add("mission");
+            // P18 "THE SECOND AXIS": the LATCHED starting rung round-trips independently of the live
+            // heat, and a save written WITHOUT it (every pre-P18 save) falls back to the live heat
+            // rather than to 0 — a 0 fallback would hand a heat-5 resumed run the assist.
+            if (got.StartHeat != 2) fails.Add($"startHeat={got.StartHeat}");
+            {
+                var legacy = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SaveJson.Default.RunDto);
+                legacy.StartHeatEnc = 0;   // simulate a pre-P18 save
+                var back = FromDto(legacy);
+                if (back.StartHeat != back.HeatLevel) fails.Add($"startHeatLegacy={back.StartHeat}/{back.HeatLevel}");
+            }
             if (got.Intel != src.Intel) fails.Add("intel");
             if (got.Squad.Count != src.Squad.Count) fails.Add("squadCount");
             if (got.Fallen.Count != 1 || got.Fallen[0] != "DOWNED-GUY") fails.Add("fallen");
@@ -1157,7 +1215,7 @@ public static partial class SaveGame
             if (structure != null) fails.Add(structure);
 
             return fails.Count == 0
-                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; schema stamped; 13 persisted-enum fingerprints match; 3 map-generator fingerprints match; meta heat round-trips; corrupt meta stashed to .bak, rewrite clean; unusable saves stashed + un-offered; junk ordinals clamped)"
+                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat + P18's latched StartHeat (absent == pre-P18 -> falls back to the live heat); schema stamped; 13 persisted-enum fingerprints match; 3 map-generator fingerprints match; meta heat round-trips; corrupt meta stashed to .bak, rewrite clean; unusable saves stashed + un-offered; junk ordinals clamped)"
                 : "SAVETEST: FAIL (" + string.Join(",", fails) + ")"
                   + (fails.Exists(f => f.StartsWith("enumShape:")) ? EnumShapeAdvice : "");
         }
@@ -1204,7 +1262,7 @@ public static partial class SaveGame
         (typeof(Spec),          0xD1E12AEDu),
         (typeof(Scar),          0xB165F9D9u),
         (typeof(Contract),      0x9EC11430u),
-        (typeof(MetaUnlock),    0xC672FAD5u),
+        (typeof(MetaUnlock),    0xE19D7A3Au),   // P18: +CombatTrials,DeepReserve,DeepStores (appended at the END)
         (typeof(RewardKind),    0x388AFEA8u),   // persisted as CardDto.Reward (raw int)
     };
 

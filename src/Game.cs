@@ -384,7 +384,11 @@ public partial class Game
         // W9 QUARTERMASTER (WAR ROOM unlock): +1 slate slot — more OPTIONS per barracks, still paid
         // for in Intel. Read once per (re)build, never per frame; NoPersist-gated so the flywheel/
         // autoplay slate is byte-identical to today.
-        int slate = ShopOfferSize + (!NoPersist && SaveGame.HasUnlock((int)MetaUnlock.Quartermaster) ? 1 : 0);
+        int slate = ShopOfferSize + (!NoPersist && SaveGame.HasUnlock((int)MetaUnlock.Quartermaster) ? 1 : 0)
+                  // P18 DEEP STORES (heat-gated): one MORE slot, stacking with QUARTERMASTER's. Same
+                  // !NoPersist gate, so the flywheel slate is byte-identical either way.
+                  + (!NoPersist && MetaProg.SecondAxis && SaveGame.HasUnlock((int)MetaUnlock.DeepStores)
+                     ? MetaProg.DeepStoresSlots : 0);
         for (int i = 0; i < pool.Count && offer.Count < slate; i++) offer.Add(pool[i]);
 
         // (3) COUNTER-PREP: a situational extra slot, only when a faction is actually telegraphed
@@ -1810,6 +1814,7 @@ public partial class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        _run.StartHeat = _run.HeatLevel;   // P18: latch the DIALLED rung — see Run.AssistLevel
         // W11 harness affordance (screenshot only, same family as SIGHTLINE_HEAT/VETSIM above):
         // SIGHTLINE_BOONS=<k> grants the first k boons so the in-mission boon-chip strip and its
         // hover card can be framed headless. Deterministic; inert when unset -> byte-stable.
@@ -1864,10 +1869,23 @@ public partial class Game
         SetupMission(n);
     }
 
+    /// P18 "THE SECOND AXIS": publish the WIDTH the heat-gated unlocks buy into the pure model
+    /// (Run owns no disk, so Game hands it the numbers — the ApplyMetaUnlocks pattern, one layer up).
+    /// Called on EVERY path that seats a run, including a resume and the modes, because a rank-up
+    /// can happen in any of them. Under NoPersist it RESETS to the shipped defaults rather than
+    /// merely skipping, so a harness process that ran a real-profile test first cannot leak a
+    /// widened offer into a later byte-stable one.
+    void RefreshMetaWidths()
+    {
+        if (NoPersist || !MetaProg.SecondAxis) { Run.PerkOfferWidth = 2; return; }
+        Run.PerkOfferWidth = SaveGame.HasUnlock((int)MetaUnlock.CombatTrials) ? Run.PerkOfferWidthMax : 2;
+    }
+
     /// Apply the persisted WAR ROOM unlocks to the just-started campaign run. No-op under NoPersist
     /// (harness/flywheel) and in endless (never called from BeginEndless), so measurement stays clean.
     void ApplyMetaUnlocks()
     {
+        RefreshMetaWidths();
         if (NoPersist) return;
         if (SaveGame.HasUnlock((int)MetaUnlock.StartIntel))
             _run.Intel += 15;
@@ -1987,6 +2005,36 @@ public partial class Game
     /// only (`Ring(...,0)`): it is an optional pickup, not a win condition, and a soldier detouring
     /// for it may reasonably have to pay for the ground around it. The doc comment used to claim
     /// "all with their rings", which was wrong (C4 review).
+    /// P19 — is `node` the LAST FIGHT before the finale on this route? True when every path out of
+    /// it reaches the BOSS node without passing another fight (an Event node is not a fight, so it
+    /// is walked THROUGH). Pure, read-only, and bounded by the DAG's six columns. This is the
+    /// route-truthful form of "mission 5": a route whose column-4 slot is an Event plays no mission
+    /// 5 at all, and a bare `n == 5` floor would leave it with no named elite (8.1% of all routes,
+    /// counted in SIGHTLINE_ROSTERTEST leg p19-4).
+    /// Static so SIGHTLINE_ROSTERTEST can ask the same question of a bare Run map with no Game.
+    public static bool IsFinalApproach(List<MissionNode> map, MissionNode node)
+    {
+        if (node == null || map == null || map.Count == 0) return false;
+        if (node.Kind == NodeKind.Boss || node.Kind == NodeKind.Event) return false;
+        if (node.Next.Count == 0) return false;                 // the finale itself has no successor
+        bool All(MissionNode nd, int depth)
+        {
+            if (depth > Run.MaxMissions) return false;          // cycle guard (the DAG has none)
+            foreach (int id in nd.Next)
+            {
+                if (id < 0 || id >= map.Count) return false;
+                var nx = map[id];
+                if (nx.Kind == NodeKind.Boss) continue;         // reached the finale — this path is clear
+                if (nx.Kind == NodeKind.Event) { if (!All(nx, depth + 1)) return false; continue; }
+                return false;                                   // another FIGHT lies ahead
+            }
+            return true;
+        }
+        return All(node, 0);
+    }
+
+    bool IsFinalApproach(MissionNode node) => _run != null && IsFinalApproach(_run.Map, node);
+
     void StampBiomeGround(int n)
     {
         var reserved = new HashSet<(int x, int y)>();
@@ -2189,6 +2237,17 @@ public partial class Game
         // P4's roster opening, so this line does not read Mission.ModeDepth.
         int rosterTier = Mode == GameMode.Skirmish ? Mission.ModeTierFor(heat) : n;
         bool modeMidBoss = Mode == GameMode.Skirmish && heat >= 4;
+        // P19 THE ROSTER CONTESTS — the campaign NODE the player routed through, handed to the
+        // force builder so the map's own ELITE label can field the named elite it advertises
+        // (Mission.MidBossFor). SKIRMISH/DAILY sit on a fresh run's Start node and ENDLESS/TRAINING
+        // throw this force away, so this is `false` in every mode but CAMPAIGN — and mission 1 is
+        // always the Start node, so the opener cannot be moved by it (HORDETEST leg (p19-3)).
+        bool eliteNode = Mode == GameMode.Campaign && _run.CurrentNode?.Kind == NodeKind.Elite;
+        // ...and whether this node is the LAST FIGHT before the finale on the route the player is
+        // actually walking. Not `n == 5`: an Event node can occupy a route's column-4 slot, in which
+        // case that route plays no mission 5 and a bare mission-number floor misses it entirely
+        // (measured: 8.1% of all enumerated routes — SIGHTLINE_ROSTERTEST leg p19-4).
+        bool finalApproach = Mode == GameMode.Campaign && IsFinalApproach(_run.CurrentNode);
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
                       Objective == Objective.Defend,    // FUL-4: trim the opener — waves are the force
@@ -2201,7 +2260,7 @@ public partial class Game
                       // pressuring the hold; it's h8's +4 stats that bite. The residual h6 cell
                       // is recorded in DEVLOG §FUL-13 with this mechanism.
                       Objective == Objective.Defend ? heatEnemy / 2 : 0,
-                      rosterTier, modeMidBoss);
+                      rosterTier, modeMidBoss, eliteNode, finalApproach);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
@@ -2491,6 +2550,7 @@ public partial class Game
         EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
         _run.LossStreak = _metaLossStreak;   // adaptive assist carries across a resumed run
+        RefreshMetaWidths();                 // P18: a resumed run keeps the widths its profile owns
         // (no Players assignment here: SetupMission(n) below rebuilds Players as a fresh per-mission
         // copy — aliasing Players = _run.Squad reintroduces the VIP-duplication bug, so leave it out.)
         int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
@@ -2772,6 +2832,11 @@ public partial class Game
             _run.Report.Insert(0, $"HEAT {UnlockedHeat} UNLOCKED");
             EndHeatUnlocked = UnlockedHeat;   // FUL-12: the end card reads the field, not the report
         }
+        // P18 "THE SECOND AXIS": record the rung this win actually CLEARED, whether or not the
+        // ceiling moved. It is the currency of the heat-gated WAR ROOM column, and it must be
+        // recorded OUTSIDE the block above — a heat-8 clear raises no ceiling (UnlockedHeat is
+        // already at Heat.Max), and that is exactly the win DEEP STORES is gated on.
+        SaveGame.RecordBestHeatWon(_run.HeatLevel);
     }
 
     // ── W5 THE DOORS (audit wildcard-3) ───────────────────────────────────────────────────────
@@ -7876,7 +7941,9 @@ public partial class Game
             if (off.A == ForcedPerk.Value) which = 0;
             else if (off.B == ForcedPerk.Value) which = 1;
         }
-        Perk p = which == 0 ? off.A : off.B;
+        // P18 COMBAT TRIALS: slot 2 exists only when the offer was widened (HasC). Anything out of
+        // range falls back to A, so a stale click can never apply a default(Perk).
+        Perk p = which == 2 && off.HasC ? off.C : (which == 1 ? off.B : off.A);
         Run.ApplyPerk(off.Unit, p);
         Stats.RecordPerk(PerkDef.Code(p));   // balance telemetry (no-op unless Stats.Enabled)
         _run.Report.Add($"{off.Unit.Name} gains {PerkDef.Name(p)}");
@@ -7888,10 +7955,22 @@ public partial class Game
     {
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         var m = Raylib.GetMousePosition();
-        if (Raylib.CheckCollisionPointRec(m, Hud.PerkTagBtn) && _run.PendingPerks.Count > 0)
-            OpenTagEditor(_run.PendingPerks[0].Unit);
+        if (_run.PendingPerks.Count == 0) return;
+        var off = _run.PendingPerks[0];
+        // P18 "THE SECOND AXIS" item 2 — the RECIPIENT row (bonus offers only; the rects are empty
+        // for a rank-up, which belongs to the soldier who earned it). Checked FIRST so a chip that
+        // overlaps nothing else can never be swallowed by a perk card.
+        foreach (var (u, r) in Hud.PerkWhoBtns)
+            if (Raylib.CheckCollisionPointRec(m, r))
+            {
+                if (!ReferenceEquals(u, off.Unit) && _run.RetargetBonusPerk(off, u)) Audio.Play("select");
+                return;
+            }
+        if (Raylib.CheckCollisionPointRec(m, Hud.PerkTagBtn))
+            OpenTagEditor(off.Unit);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnB)) ChoosePerk(1);
+        else if (off.HasC && Raylib.CheckCollisionPointRec(m, Hud.PerkBtnC)) ChoosePerk(2);
     }
 
     /// CLASS SPECIALIZATION FORK pick (W2): apply the chosen fork to the soldier + record telemetry.

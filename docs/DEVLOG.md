@@ -15239,3 +15239,743 @@ P10's gate and its own fix; ROADMAP.
 - `dotnet build -c Release` **0 warn / 0 err**.
 - `bash scripts/qa-sweep.sh --full` — see the closing lines in the wave's report.
 - Screenshots: `shots/p16-void-m2.png`, `shots/p16-void-m3.png`, `shots/p16-arid.png`.
+
+---
+
+## §THE SECOND AXIS — PROGRAM PARALLAX wave P18 (2026-09-04, base `f81d3fa`)
+
+**Thesis (from the lead's docket): the loop stops offering decisions, in three places.** One dev,
+one branch (`wave/the-fork-choice`). All three items were checked against the source before
+anything was written; **all three CONFIRMED, none stale.** What follows is the reasoning, not the
+diff — in particular *why this second axis and not another*, which is the part the docket asked for.
+
+### The verdicts, with the trace
+
+**1. THE WAR ROOM EXHAUSTS AND THE DIFFICULTY DOES NOT — CONFIRMED (not fixed by any earlier wave).**
+`MetaProg.AllUnlocks` was six purchases costing **40+70+90+50+35+45 = 330 salvage**.
+`Game.AwardMetaRunEnd` pays a full six-mission heat-0 clear `(25 + 6*6) * (10+h)/10` = **61** (h4 85,
+h8 109), plus one-time 20-salvage achievement bounties. So the shop empties in **~5 wins**.
+`Game.UnlockHeatOnWin` raises `UnlockedHeat` by one per win **at** the cap, and the cap runs to
+`Heat.Max = 8` — **eight** such wins. From roughly win 5 to win 8 the challenge curve keeps climbing
+against a permanent-reward curve that is flat at zero, which is the run-to-run pillar with one of
+its two curves switched off.
+
+**One half of the docket's framing is refuted and is recorded as such:** salvage is *not* worthless
+after the sixth unlock. W9 (SIGNAL) already shipped the "convert salvage into run-scoped advantage"
+sink — the priced veteran recall (`MetaProg.RecallCost`), the draft-pool re-roll, the scar rehab and
+the shop-slate re-roll. What was missing was never a place to SPEND. It was a place to PROGRESS.
+
+**2. THE PLAYER NEVER CHOOSES WHO GETS THE REWARD — CONFIRMED.** `Run.TryQueueBonusPerk` did
+`var u = eligible[Util.RandInt(0, eligible.Count - 1)]`. Three callers, all of them rewards:
+`Run.AddBonusPerk` (the ELITE / ONSLAUGHT card's `RewardKind.BonusPerk`, via `Game.cs`), the
+ADV. TRAINING requisition (`Game.cs`), and `EventCatalog`'s training arm (`Events.cs`).
+
+**3. A MID-RUN EVENT SILENTLY SWITCHES THE ASSIST OFF — CONFIRMED, and it is worse than "silent".**
+`Run.AssistLevel` read `HeatLevel > 0 ? 0 : Math.Min(AssistMax, LossStreak)` — the run's **live**
+heat. Three catalogue arms (`relic:0` "Claim it", `informant:1` "Turn them in", `reservecall:1`
+"Keep the roster") raise it. So a player on a loss streak, running the assist at heat 0, who takes a
+gamble whose preview reads "+1 Heat (tougher rest of run)", also lost **up to five tiers of
+force-wide enemy `-HP/-Aim` relief** for the rest of the run, with nothing on any screen saying so.
+`EventCatalog.HeatPinned` (wave THE HEAT PIN) makes `AddHeat` a no-op in every measured batch, and
+`_metaLossStreak` is 0 under `NoPersist` — **so this defect is invisible to the flywheel twice over
+and only a player ever meets it.** That is why nine win-rate-driven programs never saw it.
+
+### Why THIS second axis: THE LADDER PAYS IN WIDTH
+
+Three shapes were weighed against `docs/DESIGN.md` §3.F and §3.D.
+
+- **(1) Repeatable purchases that scale in price. Rejected.** An unbounded ladder of paid upgrades
+  is *vertical* progression, and §3.F is explicit that the goal is the opposite: "a player on run
+  100 should have **more options**, not be 10x stronger". It also feeds the difficulty curve from
+  behind — every purchase makes the next rung easier — which flattens the stair-step §3.D asks for.
+- **(2) A sink converting salvage into run-scoped advantage. Rejected as already built** (W9, above).
+  Building a second one would have been a wave spent re-shipping a wave.
+- **(3) Unlocks gated on heat REACHED. Chosen**, for one structural reason the other two cannot
+  match: **its domain is the difficulty curve's own domain.** The thing that keeps climbing after
+  the shop empties *is* the heat ladder, so gating on the ladder makes the two curves start and stop
+  together. The gates are **2 / 5 / 8**, and the top one is deliberately `Heat.Max`: the ladder's
+  final climb is also the axis's final purchase. It cannot be farmed at RECRUIT — `UnlockHeatOnWin`
+  already refuses to advance the ceiling below heat 0.
+
+**What they grant is WIDTH, not power** — each widens one recurring *choice*, and none adds a point
+of anything:
+
+| gate | unlock | cost | what widens |
+|---|---|---|---|
+| clear heat 2 | **COMBAT TRIALS** | 60 | every perk offer is a pick-1-of-**three** (both the rank-up and the bonus path) |
+| clear heat 5 | **DEEP RESERVE** | 95 | the cross-run veteran reserve holds **20** records instead of 12 |
+| clear heat 8 | **DEEP STORES** | 150 | one more requisition slate slot (stacks with QUARTERMASTER's) |
+
+You still take exactly one perk, still pay Intel for what you buy, still recall at most two or three
+veterans. **The honest residual, recorded rather than argued away:** a wider menu *is* a small edge
+by selection — best-of-3 beats best-of-2 — and it is bounded by exactly that, one pick either way.
+Nobody has priced it (see "not measured", below).
+
+**The currency needed a new persisted field and could not be derived.** `MetaDto.MaxHeat` is a
+CEILING, and `UnlockHeatOnWin` stops raising it at `Heat.Max` — so a heat-8 clear moves nothing
+there and a gate at 8 would have been permanently unreachable. `MetaDto.BestHeatWon` is appended
+(raises-only), and `SaveGame.LoadBestHeatWon` migrates every pre-P18 profile through `MaxHeat - 1`,
+which is exact for every rung below the ceiling.
+
+**`MetaUnlock` is one of the thirteen persisted-by-ordinal enums.** The three members were appended
+at the END; `SIGHTLINE_SAVETEST` duly failed with
+`enumShape:MetaUnlock (golden 0xC672FAD5, actual 0xE19D7A3A)` and the printed hash was pasted into
+`SaveGame.PersistedEnums`. No reorder, no insertion, no removal.
+
+### The WAR ROOM had EIGHT PIXELS of slack, and that decided the presentation
+
+The first cut gave the three new unlocks ordinary cards. `SIGHTLINE_FITTEST` failed immediately:
+`textEllipsized: WARROOM @90/100/110%` on **four** unlock descriptions, including three that were
+there before P18. The arithmetic: in the state FITTEST stages (2 owned / 4 unowned) the compact
+cards want `4*70-8 = 202px` in `210px` of room, so **any** added row compresses the pitch, drops the
+cards from two description rows to one, and sends `Hud.Clip` to work.
+
+So a heat-gated unlock **never takes card space**. It is one 24px ledger row — the NEXT COMMISSION —
+naming the lowest-gate unowned commission plus a count of what stands behind it, reading `BUY <cost>`
+once the rung is cleared and `CLEAR HEAT n` before. That is the column's own NEXT UNLOCK idiom
+applied to the second axis, it is what 8px of slack can buy, and it means clearing a rung visibly
+changes the same row rather than reshuffling the column. The row's description lives in a hover card
+(`Hud._warCommHover`), painted after the CAREER footer so it is never overdrawn — without it a
+commission would be a name and a price with no statement of what it does, and the WAR ROOM is the
+only screen in the game where an unlock is described at all.
+
+### Item 2 in detail: keeping the ROLL is what made the picker free
+
+`TryQueueBonusPerk` still rolls its recipient, unchanged, and that roll is now the offer's
+**default**. The player re-targets it in the chooser. Two consequences that were the whole design:
+
+- **The RNG stream is untouched.** The headless paths never open the chooser, so a batch, an autoplay
+  run and PAIRTEST draw exactly what they drew before P18.
+- **A retarget cannot be scummed.** Every non-rolled recipient's pair is derived from the offer's
+  `Seed` by a pure FNV hash (`Run.Mix` / `Run.StrHash` — deliberately **not** `string.GetHashCode`,
+  which .NET randomises per process), mirroring `MakePerkOffer`'s class-line bias. Zero `Util.Rng`
+  draws, stable under toggling, and re-selecting the rolled soldier restores the pair the RNG dealt.
+
+A **rank-up** offer is not re-targetable: it belongs to the soldier who earned it. `PerkOffer.Bonus`
+is the discriminator, and the card is retitled `FIELD TRAINING` for a bonus offer — it had said
+`PROMOTION` over a reward given to a soldier who had not been promoted.
+
+### Item 3 in detail: latch it AND say it
+
+`Run.StartHeat` is the rung the player **dialled**, latched beside `HeatLevel` on every path that
+seats a run and persisted (`RunDto.StartHeatEnc`, encoded as value+2 so `0` can mean "absent" —
+`Heat.Recruit` is `-1`, so no in-range value was free). `AssistLevel` now tests it. The heat rise
+itself is unchanged: the enemy still gets the rung the arm promised; only the confiscation of relief
+the player already had is gone. And the arm's result line now names the assist either way —
+`Heat rises to 1 - FIELD SUPPORT holds at tier 3`, or `... is WITHDRAWN` with the latch off — so the
+message can never disagree with the rule.
+
+A pleasant side effect: `Game.AssistPreview` tests `PendingHeat > 0`, which is now *exactly* the same
+predicate at run start, so the intro's FIELD SUPPORT chip is truthful for the whole run instead of
+only until its first event.
+
+### Tests — each proven to FAIL before the fix and PASS after
+
+The house pattern: the shipped behaviour is asserted **unconditionally**, so the wave's own off
+switch reproduces the pre-P18 defect and the test fails on it. That is the proof the leg can see it.
+
+| item | hook | with the lever OFF (== pre-P18) | shipped |
+|---|---|---|---|
+| assist latch | `SIGHTLINE_EVENTTEST` | `SIGHTLINE_ASSISTLATCH=0` -> `FAIL (assistRevokedByEvent=0, assistReliefRevoked=0)` | `PASS` |
+| recipient picker | `SIGHTLINE_REWARDTEST` (new) | `SIGHTLINE_PERKPICK=0` -> `FAIL (retargetRefused,retargetDidNotMove)` | `PASS` |
+| the second axis | `SIGHTLINE_METATEST` | `SIGHTLINE_SECONDAXIS=0` -> `FAIL (axisUnbuyableAfterGateMet,axisNotCharged,reserveCapUnlock)` | `PASS` |
+| DEEP RESERVE, through the real enshrine | `SIGHTLINE_VETTEST` | `SIGHTLINE_SECONDAXIS=0` -> `FAIL (deepReserveCap=12,deepReserveEnshrine=12(want 20))` | `PASS` |
+| `StartHeat` round-trip + pre-P18 fallback | `SIGHTLINE_SAVETEST` | (a naive `StartHeat=0` default would fail `startHeatLegacy`) | `PASS` |
+| the two new screens at all four text sizes | `SIGHTLINE_FITTEST` | first cut: `screenNotStaged:BONUSPERK-WIDE (identical frame to BONUSPERK)` — the hook was not calling `DebriefSurvivors`, so **neither** case was drawing the chooser | `PASS`, 50 screens |
+
+`SIGHTLINE_REWARDTEST` is the wave's one new hook — the perk OFFER surface genuinely had no owner
+(CONTRACTTEST owns the class-line table behind it, SAVETEST the ordinal, METATEST the WAR ROOM).
+It is wired into `scripts/qa-sweep.sh` through `verdict`; the sweep derives **83 exist / 83 run**
+with an empty coverage guard.
+
+### Measurement: the wave is campaign-INERT, and that is proved rather than asserted
+
+`docs/measurements/p18/` — three CRN-paired batches (heat 0 / 4 / 8, slot bases 0 / 10 / 20,
+`SIGHTLINE_BALANCE=20` = 40 greedy+sloppy campaigns per arm per rung, `runs=40` asserted on all six
+chunks, exit code checked, JSON `rm -f`'d first). **240 campaigns; base binary `f81d3fa` vs this
+branch; 2,356 aggregate leaf fields per pair; ZERO differences on all three pairs.** Every read of
+the new state is `!NoPersist`-gated, the retarget spends no draws, and `LossStreak` is 0 in a batch —
+so there was no rung round to run, and running one would have restated the base tree's numbers under
+a P18 heading. The README states what the round does **not** establish.
+
+### Found, recorded, NOT fixed
+
+- **The COLD WAR ROOM ellipsizes four unlock descriptions, and FITTEST cannot see it.** `DebugWarRoom`
+  stages the rich twelve-run demo; the zero-state (`SIGHTLINE_COLD=1`) has no `ScreenCase`, so the
+  profile every new player is in is unaudited. It is **pre-existing** — at 0 owned / 6 unowned the
+  plan already landed `cardH = 49` and `descRows = 1` before P18 — but P18's ledger row makes it
+  marginally tighter (`cardH 49 -> 44`). Adding the case would fail the gate on a condition P18 did
+  not create, and fixing it needs 342px of cards in 264px of column. ROADMAP.
+- **Nobody has priced the width.** The flywheel has no meta profile (`NoPersist`), so COMBAT TRIALS'
+  third perk, DEEP STORES' extra slot and DEEP RESERVE's deeper roster are unmeasurable, not merely
+  unmeasured. ROADMAP.
+- **An `AddHeat` arm can still push a run above the heat CEILING the player chose** (`Heat.Clamp`
+  clamps to `Heat.Max`, not to `UnlockedHeat`). Considered and left: the arm's preview says "+1 Heat"
+  and delivers exactly that, the HUD's heat chip reads live, and clamping it would neuter the arm for
+  a player already at their cap. Recorded so the next wave decides deliberately rather than by
+  inheritance.
+- **The dossier stat line on the perk chooser runs under the EDIT TAG button** (visible as
+  `SUPPR. FI` in `shots/p18-bonus-perk-picker-wide.png`). Pre-existing on `PERKCHOOSER`; it is an
+  overdraw, not a clip, so FITTEST does not see it. ROADMAP.
+
+### The wave's off switches
+
+`SIGHTLINE_ASSISTLATCH=0` (pre-P18 live-heat assist test), `SIGHTLINE_PERKPICK=0` (no recipient
+choice), `SIGHTLINE_SECONDAXIS=0` (the heat-gated column is neither listed nor applied — the pre-P18
+WAR ROOM exactly). All three are wired in `Program.cs` beside `SIGHTLINE_BIOMEMECH`/`AIDECLINE`.
+
+**Screenshots:** `shots/p18-warroom-second-axis.png` (the axis with its first commission earned),
+`shots/p18-warroom-cold-locked.png` (the fresh profile's signpost, `CLEAR HEAT 2`),
+`shots/p18-warroom-commission-hover.png` (the hover card),
+`shots/p18-bonus-perk-picker.png` and `shots/p18-bonus-perk-picker-wide.png`.
+
+---
+
+
+---
+
+## PROGRAM PARALLAX — wave P19 "THE ROSTER CONTESTS" (2026-09-04, base `3d5c405`, branch `wave/roster-contests`)
+
+**The docket had four items. Two held and were fixed; two were re-derived and are corrected here.**
+The rule this wave kept enforcing on itself is the project's own: a docket figure is a hypothesis
+until you re-measure it, and a refutation with a trace is a result.
+
+| # | docket claim | verdict |
+|---|---|---|
+| 1 | the named mid-boss is keyed on MISSION NUMBER, not the ELITE node | **HOLDS — fixed** |
+| 2 | 12 of 22 hostiles carry the same weapon; four archetype pairs are stat twins | **half holds — the weapon half fixed; the "four stat-twin pairs, one planner weight apart" half REFUTED** |
+| 3 | the four most distinctive archetypes are the rarest bodies (BOMBARD 0.8%, WARBRINGER 1.6%) | **body rates CONFIRMED, framing REFUTED — wrong denominator; not fixed** |
+| 4 | the arena deck is objective-blind, and two authored pairs are ~88% tile-identical | **first half HOLDS (left open); "two pairs at 88%" REFUTED — it is ONE pair, and 88% is the floor-share baseline** |
+
+---
+
+### 1. THE NAMED ELITE BELONGS TO THE ELITE NODE — taken
+
+**The defect, traced.** `src/Mission.cs` read
+
+```csharp
+bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5 || midBossSlot);
+```
+
+`midBossSlot` is only ever `Mode == GameMode.Skirmish && heat >= 4` (`Game.SetupMission`), so in a
+CAMPAIGN the named elite — BREAKER / BULWARK / WARDEN / MARSHAL, the one mid-game body that forces a
+different plan — appeared on missions 3 and 5 **and nowhere else**, while the campaign map ships a
+`NodeKind.Elite` whose entire advertised identity is *the heavier fight, the biggest payout*
+(`Run.CardForNode`: +2 bodies, +1 stat, a BONUS PERK; `Run.ElitePremium` = 14, the map's top intel
+rate). The label and the thing it names were disconnected in **both** directions: routing INTO an
+ELITE bought no named opponent, and avoiding every ELITE met one anyway, on a schedule. This is
+exactly the failure C3 named — *a label the game does not honour is worse than no label*.
+
+Measured on the pre-fix tree before touching anything: the flywheel's own route played **31 ELITE
+nodes in one h0 chunk alone**, none of which fielded the elite they advertise
+(`docs/measurements/p19/p19-basebin-h0-b0.json`, `byNodeKind`).
+
+**The fix.** `Mission.MidBossFor(missionNum, eliteNode, finalApproach, modeSlot)` is now the single
+predicate, `Mission.Build` takes the node kind, and `Game.SetupMission` supplies it.
+
+**The load-bearing half is the FLOOR, and it is not a mission number.** Keying purely on the node
+would gate the game's most distinctive body behind routing luck: `Run.GenerateMap` stamps only
+`max(1, mids/5)` ELITE nodes among 8-12 mid nodes and a route takes one node per column. So the
+LAST FIGHT BEFORE THE FINALE always fields one, and "last fight" is walked on the ROUTE
+(`Game.IsFinalApproach`: every path out of this node reaches BOSS without passing another fight,
+walking THROUGH Event nodes), **not** taken as `n == 5`.
+
+**That distinction was found by measurement, not by taste.** Over all **1,098 enumerated routes of
+200 maps** (`SIGHTLINE_ROSTERTEST` leg p19-4):
+
+| floor rule | routes meeting NO named elite | named elites per route |
+|---|---|---|
+| pre-P19 `n == 3 \|\| n == 5` | **30 / 1098 (2.7%)** — nobody had ever counted this | 1.63 |
+| ELITE node + a bare `n == 5` floor | **89 / 1098 (8.1%)** | 1.33 |
+| **ELITE node + the route-walked floor (SHIPPED)** | **0 / 1098** | **1.47** |
+
+An Event node can occupy a route's column-4 slot, in which case that route plays no mission 5 at
+all — which is why a mission-number floor leaks and why the pre-P19 rule leaked too.
+
+The design statement is now a sentence rather than a schedule: **the named elite fights you where
+you go looking for it — on the ELITE node — and once more, unavoidably, on the way to the boss.**
+
+`SIGHTLINE_ELITEBOSS=0` restores `n == 3 || n == 5` exactly.
+
+---
+
+### 2. THE SMG WAS ONE GUN FOR TWELVE ARCHETYPES — half taken, half refuted
+
+**What holds, re-derived on this tree.** `grep -oE 'WeaponKind\.[A-Za-z]+' src/Mission.cs` gives
+**Smg 48 / Rifle 27 / Lmg 12 / Sniper 6 / Shotgun 6**, and the archetype→weapon mapping confirms
+**12 of the 22 hostile classes carry `Weapon.Make(WeaponKind.Smg)`** — SPOTTER, HOUND, SCREENER,
+HUNTER, MORTAR, MEDIC, PIKEMAN, CUSTODIAN, BOMBARD, SCOUT, DRONE, STRIKER. `MakeHostile` builds
+every one from the same factory, so all twelve shared one range curve, one 1-3 damage band, one clip
+and one crit base.
+
+**What is REFUTED: "four archetype pairs are stat twins... differ by a single planner weight."**
+Tabulating all 22 statlines, there is **exactly ONE exact twin pair** — SPOTTER (BEACON) and
+CUSTODIAN (SEXTON), both `Smg 5 HP / 48 aim / 6 mob` — and it is **not** a planner twin: SPOTTER has
+its own standoff-and-stay-in-contact positioning branch (`Ai.cs:858`) plus the squad-wide focus-fire
+grant (`Ai.cs:1555`), while CUSTODIAN has an objective-undo action branch (`Ai.cs:406`) and takes the
+default advance weight. The near-pairs the docket is probably reading — HUNTER (5/60/9) vs STRIKER
+(4/60/9) — differ by HP **and** by advance weight 2.8 vs 3.5, flank reward 34/16 vs 42/20 plus an
+end-adjacent bonus, an overwatch discount (9 vs 26) and an exemption from disengage. That is four
+planner differences, not one. **The roster's AI is far better differentiated than the docket says.**
+
+**So the real defect is not the planner — it is the NUMBER the player reads.** `Combat.ComputeOdds`
+is what the shot tooltip and RESONANCE T2's incoming-fire forecast both run on, and for those twelve
+bodies its range term was identical. A swarmer at eight tiles and an artillery body at one presented
+the same curve. The roster played broad and **read** narrow.
+
+**The fix — a range BAND, not a new gun.** `Weapon.SmgProfile` (three bands, same `WeaponKind`, same
+damage band, same clip, same crit, so X1's exchange is untouched and no persisted ordinal moves —
+`SaveGame` stores `(int)Weapon.Kind` and rebuilds through `Weapon.Make`). Assigned purely by class in
+`Mission.SmgProfileFor`, only ever from `MakeHostile`, so no player weapon is ever re-banded:
+
+| band | `RangeMod` | who | the identity |
+|---|---|---|---|
+| **CQB** | `clamp((5-d)*4, -20, 16)` | HOUND, STRIKER, SCOUT, DRONE | +4 at point blank, **−14 at ten tiles**. "Close, or you are nothing" — and it hands the player **kiting** as a real counter to the rush archetypes, a verb the board did not previously pay. |
+| **STANDARD** | `clamp((7-d)*2, -12, 12)` | HUNTER, MEDIC, SPOTTER, SCREENER, PIKEMAN, CUSTODIAN, every player weapon | the shipped curve, byte-for-byte (ROSTERTEST pins it against a literal transcription). |
+| **STANDOFF** | `clamp((9-d)*1, -8, 8)` | MORTAR, BOMBARD | −4 at point blank, **+5 at ten**. "Charge it" — the counter-play their own `Ai` branches already assume (one settles at grenade range, the other MAXIMISES distance) and the numbers did not pay. |
+
+The two bands pivot in **opposite** directions around the standard curve; ROSTERTEST asserts that,
+not merely that they differ. `Ai.cs`'s KITE-TO-IDEAL-RANGE term reads the same `RangeMod`, so the
+opponent re-prices its own preferred distance from the same truth the player is shown — one
+function, both sides, no second model to drift.
+
+**Proven where the player reads it.** Pre-P19 a HOUND out-hit a MEDIC by a **constant 4 points at
+every distance** (aim 56 vs 52, one shared curve), so no distance told them apart. Staged on one
+board, one tile, both foes at 7.28 tiles (`SIGHTLINE_BANDSHOT`, screenshots below):
+
+| | HOUND | MEDIC | the INCOMING FIRE card |
+|---|---|---|---|
+| `SIGHTLINE_ROSTERID=0` (pre-P19) | 56% | 52% | *"2 hostiles bear · best 56%"*, **worst gun: FERAL — HOUND** |
+| shipped | **47%** | 52% | *"2 hostiles bear · best 52%"*, **worst gun: ORDERLY — MEDIC** |
+
+Same board, same tile, same two bodies, same distance — **the game names a different worst gun.**
+
+`SIGHTLINE_ROSTERID=0` restores the monoculture exactly (nothing is assigned; every carrier falls
+back to STANDARD).
+
+---
+
+### 3. "THE CONTEST ARCHETYPES ALMOST NEVER APPEAR" — body rates confirmed, framing refuted
+
+Re-derived from the round itself, **n = 30,624 hostile spawns over 3,796 missions and 960 campaigns**
+(the `pre` arm, all three rungs, base `3d5c405`):
+
+| archetype | % of all bodies | per mission | missions fielding one |
+|---|---|---|---|
+| BOMBARD | **0.69%** | 0.056 | **5.6%** (cap 1/mission ⇒ exact) |
+| WARBRINGER | **1.55%** | 0.125 | **12.5%** (cap 1/mission ⇒ exact) |
+| CUSTODIAN | 1.87% | 0.151 | ≤15.1% |
+| PIKEMAN | 2.02% | 0.163 | ≤16.3% |
+| SPOTTER | 2.69% | 0.217 | ≤21.7% |
+
+The docket's 0.8% / 1.6% are **confirmed as body rates**. But **a body rate is the wrong
+denominator for an archetype under a one-per-mission cap**, and BOMBARD and WARBRINGER are both
+capped (`Mission.SpawnEnemies` demotes any second one to a GRUNT). The quantity that decides whether
+a player meets the content is the per-MISSION presence, which is **5.6%** and **12.5%** — and at
+3.95 missions per campaign that is roughly **20%** and **40%** of campaigns. That is *thin*; it is
+not *"almost never"*, and the gap between those two readings is exactly large enough to have
+justified a rate change that was not warranted.
+
+**Deliberately NOT fixed, and the reason is a measurement.** Raising a capped archetype's rate is a
+force change that this wave would have had to price on the same instrument that could not resolve
+either lever it did ship (MDE 4.9-8.6 points, below). Spending a third arm on a change whose only
+argument is "0.69% feels low" would have produced an unresolvable number and a shipped default
+chosen on taste. It is in ROADMAP with the denominators above so the next wave starts from the right
+figure.
+
+---
+
+### 4. THE ARENA DECK — first half holds, "88% tile-identical" refuted
+
+**Holds:** `Mission.DeckPick(int seed, int missionNum)` takes no objective and has no objective-aware
+caller (`Mission.PickLayout(missionNum) => DeckPick(DeckSeed, missionNum)`). An EVAC on a plaza and
+an EVAC whose only open ground is the far corner really are dealt by the same blind draw. Left open
+in ROADMAP: it is a whole wave (it needs a per-arena objective-suitability model, and the deck's
+zero-draw purity is load-bearing for every CRN pairing in the project).
+
+**REFUTED as stated:** "two authored pairs are ~88% tile-identical". Diffing all 595 pairs of the 35
+templates in `src/Maps.cs` (198 tiles each):
+
+| pair | naive tile-identity | Jaccard over NON-FLOOR tiles |
+|---|---|---|
+| ZIGGURAT / FORGE | 88.9% | **72.7%** |
+| GARRISON / REFINERY | 88.4% | **16.0%** |
+| HOOK / GARRISON | 88.4% | **12.5%** |
+| CHASM / GARRISON | 88.4% | **11.5%** |
+| CITADEL / GARRISON | 87.4% | **18.5%** |
+| APPROACH / GARRISON | 86.9% | **7.4%** |
+
+**The templates are 85.3% floor on average** (min 69.7%, max 95.5%), so two INDEPENDENT templates
+agree on ~73% of tiles by floor share alone and any pair of sparse ones clears 88% without sharing a
+single block. On structure, the pairwise mean Jaccard is **16.7%** and there is **exactly ONE**
+genuine near-duplicate: **ZIGGURAT / FORGE at 72.7%** — both "commanding raised core" set-pieces.
+The runner-up is ZIGGURAT/STEPWELL at 54.5%, a different arena. So the deck has one redundant card,
+not two, and the metric that produced "88%" would have sent a wave to de-duplicate GARRISON and
+REFINERY, which share 16% of their structure.
+
+---
+
+### THE ROUND — 2,880 campaigns, three arms, CRN-paired
+
+Base commit `3d5c405`. Release binary from `runbin/p19/new`, under `xvfb-run`, every chunk through
+`docs/measurements/p19/run_chunk.sh` (rm -f first, exit-code check, `runs` assertion). **72/72 chunks
+`runs=40` asserted; `heatPinned=True` and `missionsAbovePin=0` on all 72.** Raw round:
+`docs/measurements/p19/`.
+
+**R0diag first.** The tree gained instrumentation, so before quoting anything: the NEW binary with
+both dials off, against the BASE-COMMIT binary, on the same three chunks — **0 differing fields of
+2,374 / 2,315 / 2,412**. The `pre` arm is an exact restoration and the CRN chain is intact.
+
+Three arms on identical worlds, 3 rungs × 8 slot bases × 20 (greedy+sloppy) = **n=320 per rung per
+arm** (160 CRN worlds × 2 policies).
+
+| contrast | rung | base% | arm% | Δ | n_discordant | b/c | McNemar z | **MDE** |
+|---|---|---|---|---|---|---|---|---|
+| **item 1 alone** (pre→boss) | h0 | 41.6 | 42.5 | +0.9 | 75 | 39/36 | +0.35 | **7.6** |
+| | h4 | 20.9 | 24.4 | +3.4 | 61 | 36/25 | +1.41 | **6.8** |
+| | h8 | 6.9 | 7.2 | +0.3 | 15 | 8/7 | +0.26 | **3.4** |
+| **item 2 alone** (boss→full) | h0 | 42.5 | 40.3 | −2.2 | 97 | 45/52 | −0.71 | **8.6** |
+| | h4 | 24.4 | 21.9 | −2.5 | 58 | 25/33 | −1.05 | **6.7** |
+| | h8 | 7.2 | 6.2 | −0.9 | 35 | 16/19 | −0.51 | **5.2** |
+| **SHIPPED, both** (pre→full) | h0 | 41.6 | 40.3 | −1.2 | 96 | 46/50 | −0.41 | **8.6** |
+| | h4 | 20.9 | 21.9 | +0.9 | 81 | 42/39 | +0.33 | **7.9** |
+| | h8 | 6.9 | 6.2 | −0.6 | 32 | 15/17 | −0.35 | **4.9** |
+
+**Read the MDE column, not the Δ column.** `MDE` is the smallest true paired effect this round could
+have detected at 80% power given the OBSERVED discordance rate. **No contrast is resolved.** The
+honest statement is: *any true effect larger than ~8.6 points at h0, ~7 at h4 or ~5 at h8 would have
+been detected, and none was.* That is an absence of evidence, not a demonstration of neutrality —
+this project has misread that before and the discordance counts are printed so it cannot happen here.
+Cluster SEs (8 chunks per rung) are in `docs/measurements/p19/summary.txt` beside the binomial ones.
+
+**THE MISSION-1 CELL** (`byNodeKind` Start, n=320 per cell) — the design contract (`DESIGN.md` §3.D)
+forbids a wave putting its cost on the opener, and two waves have now done it:
+
+| rung | pre | boss | full |
+|---|---|---|---|
+| h0 | 91.9% | **91.9%** | 91.9% |
+| h4 | 91.6% | **91.6%** | 91.9% |
+| h8 | 91.9% | **91.9%** | 93.1% |
+
+Item 1 is **exactly** identical at every rung, by construction: mission 1 is always the Start node,
+so the lever cannot reach it — and ROSTERTEST leg p19-3 asserts the whole m1 force (class, name,
+tile, HP, aim) is byte-identical across the dial rather than assuming it. Item 2 *can* reach m1 and
+moves it **+0.3 / +1.2**, i.e. in the player's favour. **The opener is not taxed.**
+
+**WHERE THE LEVER ACTUALLY LANDED** (descriptive, not paired — routes diverge, so the arms' node
+counts differ):
+
+| `byNodeKind` | rung | pre | boss | full |
+|---|---|---|---|---|
+| **Elite** | h0 | 60.5% (205) | 57.7% (213) | 59.9% (207) |
+| | h4 | 49.2% (203) | 47.6% (208) | 46.6% (191) |
+| | h8 | **38.7% (150)** | **31.0% (158)** | **30.1% (166)** |
+| **Combat** | h0 | 69.5% (410) | **72.9% (383)** | 71.7% (385) |
+| | h4 | 60.8% (365) | 62.9% (380) | 59.3% (388) |
+| | h8 | 36.0% (330) | 34.9% (335) | 34.4% (328) |
+
+The ELITE node got heavier and the plain fights got lighter, in every rung at h0/h4 and dramatically
+at h8 (−7.7 on Elite). That is the lever doing exactly what it says, and it is the reason the
+CAMPAIGN row barely moves: the wave **redistributed** difficulty onto the node the player chooses
+rather than adding or removing it.
+
+**Texture is unchanged.** `meaningfulChoicesPerTurn` 3.157/3.269/1.777 (pre) vs 3.034/3.461/1.692
+(full); `choicesPerArmedSoldierTurn` 2.233/2.484/2.061 vs 2.233/2.517/2.053; `leadSwingsPerMatch`
+0.779/0.734/0.823 vs 0.731/0.719/0.836. STALEMATE 17/960 (1.77%) in both `pre` and `full`, all on
+the MISSION arm, none on the RUN arm.
+
+**The honest cost of item 2.** Its point estimates are the negative ones (−2.2 / −2.5 / −0.9,
+unresolved). Its argument is **pillar 3, not difficulty**: the roster now reads differently at the
+table, proven in `Combat.ComputeOdds` and photographed in the card the player actually sees. If a
+future round resolves it as a real ~2-point tax and that matters, `SIGHTLINE_ROSTERID=0` is the exact
+restoration.
+
+---
+
+### Every new leg, RED before and GREEN after
+
+`SIGHTLINE_ROSTERTEST=1` is a new hook because the surface had no home: HORDETEST owns ENDLESS,
+MODETEST owns SKIRMISH/DAILY, EXPOSURETEST owns the pure map/deck derivations, CLASSTEST owns the
+objective class — nothing owned *what the CAMPAIGN node the player routed through actually fields*.
+It reads the AMBIENT dials, so each off-switch turns it red. Both transcripts:
+
+```
+$ SIGHTLINE_ELITEBOSS=0 SIGHTLINE_ROSTERTEST=1 ...          # = the pre-P19 mid-boss rule
+  built forces (m2-m4): ELITE nodes 4/25 field the named elite, plain COMBAT nodes 20/61,
+                        plain-but-final-approach nodes 0/2
+ROSTERTEST: FAIL: finalApproachNoNamedElite(0/2), eliteNodeNoNamedElite(4/25),
+                  plainNodeFieldsNamedElite(20/61)
+
+$ SIGHTLINE_ROSTERID=0 SIGHTLINE_ROSTERTEST=1 ...           # = the pre-P19 SMG monoculture
+  ComputeOdds hit%: HOUND 78@1 / 60@10, MEDIC 74@1 / 56@10, MORTAR 72@1 / 56@9 (MEDIC 58@9)
+ROSTERTEST: FAIL: builtSmgBand(MORTAR=0 want 2), builtSmgBand(STRIKER=0 want 1),
+                  builtSmgBand(SCOUT=0 want 1), builtSmgBand(DRONE=0 want 1),
+                  builtSmgBand(BOMBARD=0 want 2), noBuiltHostileCarriesANonStandardBand,
+                  houndMedicNoFlip(near 78v74, far 60v56), mortarMedicNoFlip(near 72v74, far 56v58)
+
+$ SIGHTLINE_ROSTERTEST=1 ...                                # shipped
+  built forces (m2-m4): ELITE nodes 25/25 field the named elite, plain COMBAT nodes 0/61,
+                        plain-but-final-approach nodes 2/2
+  mission-1 force identical across the dial: yes (4 bodies)
+  routes 1098: named elites/route 1.47 (pre-P19 mission-number rule 1.63);
+               ELITE nodes/route 0.67; routes meeting NONE: 0 (pre-P19 rule 30)
+  SMG bands d=1..10  cqb 16,12,8,4,0,-4,-8,-12,-16,-20 | std 12,10,8,6,4,2,0,-2,-4,-6
+                   | sto 8,7,6,5,4,3,2,1,0,-1
+  built SMG carriers: 11 classes, 5 on a non-standard band
+  ComputeOdds hit%: HOUND 82@1 / 46@10, MEDIC 74@1 / 56@10, MORTAR 68@1 / 60@9 (MEDIC 58@9)
+ROSTERTEST: PASS
+```
+
+`houndMedicNoFlip(near 78v74, far 60v56)` **is the pre-fix defect, printed**: a constant +4 at both
+ends, no distance telling the two apart.
+
+The seven legs: (p19-1) the predicate, both dial states, against a literal truth table;
+(p19-2) real built forces on real ELITE / plain / final-approach nodes over 20 maps;
+(p19-3) the mission-1 force byte-identical across the dial; (p19-4) all 1,098 enumerated routes of
+200 maps meet a named elite, with the pre-P19 rule's own leak counted beside it; (p19-5) the band
+derivation + STANDARD transcribed + the opposite-pivot and monotonicity invariants; (p19-6) the
+bands reach the built force and never the player half; (p19-7) `Combat.ComputeOdds` orderings FLIP
+with distance for two pairs that used to be separated by a constant.
+
+### New hooks and dials
+
+| name | what |
+|---|---|
+| `SIGHTLINE_ROSTERTEST=1` | the wave's gate — seven legs above. In `qa-sweep.sh` through `verdict`. |
+| `SIGHTLINE_ELITEBOSS=0` | restore the pre-P19 mid-boss rule (`n == 3 \|\| n == 5`) exactly. The A/B arm. |
+| `SIGHTLINE_ROSTERID=0` | restore the pre-P19 SMG monoculture exactly (no band is assigned). The A/B arm. |
+| `SIGHTLINE_ELITESHOT=1` | stage a frame on an ELITE node so the named opponent can be photographed. Pair with `SIGHTLINE_SHOT=760`; flip `SIGHTLINE_ELITEBOSS` for the contrast. |
+| `SIGHTLINE_BANDSHOT=1` | stage a HOUND and a MEDIC at one distance on carved lines, cursor parked, so the INCOMING FIRE card is in the frame. Flip `SIGHTLINE_ROSTERID` for the contrast. |
+| `Mission.MidBossFor` | the one predicate. `Mission.MidBossFloorMission` = 5 is a belt-and-braces proxy for a caller that cannot see the route. |
+| `Game.IsFinalApproach` | "every path out of this node reaches BOSS without passing another fight". Static overload so the test can ask it of a bare `Run` map. |
+| `Weapon.SmgProfile` / `Mission.SmgProfileFor` | the three bands and the pure class→band map. Not save state (`SaveGame` stores `(int)Weapon.Kind`). |
+
+### Found and NOT fixed
+
+1. **The enemy hover card names the CODEX entry, not the unit.** `src/Hud.cs:2503` reads
+   `string title = $"{Codex.NameFor(d.Cls)} — {d.Cls}";`, so the BREAKER this wave puts on an ELITE
+   node is captioned **"WARLORD — ELITE"** — visible in `docs/measurements/p19/eliteshot-on.png`.
+   Every named elite and every finale boss (BULWARK / WARDEN / MARSHAL / SIEGELORD / SPYMASTER) has
+   worn the wrong name on that card since SIGNAL W5. Left alone because `src/Hud.cs` belonged to
+   another developer this wave. The one-line fix, for the merge:
+   `string title = (!string.IsNullOrEmpty(d.Name) && d.Name != Codex.NameFor(d.Cls)) ? $"{d.Name} — {d.Cls}" : $"{Codex.NameFor(d.Cls)} — {d.Cls}";`
+   (`src/Hud.cs:2375` carries the same expression for the other card.)
+2. **The ELITE node's reward is still blind to what it now fields** — C3's open item. It pays
+   `ElitePremium` = 14 whether or not the fight is the named one; now that the node reliably IS the
+   heavier fight, the premium is at least honest, but it was never priced against it.
+3. Items 3 and 4 above, with the corrected denominators.
+
+### Gate
+
+- `dotnet build -c Release` **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — 84/84 self-tests PASS, no COVERAGE GAP, autoplay ×3 with no
+  TIMEOUT, `SWEEP-EXIT-CODE=0`.
+- Screenshots: `docs/measurements/p19/eliteshot-on.png` / `eliteshot-off.png`,
+  `docs/measurements/p19/bandshot-on.png` / `bandshot-off.png`.
+
+---
+
+## PROGRAM PARALLAX — wave P20 "THE STALE GROUND" (2026-09-04, base `dac9f2f`)
+
+**A merge blocker, not a feature wave.** Milestone 12's composed tree failed
+`bash scripts/qa-sweep.sh --full` intermittently — roughly 1 run in 8 — on one line:
+
+```
+MODETEST   : MODETEST: FAIL (dailyBoardNonDeterministic)
+```
+
+`ModeSelfTest` leg (2) calls `BeginDaily()` twice and compares `BoardSignature()`. The SEEDED
+DAILY's headline contract is that the same day's stamp deals the same board to everyone, so this
+is not a test artefact — it is the contract failing.
+
+### 1. The mechanism, and how it was pinned
+
+Three facts had already been established before this wave started, and are reproduced here because
+they are what made the hunt short: the failure is **first-call-only** (a third `BeginDaily` always
+agrees with the second), the differing signature is **different every time** (so it is not a fixed
+alternative board), and the day's board is a **VOID** board — the biome whose RIFT ground P16
+shipped one milestone earlier.
+
+The instrument that closed it in one run was a **draw counter**. `Util.Rng` was temporarily turned
+from a field into a property whose getter increments a counter and, under a flag, records the top
+six stack frames. That costs nothing in stream terms — every `Util` helper touches `Rng` exactly
+once per draw and `Reseed` goes through the setter — so the counted run is the same run.
+
+It reported, immediately:
+
+```
+call0: draws=879 board=469808df  hgt=c98ee6ed nBarrel=0 nHigh=8   <- the failing first call
+call1: draws=31  board=c2a75b4f  hgt=46a0b69d nBarrel=4 nHigh=0
+call2: draws=31  board=c2a75b4f  hgt=46a0b69d nBarrel=4 nHigh=0
+```
+
+**848 extra draws**, and the two traces agree for exactly 21 draws and then fork:
+
+```
+good  #22: Util.RandInt < Mission.PlaceBarrels    < Mission.Build < Game.SetupMission < Game.BeginDaily
+bad   #22: Util.RandInt < Mission.BuildProcedural < Mission.Build < Game.SetupMission < Game.BeginDaily
+```
+
+The failing call did not stamp the day's authored arena at all. `Mission.Build` sets
+`ForcedLayout` to the day's arena, calls `TryApplyLayout`, and that call **returned false** — its
+connectivity guard rejected the arena — so the daily fell through to `BuildProcedural`. That is a
+completely different board (8 high-ground tiles instead of none, no barrels) and 424 extra
+rejection-loop iterations in `PlaceBarrels` on top.
+
+`TryApplyLayout` takes **zero** RNG draws. Its accept/reject decision is a flood fill:
+
+```csharp
+var cost = g.CostMap(players[0].X, players[0].Y, (x, y) => false, out _, 9999);
+```
+
+and `Grid.CostMap` calls `Grid.IsFloor`, which since P16 reads:
+
+```csharp
+&& !(Terrain.NewOn && AnyRift && Ground[x, y] == GroundKind.Rift);
+```
+
+**`Mission.Build` was reading the PREVIOUS mission's ground layer.** Build wipes `Tiles`, `Height`
+and `Smoke` at its top; it never wiped `Ground`. And this mission's ground layer cannot exist yet —
+`Game.StampBiomeGround` runs *after* Build, because its `reserved` set is derived from the board
+Build produces. So the correct ground during a build is **no ground**, and what was actually there
+was the last board's.
+
+In `ModeSelfTest` the board before the first `BeginDaily` is a **SKIRMISH**, which is clock-seeded.
+One board in eight is a VOID board. When it was, its leftover rift severed the flood between the
+squad's deploy band (cols 0–3) and the hostiles' (cols 14–17), the day's arena was rejected, and
+the daily dealt a procedural board. The second and third `BeginDaily` inherit the *daily's own*
+ground, which is deterministic — which is exactly why only the first call ever differed.
+
+The stale read reaches further than the daily. It is inside `Mission.Build`, so it also feeds
+`SpawnEnemies`' pod scatter, `PlaceBarrels`' candidate filter and `EnsureConnectivity`'s carve, on
+**every** mission of every mode: a campaign's mission *n* board was a function of mission *n−1*'s
+ground.
+
+### 2. Attribution — pre-existing, and dated
+
+Stated plainly, because the hand-off asked for it: **this was not introduced by the composition of
+`wave/the-fork-choice` and `wave/roster-contests`.** Measured, MODETEST run to a tally:
+
+| tree | failures |
+|---|---|
+| `f81d3fa` — milestone 10, the commit **before** P16 merged | **0 / 60** |
+| `3d5c405` — milestone 11, P16 merged (the composed tree's merge base) | **5 / 60 (8.3%)** |
+| `dac9f2f` — the composed tree | **6 / 40 (15%)**, and 1/20 and 2/18 in earlier tallies |
+| `dac9f2f` with `SIGHTLINE_NEWGROUND=0` (VOID back to paint) | **0 / 40** |
+| `dac9f2f` with `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board) | **0 / 40** |
+
+So: **latent since C4** (which introduced the ground layer and the after-Build stamp order), and
+**armed by P16 GROUND TRUTH**, which made VOID's rift the first ground that stops a mover — the
+first ground a connectivity flood can see. The two levers that restore the pre-P16 / pre-C4 board
+both take the failure to zero, which is the same finding by a second road.
+
+The composed tree reads 15% against the merge base's 8.3%; at 6/40 vs 5/60 that difference is not
+resolved (z ≈ 1.0) and no claim is made about it. The earlier "12/12 clean at the merge base" was
+the ~1-in-5 chance of missing an 8% failure in twelve draws.
+
+### 3. The fix
+
+One line, at the top of `Mission.Build`, beside the `Tiles`/`Height` wipe it belongs with:
+
+```csharp
+if (ClearGroundOnBuild) grid.ClearGround();
+```
+
+`Mission.ClearGroundOnBuild` defaults **true**; `SIGHTLINE_STALEGROUND=1` restores the pre-fix
+read. The flag exists for the house reason (a change that moves the board must be switchable so it
+can be attributed and priced) and because the regression test flips it to prove its own detector
+can fail.
+
+### 4. The regression test — RED before, GREEN after, and reliably so
+
+`MODETEST` leg **(14)**, three parts. Leg (2) can only catch this by luck — it needs the skirmish
+before it to have left a VOID board — so leg (14) forces the mechanism instead of re-running the
+board and hoping.
+
+* **(14a) the invariant, on a scratch grid.** A hand-written RIFT wall down one mid-field column,
+  then `Mission.Build`, then assert the ground layer is empty. Build never stamps ground itself, so
+  "empty when Build returns" is the whole statement — and it holds for the campaign, not just the
+  daily. The dirt is written by hand rather than stamped so the leg depends on no stamper staying
+  as it is today and on no seed dealing a severing pattern by luck.
+* **(14b) the consequence, end to end.** `BeginDaily()` from a clean grid and from a dirtied one
+  must give the same `BoardSignature`. This is leg (2)'s assertion with the luck removed.
+* **(14c) the detector must be able to fail.** The same pair re-run with
+  `Mission.ClearGroundOnBuild = false`: the dirt **must** move the board there, or (14b) is
+  asserting nothing. Skipped when the rift is not a mechanic at all (`SIGHTLINE_BIOMEMECH=0` /
+  `SIGHTLINE_NEWGROUND=0`), where there is by construction nothing to bite on.
+
+Measured, on the same binary:
+
+| | result |
+|---|---|
+| default (fixed) | **PASS 25 / 25**, and the draw-counter probe 0 anomalies in 40 |
+| `SIGHTLINE_STALEGROUND=1` | **FAIL 5 / 5**, always the same three tokens: `buildReadsStaleGround(11 tiles survived Build)`, `buildLeftStaleGroundFlags`, `dailyBoardReadsPreviousGround(clean=c2a75b4f afterDirt=8fdb0bed)` |
+
+No new hook, so no `qa-sweep.sh` edit: MODETEST is already wired once, through `verdict`.
+
+### 5. What the fix costs — the board moves, and the ladder is now a pre-P20 ladder
+
+**This is not an inert change and must not be filed as one.** Removing a stale read that fed
+terrain generation changes the terrain. CRN-paired on `dac9f2f`, `SIGHTLINE_STALEGROUND=1` as the
+control arm, heat pinned, `docs/measurements/p20/`:
+
+Two rungs, 8 CRN slot sets each (bases 0–70), 20 campaigns × greedy+sloppy per chunk,
+**n = 320 per rung per arm, 1,280 campaigns**, 32/32 chunks `runs=40` asserted and heat-pin clean:
+
+| rung | fix (default) | stale (control) | delta | worlds that play out differently | McNemar (fix-only / stale-only wins) | chunk-paired t(7) |
+|---|---|---|---|---|---|---|
+| h0 | 42.5% | 40.3% | **+2.2** | **25.3%** | 16 / 9, z = +1.40 | +1.05 (mean +2.2 ± 2.1) |
+| h4 | 18.1% | 21.9% | **−3.8** | **16.6%** | 2 / 14, z = **−3.00** | **−3.97** (mean −3.8 ± 0.9) |
+
+Read it in that order:
+
+1. **The board really moves.** A quarter of h0 worlds and a sixth of h4 worlds end differently on
+   the same slot seed. This is not an inert change and nobody should file it as one.
+2. **h0 is not resolved** (+2.2, both tests under 1.5σ). Do not quote it as an effect.
+3. **h4 is resolved and it is a tightening**: −3.8 points, McNemar z = −3.00 on 16 discordant
+   pairs, and the chunk-paired t is −3.97 with **all eight slot sets negative** (−10, −2, −2, −2,
+   −2, −2, −2, −5). The fix makes heat 4 harder. The direction is what you would expect: the stale
+   layer's main visible effect was to make `TryApplyLayout` REJECT the dealt arena and fall through
+   to `BuildProcedural`, and the procedural board is evidently the friendlier one at that rung.
+4. **This round is a price, not a ladder.** It compares the fix against its own control on one
+   tree and one 8-set slot space; it is not comparable with L5's rungs, and no attempt was made to
+   make it so.
+
+**The consequence for the ladder of record.** L5's absolute win rates were measured on the stale
+board. The CRN *machinery* is intact — a slot is still a slot, the chunk runner and the heat pin
+are untouched — but an absolute number from L5 may not be compared with one measured after P20
+without saying so. `CLAUDE.md`'s ladder block now carries that warning, and **the ladder owes a
+re-measure**. That is a measurement round's job, not a merge blocker's.
+
+**No corrective lever was shipped**, for the same reason: a bug fix's job is to be correct, and
+h4 moving −3.8 is a finding to publish, not to repair inside the fix.
+
+### 6. Why the fix is not smaller than this
+
+A narrower fix — clear the ground only at the mode seam (`ResetModeState`) — would have closed the
+reported symptom (the daily's contract) and left every campaign board bit-identical, i.e. zero
+ladder cost. It was rejected: it leaves the defect in place everywhere else. The stale read is
+inside `Mission.Build`, so a campaign's mission-*n* board is a function of mission *n−1*'s ground,
+which means the same mission built in a fresh process (an empty ground layer — a loaded save) and
+built after playing the mission before it **need not agree**. That is the daily's bug wearing a
+save file. `Game.StampBiomeGround`'s design already says what the right answer is: it reserves
+every unit tile, the evac zone, the terminal, the sabotage sites and the cache *because the board
+is built first and the ground is laid around it*. During a build there is no ground. The fix makes
+that true instead of nearly true.
+
+### 7. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `SIGHTLINE_MODETEST=1` × 25 on the shipped binary — **25 PASS / 0 FAIL**. Pre-fix, the same
+  binary with `SIGHTLINE_STALEGROUND=1` — **5 FAIL / 5**, identical tokens every time. The
+  draw-counter probe that found the defect: 0 anomalies in 40 with the fix, 6 in 40 without.
+- `bash scripts/qa-sweep.sh --full` — **85/85 self-tests PASS**, no COVERAGE GAP, autoplay ×3
+  (LOSE m5 / WIN m6 / WIN m6), no TIMEOUT, **`SWEEP-EXIT-CODE=0`**.
+- Raw round + runner + `analyse.py`: `docs/measurements/p20/`.
+
+**One thing the sweep caught, worth recording because it is the guard doing its job.** The first
+`--full` run **failed** with `COVERAGE GAP: SIGHTLINE_GROUNDSEAMTEST`. There is no such hook — the
+name existed only in a comment this wave wrote in `src/Mission.cs`, pointing at a self-test that
+was folded into MODETEST instead. The guard scans `src/` for hook-shaped names and does not care
+that the occurrence is a comment, so naming a hook you did not build is a hard failure. That is the
+right behaviour and the opposite of the failure mode PARALLAX opened on: it failed **loud**.

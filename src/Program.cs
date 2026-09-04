@@ -142,6 +142,13 @@ public static class Program
         //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
             Mission.OpenerTrim = xopen;
+        // P19 THE ROSTER CONTESTS — SIGHTLINE_ELITEBOSS=0 restores the pre-P19 mid-boss rule
+        // (`n == 3 || n == 5`, blind to the node the player routed through) EXACTLY. It is what
+        // HORDETEST's P19 legs were shown to FAIL against.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ELITEBOSS") == "0") Mission.EliteBoss = false;
+        // P19 THE ROSTER CONTESTS — SIGHTLINE_ROSTERID=0 restores the pre-P19 SMG monoculture:
+        // every hostile SMG carrier back on the one shared range curve (Weapon.SmgProfile).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ROSTERID") == "0") Mission.RosterIdentity = false;
         // C1 THE FLAT MIDDLE — SIGHTLINE_MIDTOOTH=<n> : Heat.MidTooth, which of NO QUARTER's two
         // qualitative teeth ride EXPOSED (rung 6) instead. Bitfield: 1 = the +1 per-hit damage,
         // 2 = coordination tier 2, 3 = both. **0 restores the pre-C1 table exactly** — that is
@@ -215,6 +222,32 @@ public static class Program
 
         string biomeMechEnv = Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEMECH");
         if (biomeMechEnv == "1") Terrain.Enabled = true; else if (biomeMechEnv == "0") Terrain.Enabled = false;
+        // P20 "THE STALE GROUND" — SIGHTLINE_STALEGROUND=0/1. =1 restores the pre-fix seam, in
+        // which Mission.Build's floor / cost / connectivity queries read the PREVIOUS mission's
+        // ground layer (Build wiped Tiles, Height and Smoke but not Ground, and this mission's
+        // layer is not stamped until after Build returns). That made the arena a function of the
+        // board before it: measured at 8-15% of processes, the SEEDED DAILY dealt a different
+        // board on its first build than on its second. Kept as an off switch so the board change
+        // is attributable and priceable, and because MODETEST leg (14) flips it to prove its own
+        // detector can fail. Never ship it on.
+        string staleGroundEnv = Environment.GetEnvironmentVariable("SIGHTLINE_STALEGROUND");
+        if (staleGroundEnv == "1") Mission.ClearGroundOnBuild = false;
+        else if (staleGroundEnv == "0") Mission.ClearGroundOnBuild = true;
+        // ---- P18 "THE SECOND AXIS" — the wave's three off switches (house pattern: =0 restores
+        // the pre-P18 behaviour EXACTLY, so every change is attributable). ----
+        // SIGHTLINE_ASSISTLATCH=0/1: the adaptive assist reads the heat the run STARTED at instead
+        // of its live heat, so a mid-run AddHeat field event can no longer silently revoke it.
+        string assistLatchEnv = Environment.GetEnvironmentVariable("SIGHTLINE_ASSISTLATCH");
+        if (assistLatchEnv == "1") Run.AssistLatch = true; else if (assistLatchEnv == "0") Run.AssistLatch = false;
+        // SIGHTLINE_PERKPICK=0/1: a BONUS perk (ELITE/ONSLAUGHT reward, ADV. TRAINING, the field
+        // event) lets the player choose its RECIPIENT instead of landing on a random survivor.
+        string perkPickEnv = Environment.GetEnvironmentVariable("SIGHTLINE_PERKPICK");
+        if (perkPickEnv == "1") Run.BonusPerkPick = true; else if (perkPickEnv == "0") Run.BonusPerkPick = false;
+        // SIGHTLINE_SECONDAXIS=0/1: the WAR ROOM's HEAT-GATED second column (COMBAT TRIALS / DEEP
+        // RESERVE / DEEP STORES). =0 hides all three and applies none of them, which is the pre-P18
+        // WAR ROOM exactly. Every read is !NoPersist-gated, so a batch never sees it either way.
+        string secondAxisEnv = Environment.GetEnvironmentVariable("SIGHTLINE_SECONDAXIS");
+        if (secondAxisEnv == "1") MetaProg.SecondAxis = true; else if (secondAxisEnv == "0") MetaProg.SecondAxis = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -631,6 +664,13 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_REWARDTEST=1 : P18 THE SECOND AXIS — WHO gets a bonus perk and how wide the
+        // offer is (Game.RewardSelfTest). Pure model: no window, no disk.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_REWARDTEST") == "1")
+        {
+            Console.WriteLine(Game.RewardSelfTest());
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRASTTEST") == "1")
         {
             Console.WriteLine(ContrastSelfTest());
@@ -954,6 +994,21 @@ public static class Program
             Console.WriteLine(new Game().LaneSelfTest());
             Display.Shutdown();
             Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_ROSTERTEST=1 : P19 THE ROSTER CONTESTS — (a) the named mid-boss belongs to the
+        // campaign map's ELITE NODE rather than to a mission number (Mission.MidBossFor), proven on
+        // real built forces, with the mission-1 opener asserted identical across the dial and every
+        // enumerated route asserted to still meet one; (b) the SMG monoculture's three range bands
+        // (Weapon.SmgProfile), proven to reach the built force, to leave the player half alone, and
+        // to FLIP the hit% ordering of two archetypes that used to differ by a constant.
+        // It reads the AMBIENT dials, so `SIGHTLINE_ELITEBOSS=0 SIGHTLINE_ROSTERTEST=1` and
+        // `SIGHTLINE_ROSTERID=0 SIGHTLINE_ROSTERTEST=1` both FAIL — that is the proof they can.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ROSTERTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "rostertest");
+            Console.WriteLine(new Game().RosterSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -1451,6 +1506,12 @@ public static class Program
         if (longMove && longMoveEnv == "vault") Console.WriteLine($"LONGMOVE: vault staged {game.DebugVaultMove()} at {game.AnimSpeed:0.##}x");
         else if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
+        // P18 THE SECOND AXIS: SIGHTLINE_BONUSSHOT=1 (or =wide) stages the BONUS perk card with its
+        // RECIPIENT row (and COMBAT TRIALS' third option), which is what the wave actually changed.
+        {
+            string bs = Environment.GetEnvironmentVariable("SIGHTLINE_BONUSSHOT");
+            if (shot && !string.IsNullOrEmpty(bs)) game.DebugBonusPerk(bs == "wide");
+        }
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
@@ -1467,6 +1528,8 @@ public static class Program
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELITESHOT") == "1") game.DebugEliteNodeShot();   // P19: the ELITE node's named opponent (pair with SIGHTLINE_SHOT=760; flip SIGHTLINE_ELITEBOSS for the contrast)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BANDSHOT") == "1") game.DebugRosterBandShot();   // P19: the SMG bands in the INCOMING FIRE card (flip SIGHTLINE_ROSTERID for the contrast)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_LANESHOT") == "1") game.DebugEnemyLane();   // P10: an ordinary enemy overwatch holding a CHOSEN lane (pair with SIGHTLINE_SHOT=760; flip SIGHTLINE_AILANE for the contrast)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DECLINESHOT") == "1") game.DebugDeclineShot();   // C2: the opponent declines (pair with SIGHTLINE_SHOT=760 and flip SIGHTLINE_AIDECLINE for the contrast)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();

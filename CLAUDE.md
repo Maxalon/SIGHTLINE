@@ -350,6 +350,12 @@ src/
                 HostileDamageTrim - see "Combat model"), OpenerTrim, the deployment shapes,
                 pods and the per-objective board furniture. Every hostile in the game is
                 built here; nothing else may construct one.
+                P20: Build CLEARS the biome ground layer at its top (`Mission.ClearGroundOnBuild`).
+                It wipes Tiles/Height/Smoke there and used not to wipe Ground, but it READS Ground
+                through Grid.IsFloor / Grid.CostMap (TryApplyLayout's accept/reject, SpawnEnemies'
+                scatter, PlaceBarrels, EnsureConnectivity) — and this mission's layer does not exist
+                yet, because Game.StampBiomeGround runs AFTER Build. So a board was a function of
+                the board before it. SIGHTLINE_STALEGROUND=1 restores that; never ship it on.
   Voice.cs      the squad's radio barks (line pools + the cooldown/priority picker)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
   Terrain.cs    C4 + P16: the per-tile biome GROUND layer. FIVE of eight biomes are mechanical
@@ -606,6 +612,14 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
 >
 >
+> ### ⚠ L5 IS A **PRE-P20** LADDER. Wave P20 THE STALE GROUND removed a read of the PREVIOUS
+> mission's ground layer from `Mission.Build`, which **moves the terrain**: CRN-paired on `dac9f2f`
+> (`SIGHTLINE_STALEGROUND=1` as the control), the same slot seed now plays a measurably different
+> world on a substantial share of campaigns. The pairing MACHINERY is intact — a slot is still a
+> slot — but an ABSOLUTE win rate from L5 may not be compared with one measured after P20 without
+> saying so. `docs/measurements/p20/` has the priced round; DEVLOG §P20 §5 has what it does and
+> does not resolve. **The ladder owes a re-measure.**
+>
 > ### ⚠ THE LADDER OF RECORD IS **L5**, ON THE PINNED INSTRUMENT. THE L4 AND C1 TABLES BELOW ARE PROVENANCE.
 >
 > **L5 — base commit `7180374` (wave THE HEAT PIN AND L5 part A on `178464a`), heat PINNED
@@ -698,6 +712,9 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P12** THE CONFIRMED EIGHT | `Game.Frozen` owns "nothing below this ticks"; `Paused` is a property whose setter releases the fader. Both exist because state kept running behind a modal card. | §THE CONFIRMED EIGHT |
 | **P15** THE INSTRUMENT | The checkpoint redeploy **erased the mission it retried** — 421 chunks, 39,143 missions, zero non-terminal mission losses. **Every per-mission and decision-density figure in the archive is biased upward**; campaign-level results and the L5 ladder are untouched. | §THE UNVERIFIED — THE INSTRUMENT |
 | **P17** SHIPS AS v1.0.0 | The release artefact is DERIVED, not written: the archive is named from the version **the binary reports**, the changelog from `git log --first-parent`, and the checksum is recomputed in-process. `--tag` makes a LOCAL tag and never pushes. `Display.AllowLaunchFit` defaults **false** so the first-launch window fit can never reach the harness. | §SHIPS AS v1.0.0 |
+| **P18** THE SECOND AXIS | The WAR ROOM's six salvage unlocks cost **330** against **61** income for a heat-0 clear, so it emptied in ~5 wins while `UnlockHeatOnWin` kept climbing to `Heat.Max = 8`. Three unlocks are now gated on a rung **CLEARED** (`MetaDto.BestHeatWon`, appended; `MaxHeat` cannot serve — it is a CEILING that stops rising at `Heat.Max`, so a heat-8 clear moves it not at all). **The WAR ROOM's UNLOCKS column has 8px of slack**: a heat-gated unlock is a 24px ledger row, never a card, or FITTEST ellipsizes four descriptions. Also: a BONUS perk's recipient is now chosen (the roll is KEPT as the default, so the RNG stream is untouched and a retarget spends zero draws), and `Run.AssistLevel` reads the **latched** `StartHeat` so an `AddHeat` event can no longer confiscate an assist the player never opted out of. **Campaign-inert at the flywheel by construction** — 240 CRN-paired campaigns, 3 rungs, 2,356 fields, zero diffs (`docs/measurements/p18/`); the width it sells is UNPRICED and unmeasurable until a staged-profile batch hook exists. | §THE SECOND AXIS |
+| **P19** THE ROSTER CONTESTS | The named mid-boss now belongs to the map's **ELITE NODE** (`Mission.MidBossFor`), with the floor walked on the ROUTE (`Game.IsFinalApproach`) because an Event node can occupy a route's column-4 slot — **a `mission == 5` floor leaks on 8.1% of routes and the old `n == 3 \|\| n == 5` leaked on 2.7%.** Also: **BOMBARD/WARBRINGER's "0.8%/1.6%" are BODY rates and are the wrong denominator** — both are capped at one per mission, so exposure is **5.6% / 12.5% of missions**; and the arenas' "88% tile-identical" is the **85.3% floor-share baseline**, not duplication (one real near-duplicate: ZIGGURAT/FORGE, Jaccard 72.7%). | §P19 |
+| **P20** THE STALE GROUND | `Mission.Build` wiped Tiles, Height and Smoke but **not the biome GROUND layer**, and it asks for that layer through `Grid.IsFloor` / `Grid.CostMap` before `Game.StampBiomeGround` runs — so a board was a function of **the board before it**. Latent since C4, armed by P16 (the rift is the first ground that stops a mover). `Mission.ClearGroundOnBuild`; MODETEST leg (14). **The fix moves the board, so L5 is a pre-P20 ladder.** | §P20 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be
 switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, exactly),
@@ -705,7 +722,13 @@ switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, ex
 `SIGHTLINE_MIDTOOTH=0` (the pre-C1 heat table), `SIGHTLINE_OPENERTRIM=0` (the pre-X2 opener),
 `SIGHTLINE_KILLTREADMILL=1` (C3's clock arm back on), `SIGHTLINE_HEATPIN=0` (the heat leak back),
 `SIGHTLINE_CHOICEBAND=mult` (the pre-TRUE-BAND instrument), `SIGHTLINE_MODEDEPTH=0` (the pre-P14
-single-mission modes). **Grep `Program.cs` for `SIGHTLINE_` for the authoritative set** — that list
+single-mission modes), `SIGHTLINE_SECONDAXIS=0` / `SIGHTLINE_PERKPICK=0` / `SIGHTLINE_ASSISTLATCH=0`
+(the three halves of P18: the pre-P18 WAR ROOM, the random bonus-perk recipient, the live-heat assist),
+`SIGHTLINE_ELITEBOSS=0` (the pre-P19 mission-number mid-boss), `SIGHTLINE_ROSTERID=0` (the pre-P19
+SMG monoculture) and `SIGHTLINE_STALEGROUND=1` (the pre-P20 seam, in which `Mission.Build` read the
+PREVIOUS mission's ground layer — never a shipping configuration; it makes the SEEDED DAILY's
+headline contract false). **Grep `Program.cs` for `SIGHTLINE_` for the authoritative set** — that list
+is derived, this one is written down, and written-down lists in this repository go stale.
 is derived, this one is written down, and written-down lists in this repository go stale.
 
 **PROGRAM PARALLAX is the twelfth and is current.** Its own thesis, earned twice over: the gates in

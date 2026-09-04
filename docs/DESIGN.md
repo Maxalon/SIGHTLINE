@@ -328,6 +328,37 @@ the auto-backfill-to-4 currently softens it (good anti-spiral, weak stakes). Wou
 - **Don't** let a snowball (or a death-spiral) make the outcome a foregone conclusion
   with many turns still to play.
 
+> **AMENDMENT — the reward curve's DOMAIN must be the difficulty curve's domain**
+> *(PROGRAM PARALLAX, wave P18 "THE SECOND AXIS", 2026-09-04).*
+> §F said what a meta unlock should BE (horizontal, option-widening). It said nothing about how
+> LONG the meta should keep paying, and the gap showed: the WAR ROOM's six salvage unlocks cost 330
+> in total against ~61 income for a heat-0 clear, so it emptied in about five wins — while
+> `Game.UnlockHeatOnWin` kept raising the heat cap once per win at the cap, to `Heat.Max = 8`.
+> A permanent-progression curve that flattens to zero while the challenge curve keeps climbing is
+> the run-to-run pillar with one of its two curves switched off.
+>
+> **The rule this adds:** a permanent-reward track should be gated on the same axis the difficulty
+> runs on, so the two start and stop together. In SIGHTLINE that axis is HEAT, and the three
+> COMMISSIONS are gated on a rung CLEARED (2 / 5 / 8, the last **on** `Heat.Max`) rather than on
+> salvage banked. §F's horizontal rule still governs WHAT they grant — all three widen a recurring
+> choice (a perk offer, the requisition slate, the veteran reserve) and none adds a point of
+> anything. The residual is recorded rather than argued away: a wider menu is a small edge by
+> SELECTION, bounded at one pick either way, and unpriced (the flywheel has no meta profile).
+> Two design shapes were rejected in reaching this and the reasons belong here: **repeatable
+> price-scaling purchases** are vertical progression and feed the difficulty curve from behind, and
+> **another salvage-to-run-advantage sink** was already shipped by W9 — the missing thing was never
+> a place to SPEND, it was a place to PROGRESS. Detail: `docs/DEVLOG.md` §THE SECOND AXIS.
+
+> **AMENDMENT — a mercy the player did not opt out of may not be confiscated by a gamble**
+> *(same wave).* The adaptive assist (`Run.AssistLevel`) responds to a LOSS STREAK, not to a
+> difficulty rung — but it tested the run's LIVE heat, and three field-event arms raise that
+> mid-run. A player who took a "+1 Heat (tougher rest of run)" gamble therefore also lost up to
+> five tiers of force-wide enemy relief, as a second cost no screen ever named. §3.A's rule about
+> informed decisions covers this: an option whose real price is hidden is not a decision. The
+> assist is now latched to the rung the player DIALLED (`Run.StartHeat`), the heat rise is
+> unchanged, and the arm says which way it went. **The general form:** a difficulty relief granted
+> for a reason OUTSIDE the run may only be withdrawn by the thing that granted it.
+
 ### G. Teaching & onboarding
 
 **Performance before competence; teach with low-cost failure and well-ordered
@@ -1101,3 +1132,75 @@ and where §3.D forbids front-loaded anxiety. The reason is structural and worth
 next ground is designed: **neither of these grounds can kill you or hide a shooter.** A four-rookie
 opener has almost no slack in lethality and a lot of slack in routing, so a routing rule is the kind
 of rule it can absorb.
+
+---
+
+## 5.5 What a NODE LABEL promises (decided 2026-09-04, PARALLAX wave P19 "THE ROSTER CONTESTS")
+
+Same contract as §5, §5.2, §5.3 and §5.4: on the record, alternatives named, cost stated.
+
+**The finding.** The campaign map ships a `NodeKind.Elite` whose whole advertised identity is *the
+heavier fight, the biggest payout* — it carries +2 bodies, +1 stat, a BONUS PERK and the map's top
+intel rate, the fork legend names it, and `Hud`'s map screen paints it. And the one piece of
+mid-game content that actually makes a fight *heavier in kind* rather than in count — the named
+elite, whose three faction variants each force a different verb (burst the rusher, flank the wall,
+relocate under the shells) — appeared on **missions 3 and 5, blind to the node**. Routing into an
+ELITE bought no named opponent. Avoiding every ELITE met one anyway, on a schedule.
+
+**Why this is a §3 violation and not a tuning nit.** It is C3's lesson exactly: *a label the game
+does not honour is worse than no label*, because it does not merely fail to inform, it actively
+teaches the player that the fork's words do not mean anything. §3.A requires a decision's options to
+be **asymmetric** and the player to be able to make it **informed**. An ELITE node whose only real
+difference is +2 bodies is a quantitative option dressed in qualitative language; the player who
+reads "the heavier fight" and gets two more GRUNTS has been told a small lie by the UI, and after
+two or three of those they stop reading the fork at all — which costs the run-to-run loop (§2) far
+more than any force delta.
+
+**The decision.** The named elite belongs to the ELITE node. The design statement, which is now a
+sentence rather than a schedule: **the named elite fights you where you go looking for it — on the
+ELITE node — and once more, unavoidably, on the way to the boss.**
+
+**The alternatives considered:**
+
+- **(a) ELITE node ONLY, no floor.** Rejected on a measurement, not on taste. `Run.GenerateMap`
+  stamps `max(1, mids/5)` ELITE nodes among 8-12 mid nodes and a route takes one node per column,
+  so **8.1% of all 1,098 enumerated routes** would meet no named elite at all, and the mean would
+  fall 1.63 → 1.33 per route. That is a content regression dressed as an information fix: it makes
+  the label honest by making the content rarer, and §5's whole point is that the fix must not cost
+  the thing it is protecting.
+- **(b) ELITE node PLUS the old `n == 3 || n == 5`.** Rejected: it fixes only half the complaint.
+  The mission-number rule is precisely the part that has nothing to do with the map, and leaving it
+  means a player who avoids every ELITE still meets the content on a schedule — the fork still does
+  not mean anything, it just also means something now.
+- **(c) ELITE node PLUS a `mission == 5` floor.** Rejected because it is subtly wrong in the same
+  way the original was: an Event node can occupy a route's column-4 slot, so that route plays **no
+  mission 5 at all**. A mission-number floor leaks — and, counted for the first time, **the
+  pre-P19 rule leaked too, on 2.7% of routes**, which nobody had ever noticed.
+- **(d) SHIPPED — ELITE node plus a ROUTE-WALKED floor.** `Game.IsFinalApproach` asks the actual
+  question: *does every path out of this node reach the BOSS without passing another fight?*
+  (Event nodes are walked through, because they are not fights.) **0 of 1,098 routes** meet no named
+  elite, at 1.47 per route.
+
+**The honest costs, stated:**
+
+1. **The content is rarer than it was** — 1.47 named elites per route against 1.63. That is the
+   price of tying it to a choice: a player who never takes the risk meets it once instead of twice.
+   It is the correct direction (the fork is *for* differentiating routes) but it is a real loss and
+   should not be re-derived as a gain later.
+2. **A mission-2 ELITE node is now a genuinely hard mission-2.** The earliest ELITE node sits in
+   column 1, so a four-rookie squad can route into a named elite on its second fight. That is
+   *chosen* anxiety, which §3.D permits and §3.A wants — but it is only defensible because
+   **mission 1 cannot be an ELITE node** (column 0 is always Start), and P19 asserts that rather
+   than assuming it: `SIGHTLINE_ROSTERTEST` leg p19-3 pins the whole m1 force byte-identical across
+   the dial, and the round measured the `byNodeKind` Start cell at **91.9% / 91.9% / 91.9%** across
+   the three arms.
+3. **The difficulty moved onto the node the player chooses.** `byNodeKind` Elite at heat 8 fell
+   38.7% → 30.1% while plain COMBAT rose 69.5% → 71.7% at heat 0. The campaign row barely moved
+   because the wave **redistributed** difficulty rather than adding it — which is the outcome an
+   information fix should have, and is stated here so nobody reads the flat campaign row as
+   "nothing happened".
+
+**Falsifiable:** `SIGHTLINE_ELITEBOSS=0` restores `n == 3 || n == 5` exactly, and
+`SIGHTLINE_ROSTERTEST` goes red without it — with `eliteNodeNoNamedElite(4/25)` and
+`plainNodeFieldsNamedElite(20/61)`, the original defect, named. Round:
+`docs/measurements/p19/`; detail `docs/DEVLOG.md` §P19.

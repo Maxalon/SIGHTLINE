@@ -20,7 +20,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   **THE MODES GET THE BESTIARY (PARALLAX P4):** both modes now draw from the WHOLE roster. `Mission.Build` /
   `SpawnEnemies` take a `rosterTier` decoupled from the stat bump (default −1 = the mission number, so the campaign
   is byte-identical; skirmish/daily pass 3 at heat 0-2, 4 at 3-5, 5 at 6-8 — the campaign's own m3/m4/m5 tiers),
-  pods of 3, and the named mid-boss from heat 4 (`midBossSlot`; the campaign's `n == 3 || n == 5` is untouched).
+  pods of 3, and the named mid-boss from heat 4 (`midBossSlot` — untouched by P19, which changed only the
+  CAMPAIGN half of `Mission.MidBossFor`).
   And a FACTION: the skirmish card's OPPOSITION dial (ANY / SYNDICATE / LEGION / WARDENS — `< >`, TAB / SHIFT+TAB;
   ANY is dealt at deploy off the map seed among MIXED + the three, zero draws), the daily's derived from the date
   seed like its objective/arena/heat (always a named faction). `Game.ModeFaction` is published through
@@ -143,6 +144,16 @@ seeds (mix of WIN/LOSE, no exceptions):
   harsher close RangeMod); Ranger owns close range (+4 aim, pairs with the Shotgun's close bonus); MARK is now an
   aim-only designator (squad-wide crit amp removed). Each class has a clearer niche (close/long/tanky-area/flex).
   (`Unit.RangeMod`/`Weapon.Make`/`Combat.MarkCrit`.)
+- **THE SMG IS THREE GUNS (PARALLAX P19):** twelve of the twenty-two hostile archetypes carried a
+  byte-identical `Weapon.Make(Smg)`, so a swarmer at eight tiles and an artillery body at one
+  presented the same hit% in the shot tooltip and the incoming-fire card. `Weapon.SmgProfile` gives
+  the HOSTILE half three range bands at the same WeaponKind, damage band, clip and crit — **CQB**
+  `clamp((5-d)*4,-20,16)` for the four bodies whose plan is to close (HOUND / STRIKER / SCOUT /
+  DRONE; kiting them is now a real counter), **STANDOFF** `clamp((9-d)*1,-8,8)` for the two that
+  hold a standoff by design (MORTAR / BOMBARD; charging them is), and **STANDARD** — the shipped
+  curve, byte-for-byte — for the other six and for every player weapon. `Ai.cs`'s kite-to-ideal-range
+  term reads the same `RangeMod`, so both sides price distance off one function.
+  (`Mission.SmgProfileFor`; `SIGHTLINE_ROSTERTEST`; `SIGHTLINE_ROSTERID=0` restores the monoculture.)
 - **MISSION-STATIC LIFECYCLE (TEMPO W4):** the 5 per-mission `Combat` statics (RunBoons/AllUnits/MissionFaction/
   PrepFaction/PressureAim) are owned by `Combat.BeginMission/EndMission/EndRun` (one set + one clear per lifecycle),
   replacing ~14 scattered defensive resets — stale-static bleed is now structurally impossible.
@@ -354,7 +365,12 @@ seeds (mix of WIN/LOSE, no exceptions):
   (WASP — hovers, ignores cover/elevation, beelines), **Shield** (AEGIS — full frontal
   cover that re-faces the nearest soldier each turn, must be flanked or hit from above),
   **Sapper** (BREACH — demolishes the squad's
-  cover), a recurring **mid-boss** (BREAKER m3 / WARDEN m5), and a capstone **Elite boss**
+  cover), a **named mid-boss** — which since **PARALLAX P19** belongs to the campaign map's **ELITE
+  NODE** rather than to a mission number: route into an ELITE and you fight the named elite it
+  advertises (BREAKER / BULWARK / WARDEN / MARSHAL, by the node's faction), and the **last fight
+  before the finale** always fields one so every route still meets the content
+  (`Mission.MidBossFor` + `Game.IsFinalApproach`; `SIGHTLINE_ELITEBOSS=0` restores the old
+  `n == 3 || n == 5`) — and a capstone **Elite boss**
   (WARLORD) on the final mission with 2
   grenades + a one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
 - **Secondary objectives:** an optional per-mission bonus goal (NO LOSSES / SWIFT ≤7
@@ -1101,3 +1117,40 @@ hook otherwise fabricates a mission-3 one to frame CONTINUE); `SIGHTLINE_WARROOM
 SIGHTLINE_COLD=1` shows the WAR ROOM with an empty profile (the hook otherwise hard-codes a
 twelve-run career). Before this, the two screens a new player meets first had never been
 photographed.
+
+---
+
+## P18 "THE SECOND AXIS" — the meta's heat-gated column, a reward you assign, and an assist that holds
+
+- **THE SECOND AXIS — HEAT-GATED WAR ROOM COMMISSIONS.** The six salvage unlocks cost 330 in total
+  and a heat-0 clear banks 61, so the WAR ROOM emptied after ~5 wins while the heat cap kept
+  climbing to `Heat.Max = 8`. Three unlocks now cost salvage **and** a heat rung CLEARED, so the
+  reward curve's domain is the difficulty curve's: **COMBAT TRIALS** (clear heat 2, 60 — every perk
+  offer is a pick-1-of-**three**), **DEEP RESERVE** (clear heat 5, 95 — the veteran reserve holds
+  **20** records instead of 12), **DEEP STORES** (clear heat 8, 150 — one more requisition slate
+  slot, stacking with QUARTERMASTER's). All three widen an existing CHOICE rather than adding
+  power (DESIGN.md §3.F). The currency is `MetaDto.BestHeatWon` (append-only, raises-only,
+  migrated for old profiles through `MaxHeat - 1`); `MetaUnlock` gained three members **appended at
+  the END** with the SAVETEST fingerprint re-pasted. The WAR ROOM shows them as one **NEXT
+  COMMISSION** ledger row (`BUY <cost>` once earned, `CLEAR HEAT n` before, `(+N more)` behind it)
+  with the description on a hover card — a heat-gated unlock never takes card space, because the
+  UNLOCKS column had 8px of slack and full cards made FITTEST ellipsize four descriptions.
+  `SIGHTLINE_METATEST` / `SIGHTLINE_VETTEST`; `SIGHTLINE_SECONDAXIS=0` restores the pre-P18 WAR ROOM.
+- **THE BONUS PERK HAS A RECIPIENT PICKER.** The ELITE / ONSLAUGHT card reward, the ADV. TRAINING
+  requisition and the field-event training arm all queued a perk for a RANDOM eligible survivor.
+  The roll is kept as the offer's DEFAULT (so the RNG stream is untouched) and the chooser now
+  carries a chip per eligible soldier; picking one re-derives that soldier's pair from the offer's
+  seed by a pure hash — **zero `Util.Rng` draws**, stable under toggling (no re-roll scumming), and
+  re-selecting the rolled soldier restores the pair the RNG dealt. A **rank-up** offer is not
+  re-targetable and the card is retitled **FIELD TRAINING** for a bonus offer (it used to say
+  PROMOTION over a reward given to a soldier who had not been promoted).
+  `SIGHTLINE_REWARDTEST`; `SIGHTLINE_PERKPICK=0` restores the random hand-out.
+- **THE ADAPTIVE ASSIST IS LATCHED TO THE RUNG YOU DIALLED.** `Run.AssistLevel` tested the run's
+  LIVE heat, so the three `AddHeat` field-event arms silently confiscated up to five tiers of
+  force-wide enemy relief for the rest of a heat-0 run. It now tests `Run.StartHeat` — persisted
+  (`RunDto.StartHeatEnc`), so it survives a quit-and-resume — and the arm's result line names the
+  assist either way (`Heat rises to 1 - FIELD SUPPORT holds at tier 3`). The heat rise itself is
+  unchanged. `SIGHTLINE_EVENTTEST`; `SIGHTLINE_ASSISTLATCH=0` restores the confiscation.
+- **New harness hooks:** `SIGHTLINE_REWARDTEST` (the perk-offer surface: recipient, width,
+  determinism), `SIGHTLINE_BONUSSHOT=1|wide` (the bonus-perk card, with and without COMBAT TRIALS'
+  third option), and two FITTEST screens — `BONUSPERK` / `BONUSPERK-WIDE`.

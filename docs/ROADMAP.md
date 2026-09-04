@@ -1035,6 +1035,84 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
 pass, and other waves own parts of that file). The biome signature pass stays floor-tile-only,
 so its emissive cues do not creep around cover bases.
 
+## OPEN — left by PARALLAX P20 "THE STALE GROUND" (2026-09-04, base `dac9f2f`)
+
+P20 removed a read of the PREVIOUS mission's ground layer from `Mission.Build`
+(`Mission.ClearGroundOnBuild`; `SIGHTLINE_STALEGROUND=1` restores it). It closed the
+`dailyBoardNonDeterministic` merge blocker — the SEEDED DAILY dealt a different board on its first
+build than on its second in 8–15% of processes — and it **moves the terrain**, so it leaves two
+things open.
+
+- [ ] **1. RE-MEASURE THE LADDER. L5 is now a pre-P20 ladder.** Priced CRN-paired at two rungs
+      (n=320/rung/arm, 8 slot sets, `docs/measurements/p20/`): **25.3% of h0 worlds and 16.6% of h4
+      worlds play out differently**, h0 moves +2.2 (**not resolved**) and h4 moves **−3.8, McNemar
+      z=−3.00, chunk-paired t(7)=−3.97 with all eight slot sets negative** — a real tightening. The
+      pairing machinery is intact (a slot is still a slot; the runner and the heat pin are
+      untouched), so this is a re-measure, not a rebuild of the instrument. Six rungs × 16 slot
+      sets, the L5 shape, `SIGHTLINE_HEATPIN` default on. **Until it is run, an absolute win rate
+      from L5 may not be quoted against one measured on this tree.**
+- [ ] **2. Nothing else in the codebase reads a board layer before it is written — verify, don't
+      assume.** P20's leg (14a) pins exactly one statement: `Mission.Build` leaves the ground layer
+      empty. The class of defect is wider: a per-mission layer that is stamped AFTER the thing that
+      reads it. `Grid` carries seven such arrays (`Tiles`, `Height`, `Smoke`, `CoverHp`,
+      `CoverSeed`, `Fire`, `Barrel`, `Ground`); Build wipes Tiles/Height/Smoke, `Grid.ClearHazards`
+      wipes Fire/Barrel, `ResetCoverHp` recharges CoverHp at the end, `CoverSeed` is declared
+      purely visual — that accounting looks complete, and **"looks complete" is what the ground
+      layer looked like for two programs.** The cheap gate is one more assertion in leg (14a): a
+      hand-dirtied value in every array, and a statement about which ones Build is allowed to
+      carry.
+
+## OPEN — found by PARALLAX P19 "THE ROSTER CONTESTS" and deliberately NOT fixed
+
+**Read the corrected numbers here before acting on the roster docket** — two of its four items were
+re-derived to different figures, and one of them would have sent a wave in the wrong direction.
+
+- [ ] **The enemy hover card names the CODEX ENTRY, not the unit.** `src/Hud.cs:2503`:
+      `string title = $"{Codex.NameFor(d.Cls)} — {d.Cls}";`. Every named elite and finale boss —
+      BREAKER / BULWARK / WARDEN / MARSHAL / SIEGELORD / SPYMASTER — has been captioned
+      **"WARLORD — ELITE"** since SIGNAL W5, and P19 made that far more visible by putting a named
+      elite on every ELITE node (see `docs/measurements/p19/eliteshot-on.png`). One line:
+      `string title = (!string.IsNullOrEmpty(d.Name) && d.Name != Codex.NameFor(d.Cls)) ? $"{d.Name} — {d.Cls}" : $"{Codex.NameFor(d.Cls)} — {d.Cls}";`
+      `src/Hud.cs:2375` carries the same expression for the sibling card. P19 left it because
+      `src/Hud.cs` belonged to another developer that wave.
+- [ ] **The ELITE node's PRICE is still blind to what it fields** (C3's open item, now sharper).
+      `Run.ElitePremium` = 14 was set when an ELITE node was "+2 bodies, +1 stat"; it now reliably
+      fields the named elite as well. The premium is at least honest for the first time — but it has
+      never been priced against the fight, and P19's round measured the node getting materially
+      heavier (`byNodeKind` Elite at h8: **38.7% -> 30.1%**, n≈150-166/arm, descriptive not paired).
+- [ ] **CORRECTED — the "contest archetypes almost never appear" figure.** The 0.8% / 1.6% body
+      rates are real (P19 re-derived **BOMBARD 0.69%**, **WARBRINGER 1.55%** over **30,624 spawns /
+      3,796 missions / 960 campaigns**) but they are the WRONG DENOMINATOR: both carry a
+      **one-per-mission cap** in `Mission.SpawnEnemies`, so what decides exposure is per-MISSION
+      presence — **BOMBARD 5.6% of missions, WARBRINGER 12.5%** (exact, because of the cap), i.e.
+      roughly **20%** and **40%** of campaigns at 3.95 missions/campaign. Thin, but not "almost
+      never". CUSTODIAN 1.87%/mission-rate 0.151, PIKEMAN 2.02%/0.163, SPOTTER 2.69%/0.217.
+      **If a future wave wants these commoner, raise the CAP or the per-mission gate, not the body
+      rate**, and price it: P19's own instrument could not resolve either lever it shipped
+      (MDE 4.9-8.6 points at n=320/rung/arm), so a rate change needs a bigger round than one wave.
+- [ ] **CORRECTED — "two authored arena pairs are ~88% tile-identical".** Naive character agreement
+      is meaningless on these templates: they are **85.3% floor on average** (min 69.7%, max 95.5%),
+      so two INDEPENDENT layouts agree on ~73% of tiles for free. On Jaccard over NON-FLOOR tiles
+      (pairwise mean **16.7%**) there is **exactly ONE** structural near-duplicate,
+      **ZIGGURAT / FORGE at 72.7%** — both "commanding raised core" set-pieces. The runner-up is
+      ZIGGURAT/STEPWELL at 54.5%, a different arena. The pairs the naive metric flags at 88.4%
+      (GARRISON/REFINERY, HOOK/GARRISON, CHASM/GARRISON) share **16.0% / 12.5% / 11.5**% of their
+      structure. **De-duplicating one of ZIGGURAT/FORGE is the only defensible arena-diversity item.**
+- [ ] **STILL OPEN AND REAL — `Mission.DeckPick` is objective-blind.** `DeckPick(int seed, int
+      missionNum)` takes no objective and has no objective-aware caller. An EVAC on a plaza and an
+      EVAC whose only open ground is the far corner are the same blind draw. This is a whole wave:
+      it needs a per-arena objective-suitability model, and the deck's ZERO-DRAW purity is
+      load-bearing for every CRN pairing in the project, so any objective term must be a pure
+      derivation off `(seed, mission, objective)` and must be measured (it re-deals arenas, which
+      moves every archived world).
+- [ ] **REFUTED, for the record — "four archetype pairs are stat twins one planner weight apart".**
+      There is **exactly ONE exact statline twin**, SPOTTER/CUSTODIAN (`Smg 5/48/6`), and it is not a
+      planner twin (SPOTTER owns a standoff positioning branch at `Ai.cs:858` plus the focus-fire
+      grant at `Ai.cs:1555`; CUSTODIAN owns the objective-undo branch at `Ai.cs:406`). The near-pair
+      HUNTER/STRIKER differs by HP **and** four planner terms. The roster's AI is well
+      differentiated; what was undifferentiated was the NUMBER the player reads, which is what P19
+      fixed. Do not re-open this as a planner item.
+
 ## OPEN — found by PARALLAX P12 "THE CONFIRMED EIGHT" and deliberately NOT fixed
 
 - [ ] **Delete `Hud.DrawIntro`'s dead caption chain (~35 lines).** It still carries the
@@ -3273,3 +3351,45 @@ Detail in `docs/DEVLOG.md` §SHIPS AS v1.0.0; the contract is `docs/DISTRIBUTION
 - [ ] **Nobody has looked at whether a chasm makes a fight more INTERESTING.** Win rate is the only
       axis P16 measured. A rift is a positioning lever at constant threat, which W4 identified as
       the one kind of lever that could move `choices/ARMED-soldier-turn` — and nobody read it.
+
+## P18 "THE SECOND AXIS" — left open (2026-09-04, base `f81d3fa`)
+
+- [ ] **THE COLD WAR ROOM ELLIPSIZES FOUR UNLOCK DESCRIPTIONS, AND FITTEST CANNOT SEE IT.**
+      `Game.DebugWarRoom` stages the rich twelve-run demo; the zero state (`SIGHTLINE_COLD=1`) has
+      no `ScreenCase`, so **the profile every new player is in is unaudited** — the same blind spot
+      C6 found and closed for the screenshot hooks but not for the gate. Measured on this tree at
+      0 owned / 6 unowned: `room = 264`, `pitch = 52`, `cardH = 44` -> `descRows = 1` -> `Hud.Clip`
+      truncates SUPPLY LINE / STANDING ORDERS / ISSUED PLATING / CROSS-TRAINING / STANDING RESERVE
+      (see `shots/p18-warroom-cold-locked.png`). **It is PRE-EXISTING** — before P18 the same split
+      landed `cardH = 49`, also `descRows = 1`, also clipped — but P18's NEXT COMMISSION row makes
+      it 5px tighter, so this wave owns naming it. Adding a `WARROOM-COLD` case would fail the gate
+      on a condition P18 did not create; the real fix needs 342px of compact cards in 264px of
+      column, i.e. a WAR ROOM layout wave (scroll the column, or a second page, or shorter copy).
+      **Do both together or neither.**
+- [ ] **NOBODY HAS PRICED THE WIDTH THE SECOND AXIS SELLS.** COMBAT TRIALS (perk offers 2 -> 3),
+      DEEP STORES (+1 slate slot) and DEEP RESERVE (12 -> 20 reserve records) are horizontal by
+      construction, but "a wider menu is a small edge by SELECTION" is an admitted, unmeasured
+      residual. It is **unmeasurable**, not merely unmeasured: the flywheel runs `NoPersist`, so it
+      has no meta profile at all and every one of these reads is `!NoPersist`-gated. Pricing them
+      needs a harness that can run a batch against a STAGED profile (an env-seeded unlock set, the
+      `SIGHTLINE_VETSIM` pattern applied to `MetaUnlock`) — that hook does not exist and is its own
+      small wave. Until it does, **no P18 number may claim the axis is free**; `docs/measurements/p18/`
+      proves only that the axis is inert at the flywheel's COLD-profile default (240 campaigns,
+      three rungs, 2,356 fields, zero diffs).
+- [ ] **An `AddHeat` field-event arm can still push a run ABOVE the heat ceiling the player chose.**
+      `Events.Apply` clamps through `Heat.Clamp` (i.e. to `Heat.Max`), not to `UnlockedHeat`.
+      P18 considered and left it: the arm's preview says "+1 Heat" and delivers exactly that, and
+      clamping would neuter the arm for a player already at their cap. Recorded so the next wave
+      decides it deliberately instead of by inheritance. (The half that WAS a defect — the same
+      event silently confiscating the adaptive assist — is fixed; see DEVLOG §THE SECOND AXIS.)
+- [ ] **The perk chooser's dossier stat line runs UNDER the EDIT TAG button.** Visible as
+      `SUPPR. FI` in `shots/p18-bonus-perk-picker-wide.png`. Pre-existing on `PERKCHOOSER` (the
+      stats string is drawn full-width at `y + 98` and `PerkTagBtn` is placed over its right end).
+      FITTEST does not see it because it is an OVERDRAW, not a clip or an off-canvas string — which
+      is itself worth noting: the screen audit has no overlap check between a drawn string and a
+      later-drawn opaque plate.
+- [ ] **The second axis stops at three.** The gates (2 / 5 / 8) span the ladder and the last lands
+      ON `Heat.Max`, so the two curves now terminate together — but a player who owns all nine
+      unlocks is back where the docket started, one ladder later. Whether that is fine (the ladder
+      is finite, so a finite reward track matching it is correct) or whether the top wants a
+      genuinely repeatable, non-power sink is an OWNER decision, not a defect to fix by reflex.

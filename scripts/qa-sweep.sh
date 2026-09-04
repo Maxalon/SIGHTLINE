@@ -125,6 +125,7 @@ echo -n "VETTEST    : "; verdict "$(SIGHTLINE_VETTEST=1 run | grep -oE "VETTEST:
 echo -n "OWTEST     : "; verdict "$(SIGHTLINE_OWTEST=1 run | grep -oE "OWTEST: (PASS|FAIL)" | head -1)"
 echo -n "SCARTEST   : "; verdict "$(SIGHTLINE_SCARTEST=1 run | grep -oE "SCARTEST: (PASS|FAIL)" | head -1)"
 echo -n "CONTRACTTEST: "; verdict "$(SIGHTLINE_CONTRACTTEST=1 run | grep -oE "CONTRACTTEST: (PASS|FAIL)" | head -1)"
+echo -n "REWARDTEST : "; verdict "$(SIGHTLINE_REWARDTEST=1 run | grep -oE "REWARDTEST: (PASS|FAIL)" | head -1)"
 echo -n "SHOVETEST  : "; verdict "$(SIGHTLINE_SHOVETEST=1 run | grep -oE "SHOVETEST: (PASS|FAIL)" | head -1)"
 echo -n "CONCEALTEST: "; verdict "$(SIGHTLINE_CONCEALTEST=1 run | grep -oE "CONCEALTEST: (PASS|FAIL)" | head -1)"
 echo -n "HAZARDTEST : "; verdict "$(SIGHTLINE_HAZARDTEST=1 run | grep -oE "HAZARDTEST: (PASS|FAIL)" | head -1)"
@@ -183,6 +184,12 @@ echo -n "PIKETEST   : "; verdict "$(SIGHTLINE_PIKETEST=1 run | grep -oE "PIKETES
 # `SIGHTLINE_AILANE=0 SIGHTLINE_LANETEST=1` FAILS — that is the proof it can.
 echo -n "LANETEST   : "; verdict "$(SIGHTLINE_LANETEST=1 run | grep -oE "LANETEST: (PASS|FAIL)" | head -1)"
 echo -n "PODTEST    : "; verdict "$(SIGHTLINE_PODTEST=1 run | grep -oE "PODTEST: (PASS|FAIL)" | head -1)"
+# P19 THE ROSTER CONTESTS: the named mid-boss belongs to the campaign map's ELITE NODE (proven on
+# real built forces, with the mission-1 opener asserted identical across the dial and every
+# enumerated route still meeting one), plus the SMG monoculture's three range bands. Reads the
+# AMBIENT dials, so `SIGHTLINE_ELITEBOSS=0 SIGHTLINE_ROSTERTEST=1` and
+# `SIGHTLINE_ROSTERID=0 SIGHTLINE_ROSTERTEST=1` both FAIL — that is the proof they can.
+echo -n "ROSTERTEST : "; verdict "$(SIGHTLINE_ROSTERTEST=1 run | grep -oE "ROSTERTEST: (PASS|FAIL)" | head -1)"
 echo -n "EXPOSURETEST: "; verdict "$(SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST (PASS|FAIL)" | head -1)"
 echo -n "FUL11PROBE : "; verdict "$(SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1)"
 # RESONANCE W5: the RECRUIT rung + the comfort settings (anim speed / UI text scale).

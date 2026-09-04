@@ -1,0 +1,116 @@
+================================================================================================
+P19 THE ROSTER CONTESTS — CRN round.  3 arms x 3 rungs x 8 slot bases x 20 (greedy+sloppy)
+n = 320 campaigns per rung per arm (160 CRN worlds x 2 policies); 2,880 campaigns total.
+================================================================================================
+
+--- ITEM 1 alone   (pre -> boss) ---
+ rung     n   base%    arm%   delta  clSE_a  clSE_b  n_disc       b/c      z    MDE
+h0      320    41.6    42.5    +0.9    1.41    4.01      75   39/36    +0.35    7.6
+h4      320    20.9    24.4    +3.4    2.21    2.10      61   36/25    +1.41    6.8
+h8      320     6.9     7.2    +0.3    0.91    0.88      15    8/7     +0.26    3.4
+
+--- ITEM 2 alone   (boss -> full) ---
+ rung     n   base%    arm%   delta  clSE_a  clSE_b  n_disc       b/c      z    MDE
+h0      320    42.5    40.3    -2.2    4.01    1.92      97   45/52    -0.71    8.6
+h4      320    24.4    21.9    -2.5    2.10    1.93      58   25/33    -1.05    6.7
+h8      320     7.2     6.2    -0.9    0.88    2.36      35   16/19    -0.51    5.2
+
+--- SHIPPED, both  (pre -> full) ---
+ rung     n   base%    arm%   delta  clSE_a  clSE_b  n_disc       b/c      z    MDE
+h0      320    41.6    40.3    -1.2    1.41    1.92      96   46/50    -0.41    8.6
+h4      320    20.9    21.9    +0.9    2.21    1.93      81   42/39    +0.33    7.9
+h8      320     6.9     6.2    -0.6    0.91    2.36      32   15/17    -0.35    4.9
+
+--- THE MISSION-1 CELL (byNodeKind "Start") — the design contract forbids taxing it ---
+ rung             pre            boss            full
+h0       91.9% (n= 320)    91.9% (n= 320)    91.9% (n= 320)
+h4       91.6% (n= 320)    91.6% (n= 320)    91.9% (n= 320)
+h8       91.9% (n= 320)    91.9% (n= 320)    93.1% (n= 320)
+
+--- THE ELITE-NODE CELL (byNodeKind "Elite") — the node the wave gave its content to ---
+ rung             pre            boss            full
+h0       60.5% (n= 205)    57.7% (n= 213)    59.9% (n= 207)
+h4       49.2% (n= 203)    47.6% (n= 208)    46.6% (n= 191)
+h8       38.7% (n= 150)    31.0% (n= 158)    30.1% (n= 166)
+
+--- byNodeKind "Combat" (the plain fights that LOST the m3 named elite) ---
+h0       69.5% (n= 410)    72.9% (n= 383)    71.7% (n= 385)
+h4       60.8% (n= 365)    62.9% (n= 380)    59.3% (n= 388)
+h8       36.0% (n= 330)    34.9% (n= 335)    34.4% (n= 328)
+
+================== SPAWN EXPOSURE (re-derived) ==================
+
+===== ARM pre: 960 campaigns, 3796 missions, 30624 hostile spawns (8.07/mission) | heatPinned=True missionsAbovePin=0 | STALEMATE mission=17 run=0 (1.77%)
+  class        spawns  %bodies  /mission   missions with >=1 (cap)
+  SCOUT          3530   11.53%     0.930          93.0%
+  GRUNT          3341   10.91%     0.880          88.0%
+  DRONE          1960    6.40%     0.516          51.6%
+  BERSERKER      1892    6.18%     0.498          49.8%
+  ELITE          1849    6.04%     0.487          48.7%
+  HUNTER         1721    5.62%     0.453          45.3%
+  SHIELD         1562    5.10%     0.411          41.1%
+  BRUISER        1545    5.05%     0.407          40.7%
+  SAPPER         1439    4.70%     0.379          37.9%
+  LANCER         1395    4.56%     0.367          36.7%
+  SNIPER         1325    4.33%     0.349          34.9%
+  SCREENER       1253    4.09%     0.330          33.0%
+  MORTAR         1086    3.55%     0.286          28.6%
+  TURRET         1059    3.46%     0.279          27.9%
+  STRIKER        1036    3.38%     0.273          27.3%
+  HOUND          1014    3.31%     0.267          26.7%
+  MEDIC           913    2.98%     0.241          24.1%
+  SPOTTER         824    2.69%     0.217          21.7%
+  PIKEMAN         619    2.02%     0.163          16.3%
+  CUSTODIAN       574    1.87%     0.151          15.1%
+  WARBRINGER      475    1.55%     0.125          12.5% (cap 1/mission)
+  BOMBARD         212    0.69%     0.056           5.6% (cap 1/mission)
+
+===== ARM boss: 960 campaigns, 3794 missions, 30721 hostile spawns (8.10/mission) | heatPinned=True missionsAbovePin=0 | STALEMATE mission=11 run=0 (1.15%)
+  class        spawns  %bodies  /mission   missions with >=1 (cap)
+  SCOUT          3547   11.55%     0.935          93.5%
+  GRUNT          3347   10.89%     0.882          88.2%
+  DRONE          1992    6.48%     0.525          52.5%
+  BERSERKER      1924    6.26%     0.507          50.7%
+  HUNTER         1845    6.01%     0.486          48.6%
+  BRUISER        1632    5.31%     0.430          43.0%
+  ELITE          1559    5.07%     0.411          41.1%
+  SHIELD         1535    5.00%     0.405          40.5%
+  LANCER         1469    4.78%     0.387          38.7%
+  SAPPER         1348    4.39%     0.355          35.5%
+  SNIPER         1306    4.25%     0.344          34.4%
+  SCREENER       1292    4.21%     0.341          34.1%
+  TURRET         1118    3.64%     0.295          29.5%
+  STRIKER        1117    3.64%     0.294          29.4%
+  MORTAR         1008    3.28%     0.266          26.6%
+  SPOTTER         957    3.12%     0.252          25.2%
+  HOUND           951    3.10%     0.251          25.1%
+  MEDIC           893    2.91%     0.235          23.5%
+  CUSTODIAN       671    2.18%     0.177          17.7%
+  PIKEMAN         536    1.74%     0.141          14.1%
+  WARBRINGER      431    1.40%     0.114          11.4% (cap 1/mission)
+  BOMBARD         243    0.79%     0.064           6.4% (cap 1/mission)
+
+===== ARM full: 960 campaigns, 3741 missions, 30026 hostile spawns (8.03/mission) | heatPinned=True missionsAbovePin=0 | STALEMATE mission=17 run=0 (1.77%)
+  class        spawns  %bodies  /mission   missions with >=1 (cap)
+  SCOUT          3533   11.77%     0.944          94.4%
+  GRUNT          3324   11.07%     0.889          88.9%
+  DRONE          1939    6.46%     0.518          51.8%
+  BERSERKER      1883    6.27%     0.503          50.3%
+  HUNTER         1749    5.82%     0.468          46.8%
+  SHIELD         1499    4.99%     0.401          40.1%
+  SNIPER         1476    4.92%     0.395          39.5%
+  ELITE          1474    4.91%     0.394          39.4%
+  BRUISER        1430    4.76%     0.382          38.2%
+  LANCER         1354    4.51%     0.362          36.2%
+  SAPPER         1345    4.48%     0.360          36.0%
+  SCREENER       1243    4.14%     0.332          33.2%
+  TURRET         1147    3.82%     0.307          30.7%
+  MEDIC          1024    3.41%     0.274          27.4%
+  STRIKER        1010    3.36%     0.270          27.0%
+  MORTAR         1002    3.34%     0.268          26.8%
+  HOUND           877    2.92%     0.234          23.4%
+  SPOTTER         852    2.84%     0.228          22.8%
+  CUSTODIAN       639    2.13%     0.171          17.1%
+  PIKEMAN         583    1.94%     0.156          15.6%
+  WARBRINGER      436    1.45%     0.117          11.7% (cap 1/mission)
+  BOMBARD         207    0.69%     0.055           5.5% (cap 1/mission)
