@@ -1500,6 +1500,10 @@ public partial class Game
 
     // Phase 5.2 post-FX: bloom spikes on hits/kills/crits and decays smoothly.
     float _postFxBloom;   // 0..1, decays ~1.5 s
+    /// P25 harness read (SIGHTLINE_JUICETEST): the live bloom spike. Presentation only — nothing in
+    /// the sim reads it, and the only writer stays AddBloom. Read-only on purpose: the probe gets a
+    /// fresh Game per measured event rather than a reset, so nothing can zero this behind play's back.
+    public float PostFxBloom => _postFxBloom;
     // AddBloom is called alongside AddHitStop; magnitude maps s (0.1 normal, 0.4 kill-cam) -> bloom.
     public void AddBloom(float s) { _postFxBloom = MathF.Min(1f, _postFxBloom + s * 2.2f); }
 

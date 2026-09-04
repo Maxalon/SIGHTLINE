@@ -277,6 +277,46 @@ floating numbers, screen shake, zoom-punch).
 - **Don't** let juice fight readability — **juice must serve clarity, not bury it**
   (see E's signal-to-noise). More shake is not always more better.
 
+#### C.1 AMENDMENT — the proportionality rule got an instrument, and it had been broken (PARALLAX wave P25 "NOBODY HAS LOOKED", 2026-09-04)
+
+> **This is a correction, not a footnote.** The paragraph above says SIGHTLINE "already does this
+> well" and lists the channels. That sentence was written from a **feature list**. For eighteen
+> milestones nothing measured it, and two measurement waves wrote *"does not measure FEEL; nobody
+> has looked"* into `docs/DEVLOG.md` and moved on. `SIGHTLINE_JUICETEST` (base `bea240c`,
+> `docs/measurements/p25/`) looked. It found the **Do** above violated in two places.
+
+**What the rule now means operationally.** "Proportional to event importance" is checkable if you
+say what it is proportional *on*. P25 splits the channels:
+
+* **WEIGHT channels** — screen shake, hit-stop, zoom-punch, bloom. These say *how hard this hit*.
+  The rule binds here: the connected ladder GRAZE → HIT → CRIT → KILL → CRIT-KILL may never step
+  down, **and a whiff may never out-punch contact**.
+* **INFORMATION channels** — the floating word and its size. The rule does **not** bind here, and
+  §C's own second bullet is why: a MISS's word is larger than a GRAZE's (24px vs 20px) because a
+  miss is the outcome a player most needs to *read*. Juice serves clarity; clarity wins the tie.
+
+**Two violations, both fixed, both now gated:**
+
+1. **A whiff out-punched contact.** `ShotAnim.Apply` shook 2.5 on a MISS and **2.0** on a GRAZE —
+   the one channel that communicates *contact* shouted loudest when nothing was hit. Graze is 3.0
+   now (still the lightest contact on the ladder).
+2. **The frag was the only blast with no bloom.** A grenade, a barrel and a BOMBARD strike play the
+   **same cue**, so they promise the player the same event, and then answered on different channels.
+   The grenade now spikes bloom like the other two. **Corollary rule, now asserted: events that share
+   a cue must answer on the same channels** — the sound is a promise about the picture.
+
+**What the measurement could NOT settle, and is therefore still opinion:** the top of the weight
+ladder is **saturated**. Hit-stop is 0.100 for CRIT, KILL and CRIT-KILL alike (`AddHitStop` is a
+MAX); bloom is identical for KILL and CRIT-KILL (`willKill` discards the crit); shake's 18.0 is
+`Fx.AddShake`'s own ceiling. A crit-kill therefore out-punches a kill on **particle count and text
+size only**. The instrument can say the numbers are equal; it cannot say whether a player feels the
+difference. That needs eyes.
+
+**And the standing limit on all of it:** the instrument counts what the code emits. It cannot hear
+a cue, cannot see a pixel, cannot judge whether 9 reads as heavier than 5, and cannot measure fun.
+Read the "WHAT IT CANNOT SEE" block above `Game.JuiceSelfTest`, or `docs/measurements/p25/README.md`,
+before quoting a number out of it.
+
 ### D. Flow & difficulty
 
 **Keep the player in the flow channel** — challenge tracked just above skill.
@@ -485,7 +525,7 @@ assumes — the system is built, measured, and largely fails to reach play.
 
 | Area | Grade | Notes |
 |------|-------|-------|
-| Feels good (juice) | **Strong** | Hit-stop, recoil, tracers, shake, zoom-punch, floating text, procedural SFX. Protect it. |
+| Feels good (juice) | **Strong — and MEASURED since P25, on a corrected basis** | Hit-stop, recoil, tracers, shake, zoom-punch, floating text, procedural SFX. The grade stands but its BASIS is corrected: it was awarded on a list of features that exist, with nothing measuring them, for eighteen milestones. `SIGHTLINE_JUICETEST` (P25) now measures the feedback footprint of every shot outcome, all 23 action-bar verb rows + MOVE, and 9 damage routes. What it found: the ladder IS monotone, **every committing verb is both seen and heard**, and the kill signature is universal across all 9 routes — but the proportionality rule was **broken at the bottom step** (a whiff out-punched a graze) and **across the blast class** (the frag had no bloom); both are fixed and gated. Still open and NOT covered by the grade: burn and bleed arrive with no sound and no weight, the combat log records shots only, and 12 modal verb ARMS are silent. See §C.1 — and the instrument cannot hear, cannot see a pixel, and cannot measure fun. |
 | Reads clearly (full-info board) | **Strong** | %-to-hit, threat pips, cover shields, FLANKED tooltip — and since SIGNAL: status pills, role rings, visible focus cone, enemy-ID tooltips. This is the identity — don't erode it lightly. |
 | Content breadth | **Strong** | 8 objectives, biomes, a 21-archetype enemy roster, 35 authored arenas, perks/specs/traits/boons/contracts, branching map, 4 modes. Lots of *combinations* — whether they all **reach play** is the engagement-mass question below. |
 | **First contact / encounter geometry** | **Strong (was the headline issue)** | 4.2 cut sight range + built the mid-field screen; alert tiers (4.3) + concealment (4.4) completed the fix; SIGNAL made the boards biome-true. First contact is a deliberate, rewarded choice now. See §5. |

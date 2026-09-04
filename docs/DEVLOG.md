@@ -17419,3 +17419,259 @@ pre-P24 shipped tree. **Do not mix rungs across the three.**
   `SIGHTLINE_AIMTRIM=60`, naming the body the floor ate.
 - 320/320 balance chunks asserted (`p15/check_chunk.py` plus P24's arm layer), `LEAK-CHECK PASS` on
   all 320.
+
+---
+
+# §P25 — "NOBODY HAS LOOKED" (2026-09-04, `wave/the-feel`, base `bea240c`)
+
+**The last wave of PROGRAM PARALLAX, and the one that closes a gap this project has recorded
+against itself twice without addressing.** SIGHTLINE has three design pillars. Eighteen milestones
+measured **win rate**, exhaustively and well. Pillar 2 — *"Feels good: every action lands with
+weight, motion, and sound"* — had one instrument, `FEELTEST` (THE STRIDE), which measures the
+**tween**: the shape of one walk, one vault, one kill-cam, one reaction, and where floating text
+sits. Nothing measured what pillar 2 actually promises. Two measurement waves wrote the same
+sentence into this log and moved on:
+
+> **Does not measure FEEL.** Same blind spot C1 recorded against `AiTier 2`; nobody has looked.
+
+So every claim about this game's feel rested on someone reading the code and finding it plausible —
+the standard that produced a filter bug making every weapon white noise for months while the tests
+were green, and a "juice: Strong" grade partly awarded on audio nobody had heard.
+
+`SIGHTLINE_JUICETEST` is the second instrument. **Lead with what it cannot see**, because that is
+half the deliverable: an instrument that implies it measures whether the game is FUN would be worse
+than none, since it would be quoted.
+
+## P25-1. WHAT IT CANNOT SEE
+
+* **It cannot hear.** It records that a cue id reached `Audio.Play`, with its pan. Whether the
+  sound is right, pleasant, audible over the bed, or distinguishable from its neighbours is outside
+  it. (`AUDIOTEST`/`AUDIOGATE` measure the rendered *buffer*; nobody has listened.)
+* **It cannot see.** It counts what was pushed into `Fx` and reads positions; **it does not
+  render.** A channel can fire and still be invisible — occluded, off-screen, alpha 0, behind the
+  HUD; `FEELTEST` leg (c2) found exactly that class of defect. Concretely: the twelve modal-verb
+  **ARM** rows read `seen 0`, **and that number means nothing** — arming FIRE or GRENADE answers
+  with a renderer overlay driven off `AimMode`/`GrenadeMode`, which this probe never draws. Those
+  rows are reported and deliberately **not** asserted. The same caveat caps the latency column for
+  thrown ordnance: a grenade's first *Fx/audio* answer is its detonation at 30 frames, while its arc
+  is **drawn** from frame 0, so 30f is an upper bound on that verb's latency, not its latency.
+* **It cannot judge proportion perceptually.** `9 > 5` is an ordering, not a perception. Two rungs
+  this ladder separates may be indistinguishable to a player, and it cannot tell you which.
+* **It cannot see timing jitter.** Synthetic 1/60 dt, no GPU. A hitch on a real machine is invisible.
+* **It cannot measure fun**, pacing across a session, or whether any of this is satisfying. It
+  measures the CODE PATH's response, not a player's experience of it.
+
+**It is a starvation-and-proportionality instrument.** The honest scope of a headless feel probe is
+smaller than "does it feel good" and it is stated here so nobody has to rediscover it: what is
+measurable is *whether an act is answered at all*, *whether the answer scales with what happened*,
+*whether the same event answers the same way everywhere*, and *when each element lands*. That is
+four real questions and the answers found four real defects. Everything past that needs ears and eyes.
+
+## P25-2. WHAT IT MEASURES
+
+The **feedback footprint** of an event, on the real code paths, driven through the real anim pump
+(OnStart on activation, pop only from the front), with the real device-free `Audio.Spy` cue log.
+`FeelAnswer` counts four channel classes plus latency:
+
+| class | channels |
+|---|---|
+| **SEEN** | particles, floating words, rings, streaks, lights, reticles, a figure's drawn position actually changing, body FX (flash / flinch / recoil) |
+| **HEARD** | cue ids that reached `Audio.Play` |
+| **FELT** | screen shake, hit-stop, zoom-punch, bloom |
+| **READ** | lines added to the always-on combat log |
+| **ACK** | the frame index at 1/60 on which the first channel moved |
+
+Four legs: **(a) THE LADDER** — six shot outcomes fired by the same soldier at the same target;
+**(b) THE CENSUS** — every id in `Hud.VerbTable`, staged legal, armed through the real `DoAction`
+dispatcher and committed through its real `Issue*`; **(c) THE SAME ANSWER EVERYWHERE** — one unit
+taking damage by nine routes, non-lethal and lethal; **(d) THE BEAT** — a frame-by-frame trace of
+the shot's three-beat.
+
+The census is **driven off the action bar's own list**, and ABILITY / UTILITY ITEM expand per class
+(both are `Unit.Cls`-derived and cannot be assigned), so 16 bar buttons become **23 rows plus MOVE**.
+A verb added to the bar and not staged fails with `verbNotStaged` — the census cannot silently
+go stale, which is the property the COVERAGE GUARD exists to protect elsewhere.
+
+Determinism: every row reseeds, gets a **fresh `Game`** (bloom and the zoom-punch only accumulate —
+neither has a reset), and resets `Voice.BeginMission` (the bark budget is static and once-per-mission;
+without the reset the first row to kill anything ate FirstBlood and every later row's combat-log
+column read one line short). Two consecutive runs are byte-identical. 2.7 s.
+
+## P25-3. THE BASELINE — measured, then fixed
+
+Base commit `bea240c`. Raw: `docs/measurements/p25/`.
+
+### (a) THE LADDER — six shot outcomes
+
+| tier | shake | hit-stop | bloom | zoom | particles | text | cues |
+|---|---|---|---|---|---|---|---|
+| MISS | **2.5** | 0.000 | 0.000 | 0.000 | 24 | 24 | `w_rifle`+`miss` |
+| GRAZE | **2.0** | 0.030 | 0.044 | 0.000 | 25 | 20 | `w_rifle`+`hit` |
+| HIT | 5.0 | 0.050 | 0.099 | 0.000 | 43 | 26 | `w_rifle`+`hit` |
+| CRIT | 10.5 | 0.100 | 0.198 | 0.000 | 65 | 32 | `w_rifle`+`crit` |
+| KILL | 15.5 | 0.100 | 0.726 | 0.050 | 117 | 32 | `w_rifle`+`hit`+`death`+`st_kill` |
+| CRIT-KILL | 18.0 | 0.100 | 0.726 | 0.050 | 139 | 36 | `w_rifle`+`crit`+`death`+`st_kill` |
+
+**DEFECT 1 — A WHIFF OUT-PUNCHED CONTACT.** `ShotAnim.Apply` shook the screen **2.5 on a MISS and
+2.0 on a GRAZE**. Screen shake is the channel that says *contact*, and it said it loudest when
+nothing was hit. DESIGN.md §C: juice is proportional to event importance and must **reinforce**
+information, never contradict it. **Fixed**: graze 2 → **3**, keeping it the lightest contact on the
+ladder while clearing the whiff. Presentation only (`Fx.Shake` drives a `Camera2D` offset; nothing
+in `Ai`/`Combat`/the autopilot reads it, and PAIRTEST is green).
+
+**Three things measured and NOT fixed, because they are design questions, not bugs:**
+1. **The weight ladder saturates at the top.** Hit-stop is 0.100 for CRIT, KILL *and* CRIT-KILL
+   (`AddHitStop` is a MAX). Bloom is 0.726 for both KILL and CRIT-KILL — `willKill ? 0.13f : (Crit ?
+   0.09f : 0.045f)` **discards the crit once the blow is lethal**. Shake's 18.0 for CRIT-KILL is
+   `Fx.AddShake`'s own ceiling clamping a raw 21. So on the three headline weight channels a
+   crit-kill and a plain kill are **identical**; only particle count (139 vs 117) and text size
+   (36 vs 32) separate them. Whether that is enough is a question for eyes.
+2. **A MISS's word (24px) is bigger than a GRAZE's (20px).** Reported, not asserted, and the
+   assertion is deliberately scoped to *weight* channels: text size is information, and a miss
+   legitimately needs a readable word. §C's own "juice must serve clarity" cuts the other way here.
+3. **The kill's second cue is conditional.** `st_kill` fires only when a player kills an enemy; a
+   soldier the player loses gets `death` alone. Deliberate, and now written down.
+
+### (b) THE CENSUS — 23 verb rows + MOVE
+
+**Every committing verb in the game is both SEEN and HEARD, and all 24 rows fire.** That is a real
+result and it is the first time anyone has checked it. Full table in
+`docs/measurements/p25/baseline-postfix.txt`.
+
+**The measured asymmetry: 12 of the 12 MODAL arms fire no cue.** Arming FIRE, GRENADE, GRAPPLE,
+MARK, SUPPRESS, any of the four items, SHOVE, DRAG or VAULT plays nothing, while *selecting a unit*
+plays `select` and every committing verb has a cue. **This is reported, not called a defect**, for
+two reasons: the arm's real answer is a renderer overlay this probe cannot see, and the obvious
+cheap fix — reuse `select` — would give "I armed FIRE" and "I clicked a soldier" the same sound,
+which is precisely the disease THE CUE MAP wave spent a whole wave curing. It needs a new sound and
+an owner who can hear it. ROADMAP.
+
+**Also measured:** the keyboard path does **not** gate on the bar button's `Enabled` flag
+(`Game.cs` reads `KeyboardKey.R` → `DoReload()` directly, while the mouse path checks `b.Enabled`),
+so pressing a hotkey for a verb that is currently illegal returns silently — no sound, no word, no
+shake. Not staged as a row, because the census stages every verb *legal* on purpose; recorded as an
+open item.
+
+### (c) THE SAME ANSWER EVERYWHERE — one unit, nine damage routes
+
+| route | seen | heard | felt | cues |
+|---|---|---|---|---|
+| aimed-shot | 50 | 2 | 10.1 | `w_rifle`+`hit` |
+| crit-shot | 73 | 2 | 20.7 | `w_rifle`+`crit` |
+| reaction | 52 | 3 | 11.1 | `react`+`w_rifle`+`hit` |
+| grenade | 90 | 1 | 25.8 | `boom` |
+| barrel | 79 | 1 | 28.0 | `boom` |
+| siege | 51 | 1 | 25.9 | `boom` |
+| **burn** | 10 | **0** | **0.0** | **—** |
+| **bleed** | 10 | **0** | **0.0** | **—** |
+| slam | 23 | 1 | 6.0 | `hunker` |
+
+**DEFECT 2 — THE FRAG WAS THE ONE BLAST WITH NO BLOOM.** A grenade, a cooked barrel and a BOMBARD
+strike all play the **same cue** (`Audio.GameEvent.Explosion`), so they promise the player one
+event — and then answered on different channels. `GrenadeAnim.Explode` added shake 12, hit-stop
+0.07 and zoom 0.06 but **no `AddBloom`**, while `DetonateBarrel` adds 0.5 and `DetonateSiege` 0.4.
+The frag's own detonation flash had nothing to halo it. **Fixed**: `AddBloom(0.35f)` — the smallest
+of the three, which is what its damage and radius already say. Presentation only (post-FX).
+Gated by a new **BLAST-CLASS** assertion: every route that deals blast damage must answer on all
+four weight channels.
+
+**DEFECT 3 — BURN AND BLEED ARE THE ONLY DAMAGE IN THE GAME THAT ARRIVES WITH NO SOUND AND NO
+WEIGHT.** `Game.EnvDamage` — the funnel for every source-less hit — sets a flash, throws 8 particles
+and pops a `-2 BURN` word, and does not touch `Audio`, `AddShake` or `AddHitStop`. Its
+caller-fronted uses are fine (`STRIKE` and the barrel boom before they call it, `SLAM` behind
+ShoveAnim's `hunker`), but the two that ARE the event — the `Burning` tick in `TickStatuses` and the
+`Bleed` tick in `OnUnitEnteredTile` — arrive in silence. Fire in this game has no sound at all:
+there is no `fire` recipe in `Audio.BuildRecipes`.
+
+**NOT FIXED, deliberately, and this is a judgement worth arguing with.** The correct fix is a
+*sound*, and (i) the correct sound must fire **once per tick PASS, not once per unit** — a burning
+pod of three would otherwise stack three cues on one frame, which is the exact defect P14 removed
+from the overwatch path — and (ii) nobody in this sandbox can hear a new synthesized cue, which is
+how this project got a "juice: Strong" grade on audio that was white noise. Patching it inside a
+measurement wave would be repeating the mistake the wave exists to expose. It is in ROADMAP with
+the design constraint stated. What the gate DOES assert today is that every route is SEEN and that
+none is unanswered on every channel at once — both provably red (B12).
+
+**FINDING (not fixed) — the always-on combat log records SHOTS ONLY.** `Stats.Log` has exactly one
+gameplay call site outside the voice barks: `ShotAnim.Apply`. DESIGN.md §3.B sells the log as the
+antidote to output-randomness rage — "did the dice cheat me?" — and six of the nine damage routes,
+including the two that kill a soldier while the player watches, leave no line in it. That is a
+pillar-3 finding surfaced by a pillar-2 instrument; ROADMAP.
+
+**The kill signature holds on all nine routes.** Every route funnels through `KillUnit` and carries
+shake ≥ 7, hit-stop ≥ 0.10, zoom ≥ 0.05, a `death` cue and the death word. Gated.
+
+### (d) THE BEAT — frame by frame, at 1/60
+
+```
+aimed hit   f1[reticle] f9[fx+43 word:3 shake+5.0 hitstop=0.05 cue:w_rifle+hit log] settle->f32
+aimed kill  f1[reticle] f9[fx+117 word:40,DOWN shake+15.5 hitstop=0.10 cue:w_rifle+hit+death+st_kill log] settle->f32
+reaction    f1[reticle word:OVERWATCH hitstop=0.06 cue:react] f18[fx+43 word:3 shake+5.0 cue:w_rifle+hit log] settle->f41
+```
+
+**The beat is not ordered — it is SIMULTANEOUS, by construction, and that is the finding.** Every
+element of the impact (muzzle, tracer, spray, the damage number, the shake, the weapon cue, the
+hit-stop) is emitted by one call, `ShotAnim.Apply`, so nothing *can* scatter today. The leg makes
+that a contract instead of an accident: the impact frame is located by the combat-log line (the one
+thing only `Apply` writes) and the number, shake and cue must land **on it**. Anticipation must be
+strictly earlier and a settle strictly later. Hit-stop is asserted onto the impact frame for a plain
+shot but **not** for a reaction — `AddHitStop` is a MAX, so a reaction's 0.06 s announce-freeze
+simply absorbs `Apply`'s 0.05 and shows no delta. That is why the reaction's `hitstop=` appears at
+f1 and not at f18.
+
+The reaction's **two-stage** beat is visible and correct: it announces at f1 (word, `react` cue,
+snap-freeze, reticle) and impacts at f18, against the plain shot's f9 — the 0.26 s reaction wind-up
+THE BEAT shipped, seen from the other side. Ack latency is **1 frame** for every shot outcome and
+**0–1** for every non-thrown verb; the only rows above that are thrown ordnance at **30f**, which is
+`GrenadeAnim.Flight = 0.50 s` and is an upper bound (the arc is drawn from f0). `JuiceAckMax = 36`
+keeps the ceiling off that shipped constant rather than sitting on it.
+
+## P25-4. THE RED PROOF — 22 breaks, and two assertions that were theatre
+
+`docs/measurements/p25/red-demonstrations.txt`. Every assertion in the hook is demonstrated failing
+against a deliberately broken build: 22 one- or two-line breaks, each built, run headless and
+reverted. B1 and B2 are the **two shipped fixes reverted**, so they are literally the *before*.
+
+**The exercise paid for itself twice, and both are the failure mode this project has had to tear
+out before:**
+
+1. **`killSigNoDeathWord` originally read `k.Texts < 1`.** Deleting `KillUnit`'s KIA/DOWN pop
+   outright (B13) **PASSED** — the killing blow's own damage number was still on screen. A channel
+   *count* cannot see a missing word. It checks the word **by name** now (`FeelAnswer.Words`), and
+   B13 is red on all nine routes.
+2. **`Seen` originally included `Queued`** (anims enqueued). Guarding `ShotAnim.Apply` out entirely
+   (B17) did **not** raise `outcomeUnseen`, because the now-inert anim was still on the queue. An
+   enqueued anim is a *promise* that something will be drawn, not evidence that anything was.
+   `Queued` is a reported column now; **`Moved`** — a watched figure's drawn position actually
+   changing — took its place in the sum, and B17 is red on all six outcomes.
+
+Neither would have been found without the rule that every assertion must be shown red. Recording
+them here is the point: a green gate that cannot fail is worse than no gate.
+
+## P25-5. DESIGN.md — the correction
+
+`DESIGN.md` §4's scorecard graded **Feels good (juice): Strong — "Protect it."** on a feature list,
+with no measurement behind it, and §C's proportionality rule ("a crit-kill should out-punch a
+graze") had never been checked against the code that implements it. The rule was violated at the
+ladder's bottom step and across the blast class. §C now carries a P25 amendment recording the
+instrument, the two repairs, the saturation finding, and the three things that are still opinion.
+The grade is not withdrawn — the ladder IS monotone, every verb IS answered, and the kill signature
+IS universal — but its **basis** is corrected from "a list of features that exist" to "a measured
+census, on these four questions, blind to these five things".
+
+## P25-6. FOUND AND NOT FIXED
+
+Full list in `docs/ROADMAP.md`. In priority order: the DoT silence (needs a sound and an owner who
+can hear it, and a per-tick-**pass** design); the combat log's shot-only coverage; the 12 silent
+modal arms; the hotkey path's silent refusal of an illegal verb; and the weight ladder's saturated
+top three rungs.
+
+## P25-7. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — **87 self-tests exist in `src/`; this sweep ran 87** (86 → 87:
+  `JUICETEST`), every line PASS, **no COVERAGE GAP**, autoplay ×3 = WIN / LOSE / LOSE (no TIMEOUT,
+  no blank), **`SWEEP-EXIT-CODE=0`**.
+- `PAIRTEST` PASS — the two shipped fixes are presentation-only and the CRN identity is intact.
+- `SIGHTLINE_JUICETEST=1` — PASS, byte-identical on two consecutive runs, 2.7 s.
+- 22/22 RED demonstrations, every assertion family covered.

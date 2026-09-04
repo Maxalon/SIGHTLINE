@@ -3748,3 +3748,66 @@ stat's restore flag). What it leaves open, in priority order:
       this tree, so L7's "rung 5 buys ~nothing" is only half-answered: lever A restores the body the
       finale was eating at h5 (m6 9 -> 10), but whether LINGERING WOUNDS now buys anything is not
       measured. A per-rung re-run is ~10 minutes of wall time on this container.
+
+### WAVE P25 "NOBODY HAS LOOKED" (2026-09-04, base `bea240c`, details in DEVLOG §P25)
+
+**Pillar 2's SECOND instrument.** `FEELTEST` measures the tween; `SIGHTLINE_JUICETEST` measures the
+ANSWER — the feedback footprint (SEEN / HEARD / FELT / READ / latency) of every shot outcome, all 23
+action-bar verb rows + MOVE, 9 damage routes, and the shot's frame-by-frame beat. **Before quoting
+any number out of it, read the "WHAT IT CANNOT SEE" block above `Game.JuiceSelfTest`** — it cannot
+hear a cue, cannot see a pixel, cannot judge whether 9 reads as heavier than 5, and cannot measure
+fun. Raw round: `docs/measurements/p25/`.
+
+- [x] **The instrument ships and is a gate.** `SIGHTLINE_JUICETEST` in `qa-sweep.sh`, routed through
+      `verdict` (86 → 87 hooks, no COVERAGE GAP). 2.7 s, byte-identical across runs. **22 deliberate
+      breaks prove every assertion can go red** (`docs/measurements/p25/red-demonstrations.txt`).
+- [x] **DEFECT: a whiff out-punched contact.** MISS shook 2.5, GRAZE 2.0. Graze → 3.0. Gated.
+- [x] **DEFECT: the frag was the only blast with no bloom** while the barrel (0.5) and the BOMBARD
+      strike (0.4) had one — and all three play the same cue. Grenade → `AddBloom(0.35f)`. Gated by a
+      new BLAST-CLASS assertion: routes that share a cue must answer on the same channels.
+- [x] **Two assertions of the instrument's own were found to be theatre and replaced** — a text
+      COUNT that could not see a deleted death word, and a `Seen` sum that counted anims ENQUEUED
+      rather than anything drawn. Both were caught only because every assertion had to be shown red.
+
+**Open, in priority order:**
+
+- [ ] **BURN AND BLEED ARE THE ONLY DAMAGE IN THE GAME WITH NO SOUND AND NO WEIGHT.** `Game.EnvDamage`
+      sets a flash, throws 8 particles, pops a `-2 BURN` word, and touches neither `Audio` nor
+      `AddShake`/`AddHitStop`. Its caller-fronted uses are covered (`STRIKE`/barrel boom before the
+      call, `SLAM` behind ShoveAnim's `hunker`), but the two that ARE the event — the `Burning` tick
+      in `TickStatuses` and the `Bleed` tick in `OnUnitEnteredTile` — arrive in silence, and there is
+      no `fire` recipe in `Audio.BuildRecipes` at all. **P25 deliberately did not patch this**, and
+      the reason is the spec for whoever does: (1) the cue must fire **once per tick PASS, not once
+      per unit** — a burning pod of three would otherwise stack three cues on one frame, the exact
+      defect P14 removed from the overwatch path; (2) it needs a NEW recipe (the cue map is
+      injective and `hit`/`crit` mean "a round landed"), and nobody in this sandbox can hear one.
+      This is an owner-listen item, not an agent patch.
+- [ ] **THE ALWAYS-ON COMBAT LOG RECORDS SHOTS ONLY.** `Stats.Log`'s only gameplay call site outside
+      the voice barks is `ShotAnim.Apply`. DESIGN.md §3.B sells the log as the antidote to
+      output-randomness rage; a grenade, a barrel, a BOMBARD strike, a burn tick, a bleed tick and a
+      shove slam leave no line in it — including the two that kill a soldier while the player
+      watches. A pillar-3 hole found by a pillar-2 instrument. `JUICETEST`'s `read` column is the
+      measurement; adding the lines is cheap and gateable.
+- [ ] **TWELVE MODAL VERB ARMS FIRE NO CUE.** FIRE, GRENADE, GRAPPLE, MARK, SUPPRESS, all four items,
+      SHOVE, DRAG, VAULT: arming plays nothing, while *selecting a unit* plays `select` and every
+      committing verb has a cue. Reported and NOT asserted, twice over: the arm's real answer is a
+      renderer overlay `JUICETEST` cannot draw, and the cheap fix (reuse `select`) would make "I
+      armed FIRE" and "I clicked a soldier" the same sound — the disease THE CUE MAP cured. Needs a
+      new sound and ears.
+- [ ] **THE HOTKEY PATH REFUSES AN ILLEGAL VERB IN SILENCE.** `Game.cs`'s mouse path checks
+      `b.Enabled` before `DoAction`; the keyboard path calls `DoReload()` / `ToggleAim()` / ...
+      directly, so `R` on a full clip or `1` with no ammo returns with no sound, no word and no
+      shake. `ui_no` already exists as a registered recipe (the shop's refusal). Cheap; needs a
+      decision about how noisy a refusal should be.
+- [ ] **THE WEIGHT LADDER SATURATES AT THE TOP.** Hit-stop is 0.100 for CRIT, KILL *and* CRIT-KILL
+      (`AddHitStop` is a MAX); bloom is identical for KILL and CRIT-KILL (`willKill ? 0.13f : ...`
+      discards the crit once lethal); shake's 18.0 at CRIT-KILL is `Fx.AddShake`'s own ceiling
+      clamping a raw 21. A crit-kill out-punches a plain kill on **particle count and text size
+      only**. The instrument can prove the numbers are equal; it cannot say whether that reads as
+      flat. Eyes, then possibly a raised ceiling.
+- [ ] **THE ARM IS UNMEASURABLE HEADLESSLY, AND THAT IS THE INSTRUMENT'S BIGGEST HOLE.** Everything
+      the renderer draws in response to state — targeting overlays, range wash, threat cards, the
+      cover shield, the kill-zone wash — is invisible to `JUICETEST` and only partly covered by the
+      pixel probes (`BOARDTEST`, `CONTRASTTEST`, `FITTEST`, which read a rendered frame but do not
+      diff a before/after pair). A probe that renders TWO frames and diffs them would close it and
+      would make the 12 arm rows assertable. That is its own wave.
