@@ -1,0 +1,31 @@
+         A win%   B win%   delta   McNSE    clSE   t(7)  discor     b/c  MDE_McN  MDE_cl   n/arm
+h0         43.1     45.6    -2.5    4.05    4.12  -0.61      42  19/23      11.3    11.5   160
+h4         22.5     23.8    -1.2    3.75    3.24  -0.39      36  17/19      10.5     9.1   160
+h8          6.2      5.0    +1.2    1.98    2.06  +0.61      10   6/4        5.5     5.8   160
+
+POOLED over the three rungs (McNemar on all 480 CRN pairs):
+  b=42 (A won, B lost)  c=46 (B won, A lost)  discordant=88/480  z=-0.43  delta=-0.83 pts  McNemar SE=1.95
+
+byNodeKind — the OPENER cell (C4 measured Start -4.37, t=-4.53, for its own layer):
+  h0: Start  91.9 vs  91.9 =  +0.0 (uSE  3.1, n 160/160) | Combat  69.7 vs  76.1 =  -6.4 (uSE  4.3, n 211/209) | Elite  64.0 vs  65.3 =  -1.3 (uSE  6.7, n 100/101) | Boss  55.2 vs  55.3 =  -0.1 (uSE  6.2, n 125/132)
+  h4: Start  91.9 vs  91.2 =  +0.6 (uSE  3.1, n 160/160) | Combat  60.3 vs  57.9 =  +2.4 (uSE  5.0, n 189/195) | Elite  51.0 vs  55.1 =  -4.1 (uSE  7.1, n 100/98) | Boss  33.0 vs  36.2 =  -3.2 (uSE  6.5, n 109/105)
+  h8: Start  92.5 vs  92.5 =  +0.0 (uSE  2.9, n 160/160) | Combat  35.1 vs  35.9 =  -0.8 (uSE  5.2, n 171/167) | Elite  39.2 vs  34.6 =  +4.6 (uSE  7.8, n 74/78) | Boss  23.3 vs  18.6 =  +4.7 (uSE  8.8, n 43/43)
+
+byBiome — mission-level win rate on the two biomes P16 changed (and a paint control):
+  h0: VOID  72.4 vs  70.1 =  +2.3 (uSE  6.5, n 98/97, ground 12.5/0.0)
+       ARID  70.3 vs  71.4 =  -1.1 (uSE  6.7, n 91/91, ground 31.4/0.0)
+       STEEL  74.7 vs  79.5 =  -4.8 (uSE  6.5, n 83/83, ground 0.0/0.0)
+  h4: VOID  69.0 vs  69.5 =  -0.5 (uSE  7.1, n 87/82, ground 12.2/0.0)
+       ARID  62.7 vs  64.0 =  -1.3 (uSE  7.4, n 83/86, ground 31.4/0.0)
+       STEEL  67.9 vs  67.1 =  +0.9 (uSE  7.3, n 78/85, ground 0.0/0.0)
+  h8: VOID  58.9 vs  53.2 =  +5.7 (uSE  8.1, n 73/77, ground 11.9/0.0)
+       ARID  51.6 vs  60.3 =  -8.8 (uSE  8.8, n 64/63, ground 30.8/0.0)
+       STEEL  54.4 vs  56.2 =  -1.8 (uSE  8.7, n 68/64, ground 0.0/0.0)
+
+ARM CHECK (avgGroundTiles must be >0 for VOID/ARID in A and EXACTLY 0 in B):
+  arm A: ARID=31.2  ASH=0.0  MAGMA=11.8  NEON=0.0  STEEL=0.0  TUNDRA=16.2  VERDANT=31.2  VOID=12.3
+  arm B: ARID=0.0  ASH=0.0  MAGMA=11.7  NEON=0.0  STEEL=0.0  TUNDRA=16.0  VERDANT=31.6  VOID=0.0
+
+STALEMATES / instrument health:
+  arm A: runs=480 missions=1915 stalemateLosses=8 frameCapLosses=0 abortedRuns=0
+  arm B: runs=480 missions=1913 stalemateLosses=6 frameCapLosses=0 abortedRuns=0

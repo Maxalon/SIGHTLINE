@@ -25,12 +25,13 @@ seeds (mix of WIN/LOSE, no exceptions):
   ANY is dealt at deploy off the map seed among MIXED + the three, zero draws), the daily's derived from the date
   seed like its objective/arena/heat (always a named faction). `Game.ModeFaction` is published through
   `Combat.BeginMission` in place of the (always `None`) Start node. Named on the top bar for the whole fight, on the
-  banner sub-line (on the five paint biomes; the ground rule keeps that line on VERDANT/TUNDRA/MAGMA), and on the
+  banner sub-line (on the three paint biomes; the ground rule keeps that line on the five mechanical ones), and on the
   intro's DAILY caption before the attempt. `SIGHTLINE_FACTION=syndicate|legion|wardens|mixed` pins a harness
   skirmish. MODETEST legs 8-9 (FAIL on the pre-fix tree: `{GRUNT, SCOUT}` over 50 h0 builds, 0/50 pods of 3,
   0/10 mid-bosses at h4/h8, daily faction `None`).
-- **BIOME MECHANICS — THE GROUND HAS RULES (CONTOUR C4, `src/Terrain.cs`):** three of the eight biomes now
-  change how the fight works, on three different axes; the other five are still paint and say so.
+- **BIOME MECHANICS — THE GROUND HAS RULES (CONTOUR C4 + PARALLAX P16, `src/Terrain.cs`):** **five** of the
+  eight biomes now change how the fight works, on **five different axes**; the other three (STEEL / ASH /
+  NEON) are still paint and say so.
   **VERDANT — UNDERGROWTH:** the fern mats are LOW COVER FROM EVERY ANGLE, but only against fire from more than
   2 tiles away, so they cannot be flanked and the counter is to CLOSE (a cover *level* inside `Grid.GetCover`,
   so high ground / a DRONE / a SYNDICATE optic see over it exactly as they see over any low block, and the HUD
@@ -44,7 +45,18 @@ seeds (mix of WIN/LOSE, no exceptions):
   fixture positions), so it is not a function of `(MapSeed, mission)` alone. Never stamped on RAISED
   terrain — a plateau top is painted opaque over the ground layer, so ground there would be a rule
   with no pixels. Hard per-biome tile budget; real-board density is pinned by BIOMETEST and printed
-  in every sweep (VERDANT ~35 tiles / TUNDRA ~18 / MAGMA ~13 of 198). Legible on five surfaces: the board material (value-carried +
+  in every sweep (VERDANT ~34 tiles / TUNDRA ~18 / MAGMA ~13 / **VOID ~13** / **ARID ~32** of 198).
+  **VOID — RIFT (P16):** a chasm is IMPASSABLE (it joins barrels in `Grid.IsFloor`, the one predicate every
+  mover already asks) but **TRANSPARENT** and giving **NO COVER** — the only shape on the board that stops
+  movement while hiding nothing, so it cuts open floor into lanes and chokepoints you can still shoot across.
+  It cannot strand anyone: `Terrain.StampRift` re-floods the board through `Grid.CostMap` after every
+  candidate tile and reverts any tile that costs more than itself, so a chasm can never seal — **the gaps are
+  the BRIDGES**, and unlike MAGMA's fords they are the only gap source. No lone orphan holes (they are culled),
+  and a shape floor of 8 tiles met by walking another crack. `SIGHTLINE_RIFTTEST` proves the reachability over
+  576 real boards, every objective. **ARID — SOFT SAND (P16):** the exact inverse of ice — a step onto sand
+  costs **3** half-tiles (diagonal **5**) instead of 2/3, so a full-mobility soldier crosses two sand tiles per
+  action instead of four of open floor, and going around a basin is often faster. One line in `Grid.CostMap`,
+  movement only: no cover, no sight change, no hazard. Legible on five surfaces: the board material (value-carried +
   rimmed, colorblind-safe), the mission banner tag, the briefing card's one-sentence rule, the shot tooltip /
   hover threat card, and the CODEX FIELD CRAFT tab. `SIGHTLINE_BIOMETEST`; `SIGHTLINE_BIOMEMECH=0` restores the
   pre-C4 board exactly. Priced CRN-paired at n=160/rung/arm — see DEVLOG §C4 for the declared heat-0 move.

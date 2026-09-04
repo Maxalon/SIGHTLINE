@@ -329,8 +329,35 @@ public class Biome
         var force = System.Environment.GetEnvironmentVariable("SIGHTLINE_FORCEBIOME");
         if (force != null && int.TryParse(force, out int fi))
             return ((fi % All.Length) + All.Length) % All.Length;
+        // P16 GROUND TRUTH — THE DEAL, and the dial that would fix it. MEASURED, NOT SHIPPED.
+        //
+        // The line below is a FIXED 8-CYCLE with a per-run offset: biome(m+1) is always
+        // biome(m)+1. Enumerated over 4,000 seeds that is **8 of the 56 possible ordered biome
+        // adjacencies**, and only 8 distinct 6-mission sequences — every run in the game is one of
+        // eight rotations of one list, and TUNDRA is followed by VERDANT in every campaign ever
+        // played. Now that five of the eight biomes carry a mechanic, that is eight of the fifty-six
+        // possible "what did the last room teach me / what does this one ask" transitions.
+        //
+        // WHY IT IS NOT FIXED HERE. `Mission.DeckPick` reads THIS FUNCTION for its arena theme hint,
+        // so re-dealing the biome re-deals the ARENA on a measured **28.9% of missions** (2,000
+        // seeds x 6). A different arena is a different board, so flipping this severs the CRN chain
+        // for every archive under docs/measurements/ exactly as wave W1 did — re-measure, do not
+        // rescale — and it would have confounded P16's own A/B round beyond reading.
+        // AND `SIGHTLINE_SAVETEST` CANNOT SEE IT: measured, all three map goldens PASS with the deal
+        // replaced by a hash, because MapFingerprint feeds `Run.GenerateMap`'s output and the deal
+        // lives outside the generator. So the project's save-format guard has a hole here — a change
+        // that re-deals every existing save's arenas is invisible to it. See docs/ROADMAP.md.
+        //
+        // The dial is left priced and OFF: one flag, one re-measured ladder, its own wave.
+        if (DealHashed) return (int)(Util.Hash3(runSeed, missionNum, 0x0B10) % (uint)All.Length);
         return (int)(((uint)runSeed + (uint)(missionNum - 1)) % (uint)All.Length);
     }
+
+    /// SIGHTLINE_BIOMEDEAL=hash swaps the fixed 8-cycle above for a per-(seed,mission) hash, so all
+    /// 56 adjacencies become reachable. DEFAULT OFF and read ONCE at class load, so the shipped
+    /// build is byte-identical to the pre-P16 deal; `SIGHTLINE_BIOMETEST` pins that.
+    public static readonly bool DealHashed =
+        System.Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEDEAL") == "hash";
 }
 
 public static class Util

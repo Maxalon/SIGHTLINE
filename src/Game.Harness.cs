@@ -3230,7 +3230,11 @@ public partial class Game
         // shows the hover threat card's GROUND line rather than only the material.
         for (int x = 0; x < Grid.W && !_biomeShotCursor; x++)
             for (int y = 0; y < Grid.H && !_biomeShotCursor; y++)
-                if (Grid.GroundAt(x, y) != GroundKind.None && Grid.IsFloor(x, y) && UnitAt(x, y) == null)
+                // P16: `|| IsRift` — a VOID board's only mechanical tiles are NOT walkable, so the
+                // IsFloor gate parked the cursor on plain floor and the capture never showed the
+                // chasm's tooltip line. A rift can hold no unit, so the UnitAt check is moot there.
+                if (Grid.GroundAt(x, y) != GroundKind.None && (Grid.IsFloor(x, y) || Grid.IsRift(x, y))
+                    && UnitAt(x, y) == null)
                 { CurX = x; CurY = y; KbCursor = true; _biomeShotCursor = true; }
     }
     bool _biomeShotCursor;
@@ -4087,13 +4091,22 @@ public partial class Game
             u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
         }
 
-        // ═══ 1. THE STAMPER — three mechanical biomes, five that are still paint ═══════════════
-        // (declared, not hidden: STEEL/ARID/ASH/VOID/NEON must stamp NOTHING, so a future wave that
-        // gives one of them a mechanic has to change this line and say so.)
-        int[] mechIdx = { Terrain.BiomeTundra, Terrain.BiomeVerdant, Terrain.BiomeMagma };
+        // ═══ 1. THE STAMPER — five mechanical biomes, three that are still paint ══════════════
+        // (declared, not hidden: STEEL/ASH/NEON must stamp NOTHING, so a future wave that gives one
+        // of them a mechanic has to change this line and say so. P16 changed it: the list used to
+        // read three-and-five, and promoting VOID and ARID meant coming here first.)
+        int[] mechIdx = { Terrain.BiomeTundra, Terrain.BiomeVerdant, Terrain.BiomeMagma,
+                          Terrain.BiomeVoid, Terrain.BiomeArid };
         var mechKind = new Dictionary<int, GroundKind> {
             { Terrain.BiomeTundra, GroundKind.Ice }, { Terrain.BiomeVerdant, GroundKind.Undergrowth },
-            { Terrain.BiomeMagma, GroundKind.Vent } };
+            { Terrain.BiomeMagma, GroundKind.Vent }, { Terrain.BiomeVoid, GroundKind.Rift },
+            { Terrain.BiomeArid, GroundKind.Sand } };
+        // P16: the split must be asserted as a COUNT too. `mechIdx` and the paint set are derived
+        // from each other below, so a half-finished promotion (a Tag with no stamp, or a stamp with
+        // no Tag) already fails — but a wave that quietly grew `mechIdx` and updated nothing else
+        // would still pass. Pin the number the file's header comment claims.
+        if (mechIdx.Length != 5) fails.Add($"mechBiomeCount={mechIdx.Length}");
+        if (Biome.All.Length - mechIdx.Length != 3) fails.Add($"paintBiomeCount={Biome.All.Length - mechIdx.Length}");
         for (int bi = 0; bi < Biome.All.Length; bi++)
         {
             var gs = OpenGrid();
@@ -4130,7 +4143,7 @@ public partial class Game
                 foreach (int bi in mechIdx)
                 {
                     Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", bi.ToString());
-                    int lo = int.MaxValue, hi = 0, sum = 0, boards = 0, thin = 0, raised = 0;
+                    int lo = int.MaxValue, hi = 0, sum = 0, boards = 0, thin = 0, raised = 0, orphanRifts = 0;
                     for (int sd = 0; sd < 10; sd++)
                         for (int m = 1; m <= 4; m++)
                         {
@@ -4152,21 +4165,47 @@ public partial class Game
                             int n = CountGroundTiles();
                             for (int x = 0; x < Grid.W; x++)
                                 for (int y = 0; y < Grid.H; y++)
+                                {
                                     if (Grid.Ground[x, y] != GroundKind.None && Grid.HeightAt(x, y) > 0) raised++;
+                                    // P16 — NO CONFETTI. A lone 1-tile hole is not a weak chasm, it
+                                    // is a tile the player routes around for no reason and which
+                                    // reads as a rendering artefact (the first VOID capture had six
+                                    // of them and no chasm). Terrain.CullOrphanRifts removes them;
+                                    // this is the leg that says it ran on the boards that SHIP.
+                                    if (Grid.Ground[x, y] != GroundKind.Rift) continue;
+                                    bool near = false;
+                                    for (int dx = -1; dx <= 1 && !near; dx++)
+                                        for (int dy = -1; dy <= 1 && !near; dy++)
+                                            if ((dx != 0 || dy != 0) && Grid.InBounds(x + dx, y + dy)
+                                                && Grid.Ground[x + dx, y + dy] == GroundKind.Rift) near = true;
+                                    if (!near) orphanRifts++;
+                                }
                             lo = Math.Min(lo, n); hi = Math.Max(hi, n); sum += n; boards++;
-                            if (n < (bi == Terrain.BiomeMagma ? 7 : 12)) thin++;
+                            if (n < (bi == Terrain.BiomeMagma || bi == Terrain.BiomeVoid ? 7 : 12)) thin++;
                         }
                     double mean = sum / (double)boards;
                     // (a) M1 — NOTHING may be stamped on raised terrain: a plateau top is painted
                     //     opaque over the ground layer, so any tile here is a rule with no pixels.
                     if (raised != 0) fails.Add($"groundOnPlateau[{Biome.All[bi].Name}]={raised}");
                     // (b) the mechanic must actually be PRESENT on the board the player gets
-                    double loMean = bi == Terrain.BiomeMagma ? 12.0 : (bi == Terrain.BiomeTundra ? 15.0 : 25.0);
+                    // P16: VOID is the sparsest floor in the table on purpose. Its walk is 2x12-16
+                    // like MAGMA's, but the reachability guard REJECTS every candidate that would
+                    // cut the board, and on a cover-heavy arena that is a large share of the walk.
+                    // ARID is the densest: a basin is only a decision if going around it costs.
+                    double loMean = bi == Terrain.BiomeMagma ? 12.0
+                                  : bi == Terrain.BiomeVoid  ? 9.0
+                                  : bi == Terrain.BiomeArid  ? 26.0
+                                  : (bi == Terrain.BiomeTundra ? 15.0 : 25.0);
                     if (mean < loMean) fails.Add($"realMeanTooSparse[{Biome.All[bi].Name}]={mean:F1}");
                     if (mean > 46.0) fails.Add($"realMeanFlood[{Biome.All[bi].Name}]={mean:F1}");
                     // (c) and it must not VANISH on a minority of seeds — the failure this wave
                     //     claimed to have fixed on an open grid and had NOT fixed in play.
                     if (lo < 4) fails.Add($"realMin[{Biome.All[bi].Name}]={lo}");
+                    // P16 — VOID is held to its OWN floor, not the generic 4, because the stamper
+                    // guarantees one by WALKING AGAIN (Terrain.RiftFloor / RiftTries) rather than
+                    // by hoping. A regression that reinstated the thin tail would slip past `lo < 4`.
+                    if (bi == Terrain.BiomeVoid && lo < Terrain.RiftFloor) fails.Add($"riftFloorMissed={lo}");
+                    if (bi == Terrain.BiomeVoid && orphanRifts != 0) fails.Add($"orphanRifts={orphanRifts}");
                     if (thin * 4 > boards) fails.Add($"realThinBoards[{Biome.All[bi].Name}]={thin}/{boards}");
                     if (hi > 52) fails.Add($"realFlood[{Biome.All[bi].Name}]={hi}");
                     BiomeDensityNote += $" {Biome.All[bi].Name}~{mean:F1}({lo}-{hi})";
@@ -4374,6 +4413,133 @@ public partial class Game
             if (safe.Hp != shp || safe.HasStatus(StatusKind.Burning)) fails.Add("floorTileBurned");
         }
 
+        // ═══ 4b. VOID / RIFT — the TOPOLOGY axis (P16) ════════════════════════════════════════
+        // The claim is a CONJUNCTION of one presence and three ABSENCES, and the absences are the
+        // whole point: every other blocker on this board either stops sight (high cover, smoke, a
+        // vent) or gives cover (high cover, low cover) or both. A rift does neither, so it is the
+        // only shape that turns open floor into lanes without hiding anything. Each clause is
+        // measured through the function the GAME asks, not through the enum.
+        {
+            var gr = OpenGrid();
+            var openCost = gr.CostMap(2, 5, (x, y) => false, out _, 99);
+            int openReach = openCost[16, 5];
+            gr.Ground[9, 4] = GroundKind.Rift; gr.Ground[9, 5] = GroundKind.Rift;
+            gr.Ground[9, 6] = GroundKind.Rift; gr.RefreshGroundFlags();
+
+            // (1) IMPASSABLE — through IsFloor, the one chokepoint, and therefore through the one
+            //     cost map both teams path with.
+            if (gr.IsFloor(9, 5)) fails.Add("riftIsStillFloor");
+            if (!gr.IsRift(9, 5)) fails.Add("riftPredicate");
+            var rc = gr.CostMap(2, 5, (x, y) => false, out _, 99);
+            if (rc[9, 5] != -1) fails.Add($"riftPathable={rc[9, 5]}");
+            // and the detour is REAL: the same destination now costs strictly more to reach.
+            if (openReach < 0) fails.Add("riftBaselineUnreachable");
+            if (rc[16, 5] <= openReach) fails.Add($"riftNoDetour={rc[16, 5]}vs{openReach}");
+
+            // (2) TRANSPARENT — sight and fire cross it, including for a commanding shooter. This
+            //     is the clause that separates a rift from a vent, and it is an ABSENCE in
+            //     Grid.BlocksSight/IsVapor, so it can only be tested by measuring.
+            if (!gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("riftBlockedSight");
+            if (!gr.HasLineOfSight(4, 5, 14, 5, true)) fails.Add("riftBlockedCommandingSight");
+            if (gr.IsVapor(9, 5)) fails.Add("riftIsVapor");
+            if (gr.BlocksSight(9, 5)) fails.Add("riftBlocksSight");
+            // a DIAGONAL sightline over the chasm too — the supercover walk checks corner PAIRS,
+            // and a 3-tall rift is exactly the shape that would trip a blocker that leaked in.
+            if (!gr.HasLineOfSight(4, 3, 14, 7)) fails.Add("riftBlockedDiagonalSight");
+
+            // (3) NO COVER — standing beside a chasm shelters nobody, and the tile itself is not
+            //     cover for anyone shooting past it.
+            if (gr.IsCover(9, 5)) fails.Add("riftIsCover");
+            if (gr.GetCover(8, 5, 14, 5).Level != 0) fails.Add("riftGaveCoverToNeighbour");
+            if (gr.GetCover(8, 5, 14, 5).Flanked) fails.Add("riftCountedAsAdjacentCover");
+            // and the hit chance across it is EXACTLY the open-board hit chance: a real shot,
+            // resolved through Combat.ComputeOdds, with and without the chasm under the tracer.
+            var atk = Shooter(4, 5, Team.Player); var def = Shooter(14, 5, Team.Enemy);
+            var over = Combat.ComputeOdds(gr, atk, def);
+            gr.Ground[9, 4] = gr.Ground[9, 5] = gr.Ground[9, 6] = GroundKind.None; gr.RefreshGroundFlags();
+            var clear = Combat.ComputeOdds(gr, atk, def);
+            if (over.HitChance != clear.HitChance) fails.Add($"riftMovedTheOdds={over.HitChance}vs{clear.HitChance}");
+
+            // (4) it does not BURN and it is not FIRE-able (a hole is not a hazard tile).
+            gr.Ground[9, 5] = GroundKind.Rift; gr.RefreshGroundFlags();
+            gr.LightFire(9, 5, Grid.FireTurns);
+            if (gr.IsFire(9, 5)) fails.Add("riftCaughtFire");
+        }
+
+        // ═══ 4c. ARID / SOFT SAND — the DRAG axis (P16) ═══════════════════════════════════════
+        // The inverse of ice, asserted the same way ice is: the LITERAL cost (a self-referential
+        // `== Terrain.SandStepOrth` would pass for any value, including one that makes a basin
+        // impassable), the invariant that literal protects, and the direction of the reach change.
+        {
+            var gr = OpenGrid();
+            var bare = gr.CostMap(2, 5, (x, y) => false, out _, 12);
+            int bareCount = 0;
+            for (int x = 0; x < gr.W; x++) for (int y = 0; y < gr.H; y++) if (bare[x, y] >= 0) bareCount++;
+            for (int x = 3; x <= 16; x++) for (int y = 3; y <= 7; y++) gr.Ground[x, y] = GroundKind.Sand;
+            gr.RefreshGroundFlags();
+            var sc = gr.CostMap(2, 5, (x, y) => false, out _, 12);
+            if (!gr.IsSand(9, 5)) fails.Add("sandPredicate");
+            if (sc[3, 5] != 3) fails.Add($"sandStepOrth={sc[3, 5]}");
+            if (sc[3, 4] != 5) fails.Add($"sandStepDiag={sc[3, 4]}");
+            if (Terrain.SandStepOrth != 3 || Terrain.SandStepDiag != 5)
+                fails.Add($"sandConst={Terrain.SandStepOrth}/{Terrain.SandStepDiag}");
+            // INVARIANT: a full-mobility (4) soldier's single action is 8 half-tiles, so sand must
+            // stay crossable at TWO tiles per action. At 5 it would be one, and a basin would stop
+            // being a price and become terrain — the same failure mode VentStepExtra is bounded for.
+            if (Terrain.SandStepOrth * 2 > 8) fails.Add($"sandUncrossable={Terrain.SandStepOrth}");
+            // the reach genuinely SHRINKS — the exact opposite sign to the ice leg below, on the
+            // same budget and the same board.
+            int sandCount = 0;
+            for (int x = 0; x < gr.W; x++) for (int y = 0; y < gr.H; y++) if (sc[x, y] >= 0) sandCount++;
+            if (sandCount >= bareCount) fails.Add($"sandCostNothing={sandCount}vs{bareCount}");
+            // and it is a MOVEMENT rule only: no cover, no sight block, no burn.
+            if (gr.GetCover(9, 5, 14, 5).Level != 0) fails.Add("sandGaveCover");
+            if (!gr.HasLineOfSight(2, 5, 16, 5)) fails.Add("sandBlockedSight");
+            if (gr.IsVapor(9, 5)) fails.Add("sandIsVapor");
+            if (!gr.IsFloor(9, 5)) fails.Add("sandNotWalkable");
+            var atk = Shooter(4, 5, Team.Player); var def = Shooter(14, 5, Team.Enemy);
+            int hitOnSand = Combat.ComputeOdds(gr, atk, def).HitChance;
+            gr.ClearGround();
+            if (hitOnSand != Combat.ComputeOdds(gr, atk, def).HitChance) fails.Add("sandMovedTheOdds");
+        }
+
+        // ═══ 4d. THE RIFT CANNOT SEAL — the stamper's own reachability guard ══════════════════
+        // A biome that occasionally makes a mission unwinnable is far worse than a biome that is
+        // paint, so the guard gets a leg that measures the property directly on the STAMPER's
+        // output rather than trusting the code that produces it: over many OPEN boards (where a
+        // 26-tile budget has the best possible chance of walling something off) the walkable set
+        // must lose EXACTLY the rift tiles and nothing else. The heavy real-board version — every
+        // objective, every fixture, through the real SetupMission — is SIGHTLINE_RIFTTEST.
+        {
+            int boards = 0, worst = 0;
+            for (int sd = 0; sd < 60; sd++)
+                for (int m = 1; m <= 3; m++)
+                {
+                    var gr = OpenGrid();
+                    // a hard spine of high cover with two doors, so the rift has real corridors to
+                    // seal — an empty 18x11 room is nearly impossible to cut in two with 26 tiles.
+                    for (int y = 0; y < gr.H; y++) if (y != 2 && y != 8) gr.Tiles[6, y] = TileType.HighCover;
+                    for (int y = 0; y < gr.H; y++) if (y != 4) gr.Tiles[12, y] = TileType.HighCover;
+                    gr.ResetCoverHp();
+                    int before = 0;
+                    var pre = gr.CostMap(0, 0, (x, y) => false, out _, 1 << 22);
+                    for (int x = 0; x < gr.W; x++) for (int y = 0; y < gr.H; y++) if (pre[x, y] >= 0) before++;
+                    var res = new HashSet<(int x, int y)> { (0, 0) };
+                    Terrain.Stamp(gr, Terrain.BiomeVoid, sd * 7919 + 13, m, res);
+                    int rift = 0;
+                    for (int x = 0; x < gr.W; x++) for (int y = 0; y < gr.H; y++) if (gr.Ground[x, y] == GroundKind.Rift) rift++;
+                    var post = gr.CostMap(0, 0, (x, y) => false, out _, 1 << 22);
+                    int after = 0;
+                    for (int x = 0; x < gr.W; x++) for (int y = 0; y < gr.H; y++) if (post[x, y] >= 0) after++;
+                    // EXACTLY the rift tiles left the reachable set. One extra tile lost is a
+                    // stranded pocket; on a real board that pocket is where a reinforcement spawns.
+                    if (after != before - rift) { fails.Add($"riftStranded[seed{sd}m{m}]={before - after}vs{rift}"); sd = 999; break; }
+                    worst = Math.Max(worst, before - after); boards++;
+                }
+            if (boards < 180) fails.Add($"riftGuardBoards={boards}");
+            if (worst <= 0) fails.Add("riftGuardStampedNothing");
+        }
+
         // ═══ 5. THE OPPONENT UNDERSTANDS THE NEW BOARD ════════════════════════════════════════
         //
         // C4 REVIEW — WHAT THIS BLOCK USED TO CLAIM, AND WHY THAT WAS WRONG. The wave singled the
@@ -4472,6 +4638,79 @@ public partial class Game
             if (lost != 0) fails.Add($"iceTookReachAway={lost}");
         }
 
+        // ═══ 5a. THE P16 ARM — SIGHTLINE_NEWGROUND=0 restores the pre-P16 board EXACTLY ═══════
+        // The measurement lever gets its own leg, because an A/B arm nobody tested is an A/B arm
+        // that silently measures the wrong thing — and this one is easy to get wrong in the
+        // direction that LOOKS fine: VOID and ARID must go back to PAINT while VERDANT, TUNDRA and
+        // MAGMA keep everything. (SIGHTLINE_BIOMEMECH=0, section 6, is the coarser flag that turns
+        // all five off; using THAT as P16's arm would have priced C4 and P16 together.)
+        {
+            bool wasNew = Terrain.NewGround;
+            Terrain.NewGround = false;
+            try
+            {
+                // the two new biomes stamp NOTHING and carry no tag or rule...
+                foreach (int bi in new[] { Terrain.BiomeVoid, Terrain.BiomeArid })
+                {
+                    var gs = OpenGrid();
+                    Terrain.Stamp(gs, bi, 4242, 3, null);
+                    for (int x = 0; x < gs.W; x++)
+                        for (int y = 0; y < gs.H; y++)
+                            if (gs.Ground[x, y] != GroundKind.None) fails.Add($"armStamped[{Biome.All[bi].Name}]");
+                    if (Terrain.Tag(bi) != null || Terrain.Rule(bi) != null) fails.Add($"armTagged[{Biome.All[bi].Name}]");
+                }
+                // ...their predicates are inert even on a HAND-STAMPED board (the C4 lesson: gate at
+                // the predicate, not only at the stamper)...
+                var gr = OpenGrid();
+                gr.Ground[7, 5] = GroundKind.Rift; gr.Ground[6, 5] = GroundKind.Sand;
+                gr.RefreshGroundFlags();
+                if (gr.IsRift(7, 5) || gr.IsSand(6, 5)) fails.Add("armPredicates");
+                if (!gr.IsFloor(7, 5)) fails.Add("armRiftStillBlocks");
+                var ac = gr.CostMap(9, 5, (x, y) => false, out _, 99);
+                if (ac[7, 5] != 4 || ac[6, 5] != 6) fails.Add($"armCosts={ac[7, 5]}/{ac[6, 5]}");
+                // ...and the THREE C4 biomes are completely untouched by the arm, which is the half
+                // that makes it a one-lever arm rather than a second BIOMEMECH.
+                foreach (int bi in new[] { Terrain.BiomeVerdant, Terrain.BiomeTundra, Terrain.BiomeMagma })
+                {
+                    var on = OpenGrid(); var off = OpenGrid();
+                    Terrain.NewGround = true;  Terrain.Stamp(on, bi, 8181, 2, null);
+                    Terrain.NewGround = false; Terrain.Stamp(off, bi, 8181, 2, null);
+                    for (int x = 0; x < on.W; x++)
+                        for (int y = 0; y < on.H; y++)
+                            if (on.Ground[x, y] != off.Ground[x, y]) { fails.Add($"armMovedC4[{Biome.All[bi].Name}]"); x = on.W; break; }
+                    if (Terrain.Tag(bi) == null) fails.Add($"armDroppedC4Tag[{Biome.All[bi].Name}]");
+                }
+            }
+            finally { Terrain.NewGround = wasNew; }
+            if (!Terrain.NewGround) fails.Add("newGroundNotDefault");
+        }
+
+        // ═══ 5b. THE DEAL IS UNCHANGED (P16) ═════════════════════════════════════════════════
+        // P16 measured the biome deal, found it a fixed 8-cycle worth 8 of 56 adjacencies, and did
+        // NOT ship the fix (it re-deals the arena on 28.9% of missions and would sever the CRN
+        // chain — see Biome.IndexFor). The dial exists; this pins that it is OFF, so "priced but
+        // unspent" cannot quietly become "spent and unmeasured".
+        {
+            if (Biome.DealHashed) fails.Add("biomeDealNotDefault");
+            var saveForce = Environment.GetEnvironmentVariable("SIGHTLINE_FORCEBIOME");
+            Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", null);
+            try
+            {
+                var seen = new HashSet<(int, int)>();
+                for (int sd = 0; sd < 512; sd++)
+                    for (int m = 1; m <= Run.MaxMissions; m++)
+                    {
+                        int want = (int)(((uint)sd + (uint)(m - 1)) % (uint)Biome.All.Length);
+                        if (Biome.IndexFor(m, sd) != want) { fails.Add($"dealMoved[s{sd}m{m}]"); sd = 9999; break; }
+                        if (m > 1) seen.Add((Biome.IndexFor(m - 1, sd), want));
+                    }
+                // and the CONSEQUENCE, so the finding in the DEVLOG cannot rot into a claim nobody
+                // re-derives: the shipped deal really does reach only 8 of the 56 ordered pairings.
+                if (seen.Count != 8) fails.Add($"dealAdjacencies={seen.Count}");
+            }
+            finally { Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", saveForce); }
+        }
+
         // ═══ 6. THE OFF SWITCH — SIGHTLINE_BIOMEMECH=0 restores the pre-C4 board EXACTLY ══════
         {
             bool was = Terrain.Enabled;
@@ -4480,26 +4719,44 @@ public partial class Game
             gr.Ground[9, 5] = GroundKind.Undergrowth;
             gr.Ground[10, 5] = GroundKind.Vent;
             gr.Ground[11, 5] = GroundKind.Ice;
+            gr.Ground[7, 5] = GroundKind.Rift;     // P16
+            gr.Ground[6, 5] = GroundKind.Sand;     // P16
             gr.RefreshGroundFlags();
             if (gr.GetCover(9, 5, 14, 5).Level != 0) fails.Add("offSwitchFoliage");
             if (!gr.HasLineOfSight(4, 5, 14, 5)) fails.Add("offSwitchVentSight");
             var c = gr.CostMap(12, 5, (x, y) => false, out _, 99);
             if (c[11, 5] != 2 || c[10, 5] != 4) fails.Add("offSwitchCosts");
-            if (gr.IsVent(10, 5) || gr.IsIce(11, 5) || gr.IsFoliage(9, 5)) fails.Add("offSwitchPredicates");
-            var gs = OpenGrid(); Terrain.Stamp(gs, Terrain.BiomeMagma, 5, 1, null);
-            for (int x = 0; x < gs.W; x++)
-                for (int y = 0; y < gs.H; y++) if (gs.Ground[x, y] != GroundKind.None) fails.Add("offSwitchStamped");
+            // P16 — the two new grounds have to vanish just as completely, and the RIFT is the one
+            // that would be LOUD if it did not: a leftover impassable tile with the layer off is a
+            // hole in a board that is supposed to be the pre-C4 board exactly.
+            if (!gr.IsFloor(7, 5)) fails.Add("offSwitchRiftStillBlocks");
+            if (c[7, 5] != 10) fails.Add($"offSwitchRiftCost={c[7, 5]}");
+            if (c[6, 5] != 12) fails.Add($"offSwitchSandCost={c[6, 5]}");
+            if (gr.IsVent(10, 5) || gr.IsIce(11, 5) || gr.IsFoliage(9, 5)
+                || gr.IsRift(7, 5) || gr.IsSand(6, 5)) fails.Add("offSwitchPredicates");
+            if (Terrain.Tag(Terrain.BiomeVoid) != null || Terrain.Tag(Terrain.BiomeArid) != null
+                || Terrain.Rule(Terrain.BiomeVoid) != null) fails.Add("offSwitchTagged");
+            foreach (int obi in new[] { Terrain.BiomeMagma, Terrain.BiomeVoid, Terrain.BiomeArid })
+            {
+                var gs = OpenGrid(); Terrain.Stamp(gs, obi, 5, 1, null);
+                for (int x = 0; x < gs.W; x++)
+                    for (int y = 0; y < gs.H; y++) if (gs.Ground[x, y] != GroundKind.None) fails.Add("offSwitchStamped");
+            }
             Terrain.Enabled = was;
         }
 
         return fails.Count == 0
-            ? "BIOMETEST: PASS (3 biomes mechanical on 3 axes, 5 still paint; NO ground on raised terrain; "
+            ? "BIOMETEST: PASS (5 biomes mechanical on 5 axes, 3 still paint; NO ground on raised terrain; "
               + "undergrowth = omnidirectional low cover past " + Terrain.FoliageMinDist
               + " tiles and worth exactly 20 aim, gone up close, seen over from height; ice halves the step and "
               + "widens the shared reach; a vent blinds even a commanding shooter, gives no cover, costs a "
               + "full-mobility soldier's whole walk to enter, sears ONCE on entry even when also on fire, and "
               + "re-ignites for VentBurnTurns on parking; the AI declines a vent BOTH composite AND with the "
-              + "CostMap toll zeroed, jitter pinned; stamp pure, off-switch clean; REAL-BOARD density"
+              + "CostMap toll zeroed, jitter pinned; a RIFT is impassable through IsFloor yet moves no "
+              + "sightline and no hit%, and its stamper's guard strands ZERO tiles on 180 walled boards; "
+              + "SOFT SAND costs the literal 3/5 half-tiles and SHRINKS the shared reach; "
+              + "no VOID board ships a lone orphan hole or fewer than Terrain.RiftFloor rift tiles; "
+              + "stamp pure, off-switch clean; REAL-BOARD density"
               + BiomeDensityNote + ")"
             : "BIOMETEST: FAIL (" + string.Join(",", fails) + ")";
     }
@@ -10220,6 +10477,151 @@ public partial class Game
     }
 
 
+    // ── P16 "GROUND TRUTH" — SIGHTLINE_RIFTTEST: A RIFT CANNOT STRAND ANYTHING ──────────────
+    //
+    // The blocker gate for VOID. Every other mechanical ground changes what a tile COSTS; a rift
+    // removes the tile from the board, so a careless stamp can cut a spawn from the evac zone and
+    // make a mission unwinnable — which is strictly worse than leaving VOID as paint. This is the
+    // test that says it does not, and it is deliberately a REAL-BOARD test: `Terrain.Stamp`'s own
+    // guard is proven on synthetic walled boards inside BIOMETEST, but the thing that matters is
+    // the board a player is handed, with that mission's arena, force, plateaus, barrels and
+    // objective fixtures already on it.
+    //
+    // TWO CLAIMS, and the first is the strong one:
+    //
+    // (1) THE DIFFERENTIAL. On the same finished board, flood from the squad WITH the ground layer
+    //     and WITHOUT it. The reachable set must shrink by EXACTLY the number of rift tiles. Not
+    //     "the objectives I can name are still reachable" — every walkable tile that was reachable
+    //     before is still reachable, which is the only form of the claim that also covers the
+    //     things that appear LATER than the stamp and pick their own tile: DEFEND reinforcement
+    //     waves, the anti-turtle clock's spawns, LAST STAND hordes, a shoved body, a planted
+    //     forward evac beacon. A test that enumerated today's fixtures would have said PASS on a
+    //     board whose only sealed pocket is where wave 3 spawns.
+    //
+    // (2) THE FIXTURES, named anyway, because the differential is only as good as the flood's
+    //     starting point: every soldier, every hostile, every evac tile, the hack terminal, each
+    //     sabotage charge, the intel cache and the ESCORT/RESCUE asset must be reachable from the
+    //     squad, and none of them may BE a rift tile.
+    //
+    // Swept over all eight objectives x every mission depth x N seeds with the biome PINNED to
+    // VOID, so 100% of the sample carries the mechanic (GEOMTEST covers the same invariants but
+    // sees a VOID board only about one build in eight, and never checks the differential).
+    // Non-vacuity: PASS requires a real sample AND that rifts were actually stamped on most of it.
+    public static string RiftSelfTest(int seeds = 6)
+    {
+        var fails = new List<string>();
+        string savedForce = Environment.GetEnvironmentVariable("SIGHTLINE_FORCEBIOME");
+        string savedHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+        int boards = 0, withRift = 0, riftSum = 0, riftMin = int.MaxValue, riftMax = 0, cacheSeen = 0, vipSeen = 0;
+        var objs = (Objective[])Enum.GetValues(typeof(Objective));
+        try
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", Terrain.BiomeVoid.ToString());
+            foreach (int heat in new[] { 0, 8 })
+            {
+                Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+                foreach (var obj in objs)
+                    for (int m = 1; m <= Run.MaxMissions; m++)
+                        for (int sd = 0; sd < seeds; sd++)
+                        {
+                            Util.Reseed(61000 + sd * 7919 + m * 131 + (int)obj * 17 + heat * 104729);
+                            Game g;
+                            try { g = new Game { NoPersist = true, ForcedObjective = obj }; g.StartMission(m); }
+                            catch (Exception ex)
+                            { fails.Add($"h{heat}/{obj}/m{m}/s{sd} THREW {ex.GetType().Name}"); continue; }
+                            boards++;
+                            string tag = $"h{heat}/{obj}/m{m}/s{sd}";
+                            if (fails.Count > 24) continue;
+
+                            var p0 = g.Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+                            if (p0 == null) { fails.Add(tag + ": no living squad"); continue; }
+
+                            int rifts = 0;
+                            for (int x = 0; x < g.Grid.W; x++)
+                                for (int y = 0; y < g.Grid.H; y++) if (g.Grid.Ground[x, y] == GroundKind.Rift) rifts++;
+                            if (rifts > 0) { withRift++; riftSum += rifts; riftMin = Math.Min(riftMin, rifts); riftMax = Math.Max(riftMax, rifts); }
+
+                            // ---- (1) THE DIFFERENTIAL ------------------------------------------
+                            // Stated as a SET relation, not as arithmetic. The first cut asserted
+                            // `reachWith == reachWithout - rifts` and failed 26/576 with a NEGATIVE
+                            // deficit, which was the test being wrong rather than the guard: some
+                            // real boards already carry floor pockets the squad cannot reach (the
+                            // procedural fallback, mostly), and a rift laid in one of those removes
+                            // a tile that was never reachable to begin with. The claim that matters
+                            // is the one below — NOTHING THAT WAS REACHABLE STOPPED BEING SO,
+                            // except by becoming the chasm itself.
+                            bool[,] Mask()
+                            {
+                                var c = g.Grid.CostMap(p0.X, p0.Y, (x, y) => false, out _, 1 << 22);
+                                var mk = new bool[g.Grid.W, g.Grid.H];
+                                for (int x = 0; x < g.Grid.W; x++)
+                                    for (int y = 0; y < g.Grid.H; y++) mk[x, y] = c[x, y] >= 0;
+                                return mk;
+                            }
+                            var maskWith = Mask();
+                            var saved = (GroundKind[,])g.Grid.Ground.Clone();
+                            g.Grid.ClearGround();
+                            var maskWithout = Mask();
+                            Array.Copy(saved, g.Grid.Ground, saved.Length);
+                            g.Grid.RefreshGroundFlags();
+                            int stranded = 0, firstX = -1, firstY = -1;
+                            for (int x = 0; x < g.Grid.W; x++)
+                                for (int y = 0; y < g.Grid.H; y++)
+                                    if (maskWithout[x, y] && !maskWith[x, y] && g.Grid.Ground[x, y] != GroundKind.Rift)
+                                    { stranded++; if (firstX < 0) { firstX = x; firstY = y; } }
+                            if (stranded > 0)
+                                fails.Add($"{tag}: STRANDED {stranded} tile(s), first ({firstX},{firstY}) "
+                                          + $"({rifts} rifts) layout={Mission.AppliedLayout}");
+
+                            // ---- (2) THE NAMED FIXTURES ----------------------------------------
+                            var cost = g.Grid.CostMap(p0.X, p0.Y, (x, y) => false, out _, 1 << 22);
+                            bool Stuck(int x, int y) => !g.Grid.InBounds(x, y) || cost[x, y] < 0;
+                            bool OnRift(int x, int y) => g.Grid.InBounds(x, y) && g.Grid.Ground[x, y] == GroundKind.Rift;
+                            void Check(string what, int x, int y)
+                            {
+                                if (OnRift(x, y)) fails.Add($"{tag}: {what} ({x},{y}) is IN the chasm");
+                                else if (Stuck(x, y)) fails.Add($"{tag}: {what} ({x},{y}) unreachable");
+                            }
+                            foreach (var u in g.Players) if (u.Alive) Check(u.IsVip ? "ASSET " + u.Name : "soldier " + u.Name, u.X, u.Y);
+                            foreach (var u in g.Enemies) if (u.Alive) Check("hostile " + u.Cls, u.X, u.Y);
+                            foreach (var t in g.EvacZone) Check("evac tile", t.x, t.y);
+                            if (g.HasTerminal) Check("terminal", g.Terminal.x, g.Terminal.y);
+                            foreach (var st in g.SabotageSites) Check("sabotage site", st.x, st.y);
+                            if (g.CachePresent) { cacheSeen++; Check("intel cache", g.CacheX, g.CacheY); }
+                            if (g.Vip != null) vipSeen++;
+                        }
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_FORCEBIOME", savedForce);
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", savedHeat);
+        }
+
+        // NON-VACUITY. A rift that never stamped would pass every assertion above trivially — the
+        // exact failure mode C4's density leg was rewritten to close. Demand a real sample AND
+        // that the mechanic was present on most of it, AND that the fixture kinds this test claims
+        // to cover were actually seen (an ESCORT/RESCUE asset, and at least one intel cache).
+        if (boards < 400) fails.Add($"VACUOUS — only {boards} boards built");
+        if (withRift * 10 < boards * 9) fails.Add($"VACUOUS — only {withRift}/{boards} boards carried a rift");
+        if (vipSeen == 0) fails.Add("VACUOUS — no ESCORT/RESCUE asset sampled");
+        if (cacheSeen == 0) fails.Add("VACUOUS — no intel cache sampled");
+
+        var sb = new System.Text.StringBuilder();
+        double mean = withRift > 0 ? riftSum / (double)withRift : 0;
+        sb.AppendLine($"RIFTTEST: {boards} fresh VOID boards (8 objectives x {Run.MaxMissions} missions x {seeds} seeds "
+                    + $"x heats 0+8), {withRift} carried a chasm, {mean:F1} rift tiles mean "
+                    + $"({(riftMin == int.MaxValue ? 0 : riftMin)}-{riftMax}), {vipSeen} escort/rescue assets, {cacheSeen} caches");
+        foreach (var f in fails.Take(12)) sb.AppendLine("  " + f);
+        if (fails.Count > 12) sb.AppendLine($"  (+{fails.Count - 12} more)");
+        sb.Append(fails.Count == 0
+            ? "RIFTTEST: PASS (the chasm removes EXACTLY its own tiles from the squad's reachable set on every "
+              + "board; every soldier, hostile, evac tile, terminal, charge, cache and escort asset stays "
+              + "reachable and out of the hole)"
+            : $"RIFTTEST: FAIL ({fails.Count} violations)");
+        return sb.ToString();
+    }
+
     // ── R2 FIX 1 "NOBODY IS WALLED OUT" — SIGHTLINE_GEOMTEST ───────────────────────────────
     /// Every deployed SOLDIER must be able to reach the rest of the squad and must have at
     /// least one legal move on turn 1 — and every hostile / evac tile / terminal / sabotage
@@ -12121,8 +12523,20 @@ public partial class Game
 
         // (e) THE DIAL, measured on the SAME walk machinery: with the lane off, not one ordinary
         // watch may come back focused. (The scene-level half of (e) is below.)
+        //
+        // P16 — 16 CAMPAIGNS WAS AN UNDER-POWERED SAMPLE OF A RARE EVENT, and it was sitting ON its
+        // own threshold. The enemy `overwatch` branch fires on 0.15-0.46% of acts (P10's own
+        // archive), so 16 campaigns yielded ordinaryWatches = 2 against a floor of 2 — every board
+        // change in the game is one draw of a near-Poisson(2) count. MEASURED ON THE BASE COMMIT
+        // e57e151, BEFORE any P16 code: `SIGHTLINE_BIOMEMECH=0` gives 0 and `SIGHTLINE_AIDECLINE=0`
+        // gives 0, i.e. this gate already FAILED under two of the project's own shipped
+        // restore-the-old-behaviour dials — the exact flags a measurement round is expected to use.
+        // P16's board change knocked it to 1 and that is what surfaced it.
+        // THE FLOOR IS NOT LOWERED (that is the MAGMA-thin-tail lesson in CLAUDE.md, applied here):
+        // the SAMPLE is 8x. At 128 the count is 4 on the shipped board and 4 with BIOMEMECH=0,
+        // clear of the floor in both. Costs ~8 s of the sweep.
         AiLane = false;
-        WalkLaneCampaigns(16, laneAudit);
+        WalkLaneCampaigns(128, laneAudit);
         AiLane = ambient;
         if (wideSeen < 2) fails.Add($"vacuousWalkOff(ordinaryWatches={wideSeen})");
         if (focusedWithDialOff > 0) fails.Add($"coneArmedWithLaneOff={focusedWithDialOff}/{wideSeen}");

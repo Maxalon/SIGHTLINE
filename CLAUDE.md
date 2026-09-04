@@ -352,12 +352,21 @@ src/
                 built here; nothing else may construct one.
   Voice.cs      the squad's radio barks (line pools + the cooldown/priority picker)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
-  Terrain.cs    C4: the per-tile biome GROUND layer (VERDANT undergrowth / TUNDRA ice /
-                MAGMA vents). Stamped through Hash3 with ZERO Util.Rng draws (Stamp is
-                pure; the BOARD also keys on the reserved set, so it is NOT a function of
-                (MapSeed,mission) alone). NOT persisted. Read by Grid.GetCover / CostMap /
-                HasLineOfSight, so both teams get it from one truth.
+  Terrain.cs    C4 + P16: the per-tile biome GROUND layer. FIVE of eight biomes are mechanical
+                on five axes - VERDANT undergrowth (cover) / TUNDRA ice (movement) / MAGMA
+                vents (sight) / VOID RIFT (topology: impassable, TRANSPARENT, no cover) /
+                ARID SOFT SAND (drag: a step costs 3 half-tiles, 5 diagonal). STEEL/ASH/NEON
+                are paint and BIOMETEST asserts it. Stamped through Hash3 with ZERO Util.Rng
+                draws (Stamp is pure; the BOARD also keys on the reserved set, so it is NOT a
+                function of (MapSeed,mission) alone). NOT persisted. Read by Grid.GetCover /
+                CostMap / HasLineOfSight / IsFloor, so both teams get it from one truth.
+                THE RIFT IS THE ONE THAT VALIDATES: StampRift re-floods through Grid.CostMap
+                after every candidate tile and reverts any that removes more than itself, so a
+                chasm can never seal and the gaps ARE the bridges. SIGHTLINE_RIFTTEST proves it
+                on 576 real boards; with the guard off the same sweep strands 69 tiles.
                 SIGHTLINE_BIOMEMECH=0 = the pre-C4 board, exactly.
+                SIGHTLINE_NEWGROUND=0 = the pre-P16 board, exactly (VOID/ARID paint again) -
+                that, NOT BIOMEMECH, is the arm for a round that wants to price P16 alone.
   Unit.cs       Unit + Weapon + enums (Team/WeaponKind); per-weapon range curves
   Combat.cs     ComputeOdds (hit/crit/dmg) + Resolve (rolls a shot)
   Ai.cs         enemy planner: score reachable tiles for cover+LoF, flank, finish
@@ -707,6 +716,29 @@ audio censuses structurally unable to fail; and a measurement layer reporting nu
 measured nothing. **When a check here says everything is fine, ask what it would have said if it
 were not.**
 
+
+**PROGRAM PARALLAX — wave P16 "GROUND TRUTH" (2026-09-04, base `e57e151`)** ended C4's standing
+declaration that five biomes were paint. **VOID -> RIFT** (impassable, but **TRANSPARENT** and giving
+**no cover** - the only shape on this board that stops movement while hiding nothing, so it cuts open
+floor into lanes you can still shoot across) and **ARID -> SOFT SAND** (a step costs 3 half-tiles, 5
+diagonal - the exact inverse of ice, one line in `Grid.CostMap`). Five mechanical, three paint;
+`Ai.cs` gained **zero lines**, because both rules live in `Grid.IsFloor` / `Grid.CostMap`.
+**The rift is the first ground that can make a mission UNWINNABLE**, so `Terrain.StampRift` is the
+only stamper that validates - it re-floods through `Grid.CostMap` after every candidate tile and
+reverts any that removes more than itself, so a chasm can never seal and the gaps it leaves ARE the
+bridges. `SIGHTLINE_RIFTTEST` proves it on **576 real VOID boards, every objective, zero stranded
+tiles**; with the guard off the same sweep strands up to 69 tiles on 32 boards. Priced CRN-paired on
+`ba34279` (`SIGHTLINE_NEWGROUND=0` is the arm - **not** BIOMEMECH, which restores the pre-C4 board and
+would price C4 and P16 together), n=160/rung/arm, 960 campaigns: **-2.5 / -1.2 / +1.2** at h0/h4/h8,
+pooled McNemar z=-0.43, 95% CI **[-4.7, +3.0]** - near-inert on win rate **at 18.3% discordance**
+(88 of 480 worlds played out differently, so this is a bounded effect, not an absent one), and the
+**opener cell is clean** (`byNodeKind` Start +0.0/+0.6/+0.0, the cell C4's layer failed at -4.37).
+**The biome DEAL was verified and deliberately NOT changed:** it is a fixed 8-cycle reaching only
+**8 of 56** adjacencies, but `Mission.DeckPick` reads it, so re-dealing re-deals the ARENA on **28.9%
+of missions** and severs the CRN chain like W1 - and **`SIGHTLINE_SAVETEST` cannot see it** (all three
+map goldens PASS with the deal hashed; `MapFingerprint` feeds `GenerateMap` only). Both are open items
+in `docs/ROADMAP.md`. DEVLOG §GROUND TRUTH; raw round `docs/measurements/p16/`; rationale
+`docs/DESIGN.md` §5.4.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:
