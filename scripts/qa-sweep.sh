@@ -125,6 +125,7 @@ echo -n "VETTEST    : "; verdict "$(SIGHTLINE_VETTEST=1 run | grep -oE "VETTEST:
 echo -n "OWTEST     : "; verdict "$(SIGHTLINE_OWTEST=1 run | grep -oE "OWTEST: (PASS|FAIL)" | head -1)"
 echo -n "SCARTEST   : "; verdict "$(SIGHTLINE_SCARTEST=1 run | grep -oE "SCARTEST: (PASS|FAIL)" | head -1)"
 echo -n "CONTRACTTEST: "; verdict "$(SIGHTLINE_CONTRACTTEST=1 run | grep -oE "CONTRACTTEST: (PASS|FAIL)" | head -1)"
+echo -n "REWARDTEST : "; verdict "$(SIGHTLINE_REWARDTEST=1 run | grep -oE "REWARDTEST: (PASS|FAIL)" | head -1)"
 echo -n "SHOVETEST  : "; verdict "$(SIGHTLINE_SHOVETEST=1 run | grep -oE "SHOVETEST: (PASS|FAIL)" | head -1)"
 echo -n "CONCEALTEST: "; verdict "$(SIGHTLINE_CONCEALTEST=1 run | grep -oE "CONCEALTEST: (PASS|FAIL)" | head -1)"
 echo -n "HAZARDTEST : "; verdict "$(SIGHTLINE_HAZARDTEST=1 run | grep -oE "HAZARDTEST: (PASS|FAIL)" | head -1)"

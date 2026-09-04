@@ -3,11 +3,29 @@ using System.Collections.Generic;
 
 namespace Sightline;
 
-/// A rank-up perk choice presented in the barracks: pick A or B.
+/// A perk choice presented in the barracks: pick A or B (or C — see Run.PerkOfferWidth).
+///
+/// P18 "THE SECOND AXIS" made two things about this offer variable that used to be fixed:
+///  - its WIDTH (the COMBAT TRIALS war-room unlock turns every offer into a pick-1-of-3), and
+///  - its RECIPIENT, for a BONUS offer. A rank-up offer belongs to the soldier who ranked up and
+///    is never re-targetable; a BONUS perk (the ELITE / ONSLAUGHT card reward, the ADV. TRAINING
+///    requisition, the field-event training arm) used to land on a RANDOM eligible survivor, which
+///    is a non-decision in DESIGN.md §3.A's exact sense — the reward that most differentiates one
+///    soldier from another, handed out by dice at the moment the player most wants a say.
+/// The rolled recipient is kept (Rolled*) so that re-selecting them restores the pair the RNG
+/// actually dealt; every OTHER candidate's pair is derived from `Seed` by a pure hash, so a
+/// retarget costs ZERO Util.Rng draws and cannot be scummed by toggling between candidates.
 public class PerkOffer
 {
     public Unit Unit;
     public Perk A, B;
+    public Perk C;            // third option; present only when HasC (COMBAT TRIALS)
+    public bool HasC;
+    public bool Bonus;        // true == a BONUS perk: the player may choose who receives it
+    public int Seed;          // stable per-offer key for the pure-hash retarget derivation
+    public Unit RolledUnit;   // the recipient the RNG dealt (restores the dealt pair on re-select)
+    public Perk RolledA, RolledB, RolledC;
+    public bool RolledHasC;
 }
 
 /// A one-time CLASS SPECIALIZATION FORK choice (W2), offered the first time a soldier reaches
@@ -623,6 +641,12 @@ public class Run
     // assist never touches it). Persisted in meta.json (survives run-end, unlike the run save).
     public int LossStreak;                    // consecutive lost runs (meta; seeded at run start)
     public const int AssistMax = 5;           // ceiling on assist tiers
+    // P18 "THE SECOND AXIS" — the heat the run STARTED at (the rung the player DIALLED), latched so
+    // that a mid-run heat change cannot silently revoke the assist. Seeded beside HeatLevel at run
+    // start (Game.StartMission / BeginEndless / BeginSkirmish / BeginDaily / BeginTraining) and
+    // PERSISTED (RunDto.StartHeatEnc), so it survives a quit-and-resume. Pre-P18 saves carry no
+    // value and fall back to HeatLevel on load. See AssistLevel below.
+    public int StartHeat;
 
     public List<Unit> Squad = new();
     public int Mission;                       // current mission number (1-based)
@@ -1118,21 +1142,119 @@ public class Run
         Offers.Add(new MissionCard { Objective = onslaught, ModName = "ONSLAUGHT", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" });
     }
 
-    /// Reward: grant a bonus perk choice to a random survivor who has perks left.
+    /// Reward: grant a bonus perk choice to a survivor who has perks left.
     public void AddBonusPerk() => TryQueueBonusPerk("ONSLAUGHT");
 
-    /// Queue a pick-1-of-2 bonus perk for a random survivor with >=2 perks left.
+    // ── P18 "THE SECOND AXIS": the width and the recipient of a perk offer ──────────────────
+    /// How many perks an offer puts on the table. 2 is the shipped default; the COMBAT TRIALS
+    /// war-room unlock raises it to 3. Set by Game.RefreshMetaWidths from the persisted profile —
+    /// NEVER read from Run itself, which owns no disk. Left at 2 under NoPersist, so the flywheel,
+    /// autoplay and PAIRTEST draw exactly the RNG they drew before P18.
+    public static int PerkOfferWidth = 2;
+    public const int PerkOfferWidthMax = 3;
+    /// Whether a BONUS perk offer lets the player choose its recipient (SIGHTLINE_PERKPICK=0 off).
+    public static bool BonusPerkPick = true;
+
+    /// The soldiers a BONUS perk may be given to — the SAME predicate the random roll below uses,
+    /// so the picker can never offer a recipient the roll would not have chosen (or hide one it would).
+    public List<Unit> BonusPerkCandidates() => Squad.FindAll(u => CountAvail(u) >= 2);
+
+    /// Queue a bonus perk for an eligible survivor (>=2 perks left).
     /// Returns false (and queues nothing) if no soldier is eligible.
+    ///
+    /// The RECIPIENT is still ROLLED here and the roll is unchanged — it is the offer's DEFAULT, and
+    /// keeping it is what makes this change free of RNG-stream drift (the headless paths never open
+    /// the picker, so they see exactly the pre-P18 draw sequence). The player then re-targets it in
+    /// the chooser through RetargetBonusPerk, which spends no draws at all.
     public bool TryQueueBonusPerk(string reason)
     {
-        var eligible = Squad.FindAll(u => CountAvail(u) >= 2);
+        var eligible = BonusPerkCandidates();
         if (eligible.Count == 0) return false;
         var u = eligible[Util.RandInt(0, eligible.Count - 1)];
         var avail = new List<Perk>();
         foreach (var p in PerkDef.All) if (!u.HasPerk(p)) avail.Add(p);
         PickPerkPair(avail, out Perk a, out Perk b);
-        PendingPerks.Add(new PerkOffer { Unit = u, A = a, B = b });
+        var off = new PerkOffer { Unit = u, A = a, B = b, Bonus = true };
+        AddThirdOption(off, u);
+        off.Seed = Mix(Mission * 7919 + Report.Count * 131 + Squad.Count, (int)a * 31 + (int)b * 17 + reason.Length);
+        off.RolledUnit = u; off.RolledA = off.A; off.RolledB = off.B; off.RolledC = off.C; off.RolledHasC = off.HasC;
+        PendingPerks.Add(off);
         Report.Add($"{u.Name} earns a bonus perk ({reason})");
+        return true;
+    }
+
+    /// COMBAT TRIALS: widen an offer to a third distinct unowned perk. One extra Util.Rng draw, and
+    /// ONLY when PerkOfferWidth has been raised off its default by a real profile — so a batch,
+    /// autoplay run or screenshot never takes it. No-op when the soldier has fewer than 3 perks left.
+    static void AddThirdOption(PerkOffer off, Unit u)
+    {
+        if (PerkOfferWidth < 3 || off == null || u == null) return;
+        var rest = new List<Perk>();
+        foreach (var p in PerkDef.All) if (!u.HasPerk(p) && p != off.A && p != off.B) rest.Add(p);
+        if (rest.Count == 0) return;
+        off.C = rest[Util.RandInt(0, rest.Count - 1)];
+        off.HasC = true;
+    }
+
+    /// A stable hash of a string. Deliberately NOT the framework's own string hash, which .NET
+    /// randomises per PROCESS — a per-process key would give the same soldier a different offer on
+    /// every launch, and the whole point of the retarget derivation is that it is stable.
+    static int StrHash(string s)
+    {
+        unchecked
+        {
+            uint h = 2166136261u;
+            if (s != null) foreach (char c in s) h = (h ^ c) * 16777619u;
+            return (int)(h & 0x7fffffff);
+        }
+    }
+
+    /// A pure integer hash (FNV-1a + a finalising mix). Deterministic, allocation-free and — the
+    /// point — it draws NOTHING from Util.Rng, so a recipient retarget cannot move the world.
+    static int Mix(int a, int b)
+    {
+        unchecked
+        {
+            uint h = 2166136261u;
+            h = (h ^ (uint)a) * 16777619u;
+            h = (h ^ (uint)b) * 16777619u;
+            h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+            return (int)(h & 0x7fffffff);
+        }
+    }
+
+    /// Re-target a BONUS perk offer at `to`. Returns false when the offer is not a bonus offer, the
+    /// picker is switched off, or `to` is not an eligible recipient. Re-selecting the ROLLED
+    /// recipient restores the pair the RNG dealt; anyone else gets a pair derived from `Seed` by
+    /// Mix() alone — same class-line bias as MakePerkOffer, zero Util.Rng draws, and stable, so
+    /// toggling between candidates can never re-roll a better offer out of the same reward.
+    public bool RetargetBonusPerk(PerkOffer off, Unit to)
+    {
+        if (off == null || to == null || !off.Bonus || !BonusPerkPick) return false;
+        if (CountAvail(to) < 2) return false;
+        if (ReferenceEquals(to, off.Unit)) return true;   // already there
+        if (ReferenceEquals(to, off.RolledUnit))
+        {
+            off.Unit = to; off.A = off.RolledA; off.B = off.RolledB; off.C = off.RolledC; off.HasC = off.RolledHasC;
+            return true;
+        }
+        var avail = new List<Perk>();
+        foreach (var p in PerkDef.All) if (!to.HasPerk(p)) avail.Add(p);
+        if (avail.Count < 2) return false;
+        var line = new List<Perk>();
+        foreach (var p in ClassLine(to.Cls)) if (!to.HasPerk(p)) line.Add(p);
+        var aPool = line.Count > 0 ? line : avail;
+        Perk na = aPool[Mix(off.Seed, StrHash(to.Name) ^ 0x51) % aPool.Count];
+        var other = avail.FindAll(p => p != na);
+        var spicy = other.FindAll(p => !(IsStatBump(na) && IsStatBump(p)));
+        var bPool = spicy.Count > 0 ? spicy : other;
+        Perk nb = bPool[Mix(off.Seed, StrHash(to.Name) ^ 0x9E) % bPool.Count];
+        off.Unit = to; off.A = na; off.B = nb; off.C = default; off.HasC = false;
+        if (PerkOfferWidth >= 3)
+        {
+            var rest = avail.FindAll(p => p != na && p != nb);
+            if (rest.Count > 0) { off.C = rest[Mix(off.Seed, StrHash(to.Name) ^ 0xC3) % rest.Count]; off.HasC = true; }
+        }
         return true;
     }
 
@@ -1159,6 +1281,10 @@ public class Run
             if (interesting.Count > 0) b = interesting[Util.RandInt(0, interesting.Count - 1)];
         }
     }
+
+    /// Harness seam: REWARDTEST asserts that BonusPerkCandidates() IS the roll's eligibility set,
+    /// which it can only do by asking the predicate itself rather than restating it.
+    public static int CountAvailForTest(Unit u) => CountAvail(u);
 
     static int CountAvail(Unit u)
     {
@@ -1207,7 +1333,20 @@ public class Run
     ///     at RECRUIT still does not advance the Heat ceiling, so no assisted win buys progression.
     /// If it is ever changed, the test to change is `HeatLevel > 0` -> `HeatLevel != 0`, and
     /// Game.AssistPreview (`PendingHeat > 0`) must move in the same commit or the intro chip lies.
-    public int AssistLevel => HeatLevel > 0 ? 0 : Math.Min(AssistMax, LossStreak);
+    /// P18 "THE SECOND AXIS" — THE LATCH. The test is the heat the run STARTED at, not the heat it
+    /// is CURRENTLY at. Three field-event arms (relic:0 / informant:1 / reservecall:1) raise
+    /// `HeatLevel` mid-run, and the old `HeatLevel > 0` test therefore switched the assist OFF for
+    /// the rest of a heat-0 run the moment one of them fired — SILENTLY, and for a player who had
+    /// dialled a rung where the assist is meant to exist. The assist responds to a LOSS STREAK
+    /// (see the note above); a gamble the player took inside a run is not an opt-out of the safety
+    /// net they had before they took it, and nothing on screen ever said it was one. Note that the
+    /// heat rise itself is UNCHANGED — the enemy still gets the rung it was promised; only the
+    /// relief the player already had stops being confiscated as a hidden second cost.
+    /// `Game.AssistPreview`'s `PendingHeat > 0` is now EXACTLY this predicate at run start, so the
+    /// intro's FIELD SUPPORT chip is truthful for the whole run instead of only its first event.
+    /// SIGHTLINE_ASSISTLATCH=0 (AssistLatch = false) restores the pre-P18 live-heat test exactly.
+    public static bool AssistLatch = true;
+    public int AssistLevel => (AssistLatch ? StartHeat : HeatLevel) > 0 ? 0 : Math.Min(AssistMax, LossStreak);
 
     /// Enemy stat-bump relief from the assist (subtracted from statDelta in SetupMission): one
     /// point of force-wide -HP/-Aim per tier. Small + capped so it eases, never trivialises.
@@ -1837,7 +1976,9 @@ public class Run
         {
             // class line exhausted / unknown -> keep the original flat, lightly-curated behaviour.
             PickPerkPair(avail, out Perk fa, out Perk fb);
-            return new PerkOffer { Unit = u, A = fa, B = fb };
+            var flat = new PerkOffer { Unit = u, A = fa, B = fb };
+            AddThirdOption(flat, u);   // P18 COMBAT TRIALS (no-op at the default width)
+            return flat;
         }
         Perk a = line[Util.RandInt(0, line.Count - 1)];
 
@@ -1848,7 +1989,9 @@ public class Run
         var bPool = spicy.Count > 0 ? spicy : other;   // other is non-empty (avail.Count >= 2)
         Perk b = bPool[Util.RandInt(0, bPool.Count - 1)];
 
-        return new PerkOffer { Unit = u, A = a, B = b };
+        var off = new PerkOffer { Unit = u, A = a, B = b };
+        AddThirdOption(off, u);   // P18 COMBAT TRIALS (no-op at the default width)
+        return off;
     }
 
     // ---- APEX W4 (c): synthetic-veteran flywheel probe (SIGHTLINE_VETSIM) ----

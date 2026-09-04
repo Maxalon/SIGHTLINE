@@ -3273,3 +3273,45 @@ Detail in `docs/DEVLOG.md` §SHIPS AS v1.0.0; the contract is `docs/DISTRIBUTION
 - [ ] **Nobody has looked at whether a chasm makes a fight more INTERESTING.** Win rate is the only
       axis P16 measured. A rift is a positioning lever at constant threat, which W4 identified as
       the one kind of lever that could move `choices/ARMED-soldier-turn` — and nobody read it.
+
+## P18 "THE SECOND AXIS" — left open (2026-09-04, base `f81d3fa`)
+
+- [ ] **THE COLD WAR ROOM ELLIPSIZES FOUR UNLOCK DESCRIPTIONS, AND FITTEST CANNOT SEE IT.**
+      `Game.DebugWarRoom` stages the rich twelve-run demo; the zero state (`SIGHTLINE_COLD=1`) has
+      no `ScreenCase`, so **the profile every new player is in is unaudited** — the same blind spot
+      C6 found and closed for the screenshot hooks but not for the gate. Measured on this tree at
+      0 owned / 6 unowned: `room = 264`, `pitch = 52`, `cardH = 44` -> `descRows = 1` -> `Hud.Clip`
+      truncates SUPPLY LINE / STANDING ORDERS / ISSUED PLATING / CROSS-TRAINING / STANDING RESERVE
+      (see `shots/p18-warroom-cold-locked.png`). **It is PRE-EXISTING** — before P18 the same split
+      landed `cardH = 49`, also `descRows = 1`, also clipped — but P18's NEXT COMMISSION row makes
+      it 5px tighter, so this wave owns naming it. Adding a `WARROOM-COLD` case would fail the gate
+      on a condition P18 did not create; the real fix needs 342px of compact cards in 264px of
+      column, i.e. a WAR ROOM layout wave (scroll the column, or a second page, or shorter copy).
+      **Do both together or neither.**
+- [ ] **NOBODY HAS PRICED THE WIDTH THE SECOND AXIS SELLS.** COMBAT TRIALS (perk offers 2 -> 3),
+      DEEP STORES (+1 slate slot) and DEEP RESERVE (12 -> 20 reserve records) are horizontal by
+      construction, but "a wider menu is a small edge by SELECTION" is an admitted, unmeasured
+      residual. It is **unmeasurable**, not merely unmeasured: the flywheel runs `NoPersist`, so it
+      has no meta profile at all and every one of these reads is `!NoPersist`-gated. Pricing them
+      needs a harness that can run a batch against a STAGED profile (an env-seeded unlock set, the
+      `SIGHTLINE_VETSIM` pattern applied to `MetaUnlock`) — that hook does not exist and is its own
+      small wave. Until it does, **no P18 number may claim the axis is free**; `docs/measurements/p18/`
+      proves only that the axis is inert at the flywheel's COLD-profile default (240 campaigns,
+      three rungs, 2,356 fields, zero diffs).
+- [ ] **An `AddHeat` field-event arm can still push a run ABOVE the heat ceiling the player chose.**
+      `Events.Apply` clamps through `Heat.Clamp` (i.e. to `Heat.Max`), not to `UnlockedHeat`.
+      P18 considered and left it: the arm's preview says "+1 Heat" and delivers exactly that, and
+      clamping would neuter the arm for a player already at their cap. Recorded so the next wave
+      decides it deliberately instead of by inheritance. (The half that WAS a defect — the same
+      event silently confiscating the adaptive assist — is fixed; see DEVLOG §THE SECOND AXIS.)
+- [ ] **The perk chooser's dossier stat line runs UNDER the EDIT TAG button.** Visible as
+      `SUPPR. FI` in `shots/p18-bonus-perk-picker-wide.png`. Pre-existing on `PERKCHOOSER` (the
+      stats string is drawn full-width at `y + 98` and `PerkTagBtn` is placed over its right end).
+      FITTEST does not see it because it is an OVERDRAW, not a clip or an off-canvas string — which
+      is itself worth noting: the screen audit has no overlap check between a drawn string and a
+      later-drawn opaque plate.
+- [ ] **The second axis stops at three.** The gates (2 / 5 / 8) span the ladder and the last lands
+      ON `Heat.Max`, so the two curves now terminate together — but a player who owns all nine
+      unlocks is back where the docket started, one ladder later. Whether that is fine (the ladder
+      is finite, so a finite reward track matching it is correct) or whether the top wants a
+      genuinely repeatable, non-power sink is an OWNER decision, not a defect to fix by reflex.

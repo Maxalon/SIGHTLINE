@@ -491,8 +491,22 @@ public static class EventCatalog
             {
                 if (HeatPinned) return HeatPinnedLine;   // THE HEAT PIN: a rung means the rung (no draw, no mutation)
                 int before = run.HeatLevel;
+                int assistBefore = run.AssistLevel;
                 run.HeatLevel = Heat.Clamp(run.HeatLevel + Math.Max(1, o.Amount));
-                return run.HeatLevel > before ? $"Heat rises to {run.HeatLevel}" : "Heat already at ceiling";
+                if (run.HeatLevel <= before) return "Heat already at ceiling";
+                // P18 "THE SECOND AXIS" — SAY IT. Pre-P18 this line reported the heat rise and
+                // nothing else, while Run.AssistLevel's `HeatLevel > 0` test silently confiscated
+                // every tier of FIELD SUPPORT the player was running on, for the rest of the run.
+                // The latch (Run.AssistLevel) means it now HOLDS — and the arm says so, because a
+                // safety net that quietly survives is only marginally better information than one
+                // that quietly dies. With SIGHTLINE_ASSISTLATCH=0 the old confiscation is restored
+                // and this line reports THAT instead, so the message can never disagree with the rule.
+                string heatLine = $"Heat rises to {run.HeatLevel}";
+                if (assistBefore > 0)
+                    heatLine += run.AssistLevel > 0
+                        ? $" - FIELD SUPPORT holds at tier {run.AssistLevel}"
+                        : " - FIELD SUPPORT is WITHDRAWN";
+                return heatLine;
             }
             case EventOutcomeKind.GrantBoon:
             {
@@ -722,6 +736,30 @@ public static class EventCatalog
         int heat0 = run.HeatLevel;
         Apply(run, new EventOutcome { Kind = EventOutcomeKind.AddHeat, Amount = 1 });
         if (run.HeatLevel != Heat.Clamp(heat0 + 1)) fails.Add("heat");
+
+        // ── P18 "THE SECOND AXIS", item 3: A MID-RUN HEAT EVENT MAY NOT CONFISCATE THE ASSIST ──
+        // Pre-P18 Run.AssistLevel tested the run's LIVE HeatLevel, so the three AddHeat arms
+        // (relic:0 / informant:1 / reservecall:1) switched the adaptive assist off for the rest of a
+        // heat-0 run — silently, and as a SECOND cost the arm's preview never mentioned. The rise
+        // itself is unchanged; only the confiscation is gone, and the result line now names the
+        // assist's fate either way. Asserted UNCONDITIONALLY, so `SIGHTLINE_ASSISTLATCH=0
+        // SIGHTLINE_EVENTTEST=1` FAILS — that is the proof this leg can see the defect.
+        {
+            var ar = MakeTestRun();
+            ar.HeatLevel = 0; ar.StartHeat = 0; ar.LossStreak = 3;
+            if (ar.AssistLevel != 3) fails.Add($"assistPre={ar.AssistLevel}");
+            string line = Apply(ar, new EventOutcome { Kind = EventOutcomeKind.AddHeat, Amount = 1 });
+            if (ar.HeatLevel != 1) fails.Add($"assistHeatDidNotRise={ar.HeatLevel}");
+            if (ar.AssistLevel != 3) fails.Add($"assistRevokedByEvent={ar.AssistLevel}");
+            if (ar.AssistStatRelief != 3) fails.Add($"assistReliefRevoked={ar.AssistStatRelief}");
+            if (line == null || line.IndexOf("FIELD SUPPORT", StringComparison.Ordinal) < 0)
+                fails.Add("assistNotNamedOnScreen:" + (line ?? "<null>"));
+            // and a run the player DIALLED above 0 still gets nothing — the latch widens no gate.
+            var hr = MakeTestRun();
+            hr.HeatLevel = 2; hr.StartHeat = 2; hr.LossStreak = 5;
+            if (hr.AssistLevel != 0) fails.Add($"assistLeakedToHeatRun={hr.AssistLevel}");
+        }
+
         run.HeatLevel = Heat.Max;
         Apply(run, new EventOutcome { Kind = EventOutcomeKind.AddHeat, Amount = 1 });
         if (run.HeatLevel != Heat.Max) fails.Add("heatClamp");
@@ -884,7 +922,10 @@ public static class EventCatalog
             else SaveGame.Delete();
         }
 
-        return fails.Count == 0 ? "EVENTTEST: PASS" : "EVENTTEST: FAIL (" + string.Join(", ", fails) + ")";
+        return fails.Count == 0
+            ? "EVENTTEST: PASS (catalogue + outcome mutations; P18: a mid-run AddHeat raises the rung "
+              + "but cannot confiscate the adaptive assist, and the result line names FIELD SUPPORT either way)"
+            : "EVENTTEST: FAIL (" + string.Join(", ", fails) + ")";
     }
 
     /// HEATPINTEST, the catalog leg (the Stats / STALEMATE legs live in Game.Harness.cs, which

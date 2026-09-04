@@ -1101,3 +1101,40 @@ hook otherwise fabricates a mission-3 one to frame CONTINUE); `SIGHTLINE_WARROOM
 SIGHTLINE_COLD=1` shows the WAR ROOM with an empty profile (the hook otherwise hard-codes a
 twelve-run career). Before this, the two screens a new player meets first had never been
 photographed.
+
+---
+
+## P18 "THE SECOND AXIS" — the meta's heat-gated column, a reward you assign, and an assist that holds
+
+- **THE SECOND AXIS — HEAT-GATED WAR ROOM COMMISSIONS.** The six salvage unlocks cost 330 in total
+  and a heat-0 clear banks 61, so the WAR ROOM emptied after ~5 wins while the heat cap kept
+  climbing to `Heat.Max = 8`. Three unlocks now cost salvage **and** a heat rung CLEARED, so the
+  reward curve's domain is the difficulty curve's: **COMBAT TRIALS** (clear heat 2, 60 — every perk
+  offer is a pick-1-of-**three**), **DEEP RESERVE** (clear heat 5, 95 — the veteran reserve holds
+  **20** records instead of 12), **DEEP STORES** (clear heat 8, 150 — one more requisition slate
+  slot, stacking with QUARTERMASTER's). All three widen an existing CHOICE rather than adding
+  power (DESIGN.md §3.F). The currency is `MetaDto.BestHeatWon` (append-only, raises-only,
+  migrated for old profiles through `MaxHeat - 1`); `MetaUnlock` gained three members **appended at
+  the END** with the SAVETEST fingerprint re-pasted. The WAR ROOM shows them as one **NEXT
+  COMMISSION** ledger row (`BUY <cost>` once earned, `CLEAR HEAT n` before, `(+N more)` behind it)
+  with the description on a hover card — a heat-gated unlock never takes card space, because the
+  UNLOCKS column had 8px of slack and full cards made FITTEST ellipsize four descriptions.
+  `SIGHTLINE_METATEST` / `SIGHTLINE_VETTEST`; `SIGHTLINE_SECONDAXIS=0` restores the pre-P18 WAR ROOM.
+- **THE BONUS PERK HAS A RECIPIENT PICKER.** The ELITE / ONSLAUGHT card reward, the ADV. TRAINING
+  requisition and the field-event training arm all queued a perk for a RANDOM eligible survivor.
+  The roll is kept as the offer's DEFAULT (so the RNG stream is untouched) and the chooser now
+  carries a chip per eligible soldier; picking one re-derives that soldier's pair from the offer's
+  seed by a pure hash — **zero `Util.Rng` draws**, stable under toggling (no re-roll scumming), and
+  re-selecting the rolled soldier restores the pair the RNG dealt. A **rank-up** offer is not
+  re-targetable and the card is retitled **FIELD TRAINING** for a bonus offer (it used to say
+  PROMOTION over a reward given to a soldier who had not been promoted).
+  `SIGHTLINE_REWARDTEST`; `SIGHTLINE_PERKPICK=0` restores the random hand-out.
+- **THE ADAPTIVE ASSIST IS LATCHED TO THE RUNG YOU DIALLED.** `Run.AssistLevel` tested the run's
+  LIVE heat, so the three `AddHeat` field-event arms silently confiscated up to five tiers of
+  force-wide enemy relief for the rest of a heat-0 run. It now tests `Run.StartHeat` — persisted
+  (`RunDto.StartHeatEnc`), so it survives a quit-and-resume — and the arm's result line names the
+  assist either way (`Heat rises to 1 - FIELD SUPPORT holds at tier 3`). The heat rise itself is
+  unchanged. `SIGHTLINE_EVENTTEST`; `SIGHTLINE_ASSISTLATCH=0` restores the confiscation.
+- **New harness hooks:** `SIGHTLINE_REWARDTEST` (the perk-offer surface: recipient, width,
+  determinism), `SIGHTLINE_BONUSSHOT=1|wide` (the bonus-perk card, with and without COMBAT TRIALS'
+  third option), and two FITTEST screens — `BONUSPERK` / `BONUSPERK-WIDE`.

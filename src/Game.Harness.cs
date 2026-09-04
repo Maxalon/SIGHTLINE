@@ -1783,6 +1783,39 @@ public partial class Game
         Phase = Phase.Barracks;
     }
 
+    /// P18 harness hook (screenshot + FITTEST): the BONUS perk card — the reward path that used to
+    /// land on a random survivor and now asks WHO first. `wide` also stages COMBAT TRIALS' third
+    /// option, so the audit sees the widest, most crowded form of the card. Pins the offered perks
+    /// (the roll is clock-seeded) so the shot is reproducible, exactly like DebugBarracksPerk.
+    public void DebugBonusPerk(bool wide = false)
+    {
+        int widthWas = Run.PerkOfferWidth;
+        Run.PerkOfferWidth = wide ? Run.PerkOfferWidthMax : 2;
+        // Same barracks staging as DebugBarracksPerk — the chooser only draws once the debrief has
+        // run (that is what put the barracks in its promotion step), which the first cut of this
+        // hook skipped: FITTEST duly reported BONUSPERK-WIDE as an IDENTICAL FRAME to BONUSPERK,
+        // because neither was drawing the chooser at all. That is the vacuity trap leg (5) exists for.
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();
+        foreach (var u in _run.Squad) u.Perks.Clear();
+        if (_run.Squad.Count > 0)
+        {
+            _run.Squad[0].Perks.Add(Perk.Reflexes);   // an existing perk in the dossier
+            _run.Squad[0].Hp = Math.Max(1, _run.Squad[0].Hp - 3);
+        }
+        _run.TryQueueBonusPerk("ELITE");
+        if (_run.PendingPerks.Count > 0)
+        {
+            var off = _run.PendingPerks[0];
+            off.A = Perk.LockOn; off.B = Perk.Tank;                  // both delta-line shapes
+            off.RolledA = off.A; off.RolledB = off.B;
+            if (wide) { off.C = Perk.Bandolier; off.HasC = true; off.RolledC = off.C; off.RolledHasC = true; }
+            else { off.HasC = false; off.RolledHasC = false; }
+        }
+        Run.PerkOfferWidth = widthWas;
+        Phase = Phase.Barracks;
+    }
+
     /// Harness hook (screenshot only): show the barracks deployment-card screen.
     public void DebugDeployCards()
     {
@@ -5071,6 +5104,29 @@ public partial class Game
             if (capped.Exists(u => u.Name == "OP0")) fails.Add("capKeptLeastStoried");   // OP0 (lowest kills) must be gone
             if (!capped.Exists(u => u.Name == $"OP{extra - 1}")) fails.Add("capDroppedMostStoried");
 
+            // (4b) P18 DEEP RESERVE — the heat-gated unlock raises the cap the ENSHRINE actually
+            //      applies, not merely a number the WAR ROOM prints. Asserted through the real
+            //      write path for the same reason leg (4) is: a test that read VeteranCapNow()
+            //      would stay green if EnshrineVeterans kept trimming to the constant. Runs after
+            //      (4) so the reserve is already AT the ungated cap with a queue of storied names.
+            //      `SIGHTLINE_SECONDAXIS=0 SIGHTLINE_VETTEST=1` FAILS here.
+            {
+                SaveGame.AddUnlock((int)MetaUnlock.DeepReserve);
+                if (SaveGame.VeteranCapNow() != MetaProg.DeepReserveCap)
+                    fails.Add($"deepReserveCap={SaveGame.VeteranCapNow()}");
+                var more = new List<Unit>();
+                for (int i = 0; i < MetaProg.DeepReserveCap + 4; i++)
+                    more.Add(new Unit { Name = $"DR{i}", Cls = "GUNNER", Team = Team.Player, MaxHp = 9, Hp = 9,
+                                        Kills = 50 + i, Rank = 2, Alive = true, Weapon = Weapon.Make(WeaponKind.Lmg) });
+                SaveGame.EnshrineVeterans(more);
+                int deep = SaveGame.LoadVeterans().Count;
+                if (deep != MetaProg.DeepReserveCap) fails.Add($"deepReserveEnshrine={deep}(want {MetaProg.DeepReserveCap})");
+                // and taking the unlock away trims back to the ungated floor on the next write
+                try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+                SaveGame.EnshrineVeterans(batch);
+                if (SaveGame.LoadVeterans().Count != SaveGame.MaxVeterans) fails.Add("deepReserveNotUngated");
+            }
+
             // (5) a draft recalls up to MaxDraftVeterans of them (FromReserve), pool stays DraftPoolSize
             var pool = Run.GenerateDraftPool(SaveGame.LoadVeterans());
             if (pool.Count != Run.DraftPoolSize) fails.Add($"vetPoolSize={pool.Count}");
@@ -5096,7 +5152,7 @@ public partial class Game
             else { try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { } }
         }
         return fails.Count == 0
-            ? $"VETTEST: PASS (enshrine+recall carries rank/perks/traits/spec/scars; dedupe; cap {SaveGame.MaxVeterans}; draft seats <={Run.MaxDraftVeterans} veterans)"
+            ? $"VETTEST: PASS (enshrine+recall carries rank/perks/traits/spec/scars; dedupe; cap {SaveGame.MaxVeterans} and DEEP RESERVE raises the ENSHRINE to {MetaProg.DeepReserveCap}; draft seats <={Run.MaxDraftVeterans} veterans)"
             : "VETTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -7993,6 +8049,10 @@ public partial class Game
         new ScreenCase("CAMPAIGNMAP",  g => g.DebugCampaignMap()),
         new ScreenCase("BENCH",        g => g.DebugBench()),
         new ScreenCase("PERKCHOOSER",  g => g.DebugBarracksPerk()),
+        // P18 THE SECOND AXIS: the BONUS perk card in both of its new shapes — with the RECIPIENT
+        // row, and with the recipient row AND the COMBAT TRIALS third card (the widest form).
+        new ScreenCase("BONUSPERK",      g => g.DebugBonusPerk()),
+        new ScreenCase("BONUSPERK-WIDE", g => g.DebugBonusPerk(true)),
         new ScreenCase("DEPLOYCARDS",  g => g.DebugDeployCards()),
         new ScreenCase("BOONOFFER",    g => g.DebugBoon()),
         new ScreenCase("EVENT",        g => g.DebugEvent()),
@@ -12671,6 +12731,151 @@ public partial class Game
               + $"wideOff={wideSeen} tileChecks={agreeChecked} lies={lied} misses={missed} "
               + $"census={marked:0.000} posts={posts}]"
               + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "");
+    }
+
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //  P18 "THE SECOND AXIS" — SIGHTLINE_REWARDTEST: WHO gets the reward, and HOW WIDE the offer is.
+    //
+    //  WHY A NEW HOOK. The perk OFFER had no owner. CONTRACTTEST asserts the class-line TABLE
+    //  behind it, SAVETEST asserts the Perk ordinal, METATEST owns the WAR ROOM — but nothing owned
+    //  "a reward was queued: to whom, and with what on the table". That is exactly the surface this
+    //  wave changed, so it gets a hook rather than being smuggled into a test that means something else.
+    //
+    //  THE DEFECT IT GUARDS. A BONUS perk (the ELITE / ONSLAUGHT card reward, the ADV. TRAINING
+    //  requisition, the field-event training arm) landed on `eligible[Util.RandInt(...)]`. A perk is
+    //  one of the few things that differentiates one soldier from another, so handing it out by dice
+    //  removes the decision at the moment the player most wants one — DESIGN.md §3.A's non-decision,
+    //  not even wearing a costume. The recipient is now the player's; the ROLL is kept as the
+    //  DEFAULT so the RNG stream is untouched, and a retarget is derived by pure hash so it costs no
+    //  draws and cannot be scummed.
+    //
+    //  Asserted unconditionally, so BOTH of the wave's dials FAIL it:
+    //    SIGHTLINE_PERKPICK=0 SIGHTLINE_REWARDTEST=1   -> the recipient is not choosable
+    //    (the width legs drive Run.PerkOfferWidth directly, which is what COMBAT TRIALS sets;
+    //     the SIGHTLINE_SECONDAXIS dial that reaches it through a profile is METATEST's leg.)
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    public static string RewardSelfTest()
+    {
+        var fails = new List<string>();
+        try
+        {
+            int widthWas = Run.PerkOfferWidth;
+            try
+            {
+                // ---- (A) a BONUS offer is FLAGGED, and a rank-up offer is not -----------------
+                Run.PerkOfferWidth = 2;
+                Util.Reseed(770001);
+                var run = new Run(); run.Start();
+                foreach (var u in run.Squad) u.Perks.Clear();
+                if (!run.TryQueueBonusPerk("TEST")) fails.Add("bonusNotQueued");
+                if (run.PendingPerks.Count != 1) fails.Add("bonusCount=" + run.PendingPerks.Count);
+                var off = run.PendingPerks[0];
+                if (!off.Bonus) fails.Add("bonusNotFlagged");
+                if (off.Unit == null) fails.Add("bonusNoUnit");
+                if (off.A.Equals(off.B)) fails.Add("bonusPairNotDistinct");
+                if (off.HasC) fails.Add("bonusWidenedAtDefaultWidth");
+
+                // a RANK-UP offer belongs to the soldier who earned it and is NOT re-targetable.
+                var promoted = run.Squad[0];
+                promoted.Kills = 99;
+                run.PendingPerks.Clear();
+                run.PromoteEligible(promoted);
+                if (run.PendingPerks.Count == 0) fails.Add("noRankUpOffer");
+                else
+                {
+                    var rank = run.PendingPerks[0];
+                    if (rank.Bonus) fails.Add("rankUpFlaggedBonus");
+                    var other = run.Squad.Find(u => !ReferenceEquals(u, rank.Unit) && Run.CountAvailForTest(u) >= 2);
+                    if (other != null && run.RetargetBonusPerk(rank, other)) fails.Add("rankUpRetargetable");
+                }
+
+                // ---- (B) the candidate list IS the roll's eligibility set ---------------------
+                run.PendingPerks.Clear();
+                var cands = run.BonusPerkCandidates();
+                var wanted = run.Squad.FindAll(u => Run.CountAvailForTest(u) >= 2);
+                if (cands.Count != wanted.Count) fails.Add($"candidates={cands.Count}/{wanted.Count}");
+                foreach (var u in wanted) if (!cands.Contains(u)) fails.Add("candidateMissing:" + u.Name);
+                if (cands.Count < 2) fails.Add("tooFewCandidatesToTest");
+
+                // ---- (C) the RETARGET: it lands, and it is a legal offer for the new soldier --
+                if (!run.TryQueueBonusPerk("TEST2")) fails.Add("bonus2NotQueued");
+                var off2 = run.PendingPerks[run.PendingPerks.Count - 1];
+                var rolled = off2.Unit;
+                var target = cands.Find(u => !ReferenceEquals(u, rolled));
+                if (target == null) fails.Add("noRetargetTarget");
+                else
+                {
+                    if (!run.RetargetBonusPerk(off2, target)) fails.Add("retargetRefused");
+                    if (!ReferenceEquals(off2.Unit, target)) fails.Add("retargetDidNotMove");
+                    if (off2.A.Equals(off2.B)) fails.Add("retargetPairNotDistinct");
+                    if (target.HasPerk(off2.A) || target.HasPerk(off2.B)) fails.Add("retargetOfferedOwnedPerk");
+
+                    // ---- (D) a retarget draws NOTHING from the shared RNG stream --------------
+                    // The whole reason the roll was kept as the DEFAULT: the headless paths never
+                    // open the picker, so a batch/autoplay/PAIRTEST world must be bit-identical.
+                    Util.Reseed(880002);
+                    int probeA = Util.RandInt(0, 1000000);
+                    Util.Reseed(880002);
+                    run.RetargetBonusPerk(off2, rolled);
+                    run.RetargetBonusPerk(off2, target);
+                    run.RetargetBonusPerk(off2, rolled);
+                    int probeB = Util.RandInt(0, 1000000);
+                    if (probeA != probeB) fails.Add($"retargetSpentDraws {probeA}!={probeB}");
+
+                    // ---- (E) STABLE: no re-roll scumming, and the dealt pair comes back -------
+                    if (!ReferenceEquals(off2.Unit, rolled)) fails.Add("returnToRolledFailed");
+                    if (!off2.A.Equals(off2.RolledA) || !off2.B.Equals(off2.RolledB))
+                        fails.Add("rolledPairNotRestored");
+                    run.RetargetBonusPerk(off2, target);
+                    Perk t1a = off2.A, t1b = off2.B;
+                    run.RetargetBonusPerk(off2, rolled);
+                    run.RetargetBonusPerk(off2, target);
+                    if (!off2.A.Equals(t1a) || !off2.B.Equals(t1b)) fails.Add("retargetNotStable");
+                }
+
+                // ---- (F) COMBAT TRIALS: the offer widens to THREE distinct perks --------------
+                Run.PerkOfferWidth = Run.PerkOfferWidthMax;
+                Util.Reseed(770003);
+                var wide = new Run(); wide.Start();
+                foreach (var u in wide.Squad) u.Perks.Clear();
+                if (!wide.TryQueueBonusPerk("WIDE")) fails.Add("wideNotQueued");
+                var w0 = wide.PendingPerks[0];
+                if (!w0.HasC) fails.Add("widthNoThirdOption");
+                else if (w0.C.Equals(w0.A) || w0.C.Equals(w0.B)) fails.Add("widthThirdNotDistinct");
+                if (w0.Unit != null && w0.HasC && w0.Unit.HasPerk(w0.C)) fails.Add("widthOfferedOwnedPerk");
+                // and on the RANK-UP path too — the unlock says "every perk offer", not "some".
+                var wp = wide.Squad[0]; wp.Kills = 99;
+                wide.PendingPerks.Clear();
+                wide.PromoteEligible(wp);
+                if (wide.PendingPerks.Count == 0 || !wide.PendingPerks[0].HasC) fails.Add("widthRankUpNotWidened");
+                // a retargeted offer keeps the width it was dealt at
+                var wcands = wide.BonusPerkCandidates();
+                wide.PendingPerks.Clear();
+                if (wide.TryQueueBonusPerk("WIDE2"))
+                {
+                    var w2 = wide.PendingPerks[0];
+                    var wt = wcands.Find(u => !ReferenceEquals(u, w2.Unit));
+                    if (wt != null && wide.RetargetBonusPerk(w2, wt) && !w2.HasC) fails.Add("widthLostOnRetarget");
+                }
+
+                // ---- (G) the FLYWHEEL INVARIANT: a headless run is never widened -------------
+                // RefreshMetaWidths RESETS (not merely skips) under NoPersist, so a harness process
+                // that ran a real-profile leg first cannot leak a widened offer into a byte-stable one.
+                var hg = new Game { NoPersist = true };
+                hg.StartMission(1);
+                if (Run.PerkOfferWidth != 2) fails.Add($"headlessWidth={Run.PerkOfferWidth}");
+            }
+            finally { Run.PerkOfferWidth = widthWas; }
+        }
+        catch (Exception e) { return "REWARDTEST: FAIL (exception " + e.Message + ")"; }
+        return fails.Count == 0
+            ? "REWARDTEST: PASS (a BONUS perk is flagged and its RECIPIENT is the player's choice; a rank-up "
+              + "offer is not re-targetable; the candidate list is the roll's own eligibility set; a retarget "
+              + "spends ZERO Util.Rng draws, is stable under toggling and restores the dealt pair on the rolled "
+              + "soldier; COMBAT TRIALS widens BOTH offer paths to three distinct unowned perks and survives a "
+              + "retarget; a NoPersist run is never widened)"
+            : "REWARDTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// P10 helper: walk `n` short headless campaigns with the smart bot so `Game.ActProbe` sees

@@ -215,6 +215,21 @@ public static class Program
 
         string biomeMechEnv = Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEMECH");
         if (biomeMechEnv == "1") Terrain.Enabled = true; else if (biomeMechEnv == "0") Terrain.Enabled = false;
+        // ---- P18 "THE SECOND AXIS" — the wave's three off switches (house pattern: =0 restores
+        // the pre-P18 behaviour EXACTLY, so every change is attributable). ----
+        // SIGHTLINE_ASSISTLATCH=0/1: the adaptive assist reads the heat the run STARTED at instead
+        // of its live heat, so a mid-run AddHeat field event can no longer silently revoke it.
+        string assistLatchEnv = Environment.GetEnvironmentVariable("SIGHTLINE_ASSISTLATCH");
+        if (assistLatchEnv == "1") Run.AssistLatch = true; else if (assistLatchEnv == "0") Run.AssistLatch = false;
+        // SIGHTLINE_PERKPICK=0/1: a BONUS perk (ELITE/ONSLAUGHT reward, ADV. TRAINING, the field
+        // event) lets the player choose its RECIPIENT instead of landing on a random survivor.
+        string perkPickEnv = Environment.GetEnvironmentVariable("SIGHTLINE_PERKPICK");
+        if (perkPickEnv == "1") Run.BonusPerkPick = true; else if (perkPickEnv == "0") Run.BonusPerkPick = false;
+        // SIGHTLINE_SECONDAXIS=0/1: the WAR ROOM's HEAT-GATED second column (COMBAT TRIALS / DEEP
+        // RESERVE / DEEP STORES). =0 hides all three and applies none of them, which is the pre-P18
+        // WAR ROOM exactly. Every read is !NoPersist-gated, so a batch never sees it either way.
+        string secondAxisEnv = Environment.GetEnvironmentVariable("SIGHTLINE_SECONDAXIS");
+        if (secondAxisEnv == "1") MetaProg.SecondAxis = true; else if (secondAxisEnv == "0") MetaProg.SecondAxis = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -629,6 +644,13 @@ public static class Program
             LoadGameFonts();
             Console.WriteLine(new Game { NoPersist = true }.ClassSelfTest());
             Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_REWARDTEST=1 : P18 THE SECOND AXIS — WHO gets a bonus perk and how wide the
+        // offer is (Game.RewardSelfTest). Pure model: no window, no disk.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_REWARDTEST") == "1")
+        {
+            Console.WriteLine(Game.RewardSelfTest());
             return;
         }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRASTTEST") == "1")
@@ -1451,6 +1473,12 @@ public static class Program
         if (longMove && longMoveEnv == "vault") Console.WriteLine($"LONGMOVE: vault staged {game.DebugVaultMove()} at {game.AnimSpeed:0.##}x");
         else if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
+        // P18 THE SECOND AXIS: SIGHTLINE_BONUSSHOT=1 (or =wide) stages the BONUS perk card with its
+        // RECIPIENT row (and COMBAT TRIALS' third option), which is what the wave actually changed.
+        {
+            string bs = Environment.GetEnvironmentVariable("SIGHTLINE_BONUSSHOT");
+            if (shot && !string.IsNullOrEmpty(bs)) game.DebugBonusPerk(bs == "wide");
+        }
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
