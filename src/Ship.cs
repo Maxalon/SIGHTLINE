@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
+using Raylib_cs;
 
 namespace Sightline;
 
@@ -105,6 +107,154 @@ public static class Ship
     /// This is the path a player's launch actually takes; Cfg.AssetPath's fallback is the mask.
     public static string BakedPath(string rel) =>
         Path.Combine(AppContext.BaseDirectory, rel.Replace('/', Path.DirectorySeparatorChar));
+
+    // ── THE WINDOW ICON (P17 SHIPS AS v1.0.0) ────────────────────────────────────────────────
+    /// The game had no window icon anywhere — the taskbar, the alt-tab strip and the title bar all
+    /// showed whatever blank default GLFW hands out, which is the one place a "product" is judged
+    /// before it is ever run. It is generated IN ENGINE from the same palette and the same
+    /// primitives the game draws with (docs/DESIGN.md §3.H), so it commits no binary, needs no
+    /// licence entry, and cannot drift from the palette it is drawn in.
+    ///
+    /// THE MARK: the game's own aim reticle — four corner brackets in the FRIENDLY cool accent
+    /// around a single block of the LOUD DANGER accent. That is not decoration, it is this
+    /// project's semantic colour table read literally: your sights (Pal.Friend) on a hostile
+    /// (Pal.Foe), on the board's ground (Pal.Bg) inside the board's edge (Pal.BoardEdge). It is
+    /// four-fold mirror symmetric and built from axis-aligned rectangles only, so it stays crisp
+    /// when the OS downsamples it to 32 or 16 px, and it passes §3.H's squint test at 16 px
+    /// because the whole mark is two value steps: near-black field, bright brackets, bright core.
+    public const int IconSize = 64;
+
+    /// PURE — no raylib CALL, no GL context, no window (only `Raylib_cs.Color` as a value type).
+    /// Row-major, `IconSize * IconSize` pixels.
+    /// Kept separate from ApplyWindowIcon so SIGHTLINE_SHIPTEST can assert the ART rather than
+    /// assert that a function was called: a window icon is unobservable from a headless session,
+    /// but its pixels are not.
+    public static Color[] IconPixels()
+    {
+        const int N = IconSize;
+        var px = new Color[N * N];
+        void Rect(int x0, int y0, int w, int h, Color c)
+        {
+            for (int y = Math.Max(0, y0); y < Math.Min(N, y0 + h); y++)
+                for (int x = Math.Max(0, x0); x < Math.Min(N, x0 + w); x++)
+                    px[y * N + x] = c;
+        }
+
+        Rect(0, 0, N, N, Pal.Bg);                                   // the ground
+        Rect(0, 0, N, 1, Pal.BoardEdge); Rect(0, N - 1, N, 1, Pal.BoardEdge);   // the board edge, so the
+        Rect(0, 0, 1, N, Pal.BoardEdge); Rect(N - 1, 0, 1, N, Pal.BoardEdge);   // icon has an edge on any desktop
+
+        const int In = 9, Arm = 17, Th = 4;                          // bracket inset / arm / thickness
+        int far = N - In - Arm, near = N - In - Th;
+        // top-left / top-right / bottom-left / bottom-right, each an L of two bars
+        Rect(In,  In,  Arm, Th,  Pal.Friend); Rect(In,   In,  Th,  Arm, Pal.Friend);
+        Rect(far, In,  Arm, Th,  Pal.Friend); Rect(near, In,  Th,  Arm, Pal.Friend);
+        Rect(In,  near, Arm, Th, Pal.Friend); Rect(In,   far, Th,  Arm, Pal.Friend);
+        Rect(far, near, Arm, Th, Pal.Friend); Rect(near, far, Th,  Arm, Pal.Friend);
+
+        const int Core = 12;                                         // the thing in the sights
+        Rect((N - Core) / 2, (N - Core) / 2, Core, Core, Pal.Foe);
+        return px;
+    }
+
+    /// Hand the pixels to the window manager. Call once, straight after InitWindow, on the real
+    /// launch path only. Never throws: an icon is cosmetic and must not be able to stop a launch
+    /// (GLFW on Wayland, for one, ignores window icons entirely — that is not an error).
+    public static void ApplyWindowIcon()
+    {
+        try
+        {
+            var px = IconPixels();
+            var img = Raylib.GenImageColor(IconSize, IconSize, Pal.Bg);   // R8G8B8A8, which SetWindowIcon requires
+            for (int y = 0; y < IconSize; y++)
+                for (int x = 0; x < IconSize; x++)
+                    Raylib.ImageDrawPixel(ref img, x, y, px[y * IconSize + x]);
+            Raylib.SetWindowIcon(img);       // raylib/GLFW copy the pixels, so unloading now is safe
+            Raylib.UnloadImage(img);
+        }
+        catch { }
+    }
+
+    // ── THE RELEASE ARTEFACT (P17) ───────────────────────────────────────────────────────────
+    /// The directory holding the versioned archive + its checksum, when this process was launched
+    /// to judge a release. `scripts/publish.sh` sets SIGHTLINE_RELEASEDIR and re-runs SHIPTEST
+    /// from inside the published payload; every other caller (qa-sweep.sh, a developer running the
+    /// hook by hand) leaves it unset and the release legs SKIP with a stated reason, the
+    /// `_secondLaunchSkip` pattern. A leg that silently stops running is a lie.
+    static string ReleaseDir => Environment.GetEnvironmentVariable("SIGHTLINE_RELEASEDIR");
+    static string _releaseSkip;
+
+    /// The name a release archive must have: SIGHTLINE-v<version>-<rid>.<tar.gz|zip>. Derived, so
+    /// the archive a recipient downloads names the build inside it and cannot be confused with
+    /// another RID's or another version's.
+    public static string ArchivePrefix => "SIGHTLINE-v" + Version + "-";
+
+    /// The changelog that ships beside the binary. NOT in RequiredFiles: it is derived from git at
+    /// publish time (scripts/changelog.sh) and never committed, so a `dotnet build` output legitimately
+    /// does not have one — which is exactly why its leg is gated on SIGHTLINE_RELEASEDIR.
+    public const string ChangelogName = "CHANGELOG.md";
+
+    static string Sha256Of(string path)
+    {
+        using var fs = File.OpenRead(path);
+        using var sha = SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(fs)).ToLowerInvariant();
+    }
+
+    /// Legs (9) ARCHIVE + (10) CHECKSUM + (11) CHANGELOG. Returns the failures found; empty on
+    /// pass. Sets `_releaseSkip` and returns nothing when no release directory was named.
+    static List<string> ReleaseLegs()
+    {
+        var fails = new List<string>();
+        string dir = ReleaseDir;
+        if (string.IsNullOrEmpty(dir)) { _releaseSkip = "no SIGHTLINE_RELEASEDIR"; return fails; }
+        if (!Directory.Exists(dir)) { fails.Add("releaseDirMissing:" + dir); return fails; }
+
+        // (9) THE ARCHIVE. A person is handed ONE file; it must be named for the build inside it.
+        var archives = new List<string>();
+        foreach (string f in Directory.GetFiles(dir, ArchivePrefix + "*"))
+            if (f.EndsWith(".tar.gz", StringComparison.Ordinal) || f.EndsWith(".zip", StringComparison.Ordinal))
+                archives.Add(f);
+        if (archives.Count == 0) { fails.Add("releaseNoArchive:" + ArchivePrefix + "*"); return fails; }
+        archives.Sort(StringComparer.Ordinal);
+
+        foreach (string arc in archives)
+        {
+            string name = Path.GetFileName(arc);
+            if (new FileInfo(arc).Length <= 0) { fails.Add("releaseArchiveEmpty:" + name); continue; }
+
+            // (10) THE CHECKSUM — a recipient's only way to know the download is the build we
+            // published. Presence is not the assertion: the digest is RECOMPUTED here and
+            // compared, so a stale .sha256 left beside a rebuilt archive fails loudly.
+            string sums = arc + ".sha256";
+            if (!File.Exists(sums)) { fails.Add("releaseNoChecksum:" + name); continue; }
+            string line = (File.ReadAllText(sums) ?? "").Trim();
+            int sp = line.IndexOf(' ');
+            string hex = sp > 0 ? line.Substring(0, sp) : line;
+            string named = sp > 0 ? line.Substring(sp).Trim().TrimStart('*') : "";
+            bool hexOk = hex.Length == 64;
+            foreach (char c in hex) if (!Uri.IsHexDigit(c)) { hexOk = false; break; }
+            if (!hexOk || named != name) { fails.Add("releaseChecksumShape:" + name); continue; }
+            if (!string.Equals(hex, Sha256Of(arc), StringComparison.OrdinalIgnoreCase))
+                fails.Add("releaseChecksumMismatch:" + name);
+        }
+
+        // (11) THE CHANGELOG, beside the binary a player unpacks. Shape, not prose: it must be
+        // titled, it must carry a section for THIS version, and it must have entries — a
+        // generator that silently produced a heading and nothing else is the failure mode.
+        string clog = BakedPath(ChangelogName);
+        if (!File.Exists(clog)) { fails.Add("changelogMissing:" + ChangelogName); return fails; }
+        string text = File.ReadAllText(clog);
+        if (text.Trim().Length == 0) { fails.Add("changelogEmpty"); return fails; }
+        if (!text.StartsWith("# SIGHTLINE", StringComparison.Ordinal)) fails.Add("changelogTitle");
+        if (text.IndexOf("\n## v" + Version, StringComparison.Ordinal) < 0
+            && !text.StartsWith("## v" + Version, StringComparison.Ordinal))
+            fails.Add("changelogNoVersionSection:v" + Version);
+        int entries = 0;
+        foreach (string ln in text.Split('\n')) if (ln.StartsWith("- ", StringComparison.Ordinal)) entries++;
+        if (entries < 1) fails.Add("changelogNoEntries");
+        return fails;
+    }
 
     // ── SIGHTLINE_SHIPTEST ───────────────────────────────────────────────────────────────────
     /// Six legs, all aimed at the SEAM between the built artifact and the machine it lands on
@@ -237,6 +387,28 @@ public static class Ship
                 // cannot be observed after a write that worked.
                 string sweepWhy = SweepProbe();
                 if (sweepWhy != null) fails.Add("sweep:" + sweepWhy);
+
+                // (8b) THE FIT IS REMEMBERED. A first-launch window size that does not survive
+                // the relaunch is not a fix — the 1366x768 laptop would re-open clipped every
+                // boot after the player resized it. New persisted fields, so they get the same
+                // real-JSON round trip every other display setting has (Display.Save writes the
+                // file, Display.Load re-parses it off disk), plus the clamp on a hand-edited or
+                // half-written value, which must read as "unset" rather than as a 0-wide window.
+                int wasW = Display.WinW, wasH = Display.WinH;
+                try
+                {
+                    Display.WinW = 1126; Display.WinH = 704;
+                    Display.SaveForTest();
+                    Display.WinW = Display.WinH = 0;
+                    Display.LoadForTest();
+                    if (Display.WinW != 1126 || Display.WinH != 704)
+                        fails.Add($"winFitRoundTrip={Display.WinW}x{Display.WinH}");
+                    File.WriteAllText(dispPath, "{\"WinW\":4,\"WinH\":-9}");
+                    Display.LoadForTest();
+                    if (Display.WinW != 0 || Display.WinH != 0)
+                        fails.Add($"winFitClamp={Display.WinW}x{Display.WinH}");
+                }
+                finally { Display.WinW = wasW; Display.WinH = wasH; }
             }
             finally
             {
@@ -265,6 +437,105 @@ public static class Ship
                 fails.Add("versionShape:" + Version);
             if (VersionLabel.IndexOf(Version, StringComparison.Ordinal) < 0) fails.Add("versionLabelDrift");
             if (Hud.IntroFooter.IndexOf(Version, StringComparison.Ordinal) < 0) fails.Add("versionNotPainted");
+            // ...and it has to still FIT once painted. HONEST SCOPE: this is a CHARACTER BUDGET,
+            // not a measurement — LoadGameFonts() only runs on the real launch path, so Cfg.Measure
+            // here would report the raylib fallback face's metrics, not the shipped one. NotoMono
+            // at 12px is ~7.2 px/char, ~8.7 px at the 120% text size, so 72 characters is ~630 px
+            // inside a 1280 px centred line: comfortable headroom, and a hard stop on somebody
+            // appending a build hash or a branch name to a string that is CENTRED and therefore
+            // fails by running off BOTH edges at once. SIGHTLINE_FITTEST measures for real.
+            if (Hud.IntroFooter.Length > 72) fails.Add("versionFooterTooLong:" + Hud.IntroFooter.Length);
+
+            // ---- (7) ICON ------------------------------------------------------------------
+            // A window icon cannot be observed from a headless session — but the ART can, and
+            // that is the half that can regress. Asserts the grid, the palette discipline
+            // (docs/DESIGN.md §3.H: nothing off Pal, danger red present and RESERVED to the
+            // core), the symmetry, and the squint-test value hierarchy the whole visual language
+            // rests on. It is deliberately NOT a golden hash: a hash fails on any redesign and
+            // says nothing about whether the redesign is legible.
+            {
+                var px = IconPixels();
+                if (px.Length != IconSize * IconSize) fails.Add("iconSize:" + px.Length);
+                else
+                {
+                    int N = IconSize, mark = 0, opaque = 0, offPalette = 0;
+                    double lumField = 0, lumCore = 0; int nField = 0, nCore = 0;
+                    bool Same(Color a, Color b) => a.R == b.R && a.G == b.G && a.B == b.B && a.A == b.A;
+                    double Lum(Color c) => 0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B;
+                    bool asym = false, redOutsideCore = false;
+                    for (int y = 0; y < N; y++)
+                        for (int x = 0; x < N; x++)
+                        {
+                            var c = px[y * N + x];
+                            if (c.A == 255) opaque++;
+                            if (!Same(c, Pal.Bg) && !Same(c, Pal.BoardEdge)) mark++;
+                            if (!Same(c, Pal.Bg) && !Same(c, Pal.BoardEdge)
+                                && !Same(c, Pal.Friend) && !Same(c, Pal.Foe)) offPalette++;
+                            if (!Same(c, px[y * N + (N - 1 - x)]) || !Same(c, px[(N - 1 - y) * N + x])) asym = true;
+                            bool inCore = x >= N / 2 - 6 && x < N / 2 + 6 && y >= N / 2 - 6 && y < N / 2 + 6;
+                            if (Same(c, Pal.Foe) && !inCore) redOutsideCore = true;
+                            if (inCore) { lumCore += Lum(c); nCore++; }
+                            else if (Same(c, Pal.Bg)) { lumField += Lum(c); nField++; }
+                        }
+                    if (opaque != N * N) fails.Add("iconNotOpaque:" + (N * N - opaque));
+                    if (offPalette > 0) fails.Add("iconOffPalette:" + offPalette);
+                    if (asym) fails.Add("iconNotSymmetric");
+                    if (redOutsideCore) fails.Add("iconDangerAccentNotReserved");
+                    double pct = 100.0 * mark / (N * N);
+                    if (pct < 8 || pct > 40) fails.Add($"iconMarkCoverage={pct:0.0}%");
+                    if (nCore == 0 || nField == 0 || lumCore / nCore < 3 * (lumField / nField))
+                        fails.Add("iconSquintContrast");
+                }
+            }
+
+            // ---- (8) WINDOW FIT ------------------------------------------------------------
+            // The first-launch window size, asserted as a FUNCTION of the monitor rather than by
+            // opening a window — which is the only form this sandbox could ever check, and also
+            // the right form: the defect is a decision, not a rendering. 1366x768 is the case
+            // that motivated it (a 1280x800 window is 32 px taller than the screen, so the whole
+            // action bar is off the bottom edge on the first frame a new player ever sees).
+            foreach (var (mw, mh, mustEqualAuthored) in new (int, int, bool)[]
+            {
+                (1920, 1080, true), (2560, 1440, true), (3840, 2160, true), (1440, 900, true),
+                (1366,  768, false), (1280,  800, false), (1024,  768, false), (800, 600, false),
+                (512,  400, false),
+                (0, 0, true), (-1, -1, true), (64, 64, true), (320, 320, true),
+            })
+            {
+                var (w, h) = Display.FitLaunchSize(mw, mh);
+                if (w <= 0 || h <= 0) { fails.Add($"fitNonPositive@{mw}x{mh}"); continue; }
+                if (w > Cfg.ScreenW || h > Cfg.ScreenH) fails.Add($"fitEnlarged@{mw}x{mh}={w}x{h}");
+                if (mustEqualAuthored)
+                {
+                    if (w != Cfg.ScreenW || h != Cfg.ScreenH) fails.Add($"fitShouldBeAuthored@{mw}x{mh}={w}x{h}");
+                    continue;
+                }
+                // it must actually FIT, with the chrome allowance, and keep 16:10 so the
+                // letterbox stays empty and no part of the board is cropped
+                if (w > mw || h > mh - Display.LaunchChromeH) fails.Add($"fitDoesNotFit@{mw}x{mh}={w}x{h}");
+                // ...and it must clear the floor Display.Load enforces on the way back in. A
+                // writer that emits a value its own reader rejects would fit on launch one and
+                // snap back to the unfitting 1280x800 on launch two.
+                if (w < Display.LaunchMinW || h < Display.LaunchMinH)
+                    fails.Add($"fitBelowPersistFloor@{mw}x{mh}={w}x{h}");
+                float want = Cfg.ScreenW / (float)Cfg.ScreenH, got = w / (float)h;
+                if (MathF.Abs(got - want) > 0.02f) fails.Add($"fitAspect@{mw}x{mh}={w}x{h}");
+            }
+            // monotone: a bigger monitor may never produce a smaller window
+            {
+                int prevW = 0;
+                for (int mh = 480; mh <= 1600; mh += 16)
+                {
+                    var (w, _) = Display.FitLaunchSize(mh * 16 / 10, mh);
+                    if (w < prevW) { fails.Add("fitNotMonotone@" + mh); break; }
+                    prevW = w;
+                }
+            }
+            // and the harness is not exposed to any of it
+            if (Display.AllowLaunchFit) fails.Add("launchFitOnInHarness");
+
+            // ---- (9)(10)(11) THE RELEASE ARTEFACT -------------------------------------------
+            fails.AddRange(ReleaseLegs());
 
             return fails.Count == 0
                 ? $"SHIPTEST: PASS ({RequiredFiles.Length} bundled files resolve next to the binary, none via the cwd fallback; "
@@ -274,7 +545,12 @@ public static class Ship
                                                : $" (SECOND-LAUNCH LEG SKIPPED: {_secondLaunchSkip})")
                   + "; save/meta/display all written by rename, proven by an open-handle inode probe (process death "
                   + "and concurrent readers, NOT power loss - no fsync); a failed write sweeps its own .tmp; "
-                  + $"3 persisted DTOs source-generated; build stamped v{Version} and painted)"
+                  + $"3 persisted DTOs source-generated; build stamped v{Version} and painted; "
+                  + "window icon generated in-engine and legible; first-launch window fits the monitor and "
+                  + "round-trips"
+                  + (_releaseSkip == null
+                        ? "; release archive named, checksummed (digest RECOMPUTED) and changelogged)"
+                        : $"; RELEASE LEGS SKIPPED: {_releaseSkip})")
                 : "SHIPTEST: FAIL (" + string.Join(",", fails) + ")";
         }
         catch (Exception e) { return "SHIPTEST: FAIL (exception " + e.GetType().Name + ": " + e.Message + ")"; }

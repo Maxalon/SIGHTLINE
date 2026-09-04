@@ -9,7 +9,7 @@ textures and shaders, and every sound effect and music bed is **synthesised at
 runtime** — no recorded audio ships. The only committed binaries are two text
 fonts (Noto Mono and Chakra Petch, both SIL Open Font License 1.1, full licence
 text in `assets/`) and the screenshot below. A whole distributable build is
-**29.3 MB across 10 files** (MB = 10^6 bytes), self-contained: no .NET install
+**30.9 MB across 11 files** (MB = 10^6 bytes), self-contained: no .NET install
 needed on the target machine. It runs natively on Linux, macOS and Windows.
 
 ![SIGHTLINE gameplay](docs/screenshot.png)
@@ -180,7 +180,40 @@ The same card opens as **SETTINGS** from the main menu (`O` or `Esc`) and from t
 (`Esc`), so text size and the colourblind palette can be set before the first fight.
 It also shows the build version, which is what to quote in a bug report.
 
-## Build & run
+## Get it and run it
+
+**You do not need .NET installed.** A release is a single archive containing a self-contained
+build: unpack it and run the executable.
+
+```bash
+# verify the download first — the checksum ships beside the archive
+sha256sum -c SIGHTLINE-v1.0.0-linux-x64.tar.gz.sha256
+#   -> SIGHTLINE-v1.0.0-linux-x64.tar.gz: OK
+
+tar -xzf SIGHTLINE-v1.0.0-linux-x64.tar.gz
+cd SIGHTLINE-v1.0.0-linux-x64
+./Sightline
+```
+
+On Windows the archive is a `.zip`; unpack it and run `Sightline.exe` (`Get-FileHash -Algorithm
+SHA256` in PowerShell prints the same digest, uppercase). **Keep the whole unpacked folder
+together** — `libraylib.so` / `raylib.dll` is loaded at runtime and cannot be linked into the
+executable, and `assets/`, `THIRD-PARTY-NOTICES.txt` and `LICENSE` are licence obligations, not
+extras. `CHANGELOG.md` in the same folder says what changed. The build's version is printed on the
+main menu and on the pause card, so a bug report can name it.
+
+The game keeps its save, profile and settings in your user config directory
+(`~/.config/Sightline` on Linux, `%AppData%\Sightline` on Windows,
+`~/Library/Application Support/Sightline` on macOS) — deleting the folder and that directory
+uninstalls it completely. If it ever crashes it writes a `crash-*.txt` report there and tells you
+the path; that is the file to attach to a bug report.
+
+> **Unsigned.** The Windows binary is not code-signed (signing costs money and is permanently out
+> of scope for this project), so SmartScreen will warn on first run. The **Windows and macOS builds
+> have never been executed by their author** — only cross-published and checked file-by-file. Linux
+> is the tested platform.
+
+## Build & run from source
 
 Requires the **[.NET 8 SDK](https://dotnet.microsoft.com/download)** (cross-platform).
 
@@ -189,21 +222,28 @@ Requires the **[.NET 8 SDK](https://dotnet.microsoft.com/download)** (cross-plat
 dotnet run -c Release
 ```
 
-To produce a standalone distributable (no SDK needed to run it), use the publish script —
-**not** a bare `dotnet publish`:
+To produce a standalone distributable, use the publish script — **not** a bare `dotnet publish`:
 
 ```bash
-bash scripts/publish.sh                 # -> dist/linux-x64-release/  (29.3 MB, 10 files)
+bash scripts/publish.sh                 # -> dist/linux-x64-release/ (11 files) + a versioned
+                                        #    archive and .sha256 in dist/
 bash scripts/publish.sh --rid win-x64   # or osx-x64 / osx-arm64
+bash scripts/publish.sh --tag           # ...and create the LOCAL release tag (never pushes)
 ```
+
+Besides the payload directory it derives `CHANGELOG.md` from git history
+(`scripts/changelog.sh`, `git log --first-parent` — never hand-written), packs
+`dist/SIGHTLINE-v<version>-<rid>.tar.gz`, writes the checksum beside it, and re-verifies both
+against the binary it just built. Cutting a release, and what a recipient checks:
+[`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) §8.
 
 The script exists because the recommended configuration is trimmed, and a trimmed build once
 compiled with 0 errors, booted, played a whole campaign and **saved nothing at all**. So it
 re-runs the persistence and shipping self-tests against the binary it just built and refuses to
-report success if any of them fail. **Ship the whole output directory**, not just the executable:
-`libraylib.so` is `dlopen()`ed at runtime and cannot be linked in, and `assets/`,
-`THIRD-PARTY-NOTICES.txt` and `LICENSE` are licence obligations, not extras. Details, the measured
-size/startup matrix and where player data lives: [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
+report success if any of them fail. Details, the measured size/startup matrix and where player
+data lives: [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
+
+Everything here is **hand-run by design: there is no CI and there never will be.**
 
 ## Licence
 
@@ -265,11 +305,13 @@ src/
   Voice.cs             the game's words: faction dossiers, briefings, barks
   SaveGame.cs          run save / load and the one atomic writer for every player-data file
   Stats.cs             the SIGHTLINE_BALANCE analytics harness
-  Ship.cs              version stamp, bundled-file manifest, SIGHTLINE_SHIPTEST
+  Ship.cs              version stamp, bundled-file manifest, window icon, SIGHTLINE_SHIPTEST
+  Crash.cs             the top-level crash handler and the report a player attaches to a bug
 scripts/
   dev-setup.sh         sandbox setup (dotnet 8 SDK + Xvfb + software GL)
   qa-sweep.sh          every self-test in src/ + autoplay x3 (--full adds PAIRTEST); counts derived
-  publish.sh           the distributable build, with its self-tests re-run against the output
+  publish.sh           the distributable build + the release artefact, self-tests re-run on both
+  changelog.sh         CHANGELOG.md, derived from git history (never hand-written)
 ```
 
 ## Where it stands

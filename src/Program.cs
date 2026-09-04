@@ -380,6 +380,30 @@ public static class Program
             return;
         }
 
+        // P17 SHIPS AS v1.0.0 — SIGHTLINE_ICONSHOT=1: write the generated window icon out as a PNG
+        // so a human can LOOK at it. The icon itself is unobservable from here (no window manager
+        // under Xvfb, and GLFW ignores window icons on Wayland by design), so SHIPTEST asserts the
+        // PIXELS and this hook photographs them. A *SHOT hook, like SIGHTLINE_SHOT / PODSHOT /
+        // BIOMESHOT — it prints a path, never a verdict, so it is correctly outside qa-sweep.sh's
+        // TEST|GATE|PROBE coverage alphabet. Writes 64x64 (true size) plus a 256x256
+        // nearest-neighbour blow-up, which is the one that shows whether the mark is crisp.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ICONSHOT") == "1")
+        {
+            Raylib.InitWindow(64, 64, "iconshot");
+            var px = Ship.IconPixels();
+            var icon = Raylib.GenImageColor(Ship.IconSize, Ship.IconSize, Pal.Bg);
+            for (int y = 0; y < Ship.IconSize; y++)
+                for (int x = 0; x < Ship.IconSize; x++)
+                    Raylib.ImageDrawPixel(ref icon, x, y, px[y * Ship.IconSize + x]);
+            Raylib.ExportImage(icon, "sightline_icon.png");
+            Raylib.ImageResizeNN(ref icon, 256, 256);
+            Raylib.ExportImage(icon, "sightline_icon_256.png");
+            Raylib.UnloadImage(icon);
+            Console.WriteLine("ICONSHOT: sightline_icon.png (64x64) + sightline_icon_256.png");
+            Raylib.CloseWindow();
+            return;
+        }
+
         // PARALLAX P11 "THE CRASH FILE" — SIGHTLINE_CRASHTEST=1: the crash reporter's own contract.
         // Same family as SHIPTEST (both are about the artifact a player receives rather than the
         // game model), and the only self-test in this project that deliberately THROWS.
@@ -1242,6 +1266,16 @@ public static class Program
         Raylib.SetConfigFlags(flags);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — Tactical Squad Combat");
         Raylib.SetExitKey(KeyboardKey.Null);       // ESC cancels aim/grenade & opens pause; never quits the app
+        // P17 SHIPS AS v1.0.0 — the window icon, generated in engine from the palette (no committed
+        // binary, no licence entry). Only on the real launch path: the harness windows are 64x64
+        // scratch contexts nobody looks at, and an icon they never show is pure startup cost.
+        Ship.ApplyWindowIcon();
+        // P17 — THE FIRST-LAUNCH WINDOW FIT, and the ONE place it is ever enabled. Display.Init
+        // then asks the monitor whether the authored 1280x800 fits and shrinks (never enlarges) if
+        // it does not; see the block comment on Display.FitLaunchSize. Every headless path leaves
+        // this false, so SIGHTLINE_SHOT / AUTOPLAY / PAIRTEST / BALANCE keep exactly the window
+        // InitWindow just made, and window size stays independent of the machine.
+        Display.AllowLaunchFit = !(shot || autoplay);
 
         // Phase 5.3 — real bitmap font (NotoMono-Regular, OFL-1.1).
         // Bake ASCII 32-126 plus a selection of useful non-ASCII codepoints so the

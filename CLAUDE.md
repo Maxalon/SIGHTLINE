@@ -381,10 +381,16 @@ src/
   Audio.cs      procedural SFX + music (device-free-safe)
   Audio.CueMap.cs    THE CUE MAP: the injective event->cue table (one meaning, one sound)
   Audio.Analysis.cs  the measured numbers (peak/RMS/length) the AUDIO CHECK screen prints
-  Display.cs    render-target, post-FX shader, brightness/colorblind, settings
+  Display.cs    render-target, post-FX shader, brightness/colorblind, settings. P17: the
+                FIRST-LAUNCH WINDOW FIT (Display.FitLaunchSize — pure, only ever SHRINKS; persisted
+                as WinW/WinH). Gated on `Display.AllowLaunchFit`, which defaults to FALSE and is
+                set true ONLY by the real launch in Program.RealMain — that is what keeps every
+                headless window at exactly Cfg.ScreenW x Cfg.ScreenH.
   Stats.cs      SIGHTLINE_BALANCE analytics harness
   Ship.cs       C6: the DISTRIBUTABLE's contract — version stamp (Ship.Version, off the assembly),
-                the bundled-file manifest (Ship.RequiredFiles) and SIGHTLINE_SHIPTEST
+                the bundled-file manifest (Ship.RequiredFiles) and SIGHTLINE_SHIPTEST.
+                P17 added the procedural WINDOW ICON (Ship.IconPixels, pure; ApplyWindowIcon) and
+                the RELEASE legs (archive / checksum / changelog), gated on SIGHTLINE_RELEASEDIR.
   Crash.cs      P11: the top-level crash handler. `Program.Main` is now nothing but
                 `Crash.Guard(...)` around `RealMain` (+ Crash.Install for background-thread
                 throws), so **the "MUST STAY FIRST IN Main" SHIPCHILD branch is now first in
@@ -395,7 +401,10 @@ src/
                 nothing; also runs in publish.sh against the published binary.
 scripts/dev-setup.sh   sandbox setup
 scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST); counts DERIVED
-scripts/publish.sh     hand-run distributable build + persistence re-proof
+scripts/publish.sh     hand-run distributable build + persistence re-proof + the RELEASE
+                       artefact (versioned archive, .sha256, CHANGELOG.md; --tag makes a LOCAL
+                       tag and NEVER pushes). docs/DISTRIBUTION.md §8.
+scripts/changelog.sh   CHANGELOG.md derived from `git log --first-parent`. Never hand-written.
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 LICENSE                the project's own terms (all rights reserved); ALSO copied to build output
 docs/screenshot.png    README image
@@ -679,6 +688,7 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P11** THE CRASH FILE | `Program.Main` is `Crash.Guard` around `RealMain`, so **the "MUST STAY FIRST IN Main" SHIPCHILD branch is now first in `RealMain`** — keep it there. | §THE CRASH FILE |
 | **P12** THE CONFIRMED EIGHT | `Game.Frozen` owns "nothing below this ticks"; `Paused` is a property whose setter releases the fader. Both exist because state kept running behind a modal card. | §THE CONFIRMED EIGHT |
 | **P15** THE INSTRUMENT | The checkpoint redeploy **erased the mission it retried** — 421 chunks, 39,143 missions, zero non-terminal mission losses. **Every per-mission and decision-density figure in the archive is biased upward**; campaign-level results and the L5 ladder are untouched. | §THE UNVERIFIED — THE INSTRUMENT |
+| **P17** SHIPS AS v1.0.0 | The release artefact is DERIVED, not written: the archive is named from the version **the binary reports**, the changelog from `git log --first-parent`, and the checksum is recomputed in-process. `--tag` makes a LOCAL tag and never pushes. `Display.AllowLaunchFit` defaults **false** so the first-launch window fit can never reach the harness. | §SHIPS AS v1.0.0 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be
 switched off cannot be attributed. `SIGHTLINE_BIOMEMECH=0` (the pre-C4 board, exactly),
