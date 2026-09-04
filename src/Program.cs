@@ -133,7 +133,11 @@ public static class Program
             Mission.HostileToughness = xtough;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRIM"), out int xtrim) && xtrim >= 0)
             Mission.HostileDamageTrim = xtrim;
-        //   SIGHTLINE_AIMTRIM=<n>    : Mission.HostileAimTrim (flat points off every hostile's aim)
+        //   SIGHTLINE_AIMTRIM=<n>    : Mission.HostileAimTrim (flat points off every hostile's aim).
+        //                              **P24 THE TOP OF THE LADDER ships 5, so `=0` is this wave's
+        //                              RESTORE FLAG** — the pre-P24 force exactly, and the arm its
+        //                              CRN round used as the baseline. It is a LEVEL lever: it
+        //                              moves every rung, and no rung is an inertness control for it.
         //   SIGHTLINE_ENEMYBASE=<n>  : Mission.EnemyBaseCount (the `count = base + mission` constant)
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AIMTRIM"), out int xaim) && xaim >= 0)
             Mission.HostileAimTrim = xaim;

@@ -9741,6 +9741,11 @@ public partial class Game
     ///       artifact (6/7/7/8/9/9/9/9/9).
     ///   (G) MID-RUN INERTNESS. Missions 1-5 build identically with both levers on and both off —
     ///       same count, same bump, same class sequence, same tiles. The change is finale-scoped.
+    ///   (H) THE LEVEL LEVER REACHES EVERY BODY (P24 THE TOP OF THE LADDER). `HostileAimTrim` is
+    ///       applied once in `MakeHostile` with three clamps downstream of it; none binds today,
+    ///       which is a measured fact about a table that moves. Toggling the dial must change the
+    ///       aim of EVERY body by exactly the dose and change nothing else at all — same count,
+    ///       bump, classes and tiles — which is also what makes P24's paired arms paired.
     ///
     /// `SIGHTLINE_FORCEDUMP=1` prints the whole (mission x rung) headcount/bump matrix instead of
     /// only the failures — the report L7 produced by photographing the HUD, derived.
@@ -9751,6 +9756,7 @@ public partial class Game
         bool dump = Environment.GetEnvironmentVariable("SIGHTLINE_FORCEDUMP") == "1";
         bool sClamp = Sightline.Mission.ClampLast, sStat = Sightline.Mission.FinaleHeatStat;
         int sCeil = Sightline.Mission.ForceCeiling;
+        int sAimShipped = Sightline.Mission.HostileAimTrim;      // leg (H) toggles it; `finally` puts it back
         int[] seeds = { 4242, 1337, 90210 };
 
         // Build one campaign mission end-to-end (SetupMission -> Mission.Build -> SpawnEnemies) and
@@ -10024,6 +10030,56 @@ public partial class Game
                             fails.Add($"orderMovedAnUnclippedCell s{seed} m{m} h{h} req{req}");
                     }
 
+            // ---- (H) THE LEVEL LEVER REACHES EVERY BODY, AND MOVES NOTHING ELSE (P24) --------
+            // P24 THE TOP OF THE LADDER ships `Mission.HostileAimTrim = 5` — a flat give-back on
+            // the one quantity fourteen waves each raised without ever deciding to (how much of the
+            // force's fire lands). Two statements, and the second is what makes that wave's CRN
+            // round legitimate at all:
+            //   * THE TRIM REACHES EVERY BODY, IN FULL. It is applied once, in `MakeHostile`, under
+            //     a `Math.Max(20, ...)` floor — and THREE clamps sit downstream of it (88 in
+            //     SpawnEnemies, 82 and 88 on the wave/endless paths). None of them binds today: the
+            //     tallest campaign body is a TURRET at 66 + bump. But "none of them binds" is a
+            //     MEASURED FACT ABOUT A TABLE THAT MOVES, and a clamp that started eating half the
+            //     trim would leave the shipped level quietly different from the measured one. That
+            //     is L7's defect class — a value that reaches the funnel perfectly and is then
+            //     clipped one level down — with a different field in the same slot.
+            //   * IT CONSUMES NO RNG AND MOVES NOTHING BUT AIM, so the round's two arms are the
+            //     same force, of the same classes, on the same tiles, at the same seed. Without
+            //     that, a paired arm would not be a paired arm.
+            // The HVT is skipped in both builds for leg (D)'s reason (`DesignateHvt`'s +aim is
+            // clamped at 85, so a marked body may legitimately show a smaller gap — that is the HVT
+            // rule, not this dial). Under `SIGHTLINE_AIMTRIM=0` the leg still asserts the
+            // stream-neutrality half and reports the dose it found, rather than inventing a failure.
+            int sAim = Sightline.Mission.HostileAimTrim;
+            int aimBodies = 0;
+            foreach (int seed in seeds)
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                    foreach (int h in new[] { -1, 0, 4, Heat.Max })
+                    {
+                        Sightline.Mission.HostileAimTrim = 0;
+                        var offA = BuildAt(m, h, seed);
+                        var offAim = new List<int>(); int offHvtA = -1;
+                        for (int i = 0; i < Enemies.Count; i++) { offAim.Add(Enemies[i].Aim); if (Enemies[i] == Hvt) offHvtA = i; }
+                        Sightline.Mission.HostileAimTrim = sAim;
+                        var onA = BuildAt(m, h, seed);
+                        var onAim = new List<int>(); int onHvtA = -1;
+                        for (int i = 0; i < Enemies.Count; i++) { onAim.Add(Enemies[i].Aim); if (Enemies[i] == Hvt) onHvtA = i; }
+                        if (onA.count != offA.count || onA.bump != offA.bump
+                            || onA.classes != offA.classes || onA.tiles != offA.tiles)
+                        { fails.Add($"aimTrimMovedTheStream s{seed} m{m} h{h}"); continue; }
+                        for (int i = 0; i < onAim.Count && i < offAim.Count; i++)
+                        {
+                            if (i == offHvtA || i == onHvtA) continue;
+                            aimBodies++;
+                            if (offAim[i] - onAim[i] != sAim)
+                                fails.Add($"aimTrimEaten s{seed} m{m} h{h} i{i} "
+                                          + $"{offA.classes.Split(',')[i]} {offAim[i]}->{onAim[i]} want-{sAim}");
+                        }
+                    }
+            Sightline.Mission.HostileAimTrim = sAim;
+            // A loop that compared no bodies would assert nothing and report PASS.
+            if (aimBodies < 3 * seeds.Length) fails.Add("aimLegVacuous=" + aimBodies);
+
             if (dump)
             {
                 Console.WriteLine("FORCE MATRIX (seed " + seeds[0] + ", columns RECRUIT,h0..h8):");
@@ -10041,7 +10097,8 @@ public partial class Game
                   + " rung-steps are still short at the board's ceiling and " + floorBound
                   + " at an objective's floor, and nothing else is short; the ORDER "
                   + "moved " + orderMoved + " of " + (orderMoved + orderSame) + " cells and none of them had a "
-                  + "request that fitted under the ceiling)"
+                  + "request that fitted under the ceiling; the P24 aim trim of " + sAim
+                  + " reaches all " + aimBodies + " compared bodies in full and moves no other field)"
                 : "FORCETEST: FAIL " + string.Join(" | ", fails);
         }
         finally
@@ -10049,6 +10106,7 @@ public partial class Game
             Sightline.Mission.ClampLast = sClamp;
             Sightline.Mission.FinaleHeatStat = sStat;
             Sightline.Mission.ForceCeiling = sCeil;
+            Sightline.Mission.HostileAimTrim = sAimShipped;
         }
     }
 

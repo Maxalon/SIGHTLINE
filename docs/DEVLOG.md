@@ -17100,3 +17100,322 @@ construction, and `FORCETEST` leg (C) is what keeps it that way.
 - **The finale's `Ai.Tier >= 1` de-stack gate is still the only reason h3 -> h4 grows a body**, and
   it is a *gate*, not a delta. It is legal and it is measured, but it means one step of the finale's
   own ladder is bought by a boolean rather than by the heat table.
+
+# §P24 — "THE TOP OF THE LADDER" (2026-09-04, `wave/band-correction`, base `3b684a7`)
+
+**Brief:** P23 changed a mechanism, published its cost honestly, and deliberately left the
+correction to a round that could spend one lever on it. This is that round. **One lever, chosen by
+argument, measured once, against a fresh same-slot baseline** — and the argument matters more than
+the delta.
+
+Raw round, runners and analysis: [`docs/measurements/p24/`](measurements/p24/README.md).
+**320 chunks, every one asserted, zero `BAD` — 6,400 campaigns, 26,124 missions, `LEAK-CHECK PASS`
+(0 campaigns raised, 0 of 26,124 missions off-rung).**
+
+**THE LEVER: `Mission.HostileAimTrim` 0 -> 5.** Five flat points off every hostile's aim, in the one
+funnel (`Mission.MakeHostile`) every hostile in the game is built through.
+**`SIGHTLINE_AIMTRIM=0` restores the pre-P24 force exactly.**
+
+---
+
+## P24-1. THE ARGUMENT, WHICH CAME FIRST — and it corrects an inherited claim on the way
+
+### The defect is a LEVEL, not a SHAPE, and one row of the table says so
+
+P23 left the shipped tree at RECRUIT 73.4 / h0 44.4 / h2 34.7 / h4 23.6 / h6 9.4 / h8 5.0, with h0
+and h6 under their floors. The row that decides what KIND of lever this needs is not the floor row,
+it is the CENTRE row: **−1.6 / −10.6 / −5.3 / −6.4 / −10.6 / −5.0. Every heat rung is under its band
+centre, by a mean of −7.6, and RECRUIT — the one rung that is not a heat rung — is the only one
+within 2 points of its own.** That is one offset in a whole ladder, of which two rungs happened to
+have the least room before a line.
+
+### The inherited claim, checked on this tree — and half of it is wrong
+
+The claim handed down from C1/L4 is *"an apex-neutral redistribution inside `Heat.Mods` cannot fix a
+level problem; the rungs sum identically, so moving points between them is a choice about
+ALLOCATION."* It splits in two and only one half survives:
+
+- **TRUE, and provable in one line, for h0.** `Heat.Active(0)` yields **nothing** — the loop is
+  `for (i = 0; i < n; i++)` at `n = 0`, and every accessor iterates it. **No arrangement of
+  `Heat.Mods` can move h0 by any amount.** A rung the difficulty table cannot reach is a
+  base-difficulty question by construction, not by argument.
+- **FALSE as usually restated, for h6.** "The heat table cannot raise h6" does not follow, and
+  **C1's own archive holds the counter-example**: mode 4 (`bit 4`, move rung 6's anonymous +1 stat UP
+  to rung 7) is apex-neutral — h7 and h8 sum rungs 1-7 and 1-8, so the point never leaves the set —
+  and C1 measured it at **h6 18.4 -> 23.1, +4.7 ±2.7**. A redistribution that lifts h6 alone by
+  about the amount needed exists, is implemented, and has a dial.
+
+**It was rejected anyway, on three grounds.** (1) It cannot touch h0, which has been out of band on
+three successive ladders (L5 −0.1, L6 −2.6, P23 −2.6); a correction that fixes one of two identical
+breaches is half a correction. (2) **It buys h6 by making rung 6 buy less** — and L7 measured rung 6
+at **+11.2, one of only three steps resolved at n=320**, next door to rung 5's +0.6. Spending the
+ladder's strongest resolved mid-rung to buy a band verdict is the trade C1's dispersion table is the
+precedent for refusing. (3) It leaves the −7.6 mean shortfall exactly where it is.
+
+### "The band is wrong" — weighed, and NOT the conclusion
+
+The brief allowed it. It is rejected on the SHAPE of the miss: if the band were wrong at h6, h6 would
+be the outlier, and it is not — every heat rung is 5-11 under its centre in the same direction. A
+band-free reading of the same fact: **`RECRUIT -> h0` measures 29.0 points against a designed step of
+20**, and RECRUIT is one relief rung. That is a statement about the game's level that does not depend
+on the band's centres being right. The band is left exactly as FUL-13 set it — and a round may not
+move the game and the measuring stick together.
+
+### Why accuracy, and not bodies or durability
+
+Four candidates were rejected with reasons (full table in the round's README): `EnemyBaseCount`
+because it moves hostile COUNT — W4's contact breadth and the raw material of the decision-density
+instrument — because L7's own arm shows it is coarse (`base 4 -> 2` is worth **+13.3 at h6**), and
+because **lowering it pulls the finale's request back under `ForceCeiling`, partly de-scoping the
+wave this round is correcting**; `HostileToughness` and `HostileDamageTrim` because they are X1's
+deliberately-set pair encoding the two-hit trade, which `CLAUDE.md` requires a measured round per
+side to move; `OpenerTrim` because m1 already sits at 93-94% and the shortfall is in missions 3-6.
+
+`HostileAimTrim` was picked for three properties. **It is the only base-difficulty dial whose current
+value is not itself a designed constant** — it sits at the identity, built by X2 for exactly this job
+and parked when X2 spent its one lever on `OpenerTrim`. **It is a pure level shift**, so it changes
+no rung-to-rung difference and cannot flatten the steps L7 and P23 spent two rounds restoring. And it
+touches neither hostile count, nor hostile HP, nor player damage, so the pace and decision-density
+instruments should not move through it — a claim §P24-6 checks rather than repeats.
+
+### The dose, and why 5 is not a number anybody searched for
+
+**X2 measured this dial's dose-response and rejected the larger dose on TEXTURE, not on win rate**
+(n=40/arm, pre-W1 stream, quoted as a prior): h0 **35.0** baseline, **42.5 at dose 5**, 50.0 at dose
+10, with 10 rejected at "Eliminate 4.80t, Escort 13.66t". So 5 is the largest dose the project has
+already accepted, its one archived price (+7.5 at h0) is within a point of the −7.6 shortfall, and it
+was fixed before any P24 batch ran. **The constant was measured once and published. It was not
+iterated against the band.**
+
+### The prediction, written above the data
+
+`run_round.sh`'s header carries it, and commit `c5ff616` archives the 16-set round **with the
+extension declared and not yet run** — because extending n after seeing a marginal rung is exactly
+the optional stopping C1 was sent back for.
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | every rung rises | **WRONG at the apex** — h8 read −0.6 / +0.3 / −0.2 on three readings |
+| 2 | h0 moves ~+7.5 | +7.5 on the first 16 sets **to the decimal — and +0.0 on the next 16** |
+| 3 | smallest at the ends | half right: smallest at the apex, but h2 (+5.3) beats RECRUIT (+3.1) |
+| 4 | `RECRUIT->h0` shrinks toward 20, `h6->h8` grows toward 10 | **both correct**: 29.0 -> 24.7, 2.8 -> 6.3 |
+| 5 | h0 and h6 clear their floors, nothing crosses a ceiling, h8 does not fall | h0 yes; **h6 lands ON its floor**; no ceiling crossed; h8 unmoved |
+
+## P24-2. THE BRIDGE — 96/96 chunks, 1,920/1,920 legs, and 48/48 more out of sample
+
+P24's base arm is the shipped binary under this wave's own restore flag; P23's AB arm is the tree it
+was built from. Same runner, same bases, same N, same pin.
+
+| rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|---|
+| chunks / legs identical | 16/16, 320/320 | 16/16, 320/320 | 16/16, 320/320 | 16/16, 320/320 | 16/16, 320/320 | 16/16, 320/320 |
+| both arms read | 73.4 | 44.4 | 34.7 | 22.8 | 9.4 | 6.6 |
+
+…and **48/48 chunks, 960/960 legs** on the 16 NEW bases at h4/h6/h8. **BRIDGE INTACT on 2,880
+campaigns.** That certifies `SIGHTLINE_AIMTRIM=0` is a TRUE restoration rather than a named one,
+that P24's non-lever edits (FORCETEST leg (H), the JSON's new `levers` block) are stream-neutral, and
+that the CRN chain reaches through milestone 17 to P23 and thence to L6/L7.
+
+## P24-3. THE MEASURED ROUND
+
+**16 slot sets, n=320 per arm-rung** — every rung of the shipped ladder in band:
+
+| rung | base | **aim** | band | base | **aim** |
+|---|---|---|---|---|---|
+| RECRUIT | 73.4 | **76.6** | 67-83 | IN | **IN** |
+| h0 | 44.4 | **51.9** | 47-63 | **OUT −2.6** | **IN +4.9** |
+| h2 | 34.7 | **40.0** | 32-48 | IN | **IN, on the centre** |
+| h4 | 22.8 | **25.6** | 22-38 | IN +0.8 | **IN +3.6** |
+| h6 | 9.4 | **12.2** | 12-28 | **OUT −2.6** | **IN +0.2** |
+| h8 | 6.6 | **5.9** | 5-15 | IN | IN |
+
+**32 slot sets, n=640 per arm-rung — the better estimate, and it is less flattering:**
+
+| rung | base | **aim** | band | base | **aim** |
+|---|---|---|---|---|---|
+| h0 | 45.8 | **49.5** | 47-63 | **OUT −1.2** | **IN +2.5** |
+| h4 | 23.6 | **26.1** | 22-38 | IN +1.6 | **IN +4.1** |
+| h6 | 9.4 | **11.9** | 12-28 | **OUT −2.6** (1.85 clSE) | **OUT −0.1** (0.11 clSE) |
+| h8 | 5.0 | **4.8** | 5-15 | IN, exactly ON the hard floor | **OUT −0.2** (0.18 clSE) |
+
+**Both tables, always.** On the sixteen sets this round shares with P23's archive the shipped ladder
+is six-for-six in band. On thirty-two, h6 sits 0.1 under its floor and h8 0.2 under its hard floor —
+a fifth of a cluster SE each, neither a measured breach in either direction, and neither a pass.
+**The honest statement is that h6 and h8 now sit ON their floors instead of under them**, and C1's
+precedent (mode 1 at P(below) ≈ 0.49) is explicit that a rung landing on its floor may not be
+claimed as in band.
+
+**The contrast, with `n_disc` and the MDE on every row** (MDE80 = 2.80 x McNemar pair SE):
+
+| rung | sets | eff | b | c | n_disc | MDE80 | z | chunk t | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| RECRUIT | 16 | +3.1 | 39 | 29 | 68 | 7.22 | +1.21 | +1.40 | NOT RESOLVED |
+| h0 | 16 | **+7.5** | 52 | 28 | 80 | 7.83 | **+2.68** | **+3.22** | at the edge (p≈0.007) |
+| h0 | **32** | **+3.8** | 97 | 73 | 170 | 5.70 | +1.84 | +1.86 | NOT RESOLVED |
+| h2 | 16 | +5.3 | 60 | 43 | 103 | 8.88 | +1.68 | +1.41 | NOT RESOLVED |
+| h4 | 32 | +2.5 | 77 | 61 | 138 | 5.14 | +1.36 | +1.01 | NOT RESOLVED |
+| h6 | 32 | +2.5 | 53 | 37 | 90 | 4.15 | +1.69 | +1.43 | NOT RESOLVED |
+| h8 | 32 | −0.2 | 21 | 22 | 43 | **2.87** | −0.15 | −0.15 | NOT RESOLVED |
+| **POOLED** 6 rungs x 16 | 16 | **+3.49** | 228 | 161 | 389 | 2.88 | **+3.40** | | **RESOLVED** |
+| **POOLED** 4 rungs x 32 | 32 | **+2.15** | 248 | 193 | 441 | 2.30 | **+2.62** | | at the edge (p≈0.009) |
+
+**NOT ONE PER-RUNG CONTRAST RESOLVES** — h0 is shown at both n because its 16-set reading is the
+only one that even reaches the edge, and it is the reading that does not replicate (§P24-4b). The
+lever is resolved only in aggregate. Nobody should quote a per-rung number from this round as a size.
+
+## P24-4. THE TWO FINDINGS THAT ARE WORTH MORE THAN THE DELTA
+
+**(a) THE APEX DOES NOT RESPOND TO ACCURACY.** h8 was measured three ways and is zero in all of them:
+**−0.6** (original 16, n_disc 26, MDE 4.46), **+0.3** (new 16, n_disc 17, MDE 3.61), **−0.2** (all
+32, n_disc 43, **MDE 2.87 — the tightest in the round**). It is the one rung where this design can
+exclude an effect of ~3 points, and it is the only rung whose point estimate is not positive. That
+does not resolve a DIFFERENCE between rungs, but it points the next corrective wave: **whatever
+carries the apex's difficulty, it is not how often hostiles hit.** What is left are the quantities a
+level lever cannot reach through accuracy — bodies, HP/stat, per-hit damage, and the coordination
+flags that arrive at rungs 3, 4 and 6.
+
+**(b) h0's HEADLINE DOES NOT REPLICATE, AND THAT IS THE FIFTH TIME.** Split-half:
+
+| rung | original 16 | NEW 16 | all 32 |
+|---|---|---|---|
+| **h0** | **+7.5** (z +2.68) | **0.0** (b=45, c=45) | +3.8 (z +1.84, MDE 5.70) |
+| h4 | +2.8 | +2.2 | +2.5 |
+| h6 | +2.8 | +2.2 | +2.5 |
+| h8 | −0.6 | +0.3 | −0.2 |
+| pooled | +3.5 | **+1.2** (z +1.00) | +2.4 |
+
+**h4, h6 and h8 replicate almost exactly; h0 does not** — +7.5 against 0.0, with 45 discordant
+campaigns each way. The base arm's own h0 differs by slot half too (44.4 vs 47.2), as does h8 (6.6 vs
+3.4). So the pretty "+7.5 at h0, exactly as X2 predicted" is a property of sixteen slot sets, and the
+32-set +3.8 does not resolve either. Fifth sighting of this shape after L5's split-half on L4, W2's
+four-vs-sixteen, L6's re-price of P20 and L7's rung-8 sign. **A rung is sixteen slot sets; so is a
+lever; and h0 is evidently a rung where sixteen is still not enough.**
+
+## P24-5. MISSION 1 — what a LEVEL lever does to the opener, stated rather than claimed
+
+**P23 could say "m1 and m2 are identical in every arm"; P24 cannot and does not.** A level lever
+reaches mission 1 by construction. On 32 sets with identical denominators (n=640):
+
+| rung | base m1 | aim m1 | base m2 | aim m2 |
+|---|---|---|---|---|
+| h0 | 93.4 | 94.7 | 81.2 | 80.5 |
+| h4 | 93.9 | 94.2 | 77.2 | 79.7 |
+| h6 | 93.3 | 94.2 | 78.4 | 80.1 |
+| h8 | 93.3 | 94.2 | 69.8 | 71.5 |
+
+It moves a 93.3-93.9% conditional up by **+0.3 to +1.3 points, identically at every rung**, and
+§3.D's clause is about front-loaded ANXIETY, so the direction is the safe one. **The clause's actual
+content is preserved and still asserted**: `FORCETEST` leg (C) pins the opener's FORCE flat across
+rungs 0-8, and the measured m1 conditional stays flat across rungs in both arms. **Where the lever
+actually lands is late** — h0's m6 61.9 -> 66.9, h6's m5 40.3 -> 48.4, h4's m6 34.6 -> 42.4. An
+accuracy give-back compounds over a campaign, which is why the pooled campaign effect is several
+times the per-mission one.
+
+## P24-6. THE TEXTURE CHECK — the criterion X2 used to reject the larger dose
+
+Pooled over six rungs x 16 sets (7,933 base / 7,955 aim missions). **Eliminate 4.78 -> 4.83 turns
+(+0.05)**; Decapitate −0.07, Hack +0.01, Sabotage +0.03, Rescue +0.09, Defend +0.03. The two
+walk-to-a-zone objectives drift (Escort +0.59, Evac +0.73) and that is a population effect: a
+longer-surviving campaign reaches them more often. For scale, the dose X2 REJECTED on this criterion
+read Escort at 13.66 turns.
+
+**The dial's own claim — that it cannot move the decision-density instrument by construction — is
+observed rather than repeated:** `choicesPerArmedSoldierTurn` **−0.008**, `targetChoices` −0.002,
+`positionChoices` −0.005. `turnsWithAShotPct` +0.87 and `meaningfulChoicesPerTurn` +0.053, which is
+what more surviving soldiers look like.
+
+## P24-7. THE SHAPE, AND THE STALEMATE ARM
+
+Computed on the CONSISTENT design (all six rungs at 16 sets), because a step between rungs measured
+at different n is not a step. Steps `RECRUIT->h0 / h0->h2 / h2->h4 / h4->h6 / h6->h8`:
+**base 29.0 / 9.7 / 11.9 / 13.4 / 2.8 -> aim 24.7 / 11.9 / 14.4 / 13.4 / 6.3** against a band that
+implies 20 / 15 / 10 / 10 / 10.
+
+| dispersion metric | base | **aim** |
+|---|---|---|
+| mean deviation from band centre, five heat rungs | −7.42 | **−3.88** |
+| SD of the five steps | 9.64 | **6.68** |
+| L1 from the band's implied profile | 26.8 | **19.3** |
+| L1 from even spacing | 31.4 | **21.6** |
+
+**Every dispersion metric improves, and the two steps that moved are the two the band says are
+wrong.** The step P23 bought is the one that grew most (2.8 -> 6.3). These are descriptive statistics
+over point estimates whose per-rung contrasts do not resolve — a shape reading, not a resolved claim.
+C1's table recorded that *no lever beat its control on dispersion*; this one does, on a different
+tree and a different metric set.
+
+**Stalemates**: all MISSION-arm, **the RUN arm fired 0 times in 6,400 campaigns** (four consecutive
+ladders). base 34/1,920 (1.77%), aim 46/1,920 (2.40%) — the autopilot failing to find a finishing
+line in campaigns that now survive to have one. A stalemate scores as a LOSS in both arms, so the
+headline is **conservative**: ex-stalemate the deltas read +3.5 / +8.6 / +5.6 / +3.3 / +2.9 / −0.7
+against +3.1 / +7.5 / +5.3 / +2.8 / +2.8 / −0.6.
+
+## P24-8. THE GUARD — `FORCETEST` leg (H), and the fourth layer of the measurement contract
+
+**Leg (H) — THE LEVEL LEVER REACHES EVERY BODY, AND MOVES NOTHING ELSE.** It builds every
+(mission x rung in {-1, 0, 4, 8} x 3 seeds) twice, once at `HostileAimTrim = 0` and once at the
+shipped dose, and asserts (i) the two builds are the same force — same count, bump, class sequence
+and tiles, which is what makes this round's arms paired at all — and (ii) **every body's aim is
+lower by exactly the dose**. 492 bodies compared. It exists because the trim is applied once in
+`MakeHostile` with **three clamps downstream of it** (88 in `SpawnEnemies`, 82 and 88 on the
+wave/endless paths); none binds today — the tallest campaign body is a TURRET at 66 + bump — but
+"none binds" is a measured fact about a table that moves, and a clamp that started eating half the
+trim would leave the shipped level quietly different from the measured one. **That is L7's defect
+class with a different field in the same slot.** Proven able to fail: at `SIGHTLINE_AIMTRIM=60` the
+`Math.Max(20, ...)` floor bites and the leg names the body —
+`aimTrimEaten s4242 m1 h-1 i0 SCOUT 57->20 want-60`. Under `SIGHTLINE_AIMTRIM=0` it still asserts the
+stream-neutrality half and reports the dose it found, rather than inventing a failure.
+
+**The fourth layer.** Until this wave the only record of which ARM a chunk belonged to was its FILE
+NAME — not an artifact, and this project has twice been bitten by a chunk that did not measure what
+its name said (P15's silent heat fallback; C4's shipped-is-not-the-measured layer). The balance JSON
+now carries `levers{}` (aimTrim, toughness, damageTrim, enemyBase, openerTrim, forceCeiling,
+clampLast, finaleHeatStat, midTooth), and both `run_round.sh` and `chunks.sh` assert
+`levers.aimTrim` against the arm the chunk was launched as. All 320 chunks pass it, and `chunks.sh`
+re-derives every assertion from the artifacts on disk so `P24-chunks.txt` survives a lost log.
+
+## P24-9. DOES THIS SUPERSEDE THE LADDER OF RECORD? — YES, and precisely this much
+
+**YES for the six sampled rungs.** P24's `aim` arm IS the shipped tree, measured with L6's protocol
+or better (6 rungs x 16 CRN slot bases, n=320, pinned, p15 runner, every chunk asserted; plus 32 sets
+at h0/h4/h6/h8), and its base arm reproduces P23/L6/L7 campaign-for-campaign. **The ladder of record
+is now RECRUIT 76.6 / h0 49.5 / h2 40.0 / h4 26.1 / h6 11.9 / h8 4.8**, best n per rung.
+
+**NO for anything else.** P24 sampled six rungs of ten, so **L7's per-rung table is still the only
+ten-rung picture and it is now a pre-P23 AND pre-P24 one** — h1/h3/h5/h7 are unmeasured on this tree
+and may not be interpolated. L6 remains the certified pre-P23 measurement and P23's own tables the
+pre-P24 shipped tree. **Do not mix rungs across the three.**
+
+## P24-10. FOUND AND NOT FIXED
+
+- **h6 AND h8 SIT ON THEIR FLOORS ON THE 32-SET READ (−0.1 and −0.2), AND THE APEX DID NOT MOVE AT
+  ALL.** This wave got its one lever and spent it; the residue is real and is published rather than
+  chased. The next corrective round now knows something P24 did not: accuracy is not the axis at the
+  top. It should also budget for the fact that **every per-rung contrast here was unresolved at
+  n=640** — a correction aimed at h6/h8 alone needs roughly 4x the clusters to price itself, which is
+  affordable now (~8-20 s a chunk) and was not when the convention was set.
+- **h0 IS A HETEROGENEOUS RUNG AND SIXTEEN SLOT SETS DO NOT SETTLE IT.** +7.5 against 0.0 across two
+  halves of the same round, with the base arm's own h0 reading 44.4 vs 47.2. Any future h0 claim
+  needs 32 sets minimum, and probably more.
+- **THE C1 REDISTRIBUTION (`SIGHTLINE_MIDTOOTH=7`, bit 4) IS STILL AVAILABLE AND STILL UNMEASURED ON
+  THIS TREE.** P24 rejected it as the wrong tool for a level problem, not as a bad lever; it lifts h6
+  alone by ~+4.7 on C1's tree and is apex-neutral by construction. If a later wave decides h6's
+  shape matters more than rung 6's step, that is the dial — but it must re-measure the +4.7 here,
+  and it should read L7's rung-6 (+11.2) and rung-5 (+0.6) numbers before spending it.
+- **`Heat.IntelBonus` IS STILL AN ACCELERATING CARROT WITH NO OFF-SWITCH.** L7 named it, P23 left it,
+  P24 leaves it. `Heat.IntelPerLevel` is a `const`.
+- **THE `levers{}` BLOCK IS NEW AND ONLY THIS WAVE'S RUNNERS ASSERT IT.** `p15/check_chunk.py` — the
+  runner of record's layer (c) — still does not look at it. Folding an optional `--lever k=v`
+  assertion into that script would make the fourth layer available to every future round instead of
+  to this one; P24 deliberately did not edit the shared runner inside a measurement wave.
+
+## P24-11. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — **86 self-tests exist in `src/`; this sweep ran 86**, every
+  line PASS, **no COVERAGE GAP**, autoplay x3 = WIN / LOSE / LOSE (no TIMEOUT, no blank),
+  **`SWEEP-EXIT-CODE=0`**.
+- `SIGHTLINE_FORCETEST=1` — PASS, including the new leg (H) at 492 bodies compared; RED at
+  `SIGHTLINE_AIMTRIM=60`, naming the body the floor ate.
+- 320/320 balance chunks asserted (`p15/check_chunk.py` plus P24's arm layer), `LEAK-CHECK PASS` on
+  all 320.

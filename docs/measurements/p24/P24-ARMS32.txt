@@ -1,0 +1,27 @@
+(slot bases: both — 32 sets requested)
+
+===== ARMS, AND THE BAND =====
+  rung     arm     k     n   win%  binSE   clSE   band verdict
+  h0       base   32   640   45.8   1.97   1.91   [47-63] OUT -1.2 (0.64 clSE under)
+  h0       aim    32   640   49.5   1.98   2.09   [47-63] IN  (+2.5 over floor, -5.5 vs centre)
+  h4       base   32   640   23.6   1.68   1.77   [22-38] IN  (+1.6 over floor, -6.4 vs centre)
+  h4       aim    32   640   26.1   1.74   2.17   [22-38] IN  (+4.1 over floor, -3.9 vs centre)
+  h6       base   32   640    9.4   1.15   1.42   [12-28] OUT -2.6 (1.85 clSE under)
+  h6       aim    32   640   11.9   1.28   1.18   [12-28] OUT -0.1 (0.11 clSE under)
+  h8       base   32   640    5.0   0.86   0.95   [5-15] IN  (+0.0 over floor, -5.0 vs centre)
+  h8       aim    32   640    4.8   0.85   0.88   [5-15] OUT -0.2 (0.18 clSE under)
+
+===== THE CONTRAST (CRN-paired, effect = aim arm minus base arm) =====
+  rung         eff    b    c n_disc pairSE  MDE80      z  chunkD  clSE      t  verdict
+  h0           3.8   97   73    170   2.04   5.70   1.84     3.8  2.02   1.86  NOT RESOLVED (|3.8| < MDE 5.7)
+  h4           2.5   77   61    138   1.84   5.14   1.36     2.5  2.47   1.01  NOT RESOLVED (|2.5| < MDE 5.1)
+  h6           2.5   53   37     90   1.48   4.15   1.69     2.5  1.75   1.43  NOT RESOLVED (|2.5| < MDE 4.2)
+  h8          -0.2   21   22     43   1.02   2.87  -0.15    -0.2  1.06  -0.15  NOT RESOLVED (|-0.2| < MDE 2.9)
+
+  POOLED over all measured rungs: eff +2.15  b=248 c=193 n_disc=441  pairSE 0.82  MDE80 2.30  z +2.62  n=2560
+
+===== THE STEPS (this wave may not flatten what L7 and P23 restored) =====
+  step                base     aim  band implies
+  h0->h4              22.2    23.4            25
+  h4->h6              14.2    14.2            10
+  h6->h8               4.4     7.0            10

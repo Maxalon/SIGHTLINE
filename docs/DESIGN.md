@@ -1294,3 +1294,87 @@ promises with separate reasons, so they get separate switches:
 independently, and `SIGHTLINE_FORCETEST` goes red without them — with `bodyEaten m6 rung8` and
 `statEaten m6 rung8`, the original defect, named. Round: `docs/measurements/p23/`; detail
 `docs/DEVLOG.md` §P23.
+
+## 5.7 What the BAND is a spec ON (decided 2026-09-04, PARALLAX wave P24 "THE TOP OF THE LADDER")
+
+Same contract as §5, §5.2, §5.3, §5.4, §5.5 and §5.6: on the record, alternatives named, cost stated.
+
+**The finding.** P23 published its cost honestly and left h6 2.6 points under its band floor and h8
+exactly on its >= 5 hard floor. Read as two rungs that had crossed lines, that looks like a shape
+problem at the top of the ladder. **Read against the band's CENTRES it is not two rungs at all:**
+RECRUIT −1.6, h0 −10.6, h2 −5.3, h4 −6.4, h6 −10.6, h8 −5.0. Every heat rung is below its centre, by
+a mean of −7.6, and the only rung within 2 points of its own is the one rung that is not a heat rung.
+
+**The decision, in one sentence: the FUL-13 band is a specification on the game's LEVEL, so a rung
+that misses it is corrected with a base-difficulty lever, and only a rung that misses it while its
+NEIGHBOURS do not is a shape question for `Heat.Mods`.**
+
+**Why this is a §3.D decision and not a spreadsheet exercise.** §3.D asks for a stair-step curve with
+challenge tracked just above skill. The ladder is the game's macro difficulty control, and the band
+is the only written statement of what each of its rungs is *for*. If the whole ladder sits below its
+band, every rung is delivering a different experience than the one its row promises — and repairing
+that by moving points BETWEEN rungs would keep the sum wrong while making one rung's promise a
+little more wrong in exchange for another's being a little less. That is the same class of error
+§5.6 named at the apex: an honest row, delivered as something else.
+
+**Two structural facts settle which register a given miss belongs to, and both were verified on the
+tree rather than inherited:**
+
+- **`Heat.Active(0)` is empty.** Heat 0 applies no rungs, and every accessor iterates that sequence.
+  **No arrangement of `Heat.Mods` can move h0 by any amount** — so an h0 miss is a base-difficulty
+  question by construction, not by argument.
+- **An apex-neutral redistribution CAN move a single mid rung.** C1's `bit 4` moves rung 6's stat up
+  to rung 7, which leaves h7 and h8 identical and lifts h6 alone (C1 measured +4.7 ±2.7). **So the
+  widely repeated "the heat table cannot fix h6" is false**, and the true statement is the narrower
+  one above. What makes a redistribution the wrong tool here is not that it is impossible — it is
+  that it pays for a band verdict with a STEP, and L7 measured the step in question (rung 6, +11.2)
+  as one of only three resolved steps on the whole ladder.
+
+**The alternatives considered:**
+
+- **(a) Redistribute inside `Heat.Mods` (`SIGHTLINE_MIDTOOTH=7`).** Rejected, not refuted: it cannot
+  reach h0, it spends rung 6's step, and it leaves the level shortfall untouched. It remains
+  available and is named in `docs/ROADMAP.md`.
+- **(b) Fewer bodies (`Mission.EnemyBaseCount`).** Rejected. Hostile COUNT is what W4 deliberately
+  bought (contact breadth) and is the raw material of the decision-density instrument; L7's own arm
+  shows it is coarse (two bodies are worth +13.3 at h6); and lowering it pulls the finale's request
+  back under `ForceCeiling`, partly de-scoping §5.6's fix. **A correction wave may not quietly shrink
+  the wave it is correcting.**
+- **(c) Cheaper or weaker hostiles (`HostileToughness`, `HostileDamageTrim`).** Rejected. They are
+  X1's deliberately-set pair encoding the two-hit trade. Re-opening a decision is not the same thing
+  as correcting a drift, and `CLAUDE.md` requires a measured round per side to move either.
+- **(d) Declare the band wrong at h6.** Weighed and rejected on the shape of the miss: if the band
+  were wrong at h6, h6 would be the outlier, and it is not — five rungs miss in the same direction by
+  similar amounts. The band-free reading of the same fact is that `RECRUIT -> h0` measures **29.0**
+  against a designed step of **20**, off one relief rung. A round may not move the game and the
+  measuring stick together; the band is left exactly as FUL-13 set it.
+- **(e) SHIPPED — a flat give-back on ACCURACY (`Mission.HostileAimTrim` 0 -> 5).** The give-back
+  comes out of the same quantity fourteen waves each raised without deciding to: **how much of the
+  force's fire lands.** It touches neither hostile count, nor hostile HP, nor player damage, so it
+  can move the level without moving anything a previous wave deliberately bought. The dose is X2's:
+  it built the dial, measured 5 and 10, and rejected 10 on TEXTURE.
+
+**The honest costs, stated:**
+
+1. **It did not reach the apex, and the apex is where §5.6's cost landed.** h8 measured −0.6 / +0.3 /
+   −0.2 on three independent readings with the round's tightest MDE (2.87). **Whatever carries the
+   apex's difficulty, it is not how often hostiles hit** — which is a finding for the next wave, and
+   an admission that this one solved five sixths of the problem it was given.
+2. **h6 sits ON its floor rather than under it.** 9.4 -> 11.9 on 32 slot sets, 0.1 under a floor of
+   12 and 0.11 cluster-SE from it. C1's own precedent forbids calling that in band.
+3. **Not one per-rung contrast resolved**, at n=320 or n=640; the lever is resolved only pooled
+   (+3.49, z +3.40 over six rungs; +2.15, z +2.62 over four at double n). And h0's headline **+7.5
+   did not replicate** — 0.0 on the next sixteen slot sets.
+4. **It reaches mission 1, and §5.6's arm could say it did not.** A level lever has no finale scope.
+   It moves the opener's 93.3-93.9% conditional up by +0.3 to +1.3 points, identically at every rung.
+   §3.D forbids front-loaded ANXIETY, so the direction is the safe one, and the clause's actual
+   content — the opener is the SAME FORCE at every rung — is unchanged and still asserted by
+   `SIGHTLINE_FORCETEST` leg (C).
+5. **Texture was checked, not assumed.** Eliminate 4.78 -> 4.83 turns; the three
+   `*ChoicesPerArmedSoldierTurn` fields move by 0.002-0.008. The dial's claim that it cannot move the
+   decision-density instrument is observed on 15,888 missions.
+
+**Falsifiable:** `SIGHTLINE_AIMTRIM=0` restores the pre-P24 force exactly — proven, not asserted, by
+a 96/96-chunk 1,920/1,920-leg reproduction of P23's own archive — and `SIGHTLINE_FORCETEST` leg (H)
+goes red when any part of the trim fails to reach the board. Round: `docs/measurements/p24/`; detail
+`docs/DEVLOG.md` §P24.

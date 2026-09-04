@@ -1591,7 +1591,36 @@ public static class Mission
     /// bought: hostile HP (X1's two-hit trade), hostile COUNT (W4's contact breadth, armed/turn
     /// 1.39 -> 1.55) and player damage (shots-per-kill) are all untouched by construction, so
     /// Eliminate's turn budget and the decision-density instruments cannot move through this knob.
-    public static int HostileAimTrim = 0;
+    ///
+    /// ── P24 "THE TOP OF THE LADDER" — SHIPPED AT 5. `SIGHTLINE_AIMTRIM=0` restores the pre-P24
+    /// force exactly. X2 built this dial for exactly this job, priced it, and then spent its one
+    /// lever on `OpenerTrim` instead; P24 is the round that spends it.
+    ///
+    /// WHY A LEVEL LEVER AT ALL. On the L6/L7/P23 tree every rung of the heat ladder sits under
+    /// its FUL-13 band CENTRE — RECRUIT -1.6, h0 -10.6, h2 -5.3, h4 -6.4, h6 -10.6, h8 -5.0, a
+    /// mean of -7.6 over the five heat rungs — and two of them (h0 -2.6, h6 -2.6) have crossed
+    /// their floors. That is not a defect at one rung, it is an offset in the whole ladder, and
+    /// **`Heat.Mods` provably cannot reach it**: `Heat.Active(0)` yields NOTHING, so h0's win rate
+    /// is a pure function of the base game and no row of the heat table can move it by any amount.
+    ///
+    /// WHY 5, AND WHY IT IS NOT A NUMBER SOMEONE SEARCHED FOR. X2 measured the dose-response of
+    /// this exact dial at h0 (`docs/measurements/x2/`, n=40 per arm, pre-W1 stream): 35.0 baseline,
+    /// **42.5 at dose 5**, 50.0 at dose 10 — and rejected dose 10 on TEXTURE (Eliminate 4.80t,
+    /// Escort 13.66t), not on win rate. So 5 is the largest dose the project has already accepted,
+    /// and its one archived price (+7.5 at h0) is within a point of the -7.6 mean shortfall this
+    /// wave is correcting. P24 measured that value once and published what it did; it did not
+    /// iterate the constant against the band.
+    ///
+    /// WHAT IT MAY NOT DO. It must not undo P23: `ClampLast` and `FinaleHeatStat` are untouched and
+    /// the finale still hears the ladder. It must not push the apex DOWN — h8 sits on its >= 5 hard
+    /// floor with no headroom below — and an easing lever cannot.
+    ///
+    /// IT IS UNIFORM, and that is checked rather than assumed. The lowest base aim in the roster is
+    /// the SCREENER's 46, so the `Math.Max(20, ...)` floor cannot bind; the rank-and-file clamps
+    /// (88 in SpawnEnemies, 82 in MakeWaveHostile) sit above every campaign body's `base + bump`,
+    /// so nothing downstream eats part of the trim. `SIGHTLINE_FORCETEST` leg (H) asserts exactly
+    /// that on the assembled force, which is where P23 learned to look.
+    public static int HostileAimTrim = 5;
 
     // ── P19 "THE ROSTER CONTESTS" — the SMG monoculture's range bands ────────────────────────
     /// SIGHTLINE_ROSTERID=0 restores the pre-P19 roster exactly: no archetype is assigned an SMG
@@ -1618,7 +1647,7 @@ public static class Mission
     static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
     {
         int thp = hp + HostileToughness;
-        if (HostileAimTrim > 0) aim = Math.Max(20, aim - HostileAimTrim);   // no-op (identity) at the default 0
+        if (HostileAimTrim > 0) aim = Math.Max(20, aim - HostileAimTrim);   // P24 ships 5; AIMTRIM=0 is the identity
         var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = thp, MaxHp = thp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         if (RosterIdentity && w == WeaponKind.Smg) u.Weapon.SmgProfile = SmgProfileFor(cls);
         u.Weapon.TrimBaseDamage(HostileDamageTrim);

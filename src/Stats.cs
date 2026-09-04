@@ -1484,6 +1484,24 @@ public static class Stats
             // on any `choices*` field, so a comparison script must refuse a diff across them —
             // which is why this is emitted as data instead of trusted to a doc banner.
             instrument = Game.InstrumentTag,
+            // P24 THE TOP OF THE LADDER: the FORCE dials this batch was measured with. Every one is
+            // a static field an env var can repoint, and until now the only record of which arm a
+            // chunk belonged to was its FILE NAME — which is not an artifact, and this project has
+            // twice been bitten by a chunk that did not measure what its name said (P15's silent
+            // heat fallback; C4's shipped-is-not-the-measured layer). Emitted as data so a runner
+            // can ASSERT the arm instead of trusting the tag. Read by nothing in a live path.
+            levers = new
+            {
+                aimTrim = Sightline.Mission.HostileAimTrim,
+                toughness = Sightline.Mission.HostileToughness,
+                damageTrim = Sightline.Mission.HostileDamageTrim,
+                enemyBase = Sightline.Mission.EnemyBaseCount,
+                openerTrim = Sightline.Mission.OpenerTrim,
+                forceCeiling = Sightline.Mission.ForceCeiling,
+                clampLast = Sightline.Mission.ClampLast,
+                finaleHeatStat = Sightline.Mission.FinaleHeatStat,
+                midTooth = Heat.MidTooth,
+            },
             // P15 THE UNVERIFIED: what this batch was ASKED for (see BatchEnv). null outside a
             // SIGHTLINE_BALANCE batch — an older archive has no `batch` key at all, which is how a
             // consumer tells "pre-P15" from "not a batch".

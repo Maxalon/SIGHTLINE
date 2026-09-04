@@ -3547,10 +3547,16 @@ a finding, as in L4 and L5. What L6 leaves open, in priority order:
       **96/96 chunks, 1,920/1,920 legs**, which certifies L6 valid on `935d719` and P21 inert.
       **CAUSE LOCATED, and it is NOT a dead declaration** (`MIDTOOTHTEST` is green and rung 8's
       cumulative vector is correct) — see the new item below. No corrective lever shipped.
-- [ ] **h0 IS UNDER ITS FLOOR ON TWO SUCCESSIVE LADDERS** (L5 -0.1, L6 -2.6; 1.23 cluster-SE under).
-      L4/C1 flagged the LEVEL at the top of the ladder as the biggest open number and it has not
-      moved. An apex-neutral `Heat.Mods` lever cannot fix it — it is a BASE-difficulty lever, and it
-      needs one round per side (X1's rule for `MakeHostile`).
+- [x] **h0 IS UNDER ITS FLOOR ON TWO SUCCESSIVE LADDERS** (L5 -0.1, L6 -2.6, P23 -2.6; 1.23
+      cluster-SE under). L4/C1 flagged the LEVEL at the top of the ladder as the biggest open number
+      and it did not move for four ladders. **CLOSED by wave P24 THE TOP OF THE LADDER**
+      (`Mission.HostileAimTrim` 0 -> 5, `SIGHTLINE_AIMTRIM=0` restores): h0 reads **49.5 on 32 slot
+      sets (45.8 base) and 51.9 on the 16 it shares with P23 (44.4 base)** — in band on both.
+      **The reasoning was verified rather than inherited, and it is stronger than it was written:**
+      `Heat.Active(0)` yields nothing, so h0's win rate is a pure function of the base game and NO
+      arrangement of `Heat.Mods` can move it by any amount. **But the effect itself is not resolved**
+      (+3.8 on 32 sets, MDE 5.70) and its two slot halves read +7.5 and 0.0 — see the h0
+      heterogeneity item below.
 - [ ] **P20's own h4 number should be corrected where it is quoted.** L6 re-priced the lever on 16
       slot sets: **-2.5, n_disc 22, MDE 4.1, NOT RESOLVED**, with P20's own 8 sets giving -4.4
       (z = -2.33) and 8 sets it never saw giving -0.6. `docs/measurements/p20/README.md` still says
@@ -3665,19 +3671,54 @@ file was edited.** What L7 leaves open, in priority order:
 P23 closed three of L7's six items (the apex's dead teeth, the missing force guard, the finale
 stat's restore flag). What it leaves open, in priority order:
 
-- [ ] **THE LADDER'S TOP HALF IS NOW UNDER ITS BAND, AND P23 DELIBERATELY DID NOT TUNE IT.**
-      This is the first thing a later round should spend a lever on, and it must do so against its
-      own fresh baseline — a round that changes a mechanism may not also tune toward the band inside
-      itself. On 32 CRN slot sets (n=640/rung), the shipped tree reads **h4 23.6** (band 22-38, IN),
-      **h6 9.4** (band 12-28, **OUT by 2.6** — it was OUT by 1.1 before P23), and **h8 5.0**
-      (band 5-15, IN but **exactly ON the >= 5 hard floor, with no margin**). The RECRUIT rung moved
-      the other way and is nearer its centre (70.6 -> 73.4). **h0 is unchanged at 44.4 and is
-      2.6 under its floor — that miss is inherited from L5 onward and P23 did not touch it, so it is
-      a BASE-difficulty question, not a P23 one** (see the older item on that). The obvious dials to
-      reach for are named and unspent: `SIGHTLINE_FORCECEILING`, `SIGHTLINE_ENEMYBASE`,
-      `SIGHTLINE_AIMTRIM`, `SIGHTLINE_TOUGH`, `SIGHTLINE_TRIM`, and the two P23 dials themselves
-      (a partial `FinaleHeatStat` is expressible as a fraction of `heatStat`, which this wave did
-      not build because it had no evidence it was wanted).
+- [x] **THE LADDER'S TOP HALF IS NOW UNDER ITS BAND, AND P23 DELIBERATELY DID NOT TUNE IT.**
+      **SPENT by wave P24 THE TOP OF THE LADDER** (base `3b684a7`, `docs/measurements/p24/`, DEVLOG
+      §P24) — one lever, `Mission.HostileAimTrim` 0 -> 5, `SIGHTLINE_AIMTRIM=0` restores. Chosen as a
+      LEVEL lever because every heat rung sat under its band CENTRE by a mean of −7.6, and because
+      **`Heat.Active(0)` is empty — no arrangement of `Heat.Mods` can move h0 by any amount.**
+      Bridge 96/96 chunks and 1,920/1,920 legs against P23's AB arm (48/48 more out of sample).
+      Result, best n per rung: **RECRUIT 76.6 / h0 49.5 / h2 40.0 / h4 26.1 / h6 11.9 / h8 4.8.**
+      **h0 is FIXED** (45.8 -> 49.5 on 32 sets; 44.4 -> 51.9 on the 16 it shares with P23).
+      **h6 is HALF-fixed** — 9.4 -> 11.9, from 2.6 under its floor to 0.1 under it: it now sits ON
+      the floor, which C1's precedent says may not be claimed as in band. **h8 did not move at all.**
+      The two items immediately below are what is left.
+- [ ] **THE APEX DOES NOT RESPOND TO ACCURACY, AND h6/h8 STILL SIT ON THEIR FLOORS (opened by P24).**
+      h8 measured **−0.6 / +0.3 / −0.2** on the original 16 slot sets, 16 new ones and all 32
+      (n_disc 43, **MDE 2.87 — the tightest contrast in the round**), against a positive point
+      estimate at every other rung. So the next corrective lever must come from the quantities
+      accuracy cannot reach: bodies, HP/stat, per-hit damage, or the coordination flags at rungs
+      3/4/6. Two constraints it inherits. **(1) It cannot push the top down** — h8 is at 4.8 against
+      a >= 5 hard floor. **(2) It must budget for power**: *every* per-rung contrast in P24 was
+      unresolved at n=640, so a lever aimed at h6/h8 alone needs roughly 4x the clusters to price
+      itself. That is affordable now (~8-20 s a chunk) and was not when the n=320 convention was set.
+      Dials still named and unspent: `SIGHTLINE_FORCECEILING`, `SIGHTLINE_ENEMYBASE`,
+      `SIGHTLINE_TOUGH`, `SIGHTLINE_TRIM`, a partial `FinaleHeatStat` as a fraction of `heatStat`,
+      and — for h6 ALONE — `SIGHTLINE_MIDTOOTH=7` (next item).
+- [ ] **C1's APEX-NEUTRAL h6 REDISTRIBUTION IS AVAILABLE, UNMEASURED ON THIS TREE, AND P24 REJECTED
+      IT ON PURPOSE.** `SIGHTLINE_MIDTOOTH=7` (bit 4) moves rung 6's anonymous +1 stat UP to rung 7,
+      leaving the h7 and h8 cumulative vectors identical and lifting h6 alone — C1 measured
+      **18.4 -> 23.1, +4.7 ±2.7** on its own tree. **So "the heat table cannot raise h6" is FALSE and
+      should stop being repeated**; the true, narrower claim P24 verified is that the heat table
+      cannot raise **h0** (`Heat.Active(0)` is empty). P24 rejected the redistribution because it
+      cannot touch h0, because it buys h6 by making rung 6 buy less (L7: rung 6 is **+11.2**, one of
+      only three resolved steps, next to rung 5's +0.6), and because it leaves the level shortfall
+      exactly where it is. A wave that decides h6's band verdict matters more than rung 6's step has
+      the dial — but it must re-measure the +4.7 here and read L7's rung-6/rung-5 numbers first.
+- [ ] **h0 IS A HETEROGENEOUS RUNG AND SIXTEEN SLOT SETS DO NOT SETTLE IT (opened by P24).** P24's h0
+      contrast read **+7.5 (z +2.68) on its first 16 slot sets and exactly 0.0 (b=45, c=45) on the
+      next 16**; pooled over 32 it is +3.8 with MDE 5.70, not resolved. The BASE arm's own h0 differs
+      by half too (44.4 vs 47.2), as does h8 (6.6 vs 3.4). **Fifth sighting of this shape** after L5's
+      split-half on L4, W2's four-vs-sixteen, L6's re-price of P20 and L7's rung-8 sign. Any future h0
+      claim needs 32 slot sets minimum, and probably more.
+- [ ] **THE `levers{}` BLOCK IS ASSERTED BY ONE WAVE'S RUNNERS, NOT BY THE RUNNER OF RECORD.** P24
+      added a `levers{}` block to the balance JSON (aimTrim, toughness, damageTrim, enemyBase,
+      openerTrim, forceCeiling, clampLast, finaleHeatStat, midTooth) so a chunk records which ARM it
+      measured instead of leaving that to its file name — the gap behind P15's silent heat fallback
+      and C4's shipped-is-not-measured layer. `p24/run_round.sh` and `p24/chunks.sh` assert it;
+      **`p15/check_chunk.py`, layer (c) for every round, still does not look at it.** Folding an
+      optional `--lever k=v` assertion into that shared script would make the fourth layer available
+      to every future round. P24 deliberately did not edit the runner of record inside a measurement
+      wave.
 - [ ] **THE MID-RUN CEILING STILL BINDS, AND IT IS NOW THE ONLY PLACE IT DOES.** With the ordering
       fixed, the remaining cells where a rung's declared body does not reach the board are the ones
       where the board is genuinely full: ELITE mid-run nodes (`+2` from the card) at heat 3 and up,
