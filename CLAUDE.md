@@ -625,16 +625,46 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
 >
 >
-> ### ⚠ THE LADDER OF RECORD IS **L6**. L5 AND EVERYTHING BELOW IT ARE PROVENANCE.
-> ### ⚠⚠ AND L6/L7 ARE NOW **PRE-P23** LADDERS AT h4/h6/h8 AND RECRUIT.
-> Wave **P23 THE APEX BITES** changed the force the board builds on missions 5-6 (see the P23 row in
-> the wave table). Its BASE arm reproduces L6/L7 **1,600/1,600 legs, 80/80 chunks**, so the CRN chain
-> is intact and the rows below are exact for the pre-P23 tree — but the SHIPPED tree now reads,
-> on 16 slot sets, RECRUIT **73.4** / h0 44.4 (unchanged, 0 discordant in 320) / h2 **34.7**, and on
-> 32 slot sets h4 **23.6** / h6 **9.4** / h8 **5.0** (`docs/measurements/p23/`). **h6 is 2.6 under its
-> floor and h8 sits exactly ON its >=5 hard floor; P23 published that rather than tuning it, and a
-> corrective lever is ROADMAP's top item.** Quote L6 for the pre-P23 tree and P23's own round for
-> today's; **do not mix rungs from the two.**
+> ### ⚠ THE LADDER OF RECORD IS **P24's `aim` ARM** — the SIX rungs below. L6/L7 AND EVERYTHING ABOVE THEM ARE PROVENANCE.
+>
+> **P24 THE TOP OF THE LADDER, base `3b684a7`**, heat PINNED, 6 rungs x 16 CRN slot bases (n=320) plus
+> a 16-NEW-set extension at h0/h4/h6/h8 (n=640); 320 chunks, zero BAD, 6,400 campaigns, `LEAK-CHECK
+> PASS` (0 of 26,124 missions off-rung). Raw round: `docs/measurements/p24/`. Its BASE arm
+> (`SIGHTLINE_AIMTRIM=0`) reproduces P23's shipped arm **96/96 chunks, 1,920/1,920 legs**, plus 48/48
+> and 960/960 out of sample — so the CRN chain is intact from L6 through P23 to here.
+>
+> | rung | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+> |---|---|---|---|---|---|---|
+> | **win% (best n)** | **76.6** | **49.5** | **40.0** | **26.1** | **11.9** | **4.8** |
+> | n | 320 | 640 | 320 | 640 | 640 | 640 |
+> | cluster SE | 2.65 | 2.09 | 2.96 | 2.17 | 1.18 | 0.88 |
+> | band | 67-83 | 47-63 | 32-48 | 22-38 | 12-28 | 5-15 |
+> | verdict | IN | IN (+2.5) | IN (on centre) | IN (+4.1) | **OUT −0.1** | **OUT −0.2** |
+>
+> **FOUR OF SIX IN BAND, AND READ h6/h8 EXACTLY.** Both miss by 0.1-0.2 points — 0.11 and 0.18 cluster
+> SE — so **they sit ON their floors, not under them**, which C1's precedent says may not be claimed
+> as in band either way. On the 16 slot sets P24 shares with P23's archive all six rungs read IN
+> (RECRUIT 76.6 / h0 51.9 / h2 40.0 / h4 25.6 / h6 12.2 / h8 5.9); **quote both, never only that one.**
+> Steps 24.7 / 11.9 / 14.4 / 13.4 / 6.3 against a band that implies 20 / 15 / 10 / 10 / 10.
+>
+> **THE LEVER WAS ONE CONSTANT AND ITS EFFECT IS RESOLVED ONLY POOLED.** `Mission.HostileAimTrim`
+> 0 -> 5 (`SIGHTLINE_AIMTRIM=0` restores). Pooled **+3.49, z +3.40** (6 rungs x 16 sets, n=1,920,
+> n_disc 389, MDE 2.88) and **+2.15, z +2.62** (4 rungs x 32 sets, n=2,560, n_disc 441, MDE 2.30).
+> **NOT ONE PER-RUNG CONTRAST RESOLVES** — do not quote a per-rung delta from it as a size. Two
+> findings that outlast the delta: **(1) the APEX does not respond to accuracy** (h8 −0.6 / +0.3 /
+> −0.2 on three readings, MDE 2.87 the tightest in the round), so the next corrective lever must come
+> from bodies / stat / damage / coordination; **(2) h0's +7.5 did not replicate** — 0.0 on the next 16
+> sets, b=45 c=45, the FIFTH sighting of that shape here.
+>
+> **P24 SUPERSEDES ONLY THESE SIX RUNGS.** It did not sample h1/h3/h5/h7, so **L7's ten-rung table
+> below is still the only per-rung picture and is now a pre-P23 AND pre-P24 one.** L6 is the certified
+> pre-P23 ladder; P23's own round is the pre-P24 shipped tree. **Do not mix rungs across the three,
+> and do not interpolate the four rungs that have never had a band.**
+>
+> ---
+> **PRE-P24 PROVENANCE — the P23 shipped tree** (`docs/measurements/p23/`): RECRUIT 73.4 / h0 44.4 /
+> h2 34.7 on 16 sets, h4 23.6 / h6 9.4 / h8 5.0 on 32. Its BASE arm reproduces L6/L7 **1,600/1,600
+> legs, 80/80 chunks**, so the rows below are exact for the pre-P23 tree.
 > **The "L5 is a pre-P20 ladder" warning that stood here is RESOLVED: L6 re-measured the composed
 > tree.** It also re-priced P20 alone on SIXTEEN slot sets and found P20's own headline (−3.8 at
 > h4, "resolved") **does not survive the doubling** — on eight sets P20 never saw, the same lever
@@ -700,7 +730,7 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > **No corrective lever was shipped.** Two rungs under floor is a finding to publish, not to repair
 > inside a measurement round — as in L4 and L5.
 >
-> #### L7 EVERY RUNG — the PER-RUNG detail on the SAME tree. **L6 is still the ladder of record.**
+> #### L7 EVERY RUNG — the PER-RUNG detail on L6's tree. **It superseded nothing then, and it is the only TEN-rung picture now — but it is a pre-P23, pre-P24 one.**
 > **Base `935d719`**, L6's protocol exactly, 10 rungs x 16 CRN slot bases, n=320/rung, pinned,
 > `LEAK-CHECK PASS` (0 of 13,124 missions off-rung), 336 chunks / 6,720 campaigns, zero BAD. Raw:
 > `docs/measurements/l7/`. **It reproduced L6's six rungs 96/96 chunks and 1,920/1,920 legs** — so it
@@ -774,6 +804,7 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P22** NOTHING WITHOUT A SWITCH | The restore-flag rule was audited rather than asserted: **35 wave-granularity commits from W1's merge to milestone 14, by a diff of the sixteen gameplay files grouped by enclosing method, plus a census of every mutable gameplay static.** **One live unflagged LEVER, and it was already known** — THE FORK PAYS' heal ordering, now `SIGHTLINE_HEALFIRST=1`. Everything else unflagged is presentation, mode-only/campaign-inert, or a defect repair. **The methods' blind spot is the shape that produced BOTH known breaches: a change of ORDER leaves no dial to census, and a bare `const` is invisible until somebody parameterises it.** | §P22 |
 | **L7** EVERY RUNG | **The heat ladder's two quantitative levers are both switched off on MISSION 6.** `Mission.Build` clamps the headcount at 12 (`4 + n + enemyDelta`), so from heat 3 up the finale's request is already over the ceiling; then `bump = Math.Max(0, n - 1)` **discards heat's StatDelta outright**. Measured on the artifact: the finale fields **6/7/7/8/9/9/9/9/9** hostiles at heats 0-8 — **it has not grown a body since heat 4**, and at h7 vs h8 the only difference in CONTENT between the two shots is the HEAT chip (5.93% of pixels differ; all of it animation phase, as it always is here). So **NO QUARTER (+1 body, +1 stat) cannot reach the mission that decides a campaign**, and it buys −0.6 (n=640, MDE 3.7). **This is C1's defect class with the arrow reversed**: the cumulative vector is CORRECT and the BUILD does not honour it, so `HEATLADDERTEST` and `MIDTOOTHTEST` — both cumulative-vector pins — are green. **Nothing in `src/` asks what force the board actually builds.** | §L7 |
 | **P23** THE APEX BITES | L7's defect, fixed, as **two independently switchable levers** — because L7's single combined arm is exactly why its number did not resolve. `Mission.ClampLast` (`SIGHTLINE_CLAMPLAST=0`) applies the board-seating ceiling to the force that is **SEATED**, not to the number the ladder **ASKED FOR** — everything between the two only subtracts, so a 12-tile geometry constant was sizing a 6-11 body finale. `Mission.FinaleHeatStat` (`SIGHTLINE_FINALESTAT=0`) separates the finale's stat strip: the deployment CARD's stat is still dropped (the WARLORD *is* the elite), HEAT's is not. Finale force at heats 0-8: **6/7/7/8/9/9/9/9/9 -> 6/7/7/8/9/10/10/10/11**, `bump` **flat 5 -> 4/5/5/6/6/6/6/7/8/9**. **THE CEILING WAS NOT RAISED and 12 is NOT a layout constraint** — leg (E) seats **16** bodies distinct and reachable at a stressed ceiling; the defect was the ORDER. **`SIGHTLINE_FORCETEST` is the guard L7 said was missing** and is the durable half: it reads the force the BOARD assembled, not the table it came from, and it is RED pre-fix on all three seeds. **Priced, and quoted as directions not quantities**: pooled over h4/h6/h8 (n=1,920/arm) A −1.30 (z −2.14), B −1.25 (z −2.25), both −1.88 (z −2.74) — significant but the same size as the round's own MDE; the apex resolves only out of sample (−3.1, b=1 c=11). **COST PUBLISHED, NOT TUNED: h6 9.4 (2.6 under floor) and h8 5.0 (exactly ON the >=5 hard floor).** m1/m2 identical in every arm at every rung. | §P23 |
+| **P24** THE TOP OF THE LADDER | P23's cost, corrected with **one lever chosen by argument**: `Mission.HostileAimTrim` 0 -> 5 (`SIGHTLINE_AIMTRIM=0` restores), five flat points off every hostile's aim in the single `MakeHostile` funnel. **THE ARGUMENT IS THE DURABLE HALF, and it corrects an inherited claim.** The miss was a LEVEL, not a shape: every heat rung sat under its band CENTRE by a mean of −7.6. **`Heat.Active(0)` is EMPTY, so no arrangement of `Heat.Mods` can move h0 by any amount** — that half of C1/L4's inherited claim is provable in one line. **The other half is FALSE and should stop being repeated**: an apex-neutral redistribution CAN raise h6 alone (C1's `bit 4`, +4.7 ±2.7) — it was rejected because it cannot reach h0 and because it buys h6 by spending rung 6, one of only three steps L7 resolved. The dose is X2's, not a searched one: X2 built this dial, measured 5 and 10, and rejected 10 on TEXTURE. **Result (best n): RECRUIT 76.6 / h0 49.5 / h2 40.0 / h4 26.1 / h6 11.9 / h8 4.8**, four in band with h6 and h8 sitting ON their floors (−0.1, −0.2 = 0.11 / 0.18 cluster SE). **Resolved only POOLED (+3.49 z +3.40; +2.15 z +2.62 at double n) — not one per-rung contrast resolves.** Two findings that outlast the delta: **the APEX does not respond to accuracy** (h8 −0.6 / +0.3 / −0.2, MDE 2.87, the round's tightest), so the next lever must come from bodies/stat/damage/coordination; and **h0's +7.5 did not replicate** (0.0 on 16 new sets, b=45 c=45 — fifth sighting). `FORCETEST` leg (H) asserts the trim reaches every body in full and moves nothing else (three aim clamps sit downstream of it and none binds *today*). The balance JSON now carries `levers{}` so a chunk records its own ARM. | §P24 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be
 switched off cannot be attributed. **P22 gave that rule an operational form, because "gameplay
@@ -794,7 +825,7 @@ headline contract false), `SIGHTLINE_STALEHAZARDS=1` (the pre-P21 seam, in which
 not clear Fire/Barrel — **live-path inert by construction**, because `Game.SetupMission` still clears
 them first) `SIGHTLINE_FORKPRICES=0` (the pre-milestone-5 routing prices, all four as a set —
 never a shipping configuration; SUPPLY strictly dominates COMBAT again and FORKTEST leg (A) fails by
-design), `SIGHTLINE_CLAMPLAST=0` (the pre-P23 order, in which the board-seating ceiling is applied to the force REQUEST rather than to the force that is seated, so the finale's bodies stop growing at heat 4), `SIGHTLINE_FINALESTAT=0` (the pre-P23 finale stat strip, in which heat's StatDelta is discarded along with the deployment card's) — **P23's two halves are two dials on purpose: L7 could only price them together and its number did not resolve** — and `SIGHTLINE_HEALFIRST=1` (P22 — THE FORK PAYS' *other* change: the SUPPLY/RECON full heal
+design), `SIGHTLINE_CLAMPLAST=0` (the pre-P23 order, in which the board-seating ceiling is applied to the force REQUEST rather than to the force that is seated, so the finale's bodies stop growing at heat 4), `SIGHTLINE_FINALESTAT=0` (the pre-P23 finale stat strip, in which heat's StatDelta is discarded along with the deployment card's) — **P23's two halves are two dials on purpose: L7 could only price them together and its number did not resolve** — `SIGHTLINE_AIMTRIM=0` (**P24 — the pre-P24 force**, i.e. `Mission.HostileAimTrim` back at 0. It is a LEVEL lever, so **no rung is an inertness control for it** and its bridge is the whole check: base arm vs P23's shipped arm, 96/96 chunks and 1,920/1,920 legs, plus 48/48 out of sample), and `SIGHTLINE_HEALFIRST=1` (P22 — THE FORK PAYS' *other* change: the SUPPLY/RECON full heal
 back BEFORE `Run.DebriefSurvivors`' fresh-wound gauge, so a SUPPLY clear cannot wound anyone who
 walks off the field. **The pair `SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1` is what "restore
 milestone 4" means** — two dials because the prices move the ECONOMY and the ordering moves
