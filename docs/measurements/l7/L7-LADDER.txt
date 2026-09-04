@@ -1,0 +1,43 @@
+===== L7 — THE ELEVEN-RUNG LADDER (k clusters of 20 per rung) =====
+  rung    k    n   win% binomSE clustSE ratio jack min jack max    band   verdict
+  hR     16  320   70.6    2.55    2.41  0.95     69.3     71.7  67-83    IN  (+3.6 over floor 67; 1.50 clusterSE clear)
+  h0     16  320   44.4    2.78    2.13  0.77     43.3     45.7  47-63    OUT -2.6 (floor 47; 1.23 clusterSE under)
+  h1     16  320   41.9    2.76    3.12  1.13     40.7     43.7   -      (no band of record for this rung — never sampled before C1/L7)
+  h2     16  320   35.9    2.68    2.89  1.08     34.3     37.0  32-48    IN  (+3.9 over floor 32; 1.36 clusterSE clear)
+  h3     16  320   26.2    2.46    2.17  0.88     25.0     27.3   -      (no band of record for this rung — never sampled before C1/L7)
+  h4     16  320   23.1    2.36    3.09  1.31     21.3     24.3  22-38    IN  (+1.1 over floor 22; 0.36 clusterSE clear)
+  h5     16  320   22.5    2.33    1.37  0.59     22.0     23.3   -      (no band of record for this rung — never sampled before C1/L7)
+  h6     16  320   11.2    1.77    2.17  1.23     10.0     12.0  12-28    OUT -0.8 (floor 12; 0.35 clusterSE under)
+  h7     16  320    6.6    1.38    1.27  0.92      5.7      7.0   -      (no band of record for this rung — never sampled before C1/L7)
+  h8     16  320    8.8    1.58    1.41  0.89      8.0      9.3   5-15    IN  (+3.8 over floor 5; 2.67 clusterSE clear)
+  steps: hR->h0 +26.2  h0->h1 +2.5  h1->h2 +5.9  h2->h3 +9.7  h3->h4 +3.1  h4->h5 +0.6  h5->h6 +11.2  h6->h7 +4.7  h7->h8 -2.2
+  MONOTONE: NO — h7->h8
+  IN BAND: 4 of 6 graded rungs (4 rungs have no band of record)
+
+===== L7 — HEAT LEAK (does 'heat N' mean heat N?) =====
+  rung   chunks pinned  picks raised offRung missions  worst chunk
+  hR         16     16     29      0       0     1531  b0 offRung=0
+  h0         16     16     28      0       0     1374  b0 offRung=0
+  h1         16     16     28      0       0     1385  b0 offRung=0
+  h2         16     16     27      0       0     1390  b0 offRung=0
+  h3         16     16     25      0       0     1321  b0 offRung=0
+  h4         16     16     24      0       0     1323  b0 offRung=0
+  h5         16     16     23      0       0     1296  b0 offRung=0
+  h6         16     16     22      0       0     1189  b0 offRung=0
+  h7         16     16     22      0       0     1194  b0 offRung=0
+  h8         16     16     20      0       0     1121  b0 offRung=0
+  LEAK-CHECK: PASS (all 160 chunks pinned; campaignsRaised = missionsAbovePin = 0 on every one)
+
+===== L7 — STALEMATES by arm (harness-forced losses) =====
+  rung      n mission  run share%  where
+  hR      320       9    0   2.81  [s13g m3 Escort rt53] [s25s m2 Evac rt55] [s49s m4 Escort rt72] [s60s m4 Rescue rt63] [s79s m4 Escort rt56] [s95g m5 Escort rt69] [s132s m6 Decapitate rt66] [s145s m3 Escort rt62] [s159g m2 Evac rt53]
+  h0      320       8    0   2.50  [s13s m3 Escort rt55] [s21g m4 Rescue rt63] [s30s m2 Escort rt56] [s46s m1 Eliminate rt51] [s79s m4 Escort rt58] [s122g m4 Rescue rt57] [s159g m2 Evac rt53] [s159s m2 Evac rt53]
+  h1      320      11    0   3.44  [s30s m2 Escort rt56] [s39s m3 Rescue rt55] [s46s m1 Eliminate rt51] [s47s m4 Escort rt64] [s92s m6 Decapitate rt90] [s95g m5 Escort rt63] [s119g m2 Rescue rt55] [s130g m3 Eliminate rt69] [s141g m3 Eliminate rt65] [s159g m2 Evac rt53] [s159s m2 Evac rt53]
+  h2      320       7    0   2.19  [s22g m5 Evac rt66] [s39s m3 Rescue rt55] [s46s m1 Eliminate rt51] [s78g m4 Evac rt56] [s110g m4 Eliminate rt66] [s130g m3 Eliminate rt69] [s159g m2 Evac rt53]
+  h3      320       5    0   1.56  [s29g m4 Eliminate rt65] [s46s m1 Eliminate rt51] [s74g m3 Eliminate rt52] [s159g m2 Evac rt53] [s159s m2 Evac rt53]
+  h4      320       1    0   0.31  [s74g m3 Eliminate rt52]
+  h5      320       2    0   0.62  [s30g m2 Escort rt55] [s102g m2 Escort rt56]
+  h6      320       5    0   1.56  [s3g m5 Escort rt75] [s16g m2 Eliminate rt55] [s46g m1 Eliminate rt51] [s107g m2 Escort rt55] [s112g m4 Evac rt64]
+  h7      320       2    0   0.62  [s46g m1 Eliminate rt51] [s74g m3 Eliminate rt61]
+  h8      320       4    0   1.25  [s46g m1 Eliminate rt51] [s55s m4 Rescue rt57] [s125g m2 Eliminate rt52] [s133g m2 Rescue rt53]
+  TOTAL 3200 campaigns: mission-arm 54, run-arm 0, share 1.69%
