@@ -180,6 +180,7 @@ public partial class Game
         ModeFaction = faction ?? DealtFaction(_run.MapSeed);
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
         _run.StartHeat = _run.HeatLevel;   // P18: latch the DIALLED rung — see Run.AssistLevel
+        RefreshMetaWidths();               // P18: COMBAT TRIALS is a PROFILE unlock, not a campaign one
         _run.LossStreak = _metaLossStreak;
         // force the chosen objective for mission 1 (DebugForceObjective-style, but WITHOUT re-running
         // SetupMission — we call it once below with everything staged).
@@ -216,6 +217,7 @@ public partial class Game
         _run.Start();
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
         _run.StartHeat = _run.HeatLevel;   // P18: latch the DIALLED rung — see Run.AssistLevel
+        RefreshMetaWidths();               // P18: COMBAT TRIALS is a PROFILE unlock, not a campaign one
         _run.LossStreak = _metaLossStreak;
         // pin the map seed so the whole board (biome + arena selection driven off MapSeed) is
         // reproducible for the day — the same seed reproduces the same layout signature (verified twice).
