@@ -1667,8 +1667,9 @@ public static class Stats
                 avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
             }).ToList(),
             // C4 "EIGHT BIOMES ARE PAINT": the BIOME a mission was fought in, with the count of
-            // mechanical-ground tiles it carried. Three of the eight now change the fight (VERDANT
-            // undergrowth / TUNDRA slick ice / MAGMA thermal vents) and five are still paint, so a
+            // mechanical-ground tiles it carried. FIVE of the eight now change the fight (VERDANT
+            // undergrowth / TUNDRA slick ice / MAGMA thermal vents, plus P16's VOID rift and ARID
+            // soft sand) and three are still paint (STEEL / ASH / NEON), so a
             // pooled rung mixes two populations that are no longer the same game. This is the row
             // that says WHICH. `groundTiles` is 0 on the paint biomes and with SIGHTLINE_BIOMEMECH=0,
             // which also makes it the cheapest possible check that an A/B arm really was what it

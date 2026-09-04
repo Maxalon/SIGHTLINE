@@ -205,6 +205,14 @@ public static class Program
         // undergrowth / TUNDRA slick ice / MAGMA thermal vents). =0 restores the pre-C4 board
         // EXACTLY (Terrain.Enabled gates the stamper AND every Grid predicate), which is both the
         // A/B lever for the CRN round and the "watch your own test fail" proof for BIOMETEST.
+        // P16 "GROUND TRUTH" — SIGHTLINE_NEWGROUND=0/1: JUST the two grounds P16 added (VOID's
+        // RIFT and ARID's SOFT SAND). This is the A/B lever P16's CRN round was measured on, and
+        // it exists because SIGHTLINE_BIOMEMECH=0 below is the WRONG arm for it: that restores the
+        // pre-C4 board, so a round against it would price C4's three biomes and P16's two together
+        // and report the sum as P16's. Off = the pre-P16 board exactly (VOID and ARID paint again).
+        string newGroundEnv = Environment.GetEnvironmentVariable("SIGHTLINE_NEWGROUND");
+        if (newGroundEnv == "0" || newGroundEnv == "1") Terrain.NewGround = newGroundEnv == "1";
+
         string biomeMechEnv = Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEMECH");
         if (biomeMechEnv == "1") Terrain.Enabled = true; else if (biomeMechEnv == "0") Terrain.Enabled = false;
 
@@ -300,6 +308,17 @@ public static class Program
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AIIDLETEST"), out int idleN) && idleN > 0)
         {
             AiIdleTest(idleN);
+            return;
+        }
+
+        // P16 GROUND TRUTH: SIGHTLINE_RIFTTEST=1 : the VOID chasm's BLOCKER gate — a rift may not
+        // strand anything. Builds every objective x mission x seed with the biome pinned to VOID and
+        // asserts the DIFFERENTIAL (the squad's reachable set shrinks by exactly the rift tiles,
+        // which also covers spawns that do not exist yet) plus every named fixture. =<N> widens the
+        // per-cell seed count (default 6 -> ~576 boards).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_RIFTTEST"), out int riftN) && riftN > 0)
+        {
+            Console.WriteLine(Game.RiftSelfTest(riftN == 1 ? 6 : riftN));
             return;
         }
 

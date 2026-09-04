@@ -25,7 +25,7 @@ public class Grid
     public GroundKind[,] Ground;
     // Fast "does this board have any at all" flags, so the hot paths (HasLineOfSight is called
     // W*H*foes times per threat rebuild) pay one static bool + one field read on a normal board.
-    public bool AnyFoliage, AnyIce, AnyVent;
+    public bool AnyFoliage, AnyIce, AnyVent, AnyRift, AnySand;
 
     public const int HighCoverHp = 2;   // chips to crack High -> Low
     public const int LowCoverHp = 1;    // chips to clear Low -> Floor
@@ -59,17 +59,27 @@ public class Grid
     /// MAGMA fissure: opaque, dear to cross, and it sets you alight.
     public bool IsVent(int x, int y) =>
         Terrain.Enabled && AnyVent && InBounds(x, y) && Ground[x, y] == GroundKind.Vent;
+    /// P16 / VOID chasm: IMPASSABLE (see IsFloor, the one chokepoint every mover already asks),
+    /// but TRANSPARENT and giving NO cover — so it is the only blocker on this board that hides
+    /// nothing. Deliberately NOT wired into BlocksSight, IsVapor or GetCover: those three
+    /// omissions ARE the mechanic, and BIOMETEST asserts each of them.
+    public bool IsRift(int x, int y) =>
+        Terrain.NewOn && AnyRift && InBounds(x, y) && Ground[x, y] == GroundKind.Rift;
+    /// P16 / ARID soft sand: costs half a step MORE to enter (see CostMap). The exact inverse of
+    /// ice, and — like ice — a MOVEMENT rule only: no cover, no sight change, no hazard.
+    public bool IsSand(int x, int y) =>
+        Terrain.NewOn && AnySand && InBounds(x, y) && Ground[x, y] == GroundKind.Sand;
 
     public void ClearGround()
     {
         Array.Clear(Ground, 0, Ground.Length);
-        AnyFoliage = AnyIce = AnyVent = false;
+        AnyFoliage = AnyIce = AnyVent = AnyRift = AnySand = false;
     }
 
-    /// Recompute the three "board has any" flags after a stamp.
+    /// Recompute the five "board has any" flags after a stamp.
     public void RefreshGroundFlags()
     {
-        AnyFoliage = AnyIce = AnyVent = false;
+        AnyFoliage = AnyIce = AnyVent = AnyRift = AnySand = false;
         for (int x = 0; x < W; x++)
             for (int y = 0; y < H; y++)
                 switch (Ground[x, y])
@@ -77,6 +87,8 @@ public class Grid
                     case GroundKind.Undergrowth: AnyFoliage = true; break;
                     case GroundKind.Ice:         AnyIce = true;     break;
                     case GroundKind.Vent:        AnyVent = true;    break;
+                    case GroundKind.Rift:        AnyRift = true;    break;
+                    case GroundKind.Sand:        AnySand = true;    break;
                 }
     }
 
@@ -264,7 +276,10 @@ public class Grid
     /// their own destruction). Never overrides a longer-burning tile down.
     public void LightFire(int x, int y, int turns)
     {
-        if (InBounds(x, y) && Tiles[x, y] == TileType.Floor && !Barrel[x, y]) Fire[x, y] = Math.Max(Fire[x, y], turns);
+        // P16: routed through IsFloor rather than restating its clauses, so a VOID rift — a tile
+        // no unit can occupy — cannot be set alight either. Identical to the old predicate
+        // (InBounds && Tiles==Floor && !Barrel) on every board without a rift on it.
+        if (IsFloor(x, y)) Fire[x, y] = Math.Max(Fire[x, y], turns);
     }
 
     /// Lay fire over a Chebyshev `radius` of floor tiles around (cx,cy).
@@ -290,10 +305,19 @@ public class Grid
     public int HeightAt(int x, int y) => InBounds(x, y) ? Height[x, y] : 0;
     public bool IsHigh(int x, int y) => HeightAt(x, y) > 0;
 
-    /// A tile a unit can stand on (floor + in bounds, and not occupied by an explosive barrel).
-    /// Barrels are physical obstacles, so routing this through IsFloor makes them impassable
-    /// everywhere (pathing/CostMap, deployment, shove/extract destinations) via one chokepoint.
-    public bool IsFloor(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.Floor && !Barrel[x, y];
+    /// A tile a unit can stand on (floor + in bounds, not occupied by an explosive barrel, and
+    /// not a VOID rift). Barrels are physical obstacles, so routing this through IsFloor makes
+    /// them impassable everywhere (pathing/CostMap, deployment, shove/extract destinations) via
+    /// one chokepoint.
+    ///
+    /// P16: the RIFT joins them HERE and nowhere else. That single word is the whole impassability
+    /// mechanic — pathing, the move overlay, Ai.Plan's candidate set, deployment, shove and extract
+    /// destinations, reinforcement and horde spawn seats, LightFire and PlaceIntelCache all ask
+    /// this one predicate, so there is no second passability model for the opponent to be missing.
+    /// The rift is deliberately absent from BlocksSight / IsVapor / GetCover: you shoot straight
+    /// across a hole and it shelters nobody.
+    public bool IsFloor(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.Floor && !Barrel[x, y]
+                                         && !(Terrain.NewOn && AnyRift && Ground[x, y] == GroundKind.Rift);
 
     // ---------- Line of sight ----------
     // Supercover line between tile centres; blocked by any intermediate HighCover tile
@@ -477,10 +501,15 @@ public class Grid
                 //   TUNDRA ice   — half a step: the drift is a fast LANE you can ride.
                 //   MAGMA  vent  — dear: the fissure is a barrier you force a crossing through,
                 //                  and OnUnitEnteredTile charges the second half of the toll in HP.
+                //   ARID   sand  — dear by half a step: a basin you route around rather than force.
+                // (VOID's RIFT is NOT here: it is impassable, which IsFloor above already says.)
                 if (Terrain.Enabled)
                 {
                     var gk = Ground[nx, ny];
                     if (gk == GroundKind.Ice && AnyIce) step = diagonal ? Terrain.IceStepDiag : Terrain.IceStepOrth;
+                    // P16 / ARID — SOFT SAND, the exact inverse of the drift and the whole of that
+                    // mechanic. One line, in the one cost map, so the opponent re-prices itself.
+                    else if (gk == GroundKind.Sand && AnySand && Terrain.NewGround) step = diagonal ? Terrain.SandStepDiag : Terrain.SandStepOrth;
                     else if (gk == GroundKind.Vent && AnyVent) step += Terrain.VentStepExtra;
                 }
                 int nc = cc + step;

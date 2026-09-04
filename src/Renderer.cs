@@ -2728,7 +2728,7 @@ public static class Renderer
     {
         if (!Terrain.Enabled) return;
         var gr = g.Grid;
-        if (!gr.AnyFoliage && !gr.AnyIce && !gr.AnyVent) return;
+        if (!gr.AnyFoliage && !gr.AnyIce && !gr.AnyVent && !gr.AnyRift && !gr.AnySand) return;
         bool cb = Pal.Colorblind;
 
         for (int x = 0; x < gr.W; x++)
@@ -2835,6 +2835,90 @@ public static class Renderer
                     Raylib.DrawLineEx(p1, p2, 7f, Raylib.Fade(glow, 0.42f + 0.24f * pulse));
                     Raylib.DrawLineEx(p0, p1, 2.4f, Raylib.Fade(core, 0.55f + 0.35f * pulse));
                     Raylib.DrawLineEx(p1, p2, 2.4f, Raylib.Fade(core, 0.55f + 0.35f * pulse));
+                }
+                else if (kind == GroundKind.Rift && Terrain.NewGround)
+                {
+                    // P16 / VOID — a HOLE. This is the only ground on the board that removes a tile
+                    // from the game, so it is the only one drawn as ABSENCE rather than as material:
+                    // the tile goes to near-black (below every floor value in every biome, so it
+                    // reads as depth at a squint and in greyscale), and the only bright marks are a
+                    // LIP on the two near edges — the light catching the broken floor as it falls
+                    // away. That is the opposite device from cover, which is drawn as a volume
+                    // standing UP off the board, so "cannot pass" arrives twice in the same visual
+                    // language the player already reads: up = a wall, down = a hole.
+                    //
+                    // NO RIM ON THE FAR EDGES, deliberately. The fern mat, the drift and the vent
+                    // all trace their whole boundary; a rift traces only where it meets floor you
+                    // could walk from, so the eye follows the WALKABLE side of the chasm — which is
+                    // the side the decision lives on.
+                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(3, 2, 6), 0.90f));
+                    Color lip = cb ? Pal.RGBA(228, 228, 234) : Pal.RGBA(196, 172, 240);
+                    if (!gr.IsRift(x - 1, y)) Raylib.DrawLineEx(new Vector2(r.X + 1f, r.Y), new Vector2(r.X + 1f, r.Y + r.Height), 2.4f, Raylib.Fade(lip, 0.50f));
+                    if (!gr.IsRift(x, y - 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y + 1f), new Vector2(r.X + r.Width, r.Y + 1f), 2.4f, Raylib.Fade(lip, 0.50f));
+                    // the far edges get a DARK shoulder instead — the floor beyond falls into the
+                    // hole's shadow, which is what makes the black read as a volume going down
+                    // rather than as a flat black square painted on the floor.
+                    if (!gr.IsRift(x + 1, y)) Raylib.DrawLineEx(new Vector2(r.X + r.Width - 1f, r.Y), new Vector2(r.X + r.Width - 1f, r.Y + r.Height), 3.0f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.55f));
+                    if (!gr.IsRift(x, y + 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y + r.Height - 1f), new Vector2(r.X + r.Width, r.Y + r.Height - 1f), 3.0f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.55f));
+                    // a few cold motes drifting up out of the dark: VOID's own ambient, made local,
+                    // so the hole is alive without being bright. Slow, tiny, and never saturated.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float mx = r.X + 6f + GH(x, y, 760 + i) * (Cfg.Tile - 12f);
+                        float phase = (t * 0.22f + GH(x, y, 780 + i)) % 1f;
+                        float my = r.Y + r.Height - 4f - phase * (r.Height - 8f);
+                        Raylib.DrawCircleV(new Vector2(mx, my), 1.5f,
+                                           Raylib.Fade(lip, 0.34f * (1f - phase)));
+                    }
+                }
+                else if (kind == GroundKind.Sand && Terrain.NewGround)
+                {
+                    // P16 / ARID — a warm pale drift of SOFT SAND. Deliberately built from the
+                    // opposite parts to the ice drift it inverts: ice is a COOL plate with straight
+                    // bright FRACTURES and a hard rim; sand is a WARM plate with curved RIPPLES and
+                    // a soft, dashed edge. Value is lifted (it is brighter than ARID floor), but
+                    // less than ice lifts it, so the two never sit at the same brightness on a
+                    // squint — a player who has seen both must never wonder which one they are on.
+                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(226, 196, 138), 0.15f));
+                    Color grain = cb ? Pal.RGBA(224, 220, 208) : Pal.RGBA(238, 214, 158);
+                    // dune ripples: shallow arcs across the tile, all leaning the same way within a
+                    // basin so the eye reads a surface rather than noise.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float ry = r.Y + 8f + i * (Cfg.Tile - 14f) / 2.4f + GH(x, y, 820 + i) * 3f;
+                        float amp = 2.6f + GH(x, y, 840 + i) * 2.0f;
+                        var prev = new Vector2(r.X + 3f, ry);
+                        for (int k = 1; k <= 4; k++)
+                        {
+                            float fx = r.X + 3f + k * (Cfg.Tile - 6f) / 4f;
+                            float fy = ry + MathF.Sin(k * 1.6f + (x + y) * 0.7f) * amp;
+                            Raylib.DrawLineEx(prev, new Vector2(fx, fy), 1.3f, Raylib.Fade(grain, 0.30f));
+                            prev = new Vector2(fx, fy);
+                        }
+                    }
+                    // grains — a handful of bright specks, the texture that says "loose", not "slick"
+                    for (int i = 0; i < 5; i++)
+                        Raylib.DrawCircleV(new Vector2(r.X + 4f + GH(x, y, 860 + i) * (Cfg.Tile - 8f),
+                                                       r.Y + 4f + GH(x, y, 880 + i) * (Cfg.Tile - 8f)),
+                                           1.1f, Raylib.Fade(grain, 0.34f));
+                    // a SOFT (dashed) boundary where the basin meets bare rock. The three C4
+                    // grounds all draw a continuous rim; sand's edge is genuinely soft in the
+                    // fiction and — more importantly — a fourth continuous rim on the board would
+                    // stop the rim meaning anything. Dashes read as "this fades out".
+                    Color srim = cb ? Pal.RGBA(232, 226, 210) : Pal.RGBA(220, 186, 124);
+                    void Dash(bool open, Vector2 a0, Vector2 b0)
+                    {
+                        if (!open) return;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            float u0 = k / 4f + 0.06f, u1 = (k + 1) / 4f - 0.06f;
+                            Raylib.DrawLineEx(a0 + (b0 - a0) * u0, a0 + (b0 - a0) * u1, 1.5f, Raylib.Fade(srim, 0.36f));
+                        }
+                    }
+                    Dash(!gr.IsSand(x - 1, y), new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height));
+                    Dash(!gr.IsSand(x + 1, y), new Vector2(r.X + r.Width, r.Y), new Vector2(r.X + r.Width, r.Y + r.Height));
+                    Dash(!gr.IsSand(x, y - 1), new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y));
+                    Dash(!gr.IsSand(x, y + 1), new Vector2(r.X, r.Y + r.Height), new Vector2(r.X + r.Width, r.Y + r.Height));
                 }
             }
     }
