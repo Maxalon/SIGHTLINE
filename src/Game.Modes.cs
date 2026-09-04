@@ -179,6 +179,7 @@ public partial class Game
         // THE MODES GET THE BESTIARY: the dialled faction, or ANY dealt off the map seed Start just rolled.
         ModeFaction = faction ?? DealtFaction(_run.MapSeed);
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        _run.StartHeat = _run.HeatLevel;   // P18: latch the DIALLED rung — see Run.AssistLevel
         _run.LossStreak = _metaLossStreak;
         // force the chosen objective for mission 1 (DebugForceObjective-style, but WITHOUT re-running
         // SetupMission — we call it once below with everything staged).
@@ -214,6 +215,7 @@ public partial class Game
         _run = new Run();
         _run.Start();
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        _run.StartHeat = _run.HeatLevel;   // P18: latch the DIALLED rung — see Run.AssistLevel
         _run.LossStreak = _metaLossStreak;
         // pin the map seed so the whole board (biome + arena selection driven off MapSeed) is
         // reproducible for the day — the same seed reproduces the same layout signature (verified twice).

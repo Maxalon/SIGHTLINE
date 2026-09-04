@@ -55,6 +55,7 @@ public partial class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        _run.StartHeat = _run.HeatLevel;   // P18: latch the DIALLED rung — see Run.AssistLevel
         _run.LossStreak = _metaLossStreak;
         // balance telemetry tag (no-op unless Stats.Enabled). APEX W4: the MODE ("endless") lives
         // in RunRec.Mode, not the policy slot — so endless stands split greedy/sloppy exactly like

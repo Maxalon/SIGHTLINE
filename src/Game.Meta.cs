@@ -21,6 +21,8 @@ public partial class Game
         public int Salvage;
         public int Runs, Wins, BestMissions, BestWave;
         public int Veterans;      // COUNTERPLAY: size of the cross-run veteran reserve
+        public int VeteranCap = SaveGame.MaxVeterans;   // P18: the cap this profile RUNS at (DEEP RESERVE)
+        public int BestHeatWon = -1;   // P18 THE SECOND AXIS: highest heat rung ever CLEARED (-1 = none)
         public int DailyStreak;   // W9 SIGNAL: consecutive-day daily-win streak
         public HashSet<string> Achievements = new();
         public HashSet<int> Unlocks = new();
@@ -47,6 +49,8 @@ public partial class Game
         p.Runs = runs; p.Wins = wins; p.BestMissions = best;
         p.BestWave = SaveGame.LoadMetaBestWave();
         p.Veterans = SaveGame.VeteranCount();
+        p.VeteranCap = SaveGame.VeteranCapNow();
+        p.BestHeatWon = SaveGame.LoadBestHeatWon();   // P18: the heat-gated column's currency
         p.DailyStreak = SaveGame.LoadDailyStreak();
         foreach (var a in SaveGame.LoadAchievements()) p.Achievements.Add(a);
         foreach (var u in SaveGame.LoadUnlocks()) p.Unlocks.Add(u);
@@ -84,6 +88,11 @@ public partial class Game
     {
         if (WarRoom == null || NoPersist) return;
         if (WarRoom.Unlocks.Contains((int)u)) { Audio.Play("select"); return; }   // already owned
+        // P18 "THE SECOND AXIS": a heat-gated unlock is refused until the rung has been CLEARED, and
+        // refused the same way an unaffordable one is — the ledger row publishes a hit-rect on
+        // purpose (the standing invariant is that every unowned unlock has one), so the click has to
+        // be ANSWERED. Salvage is never touched on this path: the gate is checked before the spend.
+        if (!MetaProg.UnlockHeatMet(u, WarRoom.BestHeatWon)) { Audio.Cue(Audio.GameEvent.ShopNo); return; }
         int cost = MetaProg.UnlockCost(u);
         if (WarRoom.Salvage < cost) { Audio.Cue(Audio.GameEvent.ShopNo); return; }               // can't afford
         if (SaveGame.SpendSalvage(cost))
@@ -93,6 +102,10 @@ public partial class Game
             WarRoom = LoadWarRoomProfile();   // reflect the spend + new unlock immediately
         }
     }
+
+    /// Harness seam: METATEST drives the REAL buy path (the P18 heat gate lives inside it, and a
+    /// test that re-implemented the gate could not see a gate that was never wired to the button).
+    public void TryBuyUnlockForTest(MetaUnlock u) => TryBuyUnlock(u);
 
     // ---- W9 (SIGNAL): repeatable salvage SINKS (the TryBuyUnlock pattern: the UI reads a cached
     // bank, SpendSalvage refuses-and-spends-nothing when short, a success refreshes the cache).
@@ -190,6 +203,12 @@ public partial class Game
             Salvage = 155,
             Runs = 12, Wins = 3, BestMissions = 6, BestWave = 14, Veterans = 5,
             DailyStreak = 3,   // W9: the streak row reads live
+            // P18 THE SECOND AXIS: a twelve-run career that has cleared heat 3 — so the staged shot
+            // shows the axis in BOTH of its states at once (COMBAT TRIALS earned and buyable; DEEP
+            // RESERVE and DEEP STORES still locked behind their rungs). A demo profile that had
+            // cleared nothing would photograph the axis as three grey rows and prove less.
+            BestHeatWon = 3,
+            VeteranCap = SaveGame.MaxVeterans,
         };
         WarRoom.Achievements.Add("FIRST_WIN");
         WarRoom.Achievements.Add("HEAT3");
@@ -246,6 +265,85 @@ public partial class Game
             SaveGame.AddUnlock((int)MetaUnlock.StartIntel);
             if (!SaveGame.HasUnlock((int)MetaUnlock.StartIntel)) fails.Add("unlockHas");
             if (SaveGame.HasUnlock((int)MetaUnlock.StartArmor)) fails.Add("unlockPhantom");
+
+            // ── (3b) P18 "THE SECOND AXIS" — the HEAT-GATED column ────────────────────────────
+            // THE DEFECT IT GUARDS. Six salvage unlocks cost 330 in total; a heat-0 clear banks 61.
+            // The shop therefore empties after ~5 wins while the heat cap — which rises by one per
+            // win AT the cap, to Heat.Max = 8 — keeps climbing for three more. The three unlocks
+            // below are gated on a heat rung CLEARED rather than on salvage banked, so the reward
+            // curve's domain is the difficulty curve's domain. Asserted UNCONDITIONALLY, so
+            // `SIGHTLINE_SECONDAXIS=0 SIGHTLINE_METATEST=1` FAILS — the proof this leg can see it.
+            {
+                if (MetaProg.HeatUnlocks.Length == 0) fails.Add("axisEmpty");
+                // every gated unlock is in the catalogue, gated, and APPENDED (ordinal > every
+                // pre-P18 member) — the save format's own rule, checked here as well as in SAVETEST.
+                foreach (var hu in MetaProg.HeatUnlocks)
+                {
+                    if (System.Array.IndexOf(MetaProg.AllUnlocks, hu) < 0) fails.Add("axisNotListed:" + hu);
+                    if (!MetaProg.IsHeatGated(hu)) fails.Add("axisNotGated:" + hu);
+                    if ((int)hu <= (int)MetaUnlock.StandingReserve) fails.Add("axisNotAppended:" + hu);
+                    if (MetaProg.UnlockHeatGate(hu) > Sightline.Heat.Max) fails.Add("axisGateUnreachable:" + hu);
+                }
+                // the top gate must be REACHABLE, and it is only reachable through BestHeatWon:
+                // UnlockedHeat stops rising at Heat.Max, so a heat-8 clear moves no ceiling at all.
+                int top = 0;
+                foreach (var hu in MetaProg.HeatUnlocks) top = Math.Max(top, MetaProg.UnlockHeatGate(hu));
+                if (top != Sightline.Heat.Max) fails.Add($"axisTopGate={top}(want {Sightline.Heat.Max})");
+
+                // BestHeatWon: raises only, round-trips, and MIGRATES a pre-P18 profile off MaxHeat.
+                SaveGame.RecordBestHeatWon(3);
+                if (SaveGame.LoadBestHeatWon() != 3) fails.Add("bestHeatRoundTrip");
+                SaveGame.RecordBestHeatWon(1);
+                if (SaveGame.LoadBestHeatWon() != 3) fails.Add("bestHeatLowered");
+                SaveGame.RecordBestHeatWon(Sightline.Heat.Max);
+                if (SaveGame.LoadBestHeatWon() != Sightline.Heat.Max) fails.Add("bestHeatCeiling");
+                // a profile written before the field existed: MaxHeat 6 == cleared 5.
+                System.IO.File.WriteAllText(SaveGame.MetaPathPublic, "{\"MaxHeat\":6,\"Salvage\":9999}");
+                if (SaveGame.LoadBestHeatWon() != 5) fails.Add($"bestHeatMigrate={SaveGame.LoadBestHeatWon()}");
+
+                // THE GATE ITSELF, through the REAL buy path: a rich profile that has cleared
+                // nothing cannot buy a gated unlock, and the refusal must not cost it a single
+                // point of salvage (the pre-spend order — this is the leg a "check after
+                // SpendSalvage" implementation would fail).
+                System.IO.File.WriteAllText(SaveGame.MetaPathPublic, "{\"Salvage\":9999}");
+                var gm = new Game { NoPersist = false };
+                gm.BeginWarRoom();
+                var gated = MetaProg.HeatUnlocks[0];
+                int gate = MetaProg.UnlockHeatGate(gated);
+                gm.TryBuyUnlockForTest(gated);
+                if (SaveGame.HasUnlock((int)gated)) fails.Add("axisBoughtWhileLocked");
+                if (SaveGame.LoadSalvage() != 9999) fails.Add($"axisLockedRefundLeak={SaveGame.LoadSalvage()}");
+                // clear the rung and the SAME click now lands
+                SaveGame.RecordBestHeatWon(gate);
+                gm.BeginWarRoom();
+                gm.TryBuyUnlockForTest(gated);
+                if (!SaveGame.HasUnlock((int)gated)) fails.Add("axisUnbuyableAfterGateMet");
+                if (SaveGame.LoadSalvage() != 9999 - MetaProg.UnlockCost(gated)) fails.Add("axisNotCharged");
+
+                // DEEP RESERVE actually widens the reserve the WAR ROOM reports and EnshrineVeterans caps at.
+                if (SaveGame.VeteranCapNow() != SaveGame.MaxVeterans) fails.Add("reserveCapEarly");
+                SaveGame.AddUnlock((int)MetaUnlock.DeepReserve);
+                if (SaveGame.VeteranCapNow() != MetaProg.DeepReserveCap) fails.Add("reserveCapUnlock");
+
+                // and the column's row plan still paints (and publishes a hit-rect for) every
+                // unowned entry at every owned/unowned split once LOCKED rows take their space.
+                for (int owned = 0; owned <= MetaProg.AllUnlocks.Length; owned++)
+                {
+                    int rest = MetaProg.AllUnlocks.Length - owned;
+                    for (int locked = 0; locked <= 1 && locked <= rest; locked++)
+                    {
+                        var pl = Hud.WarUnlockPlan(Hud.WarColumnHeight, owned, rest - locked, locked);
+                        if (pl.drawn != Math.Max(0, rest - locked - 1))
+                            fails.Add($"axisPlanDropped owned={owned} locked={locked} drew={pl.drawn}");
+                        if (pl.panelH > Hud.WarColumnHeight) fails.Add($"axisPlanOverflow owned={owned} locked={locked}");
+                        if (pl.descRows > 0 && pl.bodySize < 12) fails.Add($"axisSubFloorBody owned={owned}");
+                    }
+                }
+                try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+                SaveGame.AddSalvage(60);   // restore the bank legs (5)+ below expect
+                SaveGame.AddUnlock((int)MetaUnlock.StartIntel);
+                SaveGame.UnlockAchievement("FIRST_WIN");
+            }
 
             // (4) legends prepend + cap 40
             SaveGame.AddLegends(new[] { new SaveGame.LegendDto { Name = "A" } });
@@ -623,7 +721,8 @@ public partial class Game
             ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist; "
               + "recall charged once in ConfirmDraft + broke-confirm refuses; barracks sinks pend until the checkpoint commit "
               + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved; "
-              + "a corrupt MaxHeat can never lock the difficulty picker; the WAR ROOM publishes a buy-rect for every unowned unlock at every owned/unowned split, and never paints an unlock body below the 12px floor)"
+              + "a corrupt MaxHeat can never lock the difficulty picker; the WAR ROOM publishes a buy-rect for every unowned unlock at every owned/unowned split, and never paints an unlock body below the 12px floor; "
+              + "P18 THE SECOND AXIS: three heat-gated unlocks appended at the END, gates 2/5/8 with the top ON Heat.Max, BestHeatWon raises-only + migrates off MaxHeat, a locked buy is refused BEFORE the spend, and DEEP RESERVE widens the reserve cap)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

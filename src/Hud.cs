@@ -122,6 +122,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static Rectangle CodexBack;
     public static float CodexScrollMax;   // clamp bound for Game.CodexScroll (content overflow px)
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
+    /// P18 COMBAT TRIALS: the third perk card's rect. Only hit-tested when the offer carries HasC.
+    public static Rectangle PerkBtnC;
+    /// P18 "THE SECOND AXIS" item 2: the RECIPIENT chips on a BONUS perk offer (empty for a rank-up
+    /// promotion, which is not re-targetable). Published by DrawPerkChooser, hit-tested by
+    /// Game.HandlePerkClick — the same publish-a-rect contract the WAR ROOM buy buttons use.
+    public static readonly System.Collections.Generic.List<(Unit Unit, Rectangle Rect)> PerkWhoBtns = new();
     public static Rectangle SpecBtnA, SpecBtnB;   // W2: class-specialization fork chooser buttons
     public static Rectangle HeatMinus, HeatPlus;   // intro Heat/Ascension +/- selector
     public static Rectangle[] MissionCards = new Rectangle[3];
@@ -3591,9 +3597,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int achH = Math.Min(colH, 44 + MetaProg.All.Length * 42 + 6);
         int hofRows = p.Legends?.Count ?? 0;
         int hofH = hofRows == 0 ? 86 : Math.Min(colH, 44 + hofRows * 34 + 8);
-        int ownedN = 0, unownedN = 0;
-        foreach (var u in MetaProg.AllUnlocks) if (p.Unlocks.Contains((int)u)) ownedN++; else unownedN++;
-        int unlH = WarUnlockPlan(colH, ownedN, unownedN).panelH;
+        int ownedN = 0, unownedN = 0, commissionN = 0;
+        foreach (var u in MetaProg.ListedUnlocks())
+            if (p.Unlocks.Contains((int)u)) ownedN++;
+            else if (MetaProg.IsHeatGated(u)) commissionN++;   // P18: a ledger row, never a card
+            else unownedN++;
+        int unlH = WarUnlockPlan(colH, ownedN, unownedN, Math.Min(1, commissionN)).panelH;
 
         DrawWarAchievements(p, c0, top, colW, achH, PanelAnim("warAch", 0.4f, 0.15f));
         DrawWarHallOfFame(p, c1, top, colW, hofH, PanelAnim("warHof", 0.4f, 0.25f));
@@ -3614,7 +3623,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 ("WIN RATE",     p.Runs > 0 ? $"{(int)MathF.Round(100f * p.Wins / p.Runs)}%" : "-", false),
                 ("BEST MISSION", p.BestMissions.ToString(), false),
                 ("BEST WAVE",    p.BestWave.ToString(), false),
-                ("VETERANS",     $"{p.Veterans}/{SaveGame.MaxVeterans}", false),
+                // P18 DEEP RESERVE raises the cap; the footer must read the cap this profile RUNS at,
+                // or it under-reports the thing the unlock was bought for.
+                ("VETERANS",     $"{p.Veterans}/{p.VeteranCap}", p.VeteranCap > SaveGame.MaxVeterans),
                 ("DAILY STREAK", p.DailyStreak.ToString(), p.DailyStreak > 0),
             };
             float cellW = (foot.Width - 28) / cells.Length;
@@ -3938,14 +3949,27 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// DrawWarRoom and the card loop in DrawWarUnlocks. `drawn` is how many COMPACT cards the loop
     /// will actually paint — it must always equal unownedN-1 (the hero card carries the other one),
     /// or an unlock is invisible AND unbuyable. Rows shrink to fit rather than the list truncating.
+    /// P18 "THE SECOND AXIS": `commissionN` is the heat-gated column's NEXT COMMISSION row — 0 or 1,
+    /// and never more.
+    ///
+    /// THE MEASUREMENT THAT SET THAT NUMBER. This column had EIGHT PIXELS of slack in the state
+    /// FITTEST audits (2 owned / 4 unowned wants 202px of compact cards in 210px of room), so the
+    /// first cut — which gave the three new unlocks ordinary cards — compressed the pitch, dropped
+    /// the compact cards from two description rows to one, and made Hud.Clip ellipsize FOUR unlock
+    /// descriptions at every UI scale. FITTEST caught it (textEllipsized, WARROOM, @90/100/110%).
+    /// So a heat-gated unlock NEVER takes card space: it is a 24px ledger row until bought, after
+    /// which it becomes an ordinary OWNED receipt. One row is what the 8px of slack can buy, and it
+    /// is also the column's own NEXT UNLOCK idiom applied to the second axis — the next step, plus
+    /// a count of what stands behind it. See docs/DEVLOG.md §THE SECOND AXIS.
     public static (int panelH, int pitch, int cardH, int descRows, int bodySize, int drawn)
-        WarUnlockPlan(int colH, int ownedN, int unownedN)
+        WarUnlockPlan(int colH, int ownedN, int unownedN, int lockedN = 0)
     {
         int heroH = unownedN > 0 ? 106 : 0;
         int compactN = Math.Max(0, unownedN - 1);
-        int panelH = Math.Min(colH, 44 + heroH + compactN * 70 + ownedN * 24 + 8);
+        int ledgerN = ownedN + lockedN;
+        int panelH = Math.Min(colH, 44 + heroH + compactN * 70 + ledgerN * 24 + 8);
         int rowY = 44 + heroH;
-        int room = (panelH - 8) - rowY - ownedN * 24;
+        int room = (panelH - 8) - rowY - ledgerN * 24;
         int pitch = 70, cardH = 62, descRows = CardBodyRows, bodySize = CardBodySize;
         if (compactN > 0 && compactN * pitch - 8 > room)
         {
@@ -3985,10 +4009,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // live salvage-progress bar toward its price. The rest of the catalogue (incl. W9's
         // CROSS-TRAINING / QUARTERMASTER / STANDING RESERVE) lists below; OWNED entries collapse
         // to one-line receipts so the column stays a shop, not a ledger.
+        // P18: a heat-gated unlock is never the NEXT UNLOCK hero and never a compact card — it is a
+        // ledger row (see WarUnlockPlan for the 8px that decided that). Two reasons beyond space: a
+        // hero card carries a salvage progress bar, and a bar filling toward a purchase the profile
+        // is not allowed to make would be the kind of lie this project keeps having to repair; and
+        // the axis reads as an axis when it has its own line, not when it is shuffled in by price.
         MetaUnlock? next = null;
         int nextCost = int.MaxValue;
-        foreach (var u in MetaProg.AllUnlocks)
-            if (!p.Unlocks.Contains((int)u) && MetaProg.UnlockCost(u) < nextCost)
+        foreach (var u in MetaProg.ListedUnlocks())
+            if (!p.Unlocks.Contains((int)u) && !MetaProg.IsHeatGated(u) && MetaProg.UnlockCost(u) < nextCost)
             { next = u; nextCost = MetaProg.UnlockCost(u); }
 
         if (next.HasValue)
@@ -4042,13 +4071,17 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // floor is CardBodyMinSize = 10, and on a fresh profile it duly painted five of six
         // descriptions at 10px. The compressed rows no longer go through FitWrap at all.
         // `owned * 24` is reserved for the receipts below.
-        int ownedRows = 0, unownedRows = 0;
-        foreach (var u in MetaProg.AllUnlocks) if (p.Unlocks.Contains((int)u)) ownedRows++; else unownedRows++;
-        var plan = WarUnlockPlan(h, ownedRows, unownedRows);
+        int ownedRows = 0, unownedRows = 0, commissionRows = 0;
+        foreach (var u in MetaProg.ListedUnlocks())
+            if (p.Unlocks.Contains((int)u)) ownedRows++;
+            else if (MetaProg.IsHeatGated(u)) commissionRows++;
+            else unownedRows++;
+        var plan = WarUnlockPlan(h, ownedRows, unownedRows, Math.Min(1, commissionRows));
         int pitch = plan.pitch, cardH = plan.cardH, descRows = plan.descRows;
-        foreach (var u in MetaProg.AllUnlocks)
+        foreach (var u in MetaProg.ListedUnlocks())
         {
             if (p.Unlocks.Contains((int)u) || (next.HasValue && u == next.Value)) continue;
+            if (MetaProg.IsHeatGated(u)) continue;   // P18: the COMMISSION ledger row below
             if (rowY + cardH > y + h) break;   // true safety net; with the pitch above it should never fire
             int cost = MetaProg.UnlockCost(u);
             bool afford = p.Salvage >= cost;
@@ -4087,8 +4120,52 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             rowY += pitch;
         }
 
+        // P18 "THE SECOND AXIS": the LOCKED heat-gated entries, as one-line signposts. They name the
+        // rung that opens them, so the WAR ROOM answers "what does the ladder still pay me?" on the
+        // screen where the question is asked. Each still publishes a hit-rect — the existing
+        // invariant is that EVERY unowned unlock has one — and Game.TryBuyUnlock refuses it with the
+        // shop's own "no" cue, so a click is answered instead of swallowed.
+        // ── P18 "THE SECOND AXIS": the NEXT COMMISSION ────────────────────────────────────────
+        // One row: the unowned heat-gated unlock with the lowest rung, plus a count of what stands
+        // behind it. It reads BUY <cost> once the rung has been cleared and CLEAR HEAT n before —
+        // so the row is the answer to "the shop is empty, what does the ladder still pay me?", and
+        // it is the same row either way, which is what makes clearing a rung visibly change it.
+        // It always publishes a hit-rect (the standing invariant is that every unowned unlock has
+        // one); Game.TryBuyUnlock answers a locked click with the shop's own "no" cue.
+        MetaUnlock? nextComm = null; int commBehind = 0;
+        foreach (var u in MetaProg.ListedUnlocks())
+        {
+            if (p.Unlocks.Contains((int)u) || !MetaProg.IsHeatGated(u)) continue;
+            if (!nextComm.HasValue || MetaProg.UnlockHeatGate(u) < MetaProg.UnlockHeatGate(nextComm.Value))
+            { if (nextComm.HasValue) commBehind++; nextComm = u; }
+            else commBehind++;
+        }
+        if (nextComm.HasValue && rowY <= y + h - 26)
+        {
+            var u = nextComm.Value;
+            bool met = MetaProg.UnlockHeatMet(u, p.BestHeatWon);
+            int cost = MetaProg.UnlockCost(u);
+            bool afford = met && p.Salvage >= cost;
+            Color mark = met ? Pal.Good : Pal.VipGold;
+            Raylib.DrawRectangleLinesEx(new Rectangle(x + 16, rowY + 3, 10, 10), 1.2f, Raylib.Fade(mark, 0.85f * anim));
+            string nm = MetaProg.UnlockName(u) + (commBehind > 0 ? $"  (+{commBehind} more)" : "");
+            Cfg.Text(nm, new Vector2(x + 34, rowY), 13, 1f, Raylib.Fade(met ? Pal.Txt : Pal.TxtDim, 0.9f * anim));
+            string right = met ? $"BUY {cost}" : $"CLEAR HEAT {MetaProg.UnlockHeatGate(u)}";
+            float rw = Cfg.Measure(right, 12, 1f).X;
+            var commChip = new Rectangle((int)(x + w - 20 - rw), rowY, rw + 8, 18);
+            if (met)
+            {
+                bool hov = afford && Raylib.CheckCollisionPointRec(Mouse(), commChip);
+                Raylib.DrawRectangleRounded(commChip, 0.3f, 6, Raylib.Fade(hov ? Pal.Good : Pal.RGBA(24, 34, 30), anim));
+            }
+            Cfg.Text(right, new Vector2((int)(x + w - 16 - rw), rowY + 2), 12, 1f,
+                     Raylib.Fade(met ? (afford ? Pal.Good : Pal.TxtDim) : Pal.VipGold, 0.9f * anim));
+            WarRoomBuyBtns.Add((u, commChip));
+            rowY += 24;
+        }
+
         // owned unlocks: one-line receipts
-        foreach (var u in MetaProg.AllUnlocks)
+        foreach (var u in MetaProg.ListedUnlocks())
         {
             if (!p.Unlocks.Contains((int)u)) continue;
             if (rowY > y + h - 26) break;
@@ -6032,7 +6109,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
-        string title = "PROMOTION";
+        // P18: a BONUS perk is not a promotion and never was — the old card said PROMOTION over a
+        // reward the ELITE node / ADV. TRAINING / a field event handed out, to a soldier who had
+        // not ranked up. Name it for what it is, and say the decision the card is actually asking for.
+        string title = off.Bonus ? "FIELD TRAINING" : "PROMOTION";
         int titW = (int)Cfg.TitleMeasure(title, 36, 1f).X;
         Cfg.TitleText(title, new Vector2(x + w / 2 - titW / 2, y + 22), 36, 1f, Pal.Accent);
         // W12: the promoted soldier's class silhouette flanks the header (board-matching glyph),
@@ -6040,7 +6120,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // the pair reads symmetric around the title.
         Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f - titW / 2f - 36, y + 42), Pal.Friend, 1.5f, MathF.PI);
         Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f + titW / 2f + 36, y + 42), Pal.Friend, 1.5f);
-        string sub = $"{off.Unit.FullName}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  CHOOSE A PERK";
+        var whoList = off.Bonus && Run.BonusPerkPick && g.RunState != null
+                    ? g.RunState.BonusPerkCandidates() : new System.Collections.Generic.List<Unit>();
+        bool pickWho = whoList.Count > 1;
+        string sub = $"{off.Unit.FullName}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  "
+                   + (pickWho ? "CHOOSE THE SOLDIER, THEN THE PERK" : "CHOOSE A PERK");
         Cfg.Text(sub, new Vector2(x + w / 2 - (int)Cfg.Measure(sub, 14, 1f).X / 2, y + 64), 14, 1f, Pal.TxtDim);
 
         // full dossier so perks can be chosen for synergy
@@ -6056,11 +6140,55 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleLinesEx(PerkTagBtn, 1.2f, th ? Pal.Accent : Pal.PanelBd);
         CenterText("EDIT TAG", PerkTagBtn, 12, th ? Pal.Accent : Pal.TxtDim);
 
-        int cw = (w - 60) / 2, ch = 154, cy = y + 196, gap = 20;
+        // ── P18: the RECIPIENT row ────────────────────────────────────────────────────────────
+        // A strip of one chip per eligible survivor, above the perk cards. The rolled recipient is
+        // pre-selected, so the card opens on a complete, takeable offer and the row is pure upside:
+        // a player who does not care clicks a perk exactly as before. Drawn only for a BONUS offer
+        // with more than one candidate — a one-candidate "choice" is the non-decision DESIGN.md
+        // §3.A warns about wearing a decision's costume.
+        PerkWhoBtns.Clear();
+        int cardsTop = y + 196;
+        if (pickWho)
+        {
+            const int chipH = 26, chipGap = 8;
+            int rowY = y + 196;
+            int rowW = w - 40;
+            int chipW = Math.Min(150, (rowW - chipGap * (whoList.Count - 1)) / whoList.Count);
+            int usedW = chipW * whoList.Count + chipGap * (whoList.Count - 1);
+            int rowX = x + w / 2 - usedW / 2;
+            string lead = "GIVE IT TO";
+            Cfg.Text(lead, new Vector2(x + 20, rowY + 5), 12, 1f, Pal.TxtDim);
+            for (int i = 0; i < whoList.Count; i++)
+            {
+                var u = whoList[i];
+                var r = new Rectangle(rowX + i * (chipW + chipGap), rowY, chipW, chipH);
+                bool sel = ReferenceEquals(u, off.Unit);
+                bool hov = Raylib.CheckCollisionPointRec(Mouse(), r);
+                Raylib.DrawRectangleRounded(r, 0.3f, 6, sel ? Pal.RGBA(26, 42, 34) : (hov ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28)));
+                Raylib.DrawRectangleLinesEx(r, sel ? 1.8f : 1.2f, sel ? Pal.Good : (hov ? Pal.Accent : Pal.PanelBd));
+                string nm = Clip(u.Name, 12, chipW - 14);
+                CenterText(nm, r, 12, sel ? Pal.Good : (hov ? Pal.Accent : Pal.TxtDim));
+                PerkWhoBtns.Add((u, r));
+            }
+            cardsTop = rowY + chipH + 12;
+        }
+
+        // P18 COMBAT TRIALS: two cards or three, laid out from the SAME budget (the card never grows),
+        // so a widened offer cannot push its own text under the 12px floor — DrawPerkCard wraps to
+        // whatever width it is handed and FITTEST audits the result at all four UI scales.
+        int nCards = off.HasC ? 3 : 2;
+        int gap = 20;
+        int cw = (w - 40 - gap * (nCards - 1)) / nCards;
+        // Keep the untouched two-card PROMOTION card pixel-identical to pre-P18; only a widened or
+        // re-targetable offer re-flows its height off the space the recipient row left.
+        int ch = (off.HasC || pickWho) ? Math.Max(120, y + h - 44 - cardsTop) : 154;
+        int cy = cardsTop;
         PerkBtnA = new Rectangle(x + 20, cy, cw, ch);
         PerkBtnB = new Rectangle(x + 20 + cw + gap, cy, cw, ch);
+        PerkBtnC = off.HasC ? new Rectangle(x + 20 + (cw + gap) * 2, cy, cw, ch) : default;
         DrawPerkCard(PerkBtnA, off.A, off.Unit);
         DrawPerkCard(PerkBtnB, off.B, off.Unit);
+        if (off.HasC) DrawPerkCard(PerkBtnC, off.C, off.Unit);
 
         int left = g.RunState.PendingPerks.Count - 1;
         string foot = left > 0 ? $"{left} more promotion(s) to assign" : "Click a perk to continue";
