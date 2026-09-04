@@ -403,8 +403,16 @@ public class ShotAnim : Anim
         // shot reads as a burst of light (the bloom bright-pass haloes it). Crit kicks brighter.
         Vector2 mouth = A.Pos + dir * 16f;
         g.Fx.Flash(mouth, Pal.Accent, (Res.Hit && Res.Crit) ? 20f : 15f, 0.10f, 0.5f);
-        // Graze shakes less than a solid hit.
-        g.Fx.AddShake(Res.Hit ? (Res.Graze ? 2f : (Res.Crit ? 9f : 5f)) : 2.5f);
+        // Graze shakes less than a solid hit — but MORE than a whiff. P25 "NOBODY HAS LOOKED"
+        // measured the outcome ladder for the first time and found this line inverted at its
+        // bottom step: a MISS shook the screen 2.5 and a GRAZE — a round that actually connected —
+        // shook it 2.0, so the one channel that says "contact" said it loudest when nothing was
+        // hit. DESIGN.md §C: juice is proportional to event importance and must REINFORCE
+        // information, never contradict it. 3.0 keeps the graze the lightest CONTACT on the ladder
+        // (hit 5, crit 9(+1.5), kill +3.5) while clearing the whiff. Gated by SIGHTLINE_JUICETEST
+        // leg (a) `missOutPunchesGraze`. Presentation only: Fx.Shake drives a Camera2D offset and
+        // is read by nothing in Ai/Combat/the autopilot.
+        g.Fx.AddShake(Res.Hit ? (Res.Graze ? 3f : (Res.Crit ? 9f : 5f)) : 2.5f);
         // per-shot pitch variation + stereo pan so repeated fire doesn't sound identical: pan
         // by the firer's screen-x, pitch by a small deterministic jitter (handled in Audio).
         float panX = Util.Clamp(A.Pos.X / (float)Cfg.ScreenW, 0f, 1f);
@@ -700,6 +708,13 @@ public class GrenadeAnim : Anim
         g.Fx.AddShake(12f);
         g.AddHitStop(0.07f);
         g.AddZoomPunch(0.06f);
+        // P25: the frag was the ONE blast in the game with no bloom spike. A cooked barrel adds
+        // 0.5 and a BOMBARD strike 0.4 (Game.DetonateBarrel / DetonateSiege), and all three play
+        // the SAME cue - Audio.GameEvent.Explosion - so they promise the player one event and then
+        // answered on different channels: the grenade's flash had nothing to halo it. 0.35 keeps
+        // the frag the smallest of the three, which is what its damage and radius already say.
+        // Gated by SIGHTLINE_JUICETEST leg (c) `blastNoBloom`. Presentation only (post-FX).
+        g.AddBloom(0.35f);
         g.Fx.Burst(_to, Pal.Accent, 36, 360f, 0.6f, 4.5f, true);
         g.Fx.Burst(_to, Pal.RGBA(120, 90, 60), 22, 200f, 0.8f, 5f);
 

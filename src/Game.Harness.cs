@@ -13860,4 +13860,566 @@ public partial class Game
         DebugMousePark = Util.TileCenter(sol.X, sol.Y);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════════
+    //  P25 "NOBODY HAS LOOKED" — SIGHTLINE_JUICETEST: THE ANSWER
+    //
+    //  Pillar 2 is "Feels good: every action lands with weight, motion, and sound." Eighteen
+    //  milestones measured WIN RATE. Two measurement waves wrote "does not measure FEEL; nobody
+    //  has looked" into the DEVLOG and moved on. FEELTEST (THE STRIDE) measures the TWEEN — the
+    //  shape of one walk, one vault, one kill-cam, one reaction, and where floating text sits.
+    //  Nothing measured the thing pillar 2 actually promises: that an action gets an ANSWER, that
+    //  the answer is PROPORTIONAL to what happened, and that the same kind of event answers the
+    //  same way everywhere.
+    //
+    //  This probe measures the FEEDBACK FOOTPRINT of an event — the channels the game fires back
+    //  — on the real code paths, driven through the real anim pump, with the real Audio.Spy cue
+    //  log. Four channel classes (FeelAnswer): SEEN (particles / floating text / rings / streaks /
+    //  lights / reticles / queued motion / body FX), HEARD (cues that reached Audio.Play, recorded
+    //  device-free), FELT (screen shake, hit-stop, zoom-punch, bloom) and READ (the combat log).
+    //
+    //  (a) THE LADDER. Six shot outcomes — MISS / GRAZE / HIT / CRIT / KILL / CRIT-KILL — fired by
+    //      the same soldier at the same target through the same ShotAnim. DESIGN.md §C: "keep juice
+    //      PROPORTIONAL to event importance (a crit-kill should out-punch a graze)". Asserts no
+    //      outcome is unseen or unheard, that the CONNECTED ladder (graze -> crit-kill) never steps
+    //      DOWN on any channel, and that a WHIFF never out-punches CONTACT on a weight channel.
+    //  (b) THE CENSUS. Every id in Hud.VerbTable — the action bar's own list, so a verb added to
+    //      the bar joins this census or fails it — staged legal, ARMED through the real DoAction
+    //      dispatcher and COMMITTED through its real Issue*. Asserts every verb actually fires and
+    //      that its commit is both SEEN and HEARD. An unacknowledged action is the single most
+    //      reliable feel failure there is, and it is the one thing here that is fully measurable.
+    //  (c) THE SAME ANSWER EVERYWHERE. One unit takes damage by nine different routes (aimed shot,
+    //      reaction, grenade, barrel, siege, burn, bleed, slam, vent), non-lethal and lethal.
+    //      Asserts every route is SEEN, and that every route's KILL carries the whole KillUnit
+    //      signature — shake, hit-stop, zoom-punch, a cue and a death word.
+    //
+    //  WHAT IT CANNOT SEE — read this before quoting any number out of it:
+    //   * It cannot HEAR. It records that a cue id reached Audio.Play, with its pan. It cannot say
+    //     whether the sound is right, pleasant, audible over the bed, or distinguishable from its
+    //     neighbours. (AUDIOTEST/AUDIOGATE measure the rendered BUFFER; nobody has listened.)
+    //   * It cannot SEE. It counts what was pushed into Fx and reads positions; it does not render.
+    //     A channel can fire and still be invisible — occluded, off-screen, alpha 0, behind the HUD.
+    //     FEELTEST's own leg (c2) found exactly that class of defect. In particular the six MODAL
+    //     verbs' arm feedback is a RENDERER overlay driven off AimMode/GrenadeMode/... which this
+    //     probe does not draw and therefore CANNOT count — the arm rows below are reported, never
+    //     asserted, for that reason.
+    //   * It cannot judge PROPORTION perceptually. "9 > 5" is an ordering, not a perception; two
+    //     rungs the table separates may be indistinguishable to a player.
+    //   * It cannot see TIMING JITTER. Everything runs at a synthetic 1/60 dt with no GPU; a hitch
+    //     on a real machine is invisible here.
+    //   * It cannot measure FUN, pacing across a session, or whether any of this is satisfying.
+    //     It measures the CODE PATH's response, not the player's experience of it.
+    //  It is a starvation-and-proportionality instrument. That is all it is.
+    // ══════════════════════════════════════════════════════════════════════════════════════
+
+    /// One event's FEEDBACK FOOTPRINT: what the game did back, counted per channel.
+    public struct FeelAnswer
+    {
+        public int Parts, Texts, Rings, Streaks, Lights, Rets, Cues, Logs, Queued, Moved;
+        public float Shake, Stop, Bloom, Zoom, TMax, Body;
+        public string Ids;
+        /// Every floating word this event printed, in order. The KILL leg asserts the DEATH WORD is
+        /// among them by NAME: an earlier draft only counted texts, and a deliberate deletion of
+        /// KillUnit's "DOWN" pop passed the gate because the shot's own damage number was still
+        /// there. A channel COUNT cannot see a missing word.
+        public string Words;
+        /// LATENCY: the frame index (at 1/60) on which the FIRST channel moved. 0 = the same frame
+        /// the verb was committed (a synchronous answer); n = the nth pump frame; -1 = never.
+        /// CAVEAT, and it is a real one: this is the first Fx/AUDIO answer. An anim that answers by
+        /// DRAWING (GrenadeAnim's in-flight arc, the targeting overlays) is invisible to it, because
+        /// this probe pumps Update and never calls Draw.
+        public int Ack;
+        /// SEEN — anything that appeared on the board, or moved a figure on it.
+        /// `Queued` is deliberately NOT in this sum. It counts anims ENQUEUED, which is a promise
+        /// that something will be drawn, not evidence that anything was: an earlier draft included
+        /// it and a build with ShotAnim.Apply guarded out entirely still read Seen >= 1 on every
+        /// shot outcome, because the (now inert) anim was still on the queue. `Moved` replaces it
+        /// with the real thing — a watched figure's drawn position actually changed.
+        public int Seen => Parts + Texts + Rings + Streaks + Lights + Rets + Moved + (Body > 0.001f ? 1 : 0);
+        /// HEARD — cues that reached Audio.Play (Audio.Spy records device-free).
+        public int Heard => Cues;
+        /// FELT — the weight channels, on one scale (hit-stop/zoom in centiseconds-equivalent).
+        public float Felt => Shake + Stop * 100f + Zoom * 100f + Bloom;
+        /// READ — lines added to the always-on combat log.
+        public int Read => Logs;
+    }
+
+    /// The KILL SIGNATURE: what Game.KillUnit owes every death, by whatever route it arrives.
+    public const float KillSigShake = 7f, KillSigStop = 0.1f, KillSigZoom = 0.05f;
+    /// LATENCY CEILING, in frames at 1/60. Deliberately loose — a STARVATION bound, not a snappiness
+    /// target. The slowest measured act is thrown ordnance, whose Fx/audio answer is the detonation at
+    /// GrenadeAnim.Flight = 0.50 s = exactly 30 frames; 36 keeps the gate off that shipped constant
+    /// instead of sitting on it. (The thrown arc is DRAWN from frame 0, which this probe cannot see —
+    /// so 30f is an upper bound on a thrown verb's true latency, not its latency.)
+    public const int JuiceAckMax = 36;
+
+    public string JuiceSelfTest()
+    {
+        var fails = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        Audio.BuildRecipes();
+
+        Unit MkU(Team t, int x, int y, int hp, string cls = null)
+        {
+            var u = new Unit { Name = t == Team.Player ? "SOL" : "FOE",
+                               Cls = cls ?? (t == Team.Player ? "ASSAULT" : "GRUNT"),
+                               Team = t, X = x, Y = y, Hp = hp, MaxHp = hp, Aim = 65, Mobility = 4,
+                               PodId = -1, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        // A clean, window-free board with no mission fixtures. A FRESH Game per measured event:
+        // bloom and the zoom-punch only ACCUMULATE (AddBloom/AddZoomPunch have no reset), so a
+        // shared instance would carry one row's spike into the next.
+        Game Scene(int seed)
+        {
+            Util.Reseed(seed);
+            var g = new Game { NoPersist = true, AutoPlay = false };
+            g.Grid = new Grid();
+            g.Players = new List<Unit>(); g.Enemies = new List<Unit>();
+            g.Vip = null; g.CaptiveLocked = false; g.Objective = Objective.Eliminate;
+            g.EvacZone.Clear(); g.BeaconZone.Clear(); g.BeaconPlanted = false;
+            g.Fx = new Fx(); g._anims.Clear();
+            g.Phase = Phase.PlayerTurn;
+            Voice.BeginMission(0, 1);   // the bark budget is STATIC and once-per-mission: without this
+                                        // reset the first row to kill anything eats FirstBlood and every
+                                        // later row's combat-log column reads one line short.
+            g.DragMode = g.VaultMode = g.AimMode = g.GrenadeMode = g.ItemMode = g.ShoveMode = false;
+            return g;
+        }
+        int stuck = 0;
+        // Measure ONE event: zero the channels this probe reads, run `act`, then drive the anim
+        // queue exactly as Game.Update's pump does (OnStart on ACTIVATION, pop only from the front).
+        FeelAnswer Measure(Game g, List<Unit> watch, Action act)
+        {
+            g.Fx = new Fx();
+            g.HitStop = 0f;
+            int log0 = Stats.CombatLog.Count;
+            float bloom0 = g.PostFxBloom, zoom0 = g.CamPulse;
+            foreach (var u in watch) { u.Flash = 0f; u.FlinchAnim = 0f; u.Recoil = Vector2.Zero; u.RecoilAnim = 0f; u.WalkLean = 0f; }
+            float Body()
+            {
+                float b = 0f;
+                foreach (var u in watch) b += u.Flash + u.FlinchAnim + u.Recoil.Length() + u.RecoilAnim + u.WalkLean;
+                return b;
+            }
+            var pos0 = watch.Select(u => u.Pos).ToList();
+            int MovedNow()
+            {
+                for (int i = 0; i < watch.Count; i++) if (Vector2.Distance(watch[i].Pos, pos0[i]) > 0.5f) return 1;
+                return 0;
+            }
+            Audio.Spy = new List<(string id, float panX, bool foe)>();
+            float Fingerprint()
+                => g.Fx.Particles.Count + g.Fx.Texts.Count + g.Fx.Rings.Count + g.Fx.Streaks.Count
+                 + g.Fx.Lights.Count + g.Fx.Reticles.Count + Audio.Spy.Count + (Stats.CombatLog.Count - log0)
+                 + g.Fx.Shake + g.HitStop * 100f + (g.PostFxBloom - bloom0) + (g.CamPulse - zoom0)
+                 + Body() + MovedNow(); // the BODY channel (flash / flinch / recoil) counts toward Seen, so it must
+                           // count toward the latency fingerprint too, or a verb whose only answer is a
+                           // flash reads as "answered on frame -1" while Seen says it was answered.
+            float fp0 = Fingerprint();
+            act();
+            int ack = Fingerprint() != fp0 ? 0 : -1;
+            int queued = g._anims.Count;
+            int guard = 0;
+            while (g._anims.Count > 0 && guard < 900)
+            {
+                var a = g._anims[0];
+                if (!a.Started) { a.Started = true; a.OnStart(g); }
+                bool done = a.Update(g, 1f / 60f);
+                if (done && g._anims.Count > 0 && g._anims[0] == a) g._anims.RemoveAt(0);
+                guard++;
+                if (ack < 0 && Fingerprint() != fp0) ack = guard;
+            }
+            if (g._anims.Count > 0) { stuck++; g._anims.Clear(); }
+            float body = Body();
+            var ids = Audio.Spy.Select(c => c.id).ToList();
+            Audio.Spy = null;
+            return new FeelAnswer
+            {
+                Parts = g.Fx.Particles.Count, Texts = g.Fx.Texts.Count, Rings = g.Fx.Rings.Count,
+                Streaks = g.Fx.Streaks.Count, Lights = g.Fx.Lights.Count, Rets = g.Fx.Reticles.Count,
+                Cues = ids.Count, Ids = ids.Count > 0 ? string.Join("+", ids) : "-",
+                Logs = Stats.CombatLog.Count - log0, Queued = queued, Moved = MovedNow(),
+                Shake = g.Fx.Shake, Stop = g.HitStop, Bloom = g.PostFxBloom - bloom0, Zoom = g.CamPulse - zoom0,
+                TMax = g.Fx.Texts.Count > 0 ? g.Fx.Texts.Max(t => t.Size) : 0f,
+                Body = body, Ack = ack,
+                Words = g.Fx.Texts.Count > 0 ? string.Join("/", g.Fx.Texts.Select(t => t.Text)) : "-",
+            };
+        }
+        string Row(string name, FeelAnswer a)
+            => $"{name,-12} seen {a.Seen,3}  heard {a.Heard,2}  felt {a.Felt,6:0.0}  read {a.Read,2}  ack {a.Ack,3}f | "
+             + $"shake {a.Shake,4:0.0} stop {a.Stop:0.000} bloom {a.Bloom:0.000} zoom {a.Zoom:0.000} "
+             + $"px {a.Parts,3} txt {a.Texts,2} tmax {a.TMax,4:0} anim {a.Queued} mv {a.Moved} | {a.Ids} | {a.Words}";
+
+        // ══ (a) THE LADDER — is the juice proportional to what happened? ══════════════════
+        string[] tierName = { "MISS", "GRAZE", "HIT", "CRIT", "KILL", "CRIT-KILL" };
+        var tier = new FeelAnswer[6];
+        for (int i = 0; i < 6; i++)
+        {
+            var g = Scene(70250 + i);
+            var a = MkU(Team.Player, 3, 5, 8); g.Players.Add(a); g.Selected = a;
+            var d = MkU(Team.Enemy, 8, 5, 30);
+            g.Enemies.Add(d);
+            g.Enemies.Add(MkU(Team.Enemy, 9, 5, 8));      // spares: this kill is never the LAST foe,
+            g.Enemies.Add(MkU(Team.Enemy, 10, 5, 8));     // so the kill-cam (FEELTEST leg d) stays out of it
+            var res = i switch
+            {
+                0 => new ShotResult { Hit = false },
+                1 => new ShotResult { Hit = true, Graze = true, Damage = 1 },
+                2 => new ShotResult { Hit = true, Damage = 3 },
+                3 => new ShotResult { Hit = true, Crit = true, Damage = 5 },
+                4 => new ShotResult { Hit = true, Damage = 30 },
+                _ => new ShotResult { Hit = true, Crit = true, Damage = 30 },
+            };
+            tier[i] = Measure(g, new List<Unit> { a, d }, () => g.Enqueue(new ShotAnim(a, d, res), Team.Player));
+            sb.AppendLine("JUICETEST: ladder " + Row(tierName[i], tier[i]));
+        }
+        for (int i = 0; i < 6; i++)
+        {
+            if (tier[i].Seen < 1) fails.Add($"outcomeUnseen({tierName[i]})");
+            if (tier[i].Heard < 1) fails.Add($"outcomeUnheard({tierName[i]})");
+            if (tier[i].Ack < 0 || tier[i].Ack > JuiceAckMax) fails.Add($"outcomeUnacknowledged({tierName[i]}:{tier[i].Ack}f)");
+        }
+        // the CONNECTED ladder never steps DOWN: a bigger thing happened, so nothing may shrink.
+        var chans = new (string n, Func<FeelAnswer, float> f)[]
+        {
+            ("shake", x => x.Shake), ("hitstop", x => x.Stop), ("bloom", x => x.Bloom),
+            ("zoom", x => x.Zoom), ("particles", x => x.Parts), ("textsize", x => x.TMax),
+        };
+        foreach (var c in chans)
+            for (int i = 2; i < 6; i++)
+                if (c.f(tier[i]) < c.f(tier[i - 1]) - 1e-4f)
+                    fails.Add($"ladderStepsDown({c.n}:{tierName[i - 1]}->{tierName[i]} {c.f(tier[i - 1]):0.00}>{c.f(tier[i]):0.00})");
+        // A WHIFF MUST NOT OUT-PUNCH CONTACT. Weight channels only: text SIZE is information, and a
+        // MISS legitimately needs a readable word — that column is reported, never asserted.
+        var weight = new (string n, Func<FeelAnswer, float> f)[]
+        {
+            ("shake", x => x.Shake), ("hitstop", x => x.Stop), ("bloom", x => x.Bloom), ("zoom", x => x.Zoom),
+        };
+        foreach (var c in weight)
+            if (c.f(tier[0]) > c.f(tier[1]) + 1e-4f)
+                fails.Add($"missOutPunchesGraze({c.n}:{c.f(tier[0]):0.00}>{c.f(tier[1]):0.00})");
+        // and the sentence DESIGN.md §C actually writes down, on every weight channel
+        foreach (var c in weight)
+            if (c.f(tier[5]) < c.f(tier[1]) + 1e-4f)
+                fails.Add($"critKillDoesNotOutPunchGraze({c.n}:{c.f(tier[5]):0.00}<={c.f(tier[1]):0.00})");
+
+        // ══ (b) THE CENSUS — does every verb on the bar get an answer? ════════════════
+        // Driven off Hud.VerbTable, the action bar's OWN list: a verb added to the bar and not
+        // staged here fails with verbNotStaged, so the census cannot silently go stale. ABILITY and
+        // UTILITY ITEM are one bar button each but FIVE and FOUR different verbs in play (both are
+        // derived from Unit.Cls and cannot be assigned), so each class gets its own row — that is
+        // where a cross-surface inconsistency would hide.
+        string[] abilityClasses = { "ASSAULT", "RANGER", "SHARPSHOOTER", "GUNNER", "CORPSMAN" };
+        string[] itemClasses = { "ASSAULT", "RANGER", "SHARPSHOOTER", "GUNNER" };
+        var plan = new List<(string Id, string Label, string Cls)>();
+        foreach (var v in Hud.VerbTable)
+        {
+            if (v.Id == "ability") foreach (var c in abilityClasses) plan.Add((v.Id, "ABILITY:" + Unit.AbilityKindFor(c).ToString().ToUpperInvariant(), c));
+            else if (v.Id == "item") foreach (var c in itemClasses) plan.Add((v.Id, "ITEM:" + Unit.ItemKindFor(c).ToString().ToUpperInvariant(), c));
+            else plan.Add((v.Id, v.Label, null));
+        }
+        int vi = 0;
+        var armSilent = new List<string>();
+        var covered = new HashSet<string>();
+        foreach (var row in plan)
+        {
+            var g = Scene(70300 + vi++);
+            var sol = MkU(Team.Player, 5, 5, 8, row.Cls); g.Players.Add(sol); g.Selected = sol;
+            var watch = new List<Unit> { sol };
+            Action arm = null, commit = null; Func<bool> fired = null; Func<bool> mode = null;
+            Unit foe = null, mate = null;
+            switch (row.Id)
+            {
+                case "shoot":
+                    foe = MkU(Team.Enemy, 10, 5, 30); g.Enemies.Add(foe); watch.Add(foe);
+                    arm = () => g.DoAction("shoot"); mode = () => g.AimMode;
+                    commit = () => g.IssueShoot(foe); fired = () => sol.Ammo < sol.Weapon.Clip; break;
+                case "grenade":
+                    foe = MkU(Team.Enemy, 10, 5, 30); g.Enemies.Add(foe); watch.Add(foe);
+                    sol.Grenades = 1;
+                    arm = () => g.DoAction("grenade"); mode = () => g.GrenadeMode;
+                    commit = () => g.IssueGrenade(10, 5); fired = () => sol.Grenades == 0; break;
+                case "ability":
+                    {
+                        sol.AbilityCd = 0;
+                        var k = sol.Ability;
+                        if (k == AbilityKind.Heal)
+                        {
+                            mate = MkU(Team.Player, 6, 5, 8); mate.Hp = 2; g.Players.Add(mate); watch.Add(mate);
+                            arm = () => g.DoAction("ability"); fired = () => mate.Hp > 2;
+                        }
+                        else if (k == AbilityKind.Mark || k == AbilityKind.Grapple || k == AbilityKind.Pin)
+                        {
+                            foe = MkU(Team.Enemy, k == AbilityKind.Grapple ? 7 : 10, 5, 30); g.Enemies.Add(foe); watch.Add(foe);
+                            var target = foe;
+                            arm = () => g.DoAction("ability");
+                            mode = () => k == AbilityKind.Mark ? g.MarkMode : k == AbilityKind.Grapple ? g.GrappleMode : g.PinMode;
+                            commit = k == AbilityKind.Mark ? () => g.IssueMark(sol, target)
+                                   : k == AbilityKind.Grapple ? () => g.IssueGrapple(sol, target)
+                                   : (Action)(() => g.IssuePin(sol, target));
+                            fired = k == AbilityKind.Mark ? () => target.Marked
+                                  : k == AbilityKind.Grapple ? () => sol.ShovedThisTurn
+                                  : (Func<bool>)(() => sol.AbilityCd > 0);
+                        }
+                        else
+                        {
+                            arm = () => g.DoAction("ability");
+                            fired = () => sol.AbilityCd > 0 || sol.Slipstreaming || sol.RunGun || sol.Blitz || sol.Steady;
+                        }
+                        break;
+                    }
+                case "item":
+                    sol.ItemCharge = 1;
+                    arm = () => g.DoAction("item"); mode = () => g.ItemMode;
+                    commit = () => g.IssueItem(8, 5); fired = () => sol.ItemCharge == 0; break;
+                case "shove":
+                    foe = MkU(Team.Enemy, 6, 5, 30); g.Enemies.Add(foe); watch.Add(foe);
+                    arm = () => g.DoAction("shove"); mode = () => g.ShoveMode;
+                    commit = () => g.IssueShove(sol, foe); fired = () => sol.ShovedThisTurn; break;
+                case "drag":
+                    mate = MkU(Team.Player, 7, 5, 8); g.Players.Add(mate); watch.Add(mate);
+                    arm = () => g.DoAction("drag"); mode = () => g.DragMode;
+                    commit = () => g.IssueDrag(mate); fired = () => mate.X == 6; break;
+                case "vault":
+                    g.Grid.Tiles[6, 5] = TileType.HighCover; g.Grid.SetCoverHp(6, 5);
+                    arm = () => g.DoAction("vault"); mode = () => g.VaultMode;
+                    commit = () => g.IssueVault(7, 5); fired = () => sol.X == 7; break;
+                case "overwatch":
+                    foe = MkU(Team.Enemy, 10, 5, 30); g.Enemies.Add(foe);
+                    arm = () => g.DoAction("overwatch"); fired = () => sol.OnOverwatch; break;
+                case "focusow":
+                    foe = MkU(Team.Enemy, 10, 5, 30); g.Enemies.Add(foe);
+                    arm = () => g.DoAction("focusow"); fired = () => sol.OwFocused; break;
+                case "brace":
+                    foe = MkU(Team.Enemy, 10, 5, 30); g.Enemies.Add(foe);
+                    arm = () => g.DoAction("brace"); fired = () => sol.OwBrace; break;
+                case "hunker":
+                    arm = () => g.DoAction("hunker"); fired = () => sol.Hunkered; break;
+                case "hack":
+                    g.Objective = Objective.Hack; g.Terminal = (6, 5); g.HackProgress = 0; g.HackedThisTurn = false;
+                    arm = () => g.DoAction("hack"); fired = () => g.HackProgress == 1; break;
+                case "beacon":
+                    g.Objective = Objective.Evac; g.EvacZone.Add((0, 0));
+                    g.Players.Add(MkU(Team.Player, 12, 9, 8));      // a squadmate outside the zone: the plant must not WIN
+                    arm = () => g.DoAction("beacon"); fired = () => g.BeaconPlanted; break;
+                case "extract":
+                    g.Objective = Objective.Evac;
+                    g.EvacZone.Add((5, 5)); g.EvacZone.Add((4, 5)); g.EvacZone.Add((4, 4)); g.EvacZone.Add((5, 4));
+                    mate = MkU(Team.Player, 6, 5, 8); g.Players.Add(mate); watch.Add(mate);
+                    g.Players.Add(MkU(Team.Player, 12, 9, 8));      // ditto: the pull must not WIN the field
+                    arm = () => g.DoAction("extract"); fired = () => g.EvacZone.Contains((mate.X, mate.Y)); break;
+                case "stabilize":
+                    mate = MkU(Team.Player, 6, 5, 1); g.Players.Add(mate); watch.Add(mate);
+                    mate.Downed = true; mate.Stabilized = false;
+                    arm = () => g.DoAction("stabilize"); fired = () => mate.Stabilized; break;
+                case "reload":
+                    sol.Ammo = 0;
+                    arm = () => g.DoAction("reload"); fired = () => sol.Ammo == sol.Weapon.Clip; break;
+            }
+            if (arm == null) { fails.Add($"verbNotStaged({row.Id})"); continue; }
+            covered.Add(row.Id);
+            var armed = Measure(g, watch, arm);
+            bool modal = commit != null;
+            string armState = modal ? (mode != null && mode() ? "MODE-ON" : "MODE-OFF") : "-";
+            var done = modal ? Measure(g, watch, commit) : armed;
+            if (fired != null && !fired()) fails.Add($"verbDidNotFire({row.Label})");
+            if (modal && armState != "MODE-ON") fails.Add($"verbDidNotArm({row.Label})");
+            if (done.Seen < 1) fails.Add($"verbUnseen({row.Label})");
+            if (done.Heard < 1) fails.Add($"verbUnheard({row.Label})");
+            if (done.Ack < 0 || done.Ack > JuiceAckMax) fails.Add($"verbUnacknowledged({row.Label}:{done.Ack}f)");
+            if (modal && armed.Heard == 0) armSilent.Add(row.Label);
+            sb.AppendLine($"JUICETEST: census {Row(row.Label, done)}"
+                        + (modal ? $"  [arm: {armState} seen {armed.Seen} heard {armed.Heard} cues {armed.Ids}]" : ""));
+        }
+        foreach (var v in Hud.VerbTable) if (!covered.Contains(v.Id)) fails.Add($"verbNotStaged({v.Id})");
+        // MOVE is not on the action bar (it is the default board act) and is the most frequent
+        // action in the game, so the census would be a lie without it.
+        {
+            var g = Scene(70330);
+            var sol = MkU(Team.Player, 3, 5, 8); g.Players.Add(sol); g.Selected = sol;
+            var path = new List<(int x, int y)> { (4, 5), (5, 5), (6, 5) };
+            var mv = Measure(g, new List<Unit> { sol }, () => g.EnqueuePath(sol, path, Team.Player));
+            sb.AppendLine("JUICETEST: census " + Row("MOVE(3 tiles)", mv));
+            if (sol.X != 6) fails.Add("moveDidNotLand");
+            if (mv.Seen < 1) fails.Add("verbUnseen(move)");
+            if (mv.Heard < 1) fails.Add("verbUnheard(move)");
+            if (mv.Ack < 0 || mv.Ack > JuiceAckMax) fails.Add($"verbUnacknowledged(move:{mv.Ack}f)");
+        }
+        sb.AppendLine($"JUICETEST: census {Hud.VerbTable.Length} bar verbs -> {plan.Count} rows + MOVE; "
+                    + $"modal arms with NO cue: {(armSilent.Count == 0 ? "none" : string.Join(",", armSilent))} "
+                    + "(an arm's real feedback is a RENDERER overlay this probe cannot draw - reported, not asserted)");
+
+        // ══ (c) THE SAME ANSWER EVERYWHERE — one damage event, nine routes ════════════════
+        // Each route runs twice on the same staged board: once NON-LETHAL (does the arrival get an
+        // answer at all?) and once LETHAL (does the death carry KillUnit's whole signature?).
+        var routes = new List<string> { "aimed-shot", "crit-shot", "reaction", "grenade", "barrel", "siege", "burn", "bleed", "slam" };
+        var nonLethal = new Dictionary<string, FeelAnswer>();
+        var lethal = new Dictionary<string, FeelAnswer>();
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool kill = pass == 1;
+            int ri = 0;
+            foreach (var r in routes)
+            {
+                var g = Scene(70400 + pass * 20 + ri++);
+                var sol = MkU(Team.Player, 5, 5, 8); g.Players.Add(sol); g.Selected = sol;
+                var victim = MkU(Team.Enemy, 6, 5, kill ? 1 : 40);
+                g.Enemies.Add(victim);
+                g.Enemies.Add(MkU(Team.Enemy, 12, 9, 8));   // never the last foe -> no kill-cam
+                var watch = new List<Unit> { sol, victim };
+                Action act;
+                switch (r)
+                {
+                    case "aimed-shot":
+                        act = () => g.Enqueue(new ShotAnim(sol, victim, new ShotResult { Hit = true, Damage = kill ? 40 : 3 }), Team.Player); break;
+                    case "crit-shot":
+                        act = () => g.Enqueue(new ShotAnim(sol, victim, new ShotResult { Hit = true, Crit = true, Damage = kill ? 40 : 3 }), Team.Player); break;
+                    case "reaction":
+                        act = () => g.Enqueue(new ShotAnim(sol, victim, new ShotResult { Hit = true, Damage = kill ? 40 : 3 }, reaction: true), Team.Player); break;
+                    case "grenade":
+                        sol.Grenades = 1; victim.X = 9; victim.Y = 5; victim.SyncPos();
+                        act = () => g.IssueGrenade(9, 5); break;
+                    case "barrel":
+                        g.Grid.Barrel[7, 5] = true; victim.X = 7; victim.Y = 6; victim.SyncPos();
+                        act = () => g.DetonateBarrel(7, 5); break;
+                    case "siege":
+                        {
+                            var art = MkU(Team.Enemy, 12, 2, 8); g.Enemies.Add(art);
+                            victim.X = 7; victim.Y = 5; victim.SyncPos();
+                            act = () => g.DetonateSiege(art, 7, 5); break;
+                        }
+                    case "burn":
+                        victim.AddStatus(StatusKind.Burning, 2);
+                        act = () => g.TickStatuses(victim); break;
+                    case "bleed":
+                        victim.AddStatus(StatusKind.Bleed, 2);
+                        act = () => g.OnUnitEnteredTile(victim); break;
+                    default:   // slam: a BLOCKED shove -> the collision routes through EnvDamage
+                        victim.X = 6; victim.Y = 5; victim.SyncPos();
+                        g.Grid.Tiles[7, 5] = TileType.HighCover; g.Grid.SetCoverHp(7, 5);
+                        act = () => g.Enqueue(new ShoveAnim(sol, victim, 1, 0), Team.Player); break;
+                }
+                var ans = Measure(g, watch, act);
+                if (kill) { lethal[r] = ans; if (victim.Alive) fails.Add($"routeDidNotKill({r})"); }
+                else { nonLethal[r] = ans; if (!victim.Alive) fails.Add($"routeKilledOnTheNonLethalPass({r})"); }
+            }
+        }
+        foreach (var r in routes)
+        {
+            sb.AppendLine("JUICETEST: harm   " + Row(r, nonLethal[r]));
+            if (nonLethal[r].Seen < 1) fails.Add($"harmUnseen({r})");
+            if (nonLethal[r].Seen + nonLethal[r].Heard + nonLethal[r].Read < 1 && nonLethal[r].Felt <= 0f)
+                fails.Add($"harmUnanswered({r})");
+            if (nonLethal[r].Ack < 0 || nonLethal[r].Ack > JuiceAckMax) fails.Add($"harmUnacknowledged({r}:{nonLethal[r].Ack}f)");
+        }
+        // THE BLAST CLASS. Three routes deal cover-ignoring AoE damage from a detonation — a thrown
+        // frag, a cooked barrel, a BOMBARD strike. They share one cue ('boom'), so they promise the
+        // player the same event; they must therefore answer on the same CHANNELS. (The incendiary
+        // also plays 'boom' but deals no blast damage — it lights a fire — so it is reported in the
+        // census, not asserted here.)
+        foreach (var r in new[] { "grenade", "barrel", "siege" })
+        {
+            var b = nonLethal[r];
+            if (b.Shake <= 0f) fails.Add($"blastNoShake({r})");
+            if (b.Stop <= 0f) fails.Add($"blastNoHitStop({r})");
+            if (b.Zoom <= 0f) fails.Add($"blastNoZoomPunch({r})");
+            if (b.Bloom <= 0f) fails.Add($"blastNoBloom({r})");
+        }
+        var deaf = routes.Where(r => nonLethal[r].Heard == 0).ToList();
+        var numb = routes.Where(r => nonLethal[r].Felt <= 0f).ToList();
+        sb.AppendLine($"JUICETEST: harm   routes with NO cue: {(deaf.Count == 0 ? "none" : string.Join(",", deaf))}; "
+                    + $"with NO weight: {(numb.Count == 0 ? "none" : string.Join(",", numb))}");
+        foreach (var r in routes)
+        {
+            var k = lethal[r];
+            sb.AppendLine("JUICETEST: kill   " + Row(r, k));
+            if (k.Shake < KillSigShake - 0.01f) fails.Add($"killSigShake({r}:{k.Shake:0.0}<{KillSigShake:0})");
+            if (k.Stop < KillSigStop - 1e-4f) fails.Add($"killSigHitStop({r}:{k.Stop:0.000}<{KillSigStop:0.00})");
+            if (k.Zoom < KillSigZoom - 1e-4f) fails.Add($"killSigZoom({r}:{k.Zoom:0.000}<{KillSigZoom:0.00})");
+            if (!k.Ids.Split('+').Contains(Audio.CueFor(Audio.GameEvent.Casualty))) fails.Add($"killSigNoCasualtyCue({r}:{k.Ids})");
+            // BY NAME, not by count: a hostile's death prints the word "DOWN" (a soldier's prints
+            // "KIA"). Counting texts passed a build with the pop deleted, because the blow's own
+            // damage number was still on screen.
+            if (!k.Words.Split('/').Contains("DOWN")) fails.Add($"killSigNoDeathWord({r}:{k.Words})");
+        }
+        // ══ (d) THE BEAT, FRAME BY FRAME ═════════════════════════════════════════════════
+        // FEELTEST leg (e) pins WHEN a shot fires and how long it runs. Nothing pinned what lands
+        // TOGETHER. A shot is a three-beat — ANNOUNCE (the reticle snaps in; for a reaction, also the
+        // word, the cue, the flash and a snap-freeze) -> IMPACT -> SETTLE — and every element of the
+        // IMPACT beat is emitted by one call, ShotAnim.Apply, so muzzle, tracer, spray, the damage
+        // number, the shake and the weapon cue land on ONE frame BY CONSTRUCTION. This leg makes that
+        // explicit and checkable: move any of them off the impact frame and the beat scatters.
+        // The impact frame is located by the COMBAT-LOG line, which Apply writes and nothing else does.
+        // HIT-STOP is deliberately NOT asserted onto the impact frame: AddHitStop is a MAX, so a
+        // reaction (which freezes 0.06 s at announce) simply absorbs Apply's 0.05 and shows no delta.
+        void TraceShot(bool reaction, bool kill, string label)
+        {
+            var g = Scene(70500 + (reaction ? 1 : 0) + (kill ? 2 : 0));
+            var a = MkU(Team.Player, 3, 5, 8); g.Players.Add(a); g.Selected = a;
+            var d = MkU(Team.Enemy, 8, 5, kill ? 1 : 40); g.Enemies.Add(d);
+            g.Enemies.Add(MkU(Team.Enemy, 12, 9, 8));           // never the last foe -> no kill-cam
+            g.Fx = new Fx(); g.HitStop = 0f;
+            Audio.Spy = new List<(string id, float panX, bool foe)>();
+            g.Enqueue(new ShotAnim(a, d, new ShotResult { Hit = true, Damage = kill ? 40 : 3 }, reaction: reaction), Team.Player);
+            int announce = -1, impact = -1, end = -1;
+            bool textAtImpact = false, shakeAtImpact = false, cueAtImpact = false, stopAtImpact = false;
+            var seq = new List<string>();
+            for (int f = 1; f <= 200 && g._anims.Count > 0; f++)
+            {
+                var an = g._anims[0];
+                int p0 = g.Fx.Particles.Count, t0 = g.Fx.Texts.Count, r0 = g.Fx.Reticles.Count,
+                    c0 = Audio.Spy.Count, l0 = Stats.CombatLog.Count;
+                float k0 = g.Fx.Shake, s0 = g.HitStop;
+                if (!an.Started) { an.Started = true; an.OnStart(g); }
+                bool done = an.Update(g, 1f / 60f);
+                if (done && g._anims.Count > 0 && g._anims[0] == an) { g._anims.RemoveAt(0); end = f; }
+                bool dText = g.Fx.Texts.Count > t0, dShake = g.Fx.Shake > k0 + 1e-4f,
+                     dCue = Audio.Spy.Count > c0, dStop = g.HitStop > s0 + 1e-4f, dLog = Stats.CombatLog.Count > l0;
+                var fired = new List<string>();
+                if (g.Fx.Reticles.Count > r0) fired.Add("reticle");
+                if (g.Fx.Particles.Count > p0) fired.Add($"fx+{g.Fx.Particles.Count - p0}");
+                if (dText) fired.Add("word:" + string.Join(",", g.Fx.Texts.Skip(t0).Select(t => t.Text)));
+                if (dShake) fired.Add($"shake+{g.Fx.Shake - k0:0.0}");
+                if (dStop) fired.Add($"hitstop={g.HitStop:0.00}");
+                if (dCue) fired.Add("cue:" + string.Join("+", Audio.Spy.Skip(c0).Select(x => x.id)));
+                if (dLog) fired.Add("log");
+                if (fired.Count > 0)
+                {
+                    if (announce < 0) announce = f;
+                    seq.Add($"f{f}[{string.Join(" ", fired)}]");
+                }
+                if (dLog && impact < 0)
+                { impact = f; textAtImpact = dText; shakeAtImpact = dShake; cueAtImpact = dCue; stopAtImpact = dStop; }
+            }
+            Audio.Spy = null;
+            sb.AppendLine($"JUICETEST: beat   {label,-13} {string.Join(" ", seq)} settle->f{end}");
+            if (announce < 0) fails.Add($"beatNoAnnounce({label})");
+            if (impact < 0) { fails.Add($"beatNoImpact({label})"); return; }
+            if (announce >= impact) fails.Add($"beatNoAnticipation({label}:announce f{announce} >= impact f{impact})");
+            if (!textAtImpact) fails.Add($"beatScattered({label}:the damage number is not on impact frame f{impact})");
+            if (!shakeAtImpact) fails.Add($"beatScattered({label}:the shake is not on impact frame f{impact})");
+            if (!cueAtImpact) fails.Add($"beatScattered({label}:the cue is not on impact frame f{impact})");
+            if (end <= impact) fails.Add($"beatNoSettle({label}:end f{end} <= impact f{impact})");
+            if (!stopAtImpact && !reaction) fails.Add($"beatNoHitStopOnImpact({label})");
+        }
+        TraceShot(false, false, "aimed hit");
+        TraceShot(false, true, "aimed kill");
+        TraceShot(true, false, "reaction");
+
+        if (stuck > 0) fails.Add($"animQueueNeverDrained({stuck})");
+
+        Console.Write(sb.ToString());
+        return fails.Count == 0
+            ? "JUICETEST: PASS (6 shot outcomes each SEEN and HEARD, the connected ladder never steps down on "
+              + "shake/hit-stop/bloom/zoom/particles/text-size and a whiff never out-punches contact; "
+              + Hud.VerbTable.Length + " bar verbs + MOVE each fire, arm and answer on both the seen and heard channels; "
+              + "every act answered within " + JuiceAckMax + " frames; "
+              + "9 harm routes each SEEN, the 3 BLAST routes each answering on all four weight channels, "
+              + "the shot's 3-beat holds - anticipation strictly before impact, the number+shake+cue all ON the impact frame, a settle after it; "
+              + "and every route's KILL carries the whole signature - shake >= "
+              + KillSigShake.ToString("0") + ", hit-stop >= " + KillSigStop.ToString("0.00") + ", zoom >= "
+              + KillSigZoom.ToString("0.00") + ", a '" + Audio.CueFor(Audio.GameEvent.Casualty) + "' cue and a death word)"
+            : "JUICETEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
 }

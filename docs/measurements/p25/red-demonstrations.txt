@@ -1,0 +1,94 @@
+P25 "NOBODY HAS LOOKED" - SIGHTLINE_JUICETEST: EVERY ASSERTION PROVEN ABLE TO FAIL.
+
+A gate that cannot go red is theatre. Each block below is ONE deliberate break of the shipped tree
+(one or two edited lines, listed in the heading), built and run headless, then reverted. The tree was
+byte-restored after every block; `git status` is clean and `git diff` empty for these files.
+Run against the FINAL instrument (the one in the branch), not an earlier draft.
+
+TWO OF THESE BREAKS ARE THE SHIPPED FIXES, REVERTED - B1 and B2 reproduce the pre-fix tree exactly,
+which is what makes them the BEFORE for P25's two repairs.
+
+### B1  THE SHIPPED FIX 1, REVERTED - a whiff out-punches contact (graze shake 3 -> 2)
+JUICETEST: FAIL (missOutPunchesGraze(shake:2.50>2.00))
+
+### B2  THE SHIPPED FIX 2, REVERTED - the frag is the only blast with no bloom
+JUICETEST: FAIL (blastNoBloom(grenade))
+
+### B3  the shot goes silent (both of ShotAnim.Apply's cues dropped)
+JUICETEST: FAIL (outcomeUnheard(MISS),outcomeUnheard(GRAZE),outcomeUnheard(HIT),outcomeUnheard(CRIT),verbUnheard(FIRE))
+
+### B4  the ladder steps DOWN (a crit freezes less than a plain hit)
+JUICETEST: FAIL (ladderStepsDown(hitstop:HIT->CRIT 0.05>0.02))
+
+### B5  a verb stops answering on the SEEN channel (RELOAD's pop text)
+JUICETEST: FAIL (verbUnseen(RELOAD))
+
+### B6  a verb stops FIRING (HUNKER no longer hunkers)
+JUICETEST: FAIL (verbDidNotFire(HUNKER))
+
+### B7  a modal verb stops ARMING (GRENADE's targeting mode never opens)
+JUICETEST: FAIL (verbDidNotArm(GRENADE))
+
+### B8  a NEW bar verb is added to Hud.VerbTable and nobody stages it
+JUICETEST: FAIL (verbNotStaged(newverb),verbNotStaged(newverb))
+
+### B9  a death loses its cue (KillUnit's Casualty)
+JUICETEST: FAIL (killSigNoCasualtyCue(aimed-shot:w_rifle+hit+st_kill),killSigNoCasualtyCue(crit-shot:w_rifle+crit+st_kill),killSigNoCasualtyCue(reaction:react+w_rifle+hit+st_kill),killSigNoCasualtyCue(grenade:boom+st_kill),killSigNoCasualtyCue(barrel:boom),killSigNoCasualtyCue(siege:boom),killSigNoCasualtyCue(burn:-),killSigNoCasualtyCue(bleed:-),killSigNoCasualtyCue(slam:hunker))
+
+### B10 a death loses its WEIGHT (KillUnit's shake / hit-stop / zoom)
+JUICETEST: FAIL (ladderStepsDown(shake:CRIT->KILL 10.50>9.50),ladderStepsDown(hitstop:CRIT->KILL 0.10>0.05),killSigHitStop(aimed-shot:0.050<0.10),killSigZoom(aimed-shot:0.005<0.05),killSigZoom(crit-shot:0.005<0.05),killSigHitStop(reaction:0.060<0.10),killSigZoom(reaction:0.005<0.05),killSigHitStop(grenade:0.070<0.10),killSigHitStop(barrel:0.060<0.10),killSigHitStop(siege:0.060<0.10),killSigShake(burn:1.0<7),killSigHitStop(burn:0.010<0.10),killSigZoom(burn:0.005<0.05),killSigShake(bleed:1.0<7),killSigHitStop(bleed:0.010<0.10),killSigZoom(bleed:0.005<0.05),killSigShake(slam:4.0<7),killSigHitStop(slam:0.030<0.10),killSigZoom(slam:0.005<0.05))
+
+### B11 a verb is answered too LATE (the frag's flight 0.50s -> 1.20s)
+JUICETEST: FAIL (verbUnseen(GRENADE),verbUnheard(GRENADE),verbUnacknowledged(GRENADE:-1f),routeDidNotKill(grenade),harmUnseen(grenade),harmUnanswered(grenade),harmUnacknowledged(grenade:-1f),blastNoShake(grenade),blastNoHitStop(grenade),blastNoZoomPunch(grenade),blastNoBloom(grenade),killSigShake(grenade:0.0<7),killSigHitStop(grenade:0.000<0.10),killSigZoom(grenade:0.000<0.05),killSigNoCasualtyCue(grenade:-),killSigNoDeathWord(grenade:-))
+
+### B12 source-less damage stops answering at all (EnvDamage's flash + burst + word)
+JUICETEST: FAIL (harmUnseen(burn),harmUnanswered(burn),harmUnacknowledged(burn:-1f),harmUnseen(bleed),harmUnanswered(bleed),harmUnacknowledged(bleed:-1f))
+
+### B13 a death loses its WORD (KillUnit's KIA/DOWN pop)
+JUICETEST: FAIL (killSigNoDeathWord(aimed-shot:40),killSigNoDeathWord(crit-shot:CRIT 40),killSigNoDeathWord(reaction:OVERWATCH/40),killSigNoDeathWord(grenade:4),killSigNoDeathWord(barrel:6),killSigNoDeathWord(siege:-8 STRIKE),killSigNoDeathWord(burn:-2 BURN),killSigNoDeathWord(bleed:-1 BLEED),killSigNoDeathWord(slam:-2 SLAM))
+
+### B14 a blast loses one weight channel (the barrel's zoom-punch)
+JUICETEST: FAIL (blastNoZoomPunch(barrel))
+
+### B15 an anim never ends (the queue never drains)
+JUICETEST: FAIL (animQueueNeverDrained(13))
+
+### B16 a CRIT-KILL stops out-punching a GRAZE (graze shake 3 -> 40, clamped to Fx's 18 ceiling)
+JUICETEST: FAIL (ladderStepsDown(shake:GRAZE->HIT 18.00>5.00),critKillDoesNotOutPunchGraze(shake:18.00<=18.00))
+
+### B17 a shot outcome answers on NO channel at all (Apply never runs, no reticle)
+JUICETEST: FAIL (outcomeUnseen(MISS),outcomeUnheard(MISS),outcomeUnacknowledged(MISS:-1f),outcomeUnseen(GRAZE),outcomeUnheard(GRAZE),outcomeUnacknowledged(GRAZE:-1f),outcomeUnseen(HIT),outcomeUnheard(HIT),outcomeUnacknowledged(HIT:-1f),outcomeUnseen(CRIT),outcomeUnheard(CRIT),outcomeUnacknowledged(CRIT:-1f),outcomeUnseen(KILL),outcomeUnheard(KILL),outcomeUnacknowledged(KILL:-1f),outcomeUnseen(CRIT-KILL),outcomeUnheard(CRIT-KILL),outcomeUnacknowledged(CRIT-KILL:-1f),critKillDoesNotOutPunchGraze(shake:0.00<=0.00),critKillDoesNotOutPunchGraze(hitstop:0.00<=0.00),critKillDoesNotOutPunchGraze(bloom:0.00<=0.00),critKillDoesNotOutPunchGraze(zoom:0.00<=0.00),verbUnseen(FIRE),verbUnheard(FIRE),verbUnacknowledged(FIRE:-1f),routeDidNotKill(aimed-shot),routeDidNotKill(crit-shot),routeDidNotKill(reaction),harmUnseen(aimed-shot),harmUnanswered(aimed-shot),harmUnacknowledged(aimed-shot:-1f),harmUnseen(crit-shot),harmUnanswered(crit-shot),harmUnacknowledged(crit-shot:-1f),killSigShake(aimed-shot:0.0<7),killSigHitStop(aimed-shot:0.000<0.10),killSigZoom(aimed-shot:0.000<0.05),killSigNoCasualtyCue(aimed-shot:-),killSigNoDeathWord(aimed-shot:-),killSigShake(crit-shot:0.0<7),killSigHitStop(crit-shot:0.000<0.10),killSigZoom(crit-shot:0.000<0.05),killSigNoCasualtyCue(crit-shot:-),killSigNoDeathWord(crit-shot:-),killSigShake(reaction:0.0<7),killSigHitStop(reaction:0.060<0.10),killSigZoom(reaction:0.000<0.05),killSigNoCasualtyCue(reaction:react),killSigNoDeathWord(reaction:OVERWATCH))
+
+### B18 the harm staging itself is wrong (a DoT tick that KILLS on the non-lethal pass)
+JUICETEST: FAIL (routeKilledOnTheNonLethalPass(burn))
+
+### B19 the beat SCATTERS - the shake leaves the impact frame (shot shake -> 0)
+JUICETEST: FAIL (beatScattered(aimed hit:the shake is not on impact frame f9),beatScattered(reaction:the shake is not on impact frame f18))
+
+### B20 the beat loses its ANTICIPATION (the plain shot's reticle snap)
+JUICETEST: FAIL (beatNoAnticipation(aimed hit:announce f9 >= impact f9),beatNoAnticipation(aimed kill:announce f9 >= impact f9))
+
+### B21 the beat loses its SETTLE (the anim ends on the impact frame)
+JUICETEST: FAIL (beatNoSettle(aimed hit:end f9 <= impact f9),beatNoSettle(aimed kill:end f9 <= impact f9),beatNoSettle(reaction:end f18 <= impact f18))
+
+### B22 the impact loses its HIT-STOP (the graded freeze -> 0)
+JUICETEST: FAIL (ladderStepsDown(hitstop:GRAZE->HIT 0.03>0.00),beatNoHitStopOnImpact(aimed hit))
+
+### NOT separately demonstrated, and why
+`moveDidNotLand` is the fourth member of the STAGING-WITNESS family - the assertions that exist so a
+row reading "no answer" can never be a row where nothing happened. Three of the four ARE demonstrated
+above: verbDidNotFire (B6), routeDidNotKill (B11) and routeKilledOnTheNonLethalPass (B18). The walk's
+own landing is separately owned and gated by SIGHTLINE_FEELTEST leg (a) (`walkDidNotLand`).
+
+### TWO ASSERTIONS THIS EXERCISE FOUND TO BE THEATRE, AND WHAT REPLACED THEM
+1. `killSigNoDeathWord` originally read `k.Texts < 1`. B13 - deleting KillUnit's KIA/DOWN pop
+   outright - PASSED, because the killing blow's own damage number was still on screen. A channel
+   COUNT cannot see a missing word. It now checks the word BY NAME (FeelAnswer.Words).
+2. `Seen` originally included `Queued` (anims enqueued). B17 - guarding ShotAnim.Apply out entirely -
+   did not raise outcomeUnseen, because the now-inert anim was still on the queue. An enqueued anim
+   is a PROMISE that something will be drawn, not evidence that anything was. `Queued` is now a
+   reported column only; `Moved` (a watched figure's drawn position actually changed) took its place
+   in the sum.
+Both are recorded here rather than quietly fixed: they are the exact failure mode this project has
+had to tear out twice before, and the only reason they were caught is that every assertion was
+required to be shown red.

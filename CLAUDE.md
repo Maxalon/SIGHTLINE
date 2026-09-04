@@ -215,6 +215,7 @@ zero TIMEOUTs. **A WIN is normal, not suspicious.** `sightline_shot.png` is giti
 | one self-test, Release binary directly | 0.1–0.4 s |
 | one self-test via `xvfb-run dotnet run -c Debug` | 1–2 s |
 | `SIGHTLINE_PAIRTEST=1` | 38 s |
+| `SIGHTLINE_JUICETEST=1` (P25 — pillar 2's *answer* probe, next to FEELTEST's *tween*: the seen/heard/felt/read footprint of every shot outcome, all 23 action-bar verb rows + MOVE, 9 damage routes, and the shot's frame-by-frame beat. **It cannot hear a cue, cannot see a pixel and cannot measure fun** — read the "WHAT IT CANNOT SEE" block above `Game.JuiceSelfTest` before quoting it) | 2.7 s |
 | `SIGHTLINE_AUTOPLAY=1` (Debug) | ~22 s |
 | `SIGHTLINE_BALANCE=10` (Release binary, **under xvfb**) | **~5 s** (was 311-509 s before W1) |
 

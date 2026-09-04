@@ -119,6 +119,11 @@ echo -n "CDTEST     : "; verdict "$(SIGHTLINE_CDTEST=1 run | grep -oE "CDTEST: (
 echo -n "FIELDTEST  : "; verdict "$(SIGHTLINE_FIELDTEST=1 run | grep -oE "FIELDTEST: (PASS|FAIL)" | head -1)"
 # THE STRIDE: pillar 2 ("feels good") — walk speed profile / vault arc / floating-text separation.
 echo -n "FEELTEST   : "; verdict "$(SIGHTLINE_FEELTEST=1 run | grep -oE "FEELTEST: (PASS|FAIL)" | head -1)"
+# P25 "NOBODY HAS LOOKED": pillar 2's OTHER half. FEELTEST measures the TWEEN; this measures the
+# ANSWER — the feedback footprint (seen / heard / felt / read / latency) of every shot outcome, every
+# action-bar verb and every route by which a unit takes damage or dies. Read the "WHAT IT CANNOT SEE"
+# block above Game.JuiceSelfTest before quoting a number out of its table.
+echo -n "JUICETEST  : "; verdict "$(SIGHTLINE_JUICETEST=1 run | grep -oE "JUICETEST: (PASS|FAIL)" | head -1)"
 echo -n "SIEGETEST  : "; verdict "$(SIGHTLINE_SIEGETEST=1 run | grep -oE "SIEGETEST: (PASS|FAIL)" | head -1)"
 echo -n "EVENTTEST  : "; verdict "$(SIGHTLINE_EVENTTEST=1 run | grep -oE "EVENTTEST: (PASS|FAIL)" | head -1)"
 echo -n "VETTEST    : "; verdict "$(SIGHTLINE_VETTEST=1 run | grep -oE "VETTEST: (PASS|FAIL)" | head -1)"

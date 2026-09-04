@@ -1362,6 +1362,17 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_JUICETEST=1 : P25 "NOBODY HAS LOOKED" — pillar 2's SECOND instrument. FEELTEST
+        // measures the TWEEN; this measures the ANSWER: the feedback footprint (seen / heard / felt /
+        // read) of every shot outcome, every action-bar verb, and every route by which a unit takes
+        // damage or dies. Read the "WHAT IT CANNOT SEE" block above Game.JuiceSelfTest before quoting it.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_JUICETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "juicetest");   // Unit.SyncPos + every anim use tile->px math
+            Console.WriteLine(new Game().JuiceSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_HORDETEST=1 : LAST STAND endless horde — wave count/scale escalation + alive-cap + meta BestWave round-trip (HORIZON W2).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HORDETEST") == "1")
         {

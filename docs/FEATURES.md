@@ -336,6 +336,15 @@ seeds (mix of WIN/LOSE, no exceptions):
   so no tile boundary stalls); VAULT draws a 26 px arc over the cover with the shadow left on the
   deck; floating text climbs a ladder clear of live text and twin numbers arc apart.
   `SIGHTLINE_FEELTEST` gates all three; the commit clock is untouched.
+- **P25 "NOBODY HAS LOOKED" (2026-09-04) — the juice is MEASURED.** `SIGHTLINE_JUICETEST` records the
+  FEEDBACK FOOTPRINT of an event on four channel classes (SEEN / HEARD / FELT / READ) plus latency,
+  and gates: the six shot outcomes never step down on any weight channel and **a whiff never
+  out-punches contact** (a MISS shook 2.5 against a GRAZE's 2.0 — fixed, graze is 3.0); all 23
+  action-bar verb rows + MOVE are both seen and heard when committed; the 3 blast routes answer on
+  the same four channels (the frag had no bloom while the barrel and the BOMBARD strike did, all
+  three playing the same cue — fixed); all 9 damage routes carry the whole `KillUnit` signature; and
+  the shot's beat holds (anticipation strictly before impact, the number + shake + cue ON the impact
+  frame, a settle after). It cannot hear a cue, see a pixel or measure fun — `docs/DEVLOG.md` §P25.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
   promotions, between-mission barracks debrief + field-heal.
 - **Branching campaign map:** the barracks shows a Slay-the-Spire-style node path
