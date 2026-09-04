@@ -3469,14 +3469,53 @@ a finding, as in L4 and L5. What L6 leaves open, in priority order:
       change in the same commit — the SUPPLY full heal moved from *before* `Run.DebriefSurvivors`
       to *inside* it (`DebriefSurvivors(bool fullHeal)`), so a soldier who ends a SUPPLY clear on
       low HP can now be wounded by it. That is live in the flywheel (SUPPLY is 828 of 5,413 played nodes — 15.3% —
-      across P21's 1,280-campaign default arm) and `SIGHTLINE_FORKPRICES` does not touch it. Flagging it is a separate,
-      smaller item: see below.
-- [ ] **THE OTHER HALF OF THE FORK PAYS IS STILL UNSWITCHABLE (opened by P21).** The heal-ordering
-      change above (`Game.SetupMission` -> `cardFullHeal` -> `Run.DebriefSurvivors(bool)`) is a
-      gameplay change with no restore flag, so `SIGHTLINE_FORKPRICES=0` isolates the wave's PRICES
-      but not the wave. It is one bool and one branch; FORKTEST leg (C) already reproduces the
-      pre-wave ordering in-process (`Clear(true, true)`), so the behaviour is written down — it
-      simply is not reachable from the environment. P21 did not widen its own scope to take it.
+      across P21's 1,280-campaign default arm) and `SIGHTLINE_FORKPRICES` does not touch it.
+      **CLOSED by wave P22 as `SIGHTLINE_HEALFIRST=1` — see the next item.**
+- [x] **THE OTHER HALF OF THE FORK PAYS IS STILL UNSWITCHABLE (opened by P21).** DONE by wave
+      **P22 "NOTHING WITHOUT A SWITCH"** (2026-09-04, base `935d719`). The heal-ordering change
+      (`Game.EnterBarracks` -> `cardFullHeal` -> `Run.DebriefSurvivors(bool)`) is now
+      `SIGHTLINE_HEALFIRST=1` -> `Run.SupplyHealFirst`, which puts the card's full heal back BEFORE
+      the fresh-wound gauge.
+      **SHIPPED AS ITS OWN DIAL, NOT FOLDED INTO `SIGHTLINE_FORKPRICES`, on purpose:** the prices
+      move the routing ECONOMY (and the map fingerprints with it), the ordering moves squad
+      ATTRITION; they have different blast radii, a future round will want one without the other,
+      and env vars compose at zero cost. **TO RESTORE MILESTONE 4 WHOLE, SET BOTH:
+      `SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1`.** Neither is a shipping configuration; with
+      HEALFIRST on, FORKTEST leg (C) fails by design.
+      FORKTEST leg **(F)** is the gate: 248/248 cells reproduce a LITERAL transcription of the
+      pre-wave ordering (the caller-side heal, not a re-derivation), 102 of them move off the
+      shipped result so a decorative flag fails, and it round-trips. Proven RED before GREEN.
+      Priced CRN-paired, `docs/measurements/p22/`; DEVLOG §P22.
+- [ ] **THE MODE FORCE HAS NO OFF SWITCH AND NO INSTRUMENT (found by P22's audit, left).**
+      Milestone 2 "THE MODES GET THE BESTIARY" gave SKIRMISH and DAILY their own `rosterTier` and
+      mid-boss slot with no restore flag. It is **campaign-inert by construction** (`rosterTier`
+      defaults to the mission number, `midBossSlot` is `Mode == Skirmish` only), so no ladder
+      crosses it and nothing measured is affected. **P22 deliberately did NOT retro-fit a flag,
+      because there is nothing to measure it with:** `SIGHTLINE_BALANCE` runs campaigns and this
+      project has no staged mode batch. The right order is instrument first, flag second — a flag
+      on a change nobody can measure is decoration. Same for m9's mode-depth *fixes* that
+      `SIGHTLINE_MODEDEPTH` does cover but nothing prices.
+- [ ] **THE AUTOPILOT IS UNFLAGGED, AND IT MOVES EVERY NUMBER (found by P22's audit, left).**
+      `Game.Autopilot.cs` is excluded from every "gameplay change" audit in this project — it is
+      the instrument, not the game — but a change to `SmartStep`/`AutoStep` moves every measured
+      figure, and no wave that has touched it shipped a restore flag. There is no way today to ask
+      "is this ladder difference the game or the bot?" across a wave that changed both. A
+      `SIGHTLINE_BOTVERSION`-shaped dial is the shape; nothing needs it yet, and P22 did not build
+      one speculatively.
+- [x] **CLAUDE.md's FLAG DERIVATION WAS NARROWER THAN ITS DESCRIPTION (found and corrected by
+      P22).** *"Grep `Program.cs` for `SIGHTLINE_` for the authoritative set"* misses **59
+      `GetEnvironmentVariable` sites outside `Program.cs`** (236 names there against 269 across
+      `src/`) — mostly harness staging, but including one GAMEPLAY dial: `SIGHTLINE_BIOMEDEAL=hash`
+      is read at class load in `src/Util.cs` and re-deals the ARENA on 28.9% of missions. Default
+      off and documented by P16, so nothing was broken — but a reader following the instruction
+      would not have found it. CLAUDE.md now says grep `src/`.
+- [ ] **THE RULE NEEDS A TEST, NOT JUST A STATEMENT (P22).** CLAUDE.md says every gameplay lever
+      gets a restore flag. P22's audit proposes the operational form — *a change earns a flag when
+      it moves the CRN stream a future round will need to bridge or isolate* — and applied it to 35
+      commits by hand. **Nothing enforces it.** The cheap enforcement is a wave-time habit, not a
+      script: at merge, diff the sixteen gameplay files against the base with git's `csharp` diff
+      driver, group by enclosing method, and answer for each group "which flag turns this off?"
+      P22's `docs/measurements/p22/README.md` has the exact command.
 - [ ] **THE LADDER'S SOFT SPOT MOVED AND IS NOT LOCATED.** `h6 -> h8` buys **2.5** points, the
       smallest step in the L6 table, and `h0 -> h2` buys 8.4 where L5 read 14.1. C1 located the
       last flat step by measuring **all ten rungs** (a six-rung ladder cannot see which of two rungs

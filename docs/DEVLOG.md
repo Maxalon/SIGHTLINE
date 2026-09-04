@@ -16432,3 +16432,315 @@ reachable from the environment. `docs/ROADMAP.md` carries it as its own item.
 - `SIGHTLINE_FORKTEST=1` — PASS at defaults; FAIL by design under `SIGHTLINE_FORKPRICES=0`.
 - 128/128 balance chunks asserted (`check_chunk.py`, four arms × 32), re-verified individually.
 - Raw round, runner and README: `docs/measurements/p21/`.
+
+---
+
+## PROGRAM PARALLAX — wave P22 "NOTHING WITHOUT A SWITCH" (2026-09-04, base `935d719`)
+
+**Branch `wave/unflagged-audit`.** The house rule — *"every gameplay lever gets a
+restore-the-old-behaviour flag, because a wave that cannot be switched off cannot be attributed"* —
+had been broken at least twice, and **both breaches were found by accident, waves later**. L6 found
+THE FORK PAYS' four bare `const int` routing prices only when its bridge to the ladder of record
+reproduced 0 of 96 chunks. P21, while closing that, found **a second unflagged change in the same
+commit** and wrote its own limit down: *"the new dial isolates that wave's prices, not that wave."*
+
+Two found by accident means the real number is unknown. This wave measured it.
+
+---
+
+## 1. The known one, closed — `SIGHTLINE_HEALFIRST`
+
+`Run.SupplyHealFirst` (default `false`), wired as `SIGHTLINE_HEALFIRST=0/1` in `Program.cs`
+beside `SIGHTLINE_FORKPRICES`. `=1` puts the SUPPLY/RECON card's full squad heal back **before**
+`Run.DebriefSurvivors`' fresh-wound gauge, which is the pre-milestone-5 ordering: the gauge reads
+`u.Hp`, so a squad healed first is gauged at full and **nobody who ends a cleared SUPPLY node on
+their feet can be wounded by it.**
+
+**It is its own dial, not a widening of `SIGHTLINE_FORKPRICES`, and here is the reasoning.** The
+wave-identity argument says one wave, one switch. The lever argument wins anyway, on three counts:
+(a) the two changes act on different systems — the prices move the **routing economy** (every node
+payout, and `SaveGame.MapFingerprint` with it), the ordering moves **squad attrition**; (b) they
+have different blast radii — the prices change what the autopilot routes toward and therefore which
+worlds get played, the ordering changes only what a squad carries out of a SUPPLY clear; (c) a
+future round will want to price one without the other, and env vars compose at zero cost (L6's
+bridge arm already sets eight in one line), so welding them buys nothing and forecloses that.
+**The composition is written down in three places: to restore milestone 4 whole, set BOTH —
+`SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1`.** Neither is a shipping configuration.
+
+**Implementation note that matters for the transcription.** The restore heals at the **top of the
+per-soldier loop**, not before it, and that is equivalent: the loop body mutates only `u`,
+`AdvanceBonds()` and the recruit backfill both run after it, and the list is a `Squad.ToList()`
+taken before any recruit arrives. Pre-wave `Game.EnterBarracks` ran
+`foreach (var u in _run.Squad) u.Hp = u.MaxHp;` and then called `DebriefSurvivors()` with no
+argument at all.
+
+### 1.1 FORKTEST leg (F), proven RED before GREEN
+
+Leg (F) joins the existing wave gate rather than adding a hook — **no `qa-sweep.sh` line is
+needed**, which also keeps this wave off the file the concurrent measurement round owns.
+
+* **F1 — the flag reproduces the pre-wave ordering against a LITERAL TRANSCRIPTION.** The
+  expectation is not re-derived from the field the code reads: it is the caller-side construction
+  leg (C) already used — `u.Hp = u.MaxHp` applied by the *caller*, then `DebriefSurvivors(false)`,
+  which is pre-milestone-5 `EnterBarracks` verbatim. Swept over every
+  (soldier × surviving HP × attrition regime × survived-near-death × carried wound) cell, because
+  the two orderings agree at full HP and differ only where the gauge bites: **248/248 cells match.**
+* **F2 — it is not decoration, and it is COUNTED.** **102 of those 248 cells** come out differently
+  from the shipped ordering. `healChanged == 0` fails the leg.
+* **F3 — it round-trips**, and leaves `Run.SupplyHealFirst` exactly as the environment set it.
+
+**RED:** with the two reads stubbed out (the field present, nothing reading it), leg F fails
+**102 F1 cells** and reports *"moves 0 of them off the shipped result"*; `FORKTEST: FAIL`.
+**GREEN:** restored, `248/248` and `102` moved; `FORKTEST: PASS`. Under `SIGHTLINE_HEALFIRST=1` the
+older leg (C) fails **by design** — the subsidy is back — exactly as leg (A) fails under
+`SIGHTLINE_FORKPRICES=0`.
+
+---
+
+## 2. THE AUDIT — the whole flag surface, by method, with the method's blind spots
+
+### 2.1 The window, and why it is where it is
+
+**35 wave-granularity commits, from W1's merge (`4784803`, 2026-08-29) to `935d719` (HEAD)**: the
+six post-W1 wave merges inside PROGRAM CROSSCUT, plus all 29 first-parent merges after it.
+
+Everything before that is **deliberately out of scope, for a reason and not for convenience**:
+
+* **A restore flag before W1 can restore nothing anybody can compare against.** W1 severed
+  presentation from the shared `Util.Rng` stream and CLAUDE.md already declares every CRN world
+  archived before it incomparable with this tree (10/10 slots reproduced up to the break, 3/10
+  after). A flag's two uses are *bridging a CRN chain* and *isolating a wave in a fresh paired
+  round*; the first is impossible pre-W1 by construction.
+* **The rule did not exist yet.** `git log -S 'restores the pre-' -- src/Program.cs --reverse`
+  puts the first restore-flag idiom in `Program.cs` at **2026-08-28** (RESONANCE W4) — one day
+  before W1. Auditing 41 earlier merges against a rule written after them would be theatre.
+* **Most of what came before is CONSTRUCTION, not change.** The game was built from nothing across
+  those merges. "Restore the old behaviour" is not defined for a feature that did not exist.
+
+### 2.2 Method M3 (history-side) and method M4 (tree-side)
+
+**M3 — the flag-surface diff.** For each of the 35 commits, diff the sixteen files that can move
+the board, the force, the economy or the run (`Ai Combat Events Grid Maps Meta Mission Run Terrain
+Unit Game Game.Modes Game.Endless Game.Meta Anim Util`), count changed **non-comment** lines, and
+list every `SIGHTLINE_` variable the same commit introduced. Then read every commit whose gameplay
+line count is non-zero, grouped by **enclosing method** — git's built-in `csharp` diff driver via a
+throwaway `core.attributesFile`, which is what makes a 400-line diff legible in one screen.
+
+**M4 — the dial census.** Independently, on the tree as it stands: every `public/internal static
+bool|int|float` **field** (not method) in those same sixteen files — 54 of them — cross-checked
+against what `Program.cs` names. 23 are unwired; every one resolves to a harness read-back, a
+counter, a per-mission state field, or a value set as a **set** by a flag that does exist
+(`Run.SetForkPrices` owns four, `Terrain.NewGround` owns the rift/sand tuning, `MetaProg.SecondAxis`
+owns `PerkOfferWidth`). **M4 surfaced no lever M3 had missed** — but see the blind spot below,
+because M4 is structurally incapable of seeing either of the two known breaches.
+
+### 2.3 The table
+
+`gp` = changed non-comment lines in the sixteen gameplay files. **It over-counts**: self-tests live
+inside `Game.Modes.cs` / `Game.Meta.cs` / `Events.cs`, so L6's 103 and several others are entirely
+test code. That is the noise the per-method grouping exists to strip.
+
+| commit | wave | gp | restore flag(s) shipped | unflagged gameplay, and its verdict |
+|---|---|---|---|---|
+| `6baa5b5` | W4 THE BOARD BECOMES A PLACE | 54 | COVERMERGE, MOVESTYLE, TOKENSTYLE, MARKERS… | `Grid.CoverSeed` — the file calls it "PURELY VISUAL" and it is. **presentation** |
+| `4e5aa9a` | **W9 THE REPAIR** | 253 | — (three new *TEST hooks) | **15 defect repairs, live, none flagged.** See §2.4 |
+| `4ba1ed3` | W5 FIRST HOUR / FRONT DOOR | 101 | OLDCHROME, BRIEFFIRST, POSTFX | onboarding, the pause card, QUIT. **presentation / UX** |
+| `d362929` | W8 THE HALF WALL | 17 | HVTBUFF, HVTDEPTH, HVTAIM | none — the wave extracted dials and changed no value |
+| `bb02bd9` | W10 THE FIT | 2 | OLDFIT | none |
+| `d814f0c` | W2 THE OPPONENT ACTS | 63 | **AIIDLEFIX** | none |
+| `1a5324a` | C6 SHIPS LIKE A PRODUCT | 3 | — | none (shipping, persistence, the manifest) |
+| `1aa30da` | C1 THE FLAT MIDDLE | 61 | **MIDTOOTH**, CHOICEBAND | none |
+| `a15e9d3` | C2 THE OPPONENT DECLINES | 88 | **AIDECLINE** | none |
+| `ef0ec76` | C5 THE HARD EDGES | 149 | AICOVSTRICT | `Run.EnsureFieldable` + `Game.EnemyStallGuard` — **guard rails**, see §2.5 |
+| `1cf46bb` | C2+C5 census reconciliation | 0 | — | none |
+| `aa272b0` | C3 THE TWO GAMES | 9 | **KILLTREADMILL** | none (`Run.IsKillObjective` is a pure predicate) |
+| `ac2a88b` `7521b50` `4f91da0` `28c6b63` `62ceaf0` `3d6e41a` | six repair/pin commits | 0 | — | none |
+| `01b653d` | C4 EIGHT BIOMES ARE PAINT | 274 | **BIOMEMECH** | none |
+| `7315425` `dd87975` | CONTOUR charter, L4 | 0 | — | none |
+| `5cd3fff` | PARALLAX m1 (THE STRIDE) | 336 | SETTINGS, LONGMOVE | `MoveStepAnim` re-interpolates `Unit.Pos` between the same two tiles at the same duration; tile entry, overwatch and the queue are untouched. **presentation** |
+| `cb58a4b` | m2 THE MODES GET THE BESTIARY | 146 | — (FACTION is a staging dial) | `rosterTier` / `midBossSlot` — **live in SKIRMISH/DAILY, campaign-inert by construction.** §2.6 |
+| `715e1a0` | m3 THE HEAT PIN + L5 | 69 | **HEATPIN** | none |
+| `ad2f6c9` | m4 THE FRONT DOOR AND THE BEAT | 86 | — (KILLCAM is a shot hook) | the kill-cam `TimeScale`. `KillUnit` branches on `AutoPlay`, so the harness keeps the old hit-stop and the flywheel never sees it. **presentation** |
+| `54147dc` | **m5 THE FORK PAYS** | 44 | — (none, at the time) | **the four prices (P21: FORKPRICES) and the heal ordering (P22: HEALFIRST).** §2.7 |
+| `4c1ca3a` | m6 THE CUE MAP | 159 | — | every line is an `Audio.Play` → `Audio.Cue` routing change or a banner cue id. **presentation** |
+| `ce2cfc7` | m7 the coverage guard | 0 | — | none |
+| `a933cfe` | m8 THE HELD LANE + THE CRASH FILE | 78 | **AILANE**, DECLINEWATCH | none |
+| `e57e151` | m9 THE UNVERIFIED (defect hunt) | 416 | **MODEDEPTH** | `MakeMidBoss`' unfactioned callsign BREAKER/WARDEN → MARSHAL. `Mk()` passes the name and nothing else; no gameplay file compares `Unit.Name`. **presentation** |
+| `f81d3fa` | m10 SHIPS AS v1.0.0 | 0 | — | none |
+| `3d5c405` | m11 GROUND TRUTH | 154 | **NEWGROUND** | none |
+| `6a6ebee` | m12 second axis / roster / stale ground | 353 | **STALEGROUND, ELITEBOSS, ROSTERID, PERKPICK, ASSISTLATCH, SECONDAXIS** | none |
+| `108d9ac` | m13 L6 | 103 | — | **none — all 103 lines are `ModeSelfTest`.** The loudest false positive M3 produced |
+| `935d719` | m14 BUILD OWNS THE BOARD | 116 | **STALEHAZARDS, FORKPRICES** | the heal ordering, named by P21 and closed here |
+
+### 2.4 The one real class the audit found: W9's fifteen defect repairs
+
+**W9 THE REPAIR changed live campaign behaviour in fifteen places and flagged none of them.** The
+ones that reach the flywheel: `Game.PurgeAnimsFor` now cancels a *downed* soldier's queued shot (a
+soldier downed mid-queue used to fire anyway); `TryFlankKillRefund` no longer refunds a downed
+killer; `Run.ReconcileDeployment` repairs the deployment after a field event moves the roster;
+`Combat.HardenedReduce(telegraph:)` stops `ComputeOdds` — a *query* — from arming the HVT-guard
+banner as a side effect; the GRAPPLE self-ram; and the run-scoped autopilot budget.
+
+**This is not a breach of the rule, and saying so is the point of the audit.** The rule is about
+*levers*. Restoring "a dead soldier still shoots" is not a configuration anybody wants, and shipping
+a flag for it would be exactly the theatre this wave was told not to do. **The project has flagged a
+defect restore twice — `SIGHTLINE_STALEGROUND=1` and `SIGHTLINE_STALEHAZARDS=1` — and both times for
+one specific reason: the defect sat inside the CRN chain a ladder had to cross.** That is the test
+this audit proposes and applies:
+
+> **A change earns a restore flag when it moves the CRN stream a future round will need to bridge
+> or isolate.** Presentation, mode-only, and guard-rail changes do not, and a flag on a change
+> nobody can measure is decoration.
+
+By that test W9's repairs would each want a flag only if a ladder ever needs to cross W9 — and none
+can, because W9 sits inside PROGRAM CROSSCUT, three ladders back, and no archived world from before
+it is comparable anyway. **Recorded, not retro-fitted.**
+
+### 2.5 Guard rails (C5)
+
+`Run.EnsureFieldable` (fires only when every squad member is benched — an unreachable-by-design
+state) and `Game.EnemyStallGuard` (fires after 480 frames of a frozen enemy turn) are safety nets
+whose whole purpose is to never fire. `EnemyStallGuardOn` is a field with **no env wiring**, which
+M4 flagged; it is deliberately not a lever. Left alone.
+
+### 2.6 Mode-only changes, campaign-inert by construction (m2, m9)
+
+m2 gave SKIRMISH and DAILY their own roster tier and mid-boss slot; m9 gave them their own depth
+(`Mission.ModeDepth`, flagged `SIGHTLINE_MODEDEPTH=0`) and stopped hard-zeroing their wave heat.
+**The campaign path is bit-identical by construction** — `rosterTier` defaults to `n`,
+`midBossSlot` is `Mode == Skirmish` only, `Mission.DepthFor(n) == n` outside the modes — so no
+ladder crosses them. m2's half has no flag, and **a flag for it would not be measurable today**:
+`SIGHTLINE_BALANCE` runs campaigns, and this project has no staged mode batch. That is a real gap,
+but it is the *instrument's* gap, and it is already an open ROADMAP item. **Recorded, not
+retro-fitted.**
+
+### 2.7 Milestone 5, re-audited line by line: there is no THIRD change
+
+The lead's open question. THE FORK PAYS' complete gameplay diff is **three** hunks, not two:
+
+1. the four routing prices + the `NodeIntel` rewrite — P21's `SIGHTLINE_FORKPRICES`;
+2. the heal ordering — this wave's `SIGHTLINE_HEALFIRST`;
+3. `Game.EnterBarracks`' legacy-card fallback, `10 + 4 * _run.Mission` → `Run.OfferIntel(card, m)`.
+
+**(3) needs no flag of its own and this is checkable rather than asserted.** `OfferIntel` is
+`BaseIntel(mission) + ClassPremium(OfferKind(c), obj)`, and under `SIGHTLINE_FORKPRICES=0`
+`DepthBase` is 10 and `PitchedPremium` is 0, so it collapses to `10 + 4 * mission` — the pre-wave
+expression exactly. **The existing flag already covers it.** With `HEALFIRST` shipped, the pair
+`SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1` restores milestone 4 whole.
+
+### 2.8 What these methods are blind to — read this before quoting "one"
+
+**M3 cannot see a change that is not in a diff of those sixteen files.** Specifically:
+
+* **An `Audio`/`Renderer`/`Hud` change with a gameplay consequence.** Those files are excluded as
+  presentation by construction. m6 moved 159 lines of cue routing; if one of those calls had
+  consumed a `Util.Rng` draw the method would have called it presentation and been wrong. (W1's
+  sever makes this unlikely, and `SIGHTLINE_PAIRTEST` would catch it — but M3 does not.)
+* **A change inside a wave, reverted and re-landed within it.** M3 diffs merge-to-parent, so it
+  sees each wave's net effect, not its internal history.
+* **The autopilot.** `Game.Autopilot.cs` is the *instrument*, not the game, and is excluded — but a
+  change to it moves every measured number, and nothing in this project flags those either.
+* **Judgement at the leaves.** "Presentation" in the table above is a *reading of the code*, not a
+  measurement. `Grid.CoverSeed`, THE STRIDE, the kill-cam and the MARSHAL callsign were each read
+  and cleared by hand; a wrong reading is a miss M3 will not catch.
+
+**M4 is blind to exactly the thing that produced both known breaches.** It censuses *fields*, so it
+can only see a lever somebody already parameterised. Before P21, `Run.SupplyDiscount` was a bare
+`const int` and invisible to it; the SUPPLY heal ordering was never a field at all — it was the
+*position of a statement*. **A change of ORDER leaves no dial to census.** That is the shape to
+watch for, and it is why the honest claim here is method-qualified, not a bare list.
+
+### 2.9 And a finding about the derivation everyone trusts
+
+CLAUDE.md says **"Grep `Program.cs` for `SIGHTLINE_` for the authoritative set"** and calls that
+list derived-and-therefore-reliable, against the written-down list that goes stale. **The derivation
+is incomplete.** `Program.cs` names **236** `SIGHTLINE_` variables; **269** appear as quoted env-var
+names across `src/`, and **59 `GetEnvironmentVariable` call sites live outside `Program.cs`**.
+
+Most of the difference is harness staging read in `Game.Harness.cs`, and two are presentation
+restores read where they act (`SIGHTLINE_COVERMERGE` in `Renderer.cs`, `SIGHTLINE_OLDCHROME`). But
+**one is a gameplay dial**: `SIGHTLINE_BIOMEDEAL=hash` is read in `src/Util.cs`, at class load, and
+it swaps the biome deal's fixed 8-cycle for a per-`(seed, mission)` hash — which `Mission.DeckPick`
+reads, so it **re-deals the ARENA on 28.9% of missions** and severs the CRN chain the way W1 did.
+It is default-off and P16 documented it, so nothing is broken; but a reader following CLAUDE.md's
+own instruction would not find it.
+
+**The instruction is corrected in CLAUDE.md**: grep `src/`, not `Program.cs`. This is the same shape
+as the two breaches that motivated this wave — *the check everybody trusts was narrower than its
+description* — and one more instance of PROGRAM PARALLAX's thesis that the gates here fail quiet.
+
+### 2.10 The count
+
+**Audited 35 wave-granularity commits by M3 + M4. Found ONE live, campaign-affecting, unflagged
+LEVER — the SUPPLY heal ordering — and it was already known.** Everything else unflagged falls in
+three classes that the rule does not reach and a flag would not help: **presentation** (six —
+W4's `CoverSeed`, W5's front door, m1's STRIDE, m4's kill-cam, m6's cue routing, m9's MARSHAL
+callsign), **mode-only / campaign-inert by construction** (one — m2's roster tier; m9's mode depth
+is the same class but IS flagged, as `SIGHTLINE_MODEDEPTH`), and **defect repairs and guard rails**
+(W9's fifteen, plus C5's two). **So the honest answer to "how many did we miss" is: the two we knew
+about, and this is the first time anybody has looked systematically enough to say that with a
+method attached.** M3 and M4's blind spots above are the part of that claim that is not proof.
+
+---
+
+## 3. What the flag is worth — the CRN round
+
+Base commit `935d719`, one binary (`runbin/P22`), two arms one env var apart. Three rungs
+(h0, h4, h8) x **16 CRN slot bases** x 20 campaigns x greedy+sloppy = **48 chunks / 1,920
+campaigns per arm, 3,840 total. 48/48 OK and 0 BAD on both arms** (`check_chunk.py`, the P15 runner
+of record). Raw round, runner and README: `docs/measurements/p22/`.
+
+**First, the inertness that had to hold: the 32 cells this round shares with P21's are 32/32
+byte-identical to P21's shipped arm** (`harness{}` and `instrument{}` excluded) — different binary,
+different commit, same worlds, same outcomes. The new flag defaults off and costs nothing, and the
+CRN chain is intact across milestone 14's merge.
+
+Then the contrast:
+
+| rung | n | shipped | `HEALFIRST=1` | delta | b/c | n_disc | MDE(80%) | McNemar z | chunk t(15) | course changed |
+|---|---|---|---|---|---|---|---|---|---|---|
+| h0 | 640 | 44.4 | 45.8 | **+1.4** | 11/20 | 31 | 2.44 | +1.62 | +2.33 | 12.5% |
+| h4 | 640 | 23.8 | 24.5 | **+0.8** | 15/20 | 35 | 2.59 | +0.85 | +1.23 | 12.0% |
+| h8 | 640 | 8.6 | 10.5 | **+1.9** | **0/12** | 12 | 1.52 | **+3.46** | +3.00 | 8.4% |
+| **pooled** | **1,920** | **25.6** | **26.9** | **+1.35** | **26/52** | **78** | **1.29** | **+2.94** | — | **11.0%** |
+
+A positive delta means the RESTORED ordering wins more, so **THE FORK PAYS' heal change made the
+campaign harder by about 1.35 points** — the direction it was designed to have, since it removed a
+hidden subsidy. **Only the pooled row and h8 are resolved**; h0 and h4 sit inside their own MDE and
+are absence of evidence, not neutrality. h8's shape is the interesting one: **all 12 discordant
+pairs go the same way (b=0)**, a small consistent effect on a low base rate.
+
+**211 of 1,920 paired campaigns (11.0%) take a different course and 0 of 48 chunk pairs are
+byte-identical**, so the flag is unambiguously live — and bounded: a SUPPLY clear is a minority of
+nodes and a wound is a temporary −Aim/−Mobility, not a death.
+
+**THIS IS NOT A PRICE FOR THE FORK PAYS AND MUST NOT BE QUOTED AS ONE.** It is a flag-vs-default
+contrast on today's tree, eleven merges after that wave. L6 priced the wave's *prices* at −0.36
+pooled over 1,920 pairs (401 discordant, MDE 2.9, unresolved) by building a whole extra tree. **The
+two numbers are of different things. Do not add them.**
+
+---
+
+## 4. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `SIGHTLINE_FORKTEST=1` — PASS; leg (F) 248/248 transcription cells, 102 moved. **Proven RED**
+  with the flag's two reads stubbed (102 F1 failures, "moves 0"), GREEN restored.
+- 96/96 balance chunks asserted, 0 BAD; 32/32 cross-checked byte-identical against P21's arm.
+- `bash scripts/qa-sweep.sh --full` — **85 self-tests exist in `src/`, this sweep ran 85**, every
+  line PASS, **no COVERAGE GAP**, autoplay x3 (LOSE m2 / LOSE m1 / WIN m6), no TIMEOUT,
+  **`SWEEP-EXIT-CODE=0`**. Run twice over the wave, green both times (the earlier one read
+  LOSE m1 / WIN m6 / WIN m6). **No `qa-sweep.sh` change was needed**, because leg (F) joined the
+  existing `SIGHTLINE_FORKTEST` rather than adding a hook — which also keeps this wave off the file
+  the concurrent measurement round owns.
+
+## 5. Left open, on purpose (all three are in `docs/ROADMAP.md`)
+
+1. **The mode force has no off switch and no instrument.** Milestone 2's SKIRMISH/DAILY roster tier
+   is unflagged and campaign-inert; there is no staged mode batch to price it with. Instrument
+   first, flag second.
+2. **The autopilot is unflagged and it moves every number.** `Game.Autopilot.cs` is excluded from
+   every audit in this project as "the instrument, not the game" — but no wave that changed it
+   shipped a restore flag, so nobody can ask "is this ladder difference the game or the bot?"
+3. **The rule has no test, only a statement.** §2.4's operational form and the exact audit command
+   are written down (`docs/measurements/p22/README.md`); nothing enforces them.

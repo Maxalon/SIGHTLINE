@@ -258,6 +258,19 @@ public static class Program
         string forkPricesEnv = Environment.GetEnvironmentVariable("SIGHTLINE_FORKPRICES");
         if (forkPricesEnv == "0") Run.SetForkPrices(false);
         else if (forkPricesEnv == "1") Run.SetForkPrices(true);
+        // P22 "NOTHING WITHOUT A SWITCH" — SIGHTLINE_HEALFIRST=0/1, the OTHER half of THE FORK
+        // PAYS, which P21 named and could not cover. =1 restores the pre-milestone-5 ORDERING of
+        // the SUPPLY/RECON card's full squad heal: it lands BEFORE Run.DebriefSurvivors' fresh-wound
+        // gauge, so nobody who ends a cleared SUPPLY node on their feet can be wounded by it. Live,
+        // not latent — SUPPLY was 828 of 5,413 played nodes (15.3%) in P21's own census.
+        // A SEPARATE dial from SIGHTLINE_FORKPRICES on purpose: the prices move the routing ECONOMY
+        // and the map fingerprints, this moves squad ATTRITION, and a round may want one alone.
+        // TO RESTORE MILESTONE 4 WHOLE, SET BOTH: SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1.
+        // Never a shipping configuration: with it on, FORKTEST leg (C) fails by design (the subsidy
+        // is back). Neither flag repairs L6's bridge — L5's worlds are gone.
+        string healFirstEnv = Environment.GetEnvironmentVariable("SIGHTLINE_HEALFIRST");
+        if (healFirstEnv == "1") Run.SupplyHealFirst = true;
+        else if (healFirstEnv == "0") Run.SupplyHealFirst = false;
         // ---- P18 "THE SECOND AXIS" — the wave's three off switches (house pattern: =0 restores
         // the pre-P18 behaviour EXACTLY, so every change is attributable). ----
         // SIGHTLINE_ASSISTLATCH=0/1: the adaptive assist reads the heat the run STARTED at instead
