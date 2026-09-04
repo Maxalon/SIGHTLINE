@@ -2220,7 +2220,17 @@ public partial class Game
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
-        Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
+        // P21 BUILD OWNS THE BOARD — `Mission.Build` now clears Fire and Barrel itself (beside its
+        // ground clear), so BUILD IS THE OWNER of all eight per-tile layers and this line is a
+        // proven no-op: Array.Clear on already-zero arrays, 28 lines before the Build that repeats
+        // it. It is KEPT DELIBERATELY, not by oversight. Removing it is the only part of the P21
+        // change that could alter a live path — it would leave the previous mission's fire and
+        // barrels live across the ~28 lines between here and the Build call (the reserve pick, the
+        // deck seed, the roster/elite/final-approach reads) — and it buys nothing: the invariant
+        // has moved into Build either way. Keeping it also keeps MODETEST leg (14b) meaningful,
+        // which asserts the whole eight-layer contract at THIS seam and would go quiet about the
+        // caller if the caller stopped doing anything.
+        Grid.ClearHazards();              // wipe last mission's fire/barrels (Mission.Build repeats it; Build owns the layer)
         // FUL-9: publish the run seed for the arena deck (pure derivation — Mission.PickLayout
         // deals draw n of a MapSeed-keyed no-repeat deck; all five mode entries route through here)
         Mission.DeckSeed = _run != null ? _run.MapSeed : 0;

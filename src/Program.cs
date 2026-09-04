@@ -233,6 +233,31 @@ public static class Program
         string staleGroundEnv = Environment.GetEnvironmentVariable("SIGHTLINE_STALEGROUND");
         if (staleGroundEnv == "1") Mission.ClearGroundOnBuild = false;
         else if (staleGroundEnv == "0") Mission.ClearGroundOnBuild = true;
+        // P21 "BUILD OWNS THE BOARD" — SIGHTLINE_STALEHAZARDS=0/1, the same switch for the two
+        // layers L6 found next door. =1 restores the pre-fix seam, in which Mission.Build did not
+        // clear Fire or Barrel and its connectivity floods could read the previous mission's
+        // barrels (Grid.IsFloor tests !Barrel in the same predicate as the rift). UNLIKE
+        // STALEGROUND this one is INERT ON EVERY SHIPPED PATH — Game.SetupMission's own
+        // Grid.ClearHazards() is kept, so the arrays are already zero when Build runs — which is
+        // why L6 called that defect LATENT, not live, and why P21's balance round expects a
+        // byte-identical JSON on either setting. MODETEST leg (14a-2) flips it to prove its dirt
+        // still bites.
+        string staleHazEnv = Environment.GetEnvironmentVariable("SIGHTLINE_STALEHAZARDS");
+        if (staleHazEnv == "1") Mission.ClearHazardsOnBuild = false;
+        else if (staleHazEnv == "0") Mission.ClearHazardsOnBuild = true;
+        // P21 "BUILD OWNS THE BOARD", second half — SIGHTLINE_FORKPRICES=0/1, the off switch
+        // THE FORK PAYS (milestone 5) should have shipped and did not. That wave repriced the
+        // campaign routing economy — Run.DepthBase 10 -> 12, a SUPPLY discount, a PITCHED class
+        // price, the ELITE premium — as four bare `const int`s, so L6's bridge to the ladder of
+        // record could not be constructed across it: 0 of 96 chunks reproduced, and the bisect put
+        // the break on exactly that milestone with L5's own base commit passing as a control.
+        // =0 restores all four pre-wave prices AS A SET (Run.SetForkPrices; partially undoing them
+        // yields an economy that never shipped). It does NOT repair that bridge — L5's worlds are
+        // gone — it makes a FUTURE round able to isolate the wave. Never a shipping configuration:
+        // with it off, FORKTEST leg (A) fails by design and SAVETEST's map fingerprints move.
+        string forkPricesEnv = Environment.GetEnvironmentVariable("SIGHTLINE_FORKPRICES");
+        if (forkPricesEnv == "0") Run.SetForkPrices(false);
+        else if (forkPricesEnv == "1") Run.SetForkPrices(true);
         // ---- P18 "THE SECOND AXIS" — the wave's three off switches (house pattern: =0 restores
         // the pre-P18 behaviour EXACTLY, so every change is attributable). ----
         // SIGHTLINE_ASSISTLATCH=0/1: the adaptive assist reads the heat the run STARTED at instead

@@ -16197,3 +16197,238 @@ It broke no existing assertion: MODETEST passes ×3 including the cross-process 
   PASS, no COVERAGE GAP, no TIMEOUT, `SWEEP-EXIT-CODE=0`.
 - `SIGHTLINE_MODETEST=1` ×3 on the shipped binary — 3 PASS, with the widened signature.
 - 224/224 chunks asserted; `rows.py --check` on all 192 shipped-runner chunks — `ROWS-CHECK: PASS`.
+
+---
+
+# §P21 — "BUILD OWNS THE BOARD" (2026-09-04, `wave/build-owns-eight`, base `108d9ac`)
+
+**A debt wave, not a feature wave.** Two items, both located precisely by an earlier wave, both
+shipped with the switch the house rule requires. Nothing here was designed by this wave; the whole
+job was to execute two settled designs and price them honestly.
+
+---
+
+## 1. `Mission.Build` now owns all eight of `Grid`'s per-tile layers
+
+### 1.1 What was wrong, said carefully
+
+P20 found `Mission.Build` wiping Tiles, Height and Smoke but not the biome **Ground** layer, while
+reading Ground through `Grid.IsFloor` — so a board was a function of the board before it, and the
+SEEDED DAILY's headline contract failed on 8–15% of processes. L6 then generalised P20's regression
+leg from one array to all eight and found **6 of 8 fail**: six self-clean, **Fire** is
+inert-but-uncleaned, and **`Barrel` moves the board** — dirtying it alone moves Tiles, Height,
+CoverHp, CoverSeed and Barrel, because `Grid.IsFloor` is
+`InBounds && Tiles==Floor && !Barrel[x,y] && !rift` and a barrel sits in the same predicate the
+rift was added to.
+
+**It was LATENT, NEVER LIVE, and this wave keeps saying so because the distinction is the whole
+shape of the change.** `Game.SetupMission` is the only production caller of `Mission.Build` — the
+other two callers are a harness Build on a fresh `new Grid()` and the regression leg itself — every
+mode funnels through it, and it calls `Grid.ClearHazards()` unconditionally, with no branch, 28
+lines before the Build call. **No shipped path has ever read a stale barrel.** What was wrong is
+that the invariant lived in the **caller** rather than in Build. That is the exact arrangement
+`Ground` had, and that arrangement is what bit.
+
+### 1.2 The change
+
+One line at the top of `Mission.Build`, beside P20's:
+
+```csharp
+if (ClearGroundOnBuild)  grid.ClearGround();
+if (ClearHazardsOnBuild) grid.ClearHazards();     // <- P21
+```
+
+`Mission.ClearHazardsOnBuild` defaults **true**; `SIGHTLINE_STALEHAZARDS=1` restores the pre-fix
+seam. The flag exists for the house reason and because MODETEST's detector-can-fail arm flips it.
+
+### 1.3 THE DECISION THE HAND-OFF ASKED FOR: `Game.SetupMission`'s call is **KEPT**
+
+The lead asked for the reasoning, not the conclusion. Four reasons, in the order they decided it:
+
+1. **The entire value of the change is that Build owns the invariant, and adding the line to Build
+   achieves that whole value.** Removing the caller's call adds nothing to the property being
+   fixed. It is a separate change wearing the same commit.
+2. **It is the only part of this wave that could touch a live path.** Between
+   `Grid.ClearHazards()` and `Mission.Build(...)` there are ~28 lines — the reserve/terminal pick,
+   `Mission.DeckSeed`, the roster tier, `eliteNode`, `IsFinalApproach`. None of them reads Fire or
+   Barrel *today*; but "none of them reads it today" is precisely the class of argument this
+   project has been burned by twice (P20's ground, L6's barrel). Deleting the call converts a
+   provably inert wave into one resting on an audit of 28 lines. The measured inertness result in
+   §1.5 is only available *because* the call stayed.
+3. **Duplication costs nothing and cannot rot.** Both sites call the same one function; there is no
+   second copy of the rule to keep in sync, and `Array.Clear` on already-zero arrays is free at the
+   scale of one mission build. The comment at the caller names Build as the owner, so a reader is
+   told which one is load-bearing.
+4. **It keeps MODETEST leg (14b) describing something real.** (14b) asserts the eight-layer
+   contract at the **SetupMission** seam — the shipped path. If the caller stopped doing anything,
+   (14b) would become a restatement of (14a-2) instead of an independent check that a future
+   caller, or a future call site, still holds the line.
+
+The counter-case, recorded because it is not silly: a duplicated clear can read as cargo-cult to a
+later maintainer, and "defence in depth" is how dead code accumulates. That is answered by the
+comment, not by deletion.
+
+### 1.4 The regression, RED before and GREEN after
+
+L6 had to split the assertion where the code split — `(14a-2)` covered the six layers Build itself
+cleared, and `(14b)` covered all eight at the SetupMission seam, because that is where the hazard
+clear lived. **The split has nothing left to describe, so it collapsed:**
+
+* `(14a-2)` now dirties **all eight** layers (`DirtyEightBuildClears`, which also asserts its own
+  dirt is real — a rift wall and at least one barrel) and asserts all eight layers, the force
+  signature and the squad's seats agree between a Build on a dirty grid and a Build on a clean one.
+* **The detector is proven able to fail on EACH OWNER SEPARATELY.** One arm suppresses
+  `ClearGroundOnBuild`, one suppresses `ClearHazardsOnBuild`, and each must move at least one layer
+  with the same dirt: `staleGridProbeInsensitive(ground)` / `(hazards)`. A single combined arm
+  would have gone green on either half alone.
+* Both arms now **save and restore** the dial rather than forcing it `true`, so a run under
+  `SIGHTLINE_STALEGROUND=1` / `STALEHAZARDS=1` keeps testing what it says it is testing.
+* `(14b)` is unchanged in kind but is now belt **and** braces rather than the only cover for
+  Fire/Barrel.
+
+Measured on the shipped Release binary:
+
+| | result |
+|---|---|
+| default (fixed) | **MODETEST PASS 5 / 5** |
+| `SIGHTLINE_STALEHAZARDS=1` | **FAIL 3 / 3**, the same token every time: `buildReadsStaleGrid(6/8 layers: Tiles, Height, CoverHp, CoverSeed, Fire, Barrel)` |
+| `SIGHTLINE_STALEGROUND=1` | **FAIL 2 / 2** (P20's seam, still red): `buildReadsStaleGround(11 tiles survived Build)`, `buildLeftStaleGroundFlags`, `buildReadsStaleGrid(1/8 layers: Ground)`, `dailyBoardReadsPreviousGround`, `dailyGridReadsPreviousMission(6/8 layers)` |
+
+The RED reproduces L6's per-layer table exactly — six layers move, and they are the five `Barrel`
+drags plus `Fire` itself. No new hook, so no `qa-sweep.sh` edit: MODETEST is already wired once,
+through `verdict`.
+
+### 1.5 Proven inert, with an n
+
+The bar was W1's: a balance JSON **identical on every key** once `harness{}` is excluded. Two rungs
+(h0, h4) x **16 CRN slot bases** x 20 campaigns x greedy+sloppy = **1,280 campaigns per arm**, heat
+pinned, 32/32 chunks asserted on every arm by `check_chunk.py`. Raw round + runner:
+`docs/measurements/p21/`.
+
+| comparison | result |
+|---|---|
+| `108d9ac` (the base commit) vs the wave, both at defaults | **IDENTICAL 32 / 32 chunks** |
+| the wave vs itself under `SIGHTLINE_STALEHAZARDS=1` | **IDENTICAL 32 / 32 chunks** |
+
+The second is the stronger statement: it isolates exactly the one added line, on one binary, and
+**1,280 CRN campaigns produce the same outcomes with the clear on and off.** That is what
+"latent, not live" means when it is measured instead of argued.
+
+**The flag being inert is the finding, not a defect in the flag.** `SIGHTLINE_STALEGROUND=1` moves
+the board because nothing else cleared Ground. `SIGHTLINE_STALEHAZARDS=1` cannot, because
+`Game.SetupMission` still clears the hazards first — by decision, §1.3. **If that diff ever comes
+back non-empty, a live path exists that neither L6 nor this wave found.**
+
+**A free cross-check fell out of it.** The default arm's cells overlap L6's ladder cells (L6 ran
+N=10 per chunk, this round N=20, same 16 slot bases, same two rungs). On the overlapping slots the
+default arm reproduces the ladder of record **32/32 chunks, 640/640 campaigns** (win,
+missionsCleared, runTurns, endMission), and reads **h0 44.4% / h4 23.8%** — L6's ladder to the
+decimal at both rungs. The CRN chain is intact from `6a6ebee` through milestone 13 and through this
+wave.
+
+---
+
+## 2. THE FORK PAYS gets the restore flag it never shipped
+
+### 2.1 The finding, and what a flag can and cannot do about it
+
+L6's bridge to the previous ladder of record reproduced **0 of 96 chunks**. Bisected by milestone
+with L5's own base commit as a passing control, the CRN chain was intact through milestone 4 and
+broke at **milestone 5, THE FORK PAYS**, which repriced the campaign routing economy —
+`Run.DepthBase` 10 → 12 plus the SUPPLY discount, the ELITE premium and the PITCHED class price —
+as four bare `const int`s with no environment switch. `CLAUDE.md`'s own rule is that every gameplay
+lever ships one *because a wave that cannot be switched off cannot be attributed*. That one could
+not, so **no bridge to L5 could exist through it, by construction.**
+
+**THIS FLAG DOES NOT REPAIR THAT BRIDGE.** L5's worlds were measured on a tree that no longer
+exists, and no environment variable brings them back; L6's 0/96 stands. ROADMAP's phrasing — *"the
+L5 archive becomes reachable again"* — was wrong and has been corrected in place. **What the flag
+buys is that a future round can isolate that wave's contribution, which was impossible before.**
+That is the whole claim.
+
+### 2.2 The change
+
+The four constants become dials, and the restore is a **set**, not four edits:
+
+```csharp
+public const  int ForkSupplyDiscount = -6, ForkElitePremium = 14, ForkPitchedPremium = 8, ForkDepthBase = 12;
+public const  int PreForkSupplyDiscount = 10, PreForkElitePremium = 14, PreForkPitchedPremium = 0, PreForkDepthBase = 10;
+public static void SetForkPrices(bool on) { ... }        // SIGHTLINE_FORKPRICES=0/1
+```
+
+**All four or it is not a restore.** The depth term moved 10 → 12 as the *redistribution* that
+hands back the ~1.88–2.06 intel/mission the discount and the premium take out (the arithmetic is in
+the constant's own comment block); undoing the premiums while keeping the base — or the reverse —
+produces an economy that never shipped and prices nothing. Both tables are `const`, so a future
+re-tune edits the `Fork*` row and the `Pre*` row keeps meaning "milestone 4".
+
+`const` → `static` is not a behaviour change (no `case` labels, attribute arguments or default
+parameter values read them), and the inertness round in §1.5 covers it: the base-commit arm is
+byte-identical to the wave's default arm on 1,280 campaigns.
+
+### 2.3 The round trip, pinned
+
+FORKTEST leg **(E)**, three parts:
+
+* **E1** — the shipped defaults are the FORK PAYS table; `SetForkPrices(false)` gives **10 / 14 /
+  0 / 10** on all four; and going back gives the whole payout table again on 40 dealt maps.
+* **E2** — under the restore, `Run.NodeIntel` reproduces the pre-milestone-5 function **verbatim**
+  on every dealt node. The expectation is a **literal transcription** of the old method
+  (`baseIntel = 10 + 4*n`; Supply +10, Elite +14, Event 0, else base), not a re-derivation from the
+  same constants the code reads — the discipline BANDTEST uses for its old rule.
+* **E3** — **the flag must not be decoration**, so the re-pricing is counted: **405 of 481 dealt
+  nodes over 40 maps** move. The 76 that do not are Event nodes, which pay 0 under both tables.
+
+The leg leaves the dial exactly as the environment set it. Under `SIGHTLINE_FORKPRICES=0` the rest
+of FORKTEST **fails by design** and says why — `A1:m1 combMin14<=suppMax24, A1:m1 supply24>=base14,
+…` — which is the defect the wave existed to remove, reproduced: SUPPLY strictly dominating COMBAT
+again. `SIGHTLINE_SAVETEST`'s map fingerprints also move under it, because
+`SaveGame.MapFingerprint` feeds each node's regenerated `Intel`. **Never a shipping
+configuration.**
+
+### 2.4 And at the campaign level it bites
+
+Same 32 cells, `SIGHTLINE_FORKPRICES=0` against the default:
+
+| rung | n | shipped | `FORKPRICES=0` | delta | n_disc | MDE(80%) | McNemar z | course changed |
+|---|---|---|---|---|---|---|---|---|
+| h0 | 640 | 44.4 | 44.8 | −0.5 | 147 | 5.3 | −0.25 | 71.7% |
+| h4 | 640 | 23.8 | 25.5 | −1.7 | 137 | 5.1 | −0.94 | 65.0% |
+| **pooled** | **1,280** | **34.1** | **35.2** | **−1.1** | **284** | **3.7** | **−0.83** | **68.4%** |
+
+All 32 chunks differ and 875 of 1,280 paired campaigns take a different course. **That is the
+claim: the flag bites.** The win-rate column is **not** a price for THE FORK PAYS and must not be
+quoted as one — every rung sits inside its own MDE, and this is a flag-vs-default contrast on
+today's tree, not the milestone-4-vs-5 contrast L6 measured (`−0.36` pooled over 1,920 pairs, also
+unresolved). They agree in sign and neither resolves anything.
+
+---
+
+## 3. Found and NOT fixed — the other half of THE FORK PAYS is still unswitchable
+
+The same commit shipped a **second** gameplay change with no flag: the SUPPLY card's full heal moved
+from *before* `Run.DebriefSurvivors` to *inside* it (`DebriefSurvivors(bool fullHeal)`), because the
+fresh-wound gauge reads `u.Hp` and a heal applied first meant a cleared SUPPLY node could not wound
+anybody who walked off the field. That is a real gameplay change, it is live in the flywheel (SUPPLY is **828 of 5,413**
+played nodes — 15.3% — across this wave's 1,280-campaign default arm), and `SIGHTLINE_FORKPRICES` does not touch it — so the dial
+isolates the wave's **prices**, not the wave.
+
+It was not fixed here because the hand-off scoped item 2 to the four routing prices and said to
+report rather than widen. It is one bool and one branch, and FORKTEST leg (C) already reproduces the
+pre-wave ordering in-process (`Clear(true, true)`) — the behaviour is written down, it simply is not
+reachable from the environment. `docs/ROADMAP.md` carries it as its own item.
+
+---
+
+## 4. Gate
+
+- `dotnet build -c Release` — **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — **85 self-tests exist in `src/`, this sweep ran 85**, every
+  line PASS, **no COVERAGE GAP**, autoplay ×3 (WIN m6 / WIN m6 / LOSE m5 on the final run; the two
+  earlier full sweeps this wave read LOSE m5 / LOSE m3 / LOSE m6 and WIN m6 / WIN m6 / WIN m6), no
+  TIMEOUT, **`SWEEP-EXIT-CODE=0`** — run three times over the wave, green all three.
+- `SIGHTLINE_MODETEST=1` ×5 on the shipped binary — 5 PASS; ×3 under `SIGHTLINE_STALEHAZARDS=1` —
+  3 FAIL, one token, identical every time.
+- `SIGHTLINE_FORKTEST=1` — PASS at defaults; FAIL by design under `SIGHTLINE_FORKPRICES=0`.
+- 128/128 balance chunks asserted (`check_chunk.py`, four arms × 32), re-verified individually.
+- Raw round, runner and README: `docs/measurements/p21/`.
