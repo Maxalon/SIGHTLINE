@@ -246,7 +246,8 @@ public static class Mission
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
                              int dmgDelta = 0, bool defend = false, int defendKeep = 0,
-                             int rosterTier = -1, bool midBossSlot = false)
+                             int rosterTier = -1, bool midBossSlot = false, bool eliteNode = false,
+                             bool finalApproach = false)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -302,7 +303,7 @@ public static class Mission
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
         SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep, shape,
-                     rosterTier, midBossSlot);
+                     rosterTier, midBossSlot, eliteNode, finalApproach);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -640,6 +641,49 @@ public static class Mission
     /// published one, otherwise the literal mission number.
     public static int DepthFor(int missionNum) => ModeDepth > 0 ? ModeDepth : missionNum;
 
+    // ── P19 "THE ROSTER CONTESTS" — THE NAMED ELITE BELONGS TO THE ELITE NODE ────────────────
+    // The campaign map ships a `NodeKind.Elite` whose whole advertised identity is "the heavier
+    // fight, the biggest payout": Run.CardForNode gives it +2 bodies / +1 stat / a BONUS PERK, and
+    // Run.ElitePremium pays it the map's top intel rate. The named mid-boss — the one piece of
+    // content in the mid-game that forces a different plan (BREAKER rushes, BULWARK must be
+    // flanked, WARDEN shells you off your tile) — was keyed on the MISSION NUMBER instead:
+    // `n == 3 || n == 5`. The label and the thing it names were therefore disconnected in BOTH
+    // directions, which is the exact failure C3 named: a label the game does not honour is worse
+    // than no label.
+    //   * a player who deliberately routed INTO an ELITE bought no named opponent for it;
+    //   * a player who avoided every ELITE met one anyway, twice, on a schedule.
+    // MEASURED on this tree before the change (n=120 campaigns, base 3d5c405): the flywheel's own
+    // route played 31 ELITE nodes at h0-b0 alone, none of which fielded the elite they advertise.
+    //
+    // `EliteBoss` keys it on the NODE. `SIGHTLINE_ELITEBOSS=0` restores the mission-number rule
+    // exactly (MidBossFor is the single predicate, so the restoration cannot drift).
+    public static bool EliteBoss = true;
+
+    /// The FINAL-APPROACH FLOOR, and the load-bearing half of the change. Keying PURELY on the
+    /// node would gate the game's most distinctive body behind routing luck: `Run.GenerateMap`
+    /// stamps only `max(1, mids/5)` ELITE nodes among ~8-12 mid nodes and a route takes exactly one
+    /// node per column, so a large share of routes would meet no named elite at all — a content
+    /// regression dressed as a fix. So the LAST FIGHT BEFORE THE FINALE always fields one, and the
+    /// design statement is a sentence rather than a schedule: *the named elite fights you where you
+    /// go looking for it — on the ELITE node — and once more, unavoidably, on the way to the boss.*
+    ///
+    /// `finalApproach` is that fight, computed on the ROUTE (Game.SetupMission walks the node's
+    /// successors), NOT on the mission number: an Event node can occupy a route's column-4 slot, in
+    /// which case the route plays no mission 5 at all and a bare `n == 5` floor silently misses it.
+    /// MEASURED over all 1,098 enumerated routes of 200 maps (SIGHTLINE_ROSTERTEST leg p19-4): a
+    /// mission-5 floor leaves 89 routes (8.1%) meeting no named elite — and the PRE-P19 mission-
+    /// number rule itself left 30 (2.7%), which nobody had ever counted. The route-walked floor
+    /// leaves zero. `MidBossFloorMission` is kept as a belt-and-braces proxy for any caller that
+    /// cannot see the route.
+    public const int MidBossFloorMission = 5;
+
+    /// The one predicate: does slot 0 of this force field the named mid-boss? `modeSlot` is the
+    /// single-mission modes' own arm (SKIRMISH heat >= 4, Game.SetupMission) and is unchanged.
+    public static bool MidBossFor(int missionNum, bool eliteNode, bool finalApproach, bool modeSlot)
+        => modeSlot
+        || (EliteBoss ? (eliteNode || finalApproach || missionNum == MidBossFloorMission)
+                      : (missionNum == 3 || missionNum == 5));
+
     /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). SHIPPED
     /// ON: measured exactly ladder-neutral (32.5% = 32.5% run completion, n=40) for the wave's
     /// biggest single gain on the "which target?" axis (+0.06 target-choices/ARMED) and
@@ -669,7 +713,8 @@ public static class Mission
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
                              int dmgDelta = 0, bool defend = false, int defendKeep = 0,
-                             int shape = DeployFrontal, int rosterTier = -1, bool midBossSlot = false)
+                             int shape = DeployFrontal, int rosterTier = -1, bool midBossSlot = false,
+                             bool eliteNode = false, bool finalApproach = false)
     {
         // THE MODES GET THE BESTIARY — ROSTER DEPTH is its own axis. `n` has always carried two
         // jobs: the NUMERIC ramp (headcount, the (n-1) stat bump, the opener trim, W9's heat
@@ -873,7 +918,7 @@ public static class Mission
             if (podsOf3 && member == 0) { podAnchor[podId] = y; podAnchorX[podId] = x; }   // the pod lead's final tile
 
             bool finalMission = n >= Run.MaxMissions;
-            bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5 || midBossSlot);   // recurring named elite
+            bool midBoss = !finalMission && i == 0 && MidBossFor(n, eliteNode, finalApproach, midBossSlot);   // named elite
             bool finalBody = n >= Run.MaxMissions;
             float r = Util.RandF();
             // W4 THE SECOND AXIS — POD UNIFORMITY. The wave's instrumentation says an armed
@@ -1399,11 +1444,34 @@ public static class Mission
     /// Eliminate's turn budget and the decision-density instruments cannot move through this knob.
     public static int HostileAimTrim = 0;
 
+    // ── P19 "THE ROSTER CONTESTS" — the SMG monoculture's range bands ────────────────────────
+    /// SIGHTLINE_ROSTERID=0 restores the pre-P19 roster exactly: no archetype is assigned an SMG
+    /// band, so all twelve SMG carriers fall back to Weapon.SmgStandard (the shipped curve).
+    public static bool RosterIdentity = true;
+
+    /// Which SMG band an archetype carries. PURE in `cls` — no draw, no state — so it cannot move
+    /// a CRN pairing, and `SIGHTLINE_ROSTERID=0` is a total restoration rather than a re-roll.
+    ///   CQB      the four bodies whose whole plan is to CLOSE: the swarmer, the leaper, the
+    ///            screen-probe and the beelining drone. Ai.cs already gives all four the top
+    ///            advance weights (3.0-3.6); their gun now agrees, and kiting them finally works.
+    ///   STANDOFF the two that hold a standoff by design: the MORTAR (its own Ai branch settles at
+    ///            grenade range) and the BOMBARD (its branch MAXIMISES distance). Charging them is
+    ///            the counter-play the design already assumed and the numbers did not pay.
+    /// Everything else keeps STANDARD, including every player weapon (this is only ever called
+    /// from MakeHostile).
+    public static int SmgProfileFor(string cls) => cls switch
+    {
+        "HOUND" or "STRIKER" or "SCOUT" or "DRONE" => Weapon.SmgCqb,
+        "MORTAR" or "BOMBARD"                      => Weapon.SmgStandoff,
+        _                                          => Weapon.SmgStandard,
+    };
+
     static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
     {
         int thp = hp + HostileToughness;
         if (HostileAimTrim > 0) aim = Math.Max(20, aim - HostileAimTrim);   // no-op (identity) at the default 0
         var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = thp, MaxHp = thp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
+        if (RosterIdentity && w == WeaponKind.Smg) u.Weapon.SmgProfile = SmgProfileFor(cls);
         u.Weapon.TrimBaseDamage(HostileDamageTrim);
         u.Ammo = u.Weapon.Clip;
         return u;

@@ -15239,3 +15239,344 @@ P10's gate and its own fix; ROADMAP.
 - `dotnet build -c Release` **0 warn / 0 err**.
 - `bash scripts/qa-sweep.sh --full` — see the closing lines in the wave's report.
 - Screenshots: `shots/p16-void-m2.png`, `shots/p16-void-m3.png`, `shots/p16-arid.png`.
+
+---
+
+## PROGRAM PARALLAX — wave P19 "THE ROSTER CONTESTS" (2026-09-04, base `3d5c405`, branch `wave/roster-contests`)
+
+**The docket had four items. Two held and were fixed; two were re-derived and are corrected here.**
+The rule this wave kept enforcing on itself is the project's own: a docket figure is a hypothesis
+until you re-measure it, and a refutation with a trace is a result.
+
+| # | docket claim | verdict |
+|---|---|---|
+| 1 | the named mid-boss is keyed on MISSION NUMBER, not the ELITE node | **HOLDS — fixed** |
+| 2 | 12 of 22 hostiles carry the same weapon; four archetype pairs are stat twins | **half holds — the weapon half fixed; the "four stat-twin pairs, one planner weight apart" half REFUTED** |
+| 3 | the four most distinctive archetypes are the rarest bodies (BOMBARD 0.8%, WARBRINGER 1.6%) | **body rates CONFIRMED, framing REFUTED — wrong denominator; not fixed** |
+| 4 | the arena deck is objective-blind, and two authored pairs are ~88% tile-identical | **first half HOLDS (left open); "two pairs at 88%" REFUTED — it is ONE pair, and 88% is the floor-share baseline** |
+
+---
+
+### 1. THE NAMED ELITE BELONGS TO THE ELITE NODE — taken
+
+**The defect, traced.** `src/Mission.cs` read
+
+```csharp
+bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5 || midBossSlot);
+```
+
+`midBossSlot` is only ever `Mode == GameMode.Skirmish && heat >= 4` (`Game.SetupMission`), so in a
+CAMPAIGN the named elite — BREAKER / BULWARK / WARDEN / MARSHAL, the one mid-game body that forces a
+different plan — appeared on missions 3 and 5 **and nowhere else**, while the campaign map ships a
+`NodeKind.Elite` whose entire advertised identity is *the heavier fight, the biggest payout*
+(`Run.CardForNode`: +2 bodies, +1 stat, a BONUS PERK; `Run.ElitePremium` = 14, the map's top intel
+rate). The label and the thing it names were disconnected in **both** directions: routing INTO an
+ELITE bought no named opponent, and avoiding every ELITE met one anyway, on a schedule. This is
+exactly the failure C3 named — *a label the game does not honour is worse than no label*.
+
+Measured on the pre-fix tree before touching anything: the flywheel's own route played **31 ELITE
+nodes in one h0 chunk alone**, none of which fielded the elite they advertise
+(`docs/measurements/p19/p19-basebin-h0-b0.json`, `byNodeKind`).
+
+**The fix.** `Mission.MidBossFor(missionNum, eliteNode, finalApproach, modeSlot)` is now the single
+predicate, `Mission.Build` takes the node kind, and `Game.SetupMission` supplies it.
+
+**The load-bearing half is the FLOOR, and it is not a mission number.** Keying purely on the node
+would gate the game's most distinctive body behind routing luck: `Run.GenerateMap` stamps only
+`max(1, mids/5)` ELITE nodes among 8-12 mid nodes and a route takes one node per column. So the
+LAST FIGHT BEFORE THE FINALE always fields one, and "last fight" is walked on the ROUTE
+(`Game.IsFinalApproach`: every path out of this node reaches BOSS without passing another fight,
+walking THROUGH Event nodes), **not** taken as `n == 5`.
+
+**That distinction was found by measurement, not by taste.** Over all **1,098 enumerated routes of
+200 maps** (`SIGHTLINE_ROSTERTEST` leg p19-4):
+
+| floor rule | routes meeting NO named elite | named elites per route |
+|---|---|---|
+| pre-P19 `n == 3 \|\| n == 5` | **30 / 1098 (2.7%)** — nobody had ever counted this | 1.63 |
+| ELITE node + a bare `n == 5` floor | **89 / 1098 (8.1%)** | 1.33 |
+| **ELITE node + the route-walked floor (SHIPPED)** | **0 / 1098** | **1.47** |
+
+An Event node can occupy a route's column-4 slot, in which case that route plays no mission 5 at
+all — which is why a mission-number floor leaks and why the pre-P19 rule leaked too.
+
+The design statement is now a sentence rather than a schedule: **the named elite fights you where
+you go looking for it — on the ELITE node — and once more, unavoidably, on the way to the boss.**
+
+`SIGHTLINE_ELITEBOSS=0` restores `n == 3 || n == 5` exactly.
+
+---
+
+### 2. THE SMG WAS ONE GUN FOR TWELVE ARCHETYPES — half taken, half refuted
+
+**What holds, re-derived on this tree.** `grep -oE 'WeaponKind\.[A-Za-z]+' src/Mission.cs` gives
+**Smg 48 / Rifle 27 / Lmg 12 / Sniper 6 / Shotgun 6**, and the archetype→weapon mapping confirms
+**12 of the 22 hostile classes carry `Weapon.Make(WeaponKind.Smg)`** — SPOTTER, HOUND, SCREENER,
+HUNTER, MORTAR, MEDIC, PIKEMAN, CUSTODIAN, BOMBARD, SCOUT, DRONE, STRIKER. `MakeHostile` builds
+every one from the same factory, so all twelve shared one range curve, one 1-3 damage band, one clip
+and one crit base.
+
+**What is REFUTED: "four archetype pairs are stat twins... differ by a single planner weight."**
+Tabulating all 22 statlines, there is **exactly ONE exact twin pair** — SPOTTER (BEACON) and
+CUSTODIAN (SEXTON), both `Smg 5 HP / 48 aim / 6 mob` — and it is **not** a planner twin: SPOTTER has
+its own standoff-and-stay-in-contact positioning branch (`Ai.cs:858`) plus the squad-wide focus-fire
+grant (`Ai.cs:1555`), while CUSTODIAN has an objective-undo action branch (`Ai.cs:406`) and takes the
+default advance weight. The near-pairs the docket is probably reading — HUNTER (5/60/9) vs STRIKER
+(4/60/9) — differ by HP **and** by advance weight 2.8 vs 3.5, flank reward 34/16 vs 42/20 plus an
+end-adjacent bonus, an overwatch discount (9 vs 26) and an exemption from disengage. That is four
+planner differences, not one. **The roster's AI is far better differentiated than the docket says.**
+
+**So the real defect is not the planner — it is the NUMBER the player reads.** `Combat.ComputeOdds`
+is what the shot tooltip and RESONANCE T2's incoming-fire forecast both run on, and for those twelve
+bodies its range term was identical. A swarmer at eight tiles and an artillery body at one presented
+the same curve. The roster played broad and **read** narrow.
+
+**The fix — a range BAND, not a new gun.** `Weapon.SmgProfile` (three bands, same `WeaponKind`, same
+damage band, same clip, same crit, so X1's exchange is untouched and no persisted ordinal moves —
+`SaveGame` stores `(int)Weapon.Kind` and rebuilds through `Weapon.Make`). Assigned purely by class in
+`Mission.SmgProfileFor`, only ever from `MakeHostile`, so no player weapon is ever re-banded:
+
+| band | `RangeMod` | who | the identity |
+|---|---|---|---|
+| **CQB** | `clamp((5-d)*4, -20, 16)` | HOUND, STRIKER, SCOUT, DRONE | +4 at point blank, **−14 at ten tiles**. "Close, or you are nothing" — and it hands the player **kiting** as a real counter to the rush archetypes, a verb the board did not previously pay. |
+| **STANDARD** | `clamp((7-d)*2, -12, 12)` | HUNTER, MEDIC, SPOTTER, SCREENER, PIKEMAN, CUSTODIAN, every player weapon | the shipped curve, byte-for-byte (ROSTERTEST pins it against a literal transcription). |
+| **STANDOFF** | `clamp((9-d)*1, -8, 8)` | MORTAR, BOMBARD | −4 at point blank, **+5 at ten**. "Charge it" — the counter-play their own `Ai` branches already assume (one settles at grenade range, the other MAXIMISES distance) and the numbers did not pay. |
+
+The two bands pivot in **opposite** directions around the standard curve; ROSTERTEST asserts that,
+not merely that they differ. `Ai.cs`'s KITE-TO-IDEAL-RANGE term reads the same `RangeMod`, so the
+opponent re-prices its own preferred distance from the same truth the player is shown — one
+function, both sides, no second model to drift.
+
+**Proven where the player reads it.** Pre-P19 a HOUND out-hit a MEDIC by a **constant 4 points at
+every distance** (aim 56 vs 52, one shared curve), so no distance told them apart. Staged on one
+board, one tile, both foes at 7.28 tiles (`SIGHTLINE_BANDSHOT`, screenshots below):
+
+| | HOUND | MEDIC | the INCOMING FIRE card |
+|---|---|---|---|
+| `SIGHTLINE_ROSTERID=0` (pre-P19) | 56% | 52% | *"2 hostiles bear · best 56%"*, **worst gun: FERAL — HOUND** |
+| shipped | **47%** | 52% | *"2 hostiles bear · best 52%"*, **worst gun: ORDERLY — MEDIC** |
+
+Same board, same tile, same two bodies, same distance — **the game names a different worst gun.**
+
+`SIGHTLINE_ROSTERID=0` restores the monoculture exactly (nothing is assigned; every carrier falls
+back to STANDARD).
+
+---
+
+### 3. "THE CONTEST ARCHETYPES ALMOST NEVER APPEAR" — body rates confirmed, framing refuted
+
+Re-derived from the round itself, **n = 30,624 hostile spawns over 3,796 missions and 960 campaigns**
+(the `pre` arm, all three rungs, base `3d5c405`):
+
+| archetype | % of all bodies | per mission | missions fielding one |
+|---|---|---|---|
+| BOMBARD | **0.69%** | 0.056 | **5.6%** (cap 1/mission ⇒ exact) |
+| WARBRINGER | **1.55%** | 0.125 | **12.5%** (cap 1/mission ⇒ exact) |
+| CUSTODIAN | 1.87% | 0.151 | ≤15.1% |
+| PIKEMAN | 2.02% | 0.163 | ≤16.3% |
+| SPOTTER | 2.69% | 0.217 | ≤21.7% |
+
+The docket's 0.8% / 1.6% are **confirmed as body rates**. But **a body rate is the wrong
+denominator for an archetype under a one-per-mission cap**, and BOMBARD and WARBRINGER are both
+capped (`Mission.SpawnEnemies` demotes any second one to a GRUNT). The quantity that decides whether
+a player meets the content is the per-MISSION presence, which is **5.6%** and **12.5%** — and at
+3.95 missions per campaign that is roughly **20%** and **40%** of campaigns. That is *thin*; it is
+not *"almost never"*, and the gap between those two readings is exactly large enough to have
+justified a rate change that was not warranted.
+
+**Deliberately NOT fixed, and the reason is a measurement.** Raising a capped archetype's rate is a
+force change that this wave would have had to price on the same instrument that could not resolve
+either lever it did ship (MDE 4.9-8.6 points, below). Spending a third arm on a change whose only
+argument is "0.69% feels low" would have produced an unresolvable number and a shipped default
+chosen on taste. It is in ROADMAP with the denominators above so the next wave starts from the right
+figure.
+
+---
+
+### 4. THE ARENA DECK — first half holds, "88% tile-identical" refuted
+
+**Holds:** `Mission.DeckPick(int seed, int missionNum)` takes no objective and has no objective-aware
+caller (`Mission.PickLayout(missionNum) => DeckPick(DeckSeed, missionNum)`). An EVAC on a plaza and
+an EVAC whose only open ground is the far corner really are dealt by the same blind draw. Left open
+in ROADMAP: it is a whole wave (it needs a per-arena objective-suitability model, and the deck's
+zero-draw purity is load-bearing for every CRN pairing in the project).
+
+**REFUTED as stated:** "two authored pairs are ~88% tile-identical". Diffing all 595 pairs of the 35
+templates in `src/Maps.cs` (198 tiles each):
+
+| pair | naive tile-identity | Jaccard over NON-FLOOR tiles |
+|---|---|---|
+| ZIGGURAT / FORGE | 88.9% | **72.7%** |
+| GARRISON / REFINERY | 88.4% | **16.0%** |
+| HOOK / GARRISON | 88.4% | **12.5%** |
+| CHASM / GARRISON | 88.4% | **11.5%** |
+| CITADEL / GARRISON | 87.4% | **18.5%** |
+| APPROACH / GARRISON | 86.9% | **7.4%** |
+
+**The templates are 85.3% floor on average** (min 69.7%, max 95.5%), so two INDEPENDENT templates
+agree on ~73% of tiles by floor share alone and any pair of sparse ones clears 88% without sharing a
+single block. On structure, the pairwise mean Jaccard is **16.7%** and there is **exactly ONE**
+genuine near-duplicate: **ZIGGURAT / FORGE at 72.7%** — both "commanding raised core" set-pieces.
+The runner-up is ZIGGURAT/STEPWELL at 54.5%, a different arena. So the deck has one redundant card,
+not two, and the metric that produced "88%" would have sent a wave to de-duplicate GARRISON and
+REFINERY, which share 16% of their structure.
+
+---
+
+### THE ROUND — 2,880 campaigns, three arms, CRN-paired
+
+Base commit `3d5c405`. Release binary from `runbin/p19/new`, under `xvfb-run`, every chunk through
+`docs/measurements/p19/run_chunk.sh` (rm -f first, exit-code check, `runs` assertion). **72/72 chunks
+`runs=40` asserted; `heatPinned=True` and `missionsAbovePin=0` on all 72.** Raw round:
+`docs/measurements/p19/`.
+
+**R0diag first.** The tree gained instrumentation, so before quoting anything: the NEW binary with
+both dials off, against the BASE-COMMIT binary, on the same three chunks — **0 differing fields of
+2,374 / 2,315 / 2,412**. The `pre` arm is an exact restoration and the CRN chain is intact.
+
+Three arms on identical worlds, 3 rungs × 8 slot bases × 20 (greedy+sloppy) = **n=320 per rung per
+arm** (160 CRN worlds × 2 policies).
+
+| contrast | rung | base% | arm% | Δ | n_discordant | b/c | McNemar z | **MDE** |
+|---|---|---|---|---|---|---|---|---|
+| **item 1 alone** (pre→boss) | h0 | 41.6 | 42.5 | +0.9 | 75 | 39/36 | +0.35 | **7.6** |
+| | h4 | 20.9 | 24.4 | +3.4 | 61 | 36/25 | +1.41 | **6.8** |
+| | h8 | 6.9 | 7.2 | +0.3 | 15 | 8/7 | +0.26 | **3.4** |
+| **item 2 alone** (boss→full) | h0 | 42.5 | 40.3 | −2.2 | 97 | 45/52 | −0.71 | **8.6** |
+| | h4 | 24.4 | 21.9 | −2.5 | 58 | 25/33 | −1.05 | **6.7** |
+| | h8 | 7.2 | 6.2 | −0.9 | 35 | 16/19 | −0.51 | **5.2** |
+| **SHIPPED, both** (pre→full) | h0 | 41.6 | 40.3 | −1.2 | 96 | 46/50 | −0.41 | **8.6** |
+| | h4 | 20.9 | 21.9 | +0.9 | 81 | 42/39 | +0.33 | **7.9** |
+| | h8 | 6.9 | 6.2 | −0.6 | 32 | 15/17 | −0.35 | **4.9** |
+
+**Read the MDE column, not the Δ column.** `MDE` is the smallest true paired effect this round could
+have detected at 80% power given the OBSERVED discordance rate. **No contrast is resolved.** The
+honest statement is: *any true effect larger than ~8.6 points at h0, ~7 at h4 or ~5 at h8 would have
+been detected, and none was.* That is an absence of evidence, not a demonstration of neutrality —
+this project has misread that before and the discordance counts are printed so it cannot happen here.
+Cluster SEs (8 chunks per rung) are in `docs/measurements/p19/summary.txt` beside the binomial ones.
+
+**THE MISSION-1 CELL** (`byNodeKind` Start, n=320 per cell) — the design contract (`DESIGN.md` §3.D)
+forbids a wave putting its cost on the opener, and two waves have now done it:
+
+| rung | pre | boss | full |
+|---|---|---|---|
+| h0 | 91.9% | **91.9%** | 91.9% |
+| h4 | 91.6% | **91.6%** | 91.9% |
+| h8 | 91.9% | **91.9%** | 93.1% |
+
+Item 1 is **exactly** identical at every rung, by construction: mission 1 is always the Start node,
+so the lever cannot reach it — and ROSTERTEST leg p19-3 asserts the whole m1 force (class, name,
+tile, HP, aim) is byte-identical across the dial rather than assuming it. Item 2 *can* reach m1 and
+moves it **+0.3 / +1.2**, i.e. in the player's favour. **The opener is not taxed.**
+
+**WHERE THE LEVER ACTUALLY LANDED** (descriptive, not paired — routes diverge, so the arms' node
+counts differ):
+
+| `byNodeKind` | rung | pre | boss | full |
+|---|---|---|---|---|
+| **Elite** | h0 | 60.5% (205) | 57.7% (213) | 59.9% (207) |
+| | h4 | 49.2% (203) | 47.6% (208) | 46.6% (191) |
+| | h8 | **38.7% (150)** | **31.0% (158)** | **30.1% (166)** |
+| **Combat** | h0 | 69.5% (410) | **72.9% (383)** | 71.7% (385) |
+| | h4 | 60.8% (365) | 62.9% (380) | 59.3% (388) |
+| | h8 | 36.0% (330) | 34.9% (335) | 34.4% (328) |
+
+The ELITE node got heavier and the plain fights got lighter, in every rung at h0/h4 and dramatically
+at h8 (−7.7 on Elite). That is the lever doing exactly what it says, and it is the reason the
+CAMPAIGN row barely moves: the wave **redistributed** difficulty onto the node the player chooses
+rather than adding or removing it.
+
+**Texture is unchanged.** `meaningfulChoicesPerTurn` 3.157/3.269/1.777 (pre) vs 3.034/3.461/1.692
+(full); `choicesPerArmedSoldierTurn` 2.233/2.484/2.061 vs 2.233/2.517/2.053; `leadSwingsPerMatch`
+0.779/0.734/0.823 vs 0.731/0.719/0.836. STALEMATE 17/960 (1.77%) in both `pre` and `full`, all on
+the MISSION arm, none on the RUN arm.
+
+**The honest cost of item 2.** Its point estimates are the negative ones (−2.2 / −2.5 / −0.9,
+unresolved). Its argument is **pillar 3, not difficulty**: the roster now reads differently at the
+table, proven in `Combat.ComputeOdds` and photographed in the card the player actually sees. If a
+future round resolves it as a real ~2-point tax and that matters, `SIGHTLINE_ROSTERID=0` is the exact
+restoration.
+
+---
+
+### Every new leg, RED before and GREEN after
+
+`SIGHTLINE_ROSTERTEST=1` is a new hook because the surface had no home: HORDETEST owns ENDLESS,
+MODETEST owns SKIRMISH/DAILY, EXPOSURETEST owns the pure map/deck derivations, CLASSTEST owns the
+objective class — nothing owned *what the CAMPAIGN node the player routed through actually fields*.
+It reads the AMBIENT dials, so each off-switch turns it red. Both transcripts:
+
+```
+$ SIGHTLINE_ELITEBOSS=0 SIGHTLINE_ROSTERTEST=1 ...          # = the pre-P19 mid-boss rule
+  built forces (m2-m4): ELITE nodes 4/25 field the named elite, plain COMBAT nodes 20/61,
+                        plain-but-final-approach nodes 0/2
+ROSTERTEST: FAIL: finalApproachNoNamedElite(0/2), eliteNodeNoNamedElite(4/25),
+                  plainNodeFieldsNamedElite(20/61)
+
+$ SIGHTLINE_ROSTERID=0 SIGHTLINE_ROSTERTEST=1 ...           # = the pre-P19 SMG monoculture
+  ComputeOdds hit%: HOUND 78@1 / 60@10, MEDIC 74@1 / 56@10, MORTAR 72@1 / 56@9 (MEDIC 58@9)
+ROSTERTEST: FAIL: builtSmgBand(MORTAR=0 want 2), builtSmgBand(STRIKER=0 want 1),
+                  builtSmgBand(SCOUT=0 want 1), builtSmgBand(DRONE=0 want 1),
+                  builtSmgBand(BOMBARD=0 want 2), noBuiltHostileCarriesANonStandardBand,
+                  houndMedicNoFlip(near 78v74, far 60v56), mortarMedicNoFlip(near 72v74, far 56v58)
+
+$ SIGHTLINE_ROSTERTEST=1 ...                                # shipped
+  built forces (m2-m4): ELITE nodes 25/25 field the named elite, plain COMBAT nodes 0/61,
+                        plain-but-final-approach nodes 2/2
+  mission-1 force identical across the dial: yes (4 bodies)
+  routes 1098: named elites/route 1.47 (pre-P19 mission-number rule 1.63);
+               ELITE nodes/route 0.67; routes meeting NONE: 0 (pre-P19 rule 30)
+  SMG bands d=1..10  cqb 16,12,8,4,0,-4,-8,-12,-16,-20 | std 12,10,8,6,4,2,0,-2,-4,-6
+                   | sto 8,7,6,5,4,3,2,1,0,-1
+  built SMG carriers: 11 classes, 5 on a non-standard band
+  ComputeOdds hit%: HOUND 82@1 / 46@10, MEDIC 74@1 / 56@10, MORTAR 68@1 / 60@9 (MEDIC 58@9)
+ROSTERTEST: PASS
+```
+
+`houndMedicNoFlip(near 78v74, far 60v56)` **is the pre-fix defect, printed**: a constant +4 at both
+ends, no distance telling the two apart.
+
+The seven legs: (p19-1) the predicate, both dial states, against a literal truth table;
+(p19-2) real built forces on real ELITE / plain / final-approach nodes over 20 maps;
+(p19-3) the mission-1 force byte-identical across the dial; (p19-4) all 1,098 enumerated routes of
+200 maps meet a named elite, with the pre-P19 rule's own leak counted beside it; (p19-5) the band
+derivation + STANDARD transcribed + the opposite-pivot and monotonicity invariants; (p19-6) the
+bands reach the built force and never the player half; (p19-7) `Combat.ComputeOdds` orderings FLIP
+with distance for two pairs that used to be separated by a constant.
+
+### New hooks and dials
+
+| name | what |
+|---|---|
+| `SIGHTLINE_ROSTERTEST=1` | the wave's gate — seven legs above. In `qa-sweep.sh` through `verdict`. |
+| `SIGHTLINE_ELITEBOSS=0` | restore the pre-P19 mid-boss rule (`n == 3 \|\| n == 5`) exactly. The A/B arm. |
+| `SIGHTLINE_ROSTERID=0` | restore the pre-P19 SMG monoculture exactly (no band is assigned). The A/B arm. |
+| `SIGHTLINE_ELITESHOT=1` | stage a frame on an ELITE node so the named opponent can be photographed. Pair with `SIGHTLINE_SHOT=760`; flip `SIGHTLINE_ELITEBOSS` for the contrast. |
+| `SIGHTLINE_BANDSHOT=1` | stage a HOUND and a MEDIC at one distance on carved lines, cursor parked, so the INCOMING FIRE card is in the frame. Flip `SIGHTLINE_ROSTERID` for the contrast. |
+| `Mission.MidBossFor` | the one predicate. `Mission.MidBossFloorMission` = 5 is a belt-and-braces proxy for a caller that cannot see the route. |
+| `Game.IsFinalApproach` | "every path out of this node reaches BOSS without passing another fight". Static overload so the test can ask it of a bare `Run` map. |
+| `Weapon.SmgProfile` / `Mission.SmgProfileFor` | the three bands and the pure class→band map. Not save state (`SaveGame` stores `(int)Weapon.Kind`). |
+
+### Found and NOT fixed
+
+1. **The enemy hover card names the CODEX entry, not the unit.** `src/Hud.cs:2503` reads
+   `string title = $"{Codex.NameFor(d.Cls)} — {d.Cls}";`, so the BREAKER this wave puts on an ELITE
+   node is captioned **"WARLORD — ELITE"** — visible in `docs/measurements/p19/eliteshot-on.png`.
+   Every named elite and every finale boss (BULWARK / WARDEN / MARSHAL / SIEGELORD / SPYMASTER) has
+   worn the wrong name on that card since SIGNAL W5. Left alone because `src/Hud.cs` belonged to
+   another developer this wave. The one-line fix, for the merge:
+   `string title = (!string.IsNullOrEmpty(d.Name) && d.Name != Codex.NameFor(d.Cls)) ? $"{d.Name} — {d.Cls}" : $"{Codex.NameFor(d.Cls)} — {d.Cls}";`
+   (`src/Hud.cs:2375` carries the same expression for the other card.)
+2. **The ELITE node's reward is still blind to what it now fields** — C3's open item. It pays
+   `ElitePremium` = 14 whether or not the fight is the named one; now that the node reliably IS the
+   heavier fight, the premium is at least honest, but it was never priced against it.
+3. Items 3 and 4 above, with the corrected denominators.
+
+### Gate
+
+- `dotnet build -c Release` **0 warn / 0 err**.
+- `bash scripts/qa-sweep.sh --full` — 84/84 self-tests PASS, no COVERAGE GAP, autoplay ×3 with no
+  TIMEOUT, `SWEEP-EXIT-CODE=0`.
+- Screenshots: `docs/measurements/p19/eliteshot-on.png` / `eliteshot-off.png`,
+  `docs/measurements/p19/bandshot-on.png` / `bandshot-off.png`.

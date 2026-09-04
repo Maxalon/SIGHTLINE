@@ -1987,6 +1987,36 @@ public partial class Game
     /// only (`Ring(...,0)`): it is an optional pickup, not a win condition, and a soldier detouring
     /// for it may reasonably have to pay for the ground around it. The doc comment used to claim
     /// "all with their rings", which was wrong (C4 review).
+    /// P19 — is `node` the LAST FIGHT before the finale on this route? True when every path out of
+    /// it reaches the BOSS node without passing another fight (an Event node is not a fight, so it
+    /// is walked THROUGH). Pure, read-only, and bounded by the DAG's six columns. This is the
+    /// route-truthful form of "mission 5": a route whose column-4 slot is an Event plays no mission
+    /// 5 at all, and a bare `n == 5` floor would leave it with no named elite (8.1% of all routes,
+    /// counted in SIGHTLINE_ROSTERTEST leg p19-4).
+    /// Static so SIGHTLINE_ROSTERTEST can ask the same question of a bare Run map with no Game.
+    public static bool IsFinalApproach(List<MissionNode> map, MissionNode node)
+    {
+        if (node == null || map == null || map.Count == 0) return false;
+        if (node.Kind == NodeKind.Boss || node.Kind == NodeKind.Event) return false;
+        if (node.Next.Count == 0) return false;                 // the finale itself has no successor
+        bool All(MissionNode nd, int depth)
+        {
+            if (depth > Run.MaxMissions) return false;          // cycle guard (the DAG has none)
+            foreach (int id in nd.Next)
+            {
+                if (id < 0 || id >= map.Count) return false;
+                var nx = map[id];
+                if (nx.Kind == NodeKind.Boss) continue;         // reached the finale — this path is clear
+                if (nx.Kind == NodeKind.Event) { if (!All(nx, depth + 1)) return false; continue; }
+                return false;                                   // another FIGHT lies ahead
+            }
+            return true;
+        }
+        return All(node, 0);
+    }
+
+    bool IsFinalApproach(MissionNode node) => _run != null && IsFinalApproach(_run.Map, node);
+
     void StampBiomeGround(int n)
     {
         var reserved = new HashSet<(int x, int y)>();
@@ -2189,6 +2219,17 @@ public partial class Game
         // P4's roster opening, so this line does not read Mission.ModeDepth.
         int rosterTier = Mode == GameMode.Skirmish ? Mission.ModeTierFor(heat) : n;
         bool modeMidBoss = Mode == GameMode.Skirmish && heat >= 4;
+        // P19 THE ROSTER CONTESTS — the campaign NODE the player routed through, handed to the
+        // force builder so the map's own ELITE label can field the named elite it advertises
+        // (Mission.MidBossFor). SKIRMISH/DAILY sit on a fresh run's Start node and ENDLESS/TRAINING
+        // throw this force away, so this is `false` in every mode but CAMPAIGN — and mission 1 is
+        // always the Start node, so the opener cannot be moved by it (HORDETEST leg (p19-3)).
+        bool eliteNode = Mode == GameMode.Campaign && _run.CurrentNode?.Kind == NodeKind.Elite;
+        // ...and whether this node is the LAST FIGHT before the finale on the route the player is
+        // actually walking. Not `n == 5`: an Event node can occupy a route's column-4 slot, in which
+        // case that route plays no mission 5 and a bare mission-number floor misses it entirely
+        // (measured: 8.1% of all enumerated routes — SIGHTLINE_ROSTERTEST leg p19-4).
+        bool finalApproach = Mode == GameMode.Campaign && IsFinalApproach(_run.CurrentNode);
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
                       Objective == Objective.Defend,    // FUL-4: trim the opener — waves are the force
@@ -2201,7 +2242,7 @@ public partial class Game
                       // pressuring the hold; it's h8's +4 stats that bite. The residual h6 cell
                       // is recorded in DEVLOG §FUL-13 with this mechanism.
                       Objective == Objective.Defend ? heatEnemy / 2 : 0,
-                      rosterTier, modeMidBoss);
+                      rosterTier, modeMidBoss, eliteNode, finalApproach);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.

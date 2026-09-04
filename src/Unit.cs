@@ -109,6 +109,35 @@ public class Weapon
     public int RangeBonus;   // +tiles of effective range from mods (Stabilizer); 0 by default
     public bool Scoped;      // SCOPE: flattens long-range aim falloff
 
+    // ── P19 "THE ROSTER CONTESTS" — THE SMG IS THREE GUNS, NOT ONE ───────────────────────────
+    // MEASURED on this tree (base 3d5c405):
+    //   `grep -oE 'WeaponKind\.[A-Za-z]+' src/Mission.cs` -> Smg 48, Rifle 27, Lmg 12, Sniper 6,
+    //   Shotgun 6, and TWELVE of the twenty-two hostile archetypes carry `Weapon.Make(Smg)`.
+    // Every one of them therefore shared ONE range curve, ONE 1-3 damage band, one clip and one
+    // crit base. `src/Ai.cs` gives those twelve genuinely different temperaments — the HOUND is
+    // the hardest charger in the game, the BOMBARD maximises distance — but the NUMBERS the
+    // player reads (the shot tooltip's hit%, and RESONANCE T2's incoming-fire forecast, both of
+    // which run through Combat.ComputeOdds -> RangeMod) were identical for a swarmer at eight
+    // tiles and an artillery body at one. The roster played broad and read narrow.
+    //
+    // The fix is a RANGE BAND, not a new gun: same WeaponKind, same damage band, same clip, same
+    // crit, so the exchange X1 priced is untouched and no persisted ordinal moves (SaveGame stores
+    // `(int)Weapon.Kind` and rebuilds through `Weapon.Make`, so this field is not save state).
+    // The three bands pivot in OPPOSITE directions, which is the whole design:
+    //   CQB      (pivot 5, slope 4) — +4 aim at point blank, -14 at ten tiles. "Close, or you are
+    //                                 nothing." It hands the player KITING as a real counter to
+    //                                 the rush archetypes, a verb the board did not previously pay.
+    //   STANDARD (pivot 7, slope 2) — the shipped curve, byte-for-byte. Every player weapon and
+    //                                 the six mid-roster SMG bodies keep it.
+    //   STANDOFF (pivot 9, slope 1) — -4 at point blank, +5 at ten. "Charge it." The MORTAR and
+    //                                 the BOMBARD hold a standoff by design; now their gun agrees.
+    // `Ai.cs`'s KITE-TO-IDEAL-RANGE term reads the same RangeMod, so the opponent re-prices its
+    // own preferred distance from the same truth the player is shown — one function, both sides.
+    // Assigned in Mission.MakeHostile (Mission.SmgProfileFor); SIGHTLINE_ROSTERID=0 restores the
+    // monoculture exactly by never assigning one.
+    public const int SmgStandard = 0, SmgCqb = 1, SmgStandoff = 2;
+    public int SmgProfile = SmgStandard;   // meaningful only for WeaponKind.Smg
+
     /// Maximum effective firing range in tiles (+ any mod range bonus).
     public int MaxRange => BaseMaxRange + RangeBonus;
     int BaseMaxRange => Kind switch
@@ -131,8 +160,13 @@ public class Weapon
                 return (int)Util.Clamp(Soften((5 - dist) * 8), -45, 30);
             case WeaponKind.Sniper:  // rewards distance, punished point-blank
                 return (int)Util.Clamp((dist - 4) * 4, -30, 16);   // already long-ranged; scope adds none here
-            case WeaponKind.Smg:     // slight close-range edge
-                return (int)Util.Clamp(Soften((7 - dist) * 2), -12, 12);
+            case WeaponKind.Smg:     // slight close-range edge — three archetype bands (P19)
+                switch (SmgProfile)
+                {
+                    case SmgCqb:      return (int)Util.Clamp(Soften((5 - dist) * 4), -20, 16);
+                    case SmgStandoff: return (int)Util.Clamp(Soften((9 - dist) * 1), -8, 8);
+                    default:          return (int)Util.Clamp(Soften((7 - dist) * 2), -12, 12);
+                }
             case WeaponKind.Lmg:     // suppression gun: wide flat medium band, gentle long falloff
                 return (int)Util.Clamp(Soften(-(dist - 10) * 1.5f), -10, 6);
             default:                 // rifle: balanced, gentle falloff
