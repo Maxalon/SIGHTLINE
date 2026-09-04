@@ -1040,3 +1040,64 @@ Design intent only — the build checklist lives in `CLAUDE.md` → **ROADMAP �
 
 *Companion to `CLAUDE.md`. When in doubt about a feel/information change, this doc is
 the tie-breaker; when in doubt about build state, `CLAUDE.md` is.*
+
+---
+
+## 5.4 What a HOLE is for (decided 2026-09-04, PARALLAX wave P16 "GROUND TRUTH")
+
+Same contract as §5, §5.1, §5.2 and §5.3: on the record, with the alternative named and the cost of
+the one we chose stated.
+
+**The question.** C4 gave three biomes a rule and declared the other five paint. Making a fourth and
+fifth mechanical is easy; making them mean something *different* is the design problem. C4's three
+already cover the three obvious axes — cover (VERDANT), movement cost (TUNDRA), sight (MAGMA). A
+fourth "costs more to walk on" would have been a reskin of ice, and a fourth "blocks sight" a reskin
+of a vent.
+
+**What we chose, and why it is not a fourth version of the same thing.** A **RIFT** is the first
+ground that changes what the board *is* rather than what a tile *costs*.
+
+> Every other blocker in this game hides something. High cover stops sight **and** shelters. Smoke
+> and a thermal vent stop sight. A barrel stops movement and explodes. **A rift stops movement and
+> hides nothing at all** — fire crosses it as if it were open floor, and standing beside one
+> shelters you from exactly nothing.
+
+That is the property worth having, and it is worth stating as the design rule: **the rift adds a
+constraint without adding an unknown.** It makes the room harder to *cross* and no harder to *read*.
+Compare it with the alternative that was on the table — a wider, more common MAGMA-style opaque
+band — which would have made the room harder to cross **and** harder to read, and every extra tile
+of it would have been a tile where information was withheld. §5 (fog of war, deferred) is the
+standing commitment that this game does not withhold information from the player it has already
+earned; a big sight-blocking feature spends against that budget and a hole does not.
+
+The second consequence is about **the fight, not the walk.** A chasm that cannot be crossed but can
+be shot over creates the one geometry this board did not have: two sides that can *engage* without
+being able to *close*. Cover produces standoffs you can flank; a rift produces standoffs you have to
+walk around, in the open, watched. That is a positioning problem at constant threat, which is
+exactly the kind of lever W4 identified as the only one that could plausibly move decision density
+(a threat lever cannot — `CountMeaningfulChoices`' two halves respond to threat with opposite signs).
+**Nobody has measured whether it did**, and that is declared open in ROADMAP, not claimed here.
+
+**SOFT SAND is deliberately the small one.** ARID is the inverse of ice on the same axis, one line
+in `Grid.CostMap`, and it exists to make the *pair* legible: with both shipped, a player learns that
+the ground under them can make a step cheaper OR dearer, and the two biomes teach each other. It
+buys almost nothing on its own and is not defended as if it did.
+
+**The cost we accepted, stated plainly.** An impassable tile is the first thing this layer has
+shipped that can make a mission **unwinnable** rather than merely harder. That is not a polish
+concern, it is a correctness one, and the answer is not care — it is a guard that runs on every
+board (`Terrain.StampRift` re-floods through `Grid.CostMap` and reverts any tile that removes more
+than itself) plus a test that measures the property on 576 real boards across all eight objectives
+(`SIGHTLINE_RIFTTEST`). With the guard switched off, that sweep strands up to 69 tiles on 32 boards.
+**The design rule this establishes for any future ground that removes a tile: it must ship with a
+stamper that validates, not with a stamper that is careful.**
+
+**What it cost in balance: nothing we can measure, and we say so.** 960 CRN-paired campaigns put the
+whole layer at −2.5 / −1.2 / +1.2 win-rate points at h0/h4/h8 (pooled 95% CI [−4.7, +3.0]) — while
+18.3% of paired worlds played out differently. So it is a real change to the game with a bounded
+effect on difficulty, which is the outcome a variety feature *should* have. Critically, **it does
+not land on mission 1** (`byNodeKind` Start +0.0 / +0.6 / +0.0), where C4's layer did land (−4.37)
+and where §3.D forbids front-loaded anxiety. The reason is structural and worth remembering when the
+next ground is designed: **neither of these grounds can kill you or hide a shooter.** A four-rookie
+opener has almost no slack in lethality and a lot of slack in routing, so a routing rule is the kind
+of rule it can absorb.
