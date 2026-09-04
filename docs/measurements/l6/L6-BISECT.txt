@@ -1,0 +1,31 @@
+L6 — LOCATING THE BRIDGE BREAK. Output of docs/measurements/l6/bisect.sh, verbatim.
+
+  cd /home/user/wt/ladder-l6
+  bash docs/measurements/l6/bisect.sh 7180374 cb58a4b 715e1a0 ad2f6c9 54147dc
+
+Each row builds that commit, snapshots its Release binary, replays four cells of L5's own ladder
+on it with THAT SNAPSHOT'S OWN DEFAULTS, and compares `pairedPolicy.slots` against the L5 archive.
+"SAME" = the whole slots record is identical; "diffN" = it differs and N of the 20 win flags moved.
+
+7180374  h0-b0=SAME   h0-b30=SAME   h4-b0=SAME  hR-b0=SAME   7180374 THE HEAT PIN AND L5 (part A)
+cb58a4b  h0-b0=diff2  h0-b30=diff0  h4-b0=SAME  hR-b0=diff1  cb58a4b Merge PR #85 — milestone 2
+715e1a0  h0-b0=SAME   h0-b30=SAME   h4-b0=SAME  hR-b0=SAME   715e1a0 Merge PR #86 — milestone 3
+ad2f6c9  h0-b0=SAME   h0-b30=SAME   h4-b0=SAME  hR-b0=SAME   ad2f6c9 Merge PR #87 — milestone 4
+54147dc  h0-b0=diff2  h0-b30=diff8  h4-b0=diff5 hR-b0=diff7  54147dc Merge PR #88 — milestone 5
+
+READ THE ROWS IN THIS ORDER, BECAUSE ONE OF THEM IS NOT WHAT IT LOOKS LIKE.
+
+7180374 IS THE CONTROL AND IT PASSES. L5 was measured on this commit with `c1/run_chunk.sh`;
+this round uses `p15/run_chunk.sh`. Four cells reproduce exactly, so the runner change is not a
+difference and every row below means what it says.
+
+cb58a4b (milestone 2) IS NOT A GAMEPLAY BREAK. `7180374` is the tip of the heat-pin wave branch,
+which merged at milestone 3; milestone 2 merged before it. So cb58a4b is main WITHOUT the heat
+pin, and a batch on it runs UNPINNED — a rung there is not the rung. Milestone 3, which contains
+both milestone 2 and the pin, reproduces L5 on all four cells, which is also the proof that
+milestone 2 ("the modes get the bestiary") is campaign-inert.
+
+54147dc (milestone 5, THE FORK PAYS) IS THE BREAK. All four cells differ, on 2-8 of 20 win flags.
+That wave repriced the routing economy — `Run.DepthBase` 10 -> 12, a SUPPLY discount, a PITCHED
+premium, an ELITE premium — and every one of them is a `const int` in src/Run.cs with NO
+environment restore flag. It cannot be switched off, so no bridge to L5 can exist through it.

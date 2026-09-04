@@ -1,0 +1,13 @@
+P20 alone, h0 and h4 — SPLIT-HALF over the slot space (L5/L6's 16 sets = P20's 8 + 8 new)
+  rung half            n  stale%   fix%  delta   b   c n_disc   MDE      z  chunk t
+  h0   P20's 8 (b0-70)  160    41.2   43.8    2.5   4   8     12  6.06   1.15     0.88
+  h0   8 NEW (b80-150)  160    43.1   45.0    1.9   8  11     19  7.63   0.69     0.81
+  h0   all 16        320    42.2   44.4    2.2  12  19     31  4.87   1.26     1.24
+  h4   P20's 8 (b0-70)  160    22.5   18.1   -4.4   8   1      9  5.25  -2.33    -2.50
+  h4   8 NEW (b80-150)  160    28.8   28.1   -0.6   7   6     13  6.31  -0.28    -0.23
+  h4   all 16        320    25.6   23.1   -2.5  15   7     22  4.10  -1.71    -1.52
+
+HOW MUCH OF THE BOARD ACTUALLY MOVES — paired campaigns whose COURSE differs, not just the win flag.
+  (P20's own round reported 25.3% of h0 worlds and 16.6% of h4 worlds ending differently.)
+  h0: 87/320 = 27.2% of paired campaigns take a different COURSE; 31/320 = 9.7% end in a different RESULT
+  h4: 71/320 = 22.2% of paired campaigns take a different COURSE; 22/320 = 6.9% end in a different RESULT

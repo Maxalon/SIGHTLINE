@@ -532,15 +532,28 @@ public partial class Game
     // ── harness: screenshot the SKIRMISH setup screen (SIGHTLINE_SKIRMISHSETUP=1) ────────────────
     public void DebugSkirmishSetup() { BeginSkirmishSetup(); SkirmishObjective = Objective.Hack; SkirmishFaction = Faction.Legion; }
 
-    /// A cheap deterministic fingerprint of the current board (terrain tiles + heights + every unit's
-    /// spawn tile), used by ModeSelfTest to prove the SEEDED DAILY reproduces the same board twice.
+    /// A cheap deterministic fingerprint of the current board — ALL EIGHT of `Grid`'s per-tile
+    /// layers plus every unit's spawn tile — used by ModeSelfTest to prove the SEEDED DAILY
+    /// reproduces the same board twice, in one process and in a second one.
+    ///
+    /// WIDENED (wave L6, from Tiles + Height + seats). It was the gate that caught P20's stale
+    /// GROUND layer, and it could not see six of the eight layers it was being trusted for — in
+    /// particular `Barrel`, which `Grid.IsFloor` reads, so a stale barrel moves the terrain by
+    /// exactly P20's mechanism and left no mark on this hash. A signature that is trusted to say
+    /// "the same day deals the same board" must hash the whole board. Harness-only: this function
+    /// has no caller outside ModeSelfTest and `DailySignatureLine`, so widening it cannot touch a
+    /// shipped path — it can only make an existing assertion sharper.
     string BoardSignature()
     {
         uint h = 2166136261u;
         void Mix(int v) { unchecked { h ^= (uint)v; h *= 16777619u; } }
         for (int x = 0; x < Grid.W; x++)
             for (int y = 0; y < Grid.H; y++)
-            { Mix((int)Grid.Tiles[x, y]); Mix(Grid.Height[x, y]); }
+            {
+                Mix((int)Grid.Tiles[x, y]);      Mix(Grid.Height[x, y]);    Mix(Grid.Smoke[x, y]);
+                Mix(Grid.CoverHp[x, y]);         Mix(Grid.CoverSeed[x, y]); Mix(Grid.Fire[x, y]);
+                Mix(Grid.Barrel[x, y] ? 1 : 0);  Mix((int)Grid.Ground[x, y]);
+            }
         foreach (var u in Players) { Mix(u.X); Mix(u.Y); }
         foreach (var e in Enemies) { Mix(e.X); Mix(e.Y); }
         return h.ToString("x8");
@@ -1101,6 +1114,66 @@ public partial class Game
                 // deploy band (cols 0-3) from the hostiles' (cols 14-17) — which is exactly the
                 // shape a leftover VOID board had when it made leg (2) fail in the wild.
                 const int WallX = 9;
+                // ── the shared machinery for (14a-2) and (14b) ───────────────────────────────
+                // A per-LAYER signature, so a failure names the layer instead of saying "the board
+                // moved". Eight independent FNV-1a accumulators over the same scan.
+                string[] LayerSigs(Grid g)
+                {
+                    var names = new[] { "Tiles", "Height", "Smoke", "CoverHp", "CoverSeed", "Fire", "Barrel", "Ground" };
+                    var hh = new uint[8];
+                    for (int i = 0; i < 8; i++) hh[i] = 2166136261u;
+                    void Mix(int i, int v) { unchecked { hh[i] ^= (uint)v; hh[i] *= 16777619u; } }
+                    for (int gx = 0; gx < g.W; gx++)
+                        for (int gy = 0; gy < g.H; gy++)
+                        {
+                            Mix(0, (int)g.Tiles[gx, gy]);     Mix(1, g.Height[gx, gy]);    Mix(2, g.Smoke[gx, gy]);
+                            Mix(3, g.CoverHp[gx, gy]);        Mix(4, g.CoverSeed[gx, gy]); Mix(5, g.Fire[gx, gy]);
+                            Mix(6, g.Barrel[gx, gy] ? 1 : 0); Mix(7, (int)g.Ground[gx, gy]);
+                        }
+                    var outv = new string[8];
+                    for (int i = 0; i < 8; i++) outv[i] = names[i] + ":" + hh[i].ToString("x8");
+                    return outv;
+                }
+                string FoeSig(List<Unit> fs)
+                {
+                    uint fh = 2166136261u;
+                    void Mix(int v) { unchecked { fh ^= (uint)v; fh *= 16777619u; } }
+                    Mix(fs.Count);
+                    foreach (var e in fs) { Mix(e.X); Mix(e.Y); Mix(e.MaxHp); Mix((int)e.Weapon.Kind); Mix(e.PodId); }
+                    return fh.ToString("x8");
+                }
+                // A PLAUSIBLE previous mission, written by hand rather than played, so neither leg
+                // depends on a stamper staying as it is or on a seed dealing the right pattern:
+                // cover and elevation from another arena, smoke still hanging, chipped cover HP,
+                // assigned volume seeds, a rift wall down mid-field, drifts of ice.
+                // SIX LAYERS — the ones Mission.Build clears itself. Fire and Barrel are NOT here:
+                // Build neither clears nor (for Fire) reads them, so they belong to (14b)'s seam.
+                void DirtySixBuildClears(Grid g)
+                {
+                    for (int gx = 0; gx < g.W; gx++)
+                        for (int gy = 0; gy < g.H; gy++)
+                        {
+                            g.Tiles[gx, gy] = (gx + gy) % 7 == 0 ? TileType.HighCover
+                                            : ((gx * 3 + gy) % 5 == 0 ? TileType.LowCover : TileType.Floor);
+                            g.Height[gx, gy]    = (gx + 2 * gy) % 11 == 0 ? 1 : 0;
+                            g.Smoke[gx, gy]     = (gx * gy) % 13 == 0 ? 2 : 0;
+                            g.CoverHp[gx, gy]   = (gx + gy) % 3;
+                            g.CoverSeed[gx, gy] = (gx * 17 + gy * 5) % 29 - 1;
+                            g.Ground[gx, gy]    = gx == WallX ? GroundKind.Rift
+                                                : ((gx + gy) % 9 == 0 ? GroundKind.Ice : GroundKind.None);
+                        }
+                    g.RefreshGroundFlags();
+                }
+                // ...and the OTHER TWO, which only (14b)'s whole-seam check may use.
+                void DirtyHazards(Grid g)
+                {
+                    for (int gx = 0; gx < g.W; gx++)
+                        for (int gy = 0; gy < g.H; gy++)
+                        {
+                            g.Fire[gx, gy]   = (gx + 3 * gy) % 17 == 0 ? 2 : 0;
+                            g.Barrel[gx, gy] = (gx * 7 + gy) % 23 == 0;
+                        }
+                }
                 void DirtyGround(Grid g)
                 {
                     for (int gy = 0; gy < g.H; gy++) g.Ground[WallX, gy] = GroundKind.Rift;
@@ -1125,18 +1198,119 @@ public partial class Game
                 if (scratch.AnyRift || scratch.AnyIce || scratch.AnyVent || scratch.AnyFoliage || scratch.AnySand)
                     fails.Add("buildLeftStaleGroundFlags");
 
+                // (14a-2) THE OTHER SEVEN ARRAYS — P20's ONE OPEN ITEM, CLOSED, AND WHAT IT FOUND.
+                //  Leg (14a) pins ONE of `Grid`'s eight per-tile layers (Ground). P20's own note
+                //  left the rest open and said the accounting for them "looks complete" — which is
+                //  precisely what the ground layer looked like for two programs. So this asserts
+                //  the GENERAL statement (14a) is one instance of: **Build's output is a function
+                //  of Build's inputs, whatever the grid held before it.** Two Builds, same mission
+                //  number, same reseeded stream, same fresh squad, one on a clean grid and one on a
+                //  dirtied grid, must agree layer for layer AND on the force and seats they place.
+                //
+                //  MEASURED, one dirty layer at a time (this leg's own probe, 2026-09-04):
+                //    Tiles Height Smoke CoverHp CoverSeed Ground  ->  nothing moves. Self-cleaning.
+                //    Fire    -> only Fire moves. Build never reads it and never clears it.
+                //    Barrel  -> **Tiles, Height, CoverHp, CoverSeed and Barrel all move.**
+                //  So the answer to "are the other seven fine" is no: six are, one is inert-but-
+                //  uncleaned, and one MOVES THE BOARD. `Grid.IsFloor` is
+                //  `InBounds && Tiles==Floor && !Barrel[x,y] && !rift` — a barrel sits in the same
+                //  predicate the rift was added to — so every connectivity flood inside Build reads
+                //  it: TryApplyLayout's accept/reject guard, EnsureConnectivity's carve (which says
+                //  so itself: "a barrel keeps a tile non-walkable"), PlaceBarrels' candidate filter.
+                //  That is P20's defect with a different array in the same slot of the same test.
+                //
+                //  IT IS LATENT, NOT LIVE, AND THE DIFFERENCE IS THE WHOLE POINT. `Game.SetupMission`
+                //  is the only production caller of `Mission.Build` (the other two are a harness
+                //  call on a fresh `new Grid()` and this leg), every mode funnels through it, and it
+                //  calls `Grid.ClearHazards()` — Fire and Barrel — unconditionally, with no branch,
+                //  28 lines before the Build call. So nothing shipped reads a stale barrel today.
+                //  What is wrong is WHERE the invariant lives: in the caller, not in Build. That is
+                //  the exact arrangement Ground had (StampBiomeGround runs after Build) and it bit
+                //  at 8-15% of daily processes. One line in one place stands between here and P20.
+                //
+                //  THE ASSERTION THEREFORE SPLITS WHERE THE CODE SPLITS, rather than pretending:
+                //    (14a-2) the SIX layers Build itself clears, at the BUILD seam.
+                //    (14b)   all EIGHT, at the SETUPMISSION seam — the shipped path, where the
+                //            hazard clear actually is. That is what covers Fire and Barrel, and it
+                //            fails loudly if a future caller stops doing Build's job.
+                //  AND THE GATE THAT CAUGHT P20 WAS BLIND TO IT: `BoardSignature()` hashed Tiles,
+                //  Height and unit seats only, so neither (14b) as it stood nor the daily's
+                //  cross-process check could ever have seen a Barrel move. It hashes all eight
+                //  layers as of this wave — a harness-only widening, which is why it was safe to
+                //  do in a measurement wave when the ClearHazards move was not.
+                {
+                    var dirtyG = new Grid(); DirtySixBuildClears(dirtyG);
+                    var cleanG = new Grid();
+                    var sqDirty = Sightline.Mission.TrainingSquad(); var foeDirty = new List<Unit>();
+                    var sqClean = Sightline.Mission.TrainingSquad(); var foeClean = new List<Unit>();
+                    int deckWas = Sightline.Mission.DeckSeed;
+                    Sightline.Mission.DeckSeed = 20260904;
+                    Util.Reseed(90210); Sightline.Mission.Build(dirtyG, sqDirty, foeDirty, 3);
+                    Util.Reseed(90210); Sightline.Mission.Build(cleanG, sqClean, foeClean, 3);
+                    Sightline.Mission.DeckSeed = deckWas;
+
+                    var sd = LayerSigs(dirtyG); var sc = LayerSigs(cleanG);
+                    var moved = new List<string>();
+                    for (int i = 0; i < 8; i++) if (sd[i] != sc[i]) moved.Add(sd[i] + "!=" + sc[i]);
+                    if (moved.Count != 0)
+                        fails.Add($"buildReadsStaleGrid({moved.Count}/8 layers: {string.Join(",", moved)})");
+                    // ...and the FORCE, which is what a stale layer moves through the pod scatter,
+                    // and the SEATS, which Build assigns from the deployment shape.
+                    if (FoeSig(foeDirty) != FoeSig(foeClean))
+                        fails.Add($"buildForceReadsStaleGrid(dirty={FoeSig(foeDirty)} clean={FoeSig(foeClean)})");
+                    for (int i = 0; i < sqDirty.Count && i < sqClean.Count; i++)
+                        if (sqDirty[i].X != sqClean[i].X || sqDirty[i].Y != sqClean[i].Y)
+                        { fails.Add($"buildSeatsReadStaleGrid(unit{i})"); break; }
+
+                    // THE DETECTOR MUST BE ABLE TO FAIL — same discipline as (14c). With the ground
+                    // clear suppressed (the pre-P20 seam) the SAME dirt must move at least one
+                    // layer, or every assertion above is vacuous and would sit green forever.
+                    if (Terrain.NewOn)
+                    {
+                        var dirtyS = new Grid(); DirtySixBuildClears(dirtyS);
+                        var cleanS = new Grid();
+                        var sqA = Sightline.Mission.TrainingSquad(); var foeA = new List<Unit>();
+                        var sqB = Sightline.Mission.TrainingSquad(); var foeB = new List<Unit>();
+                        int deck2 = Sightline.Mission.DeckSeed;
+                        Sightline.Mission.DeckSeed = 20260904;
+                        Sightline.Mission.ClearGroundOnBuild = false;
+                        Util.Reseed(90210); Sightline.Mission.Build(dirtyS, sqA, foeA, 3);
+                        Util.Reseed(90210); Sightline.Mission.Build(cleanS, sqB, foeB, 3);
+                        Sightline.Mission.ClearGroundOnBuild = true;
+                        Sightline.Mission.DeckSeed = deck2;
+                        var a = LayerSigs(dirtyS); var b = LayerSigs(cleanS);
+                        bool sensitive = false;
+                        for (int i = 0; i < 8; i++) if (a[i] != b[i]) sensitive = true;
+                        if (!sensitive) fails.Add("staleGridProbeInsensitive");
+                    }
+                }
+
                 // (14b) THE CONSEQUENCE, end to end: the SEEDED DAILY's headline contract is that
                 //       the same stamp deals the same board to everyone. A cold board (clean grid)
                 //       and a warm one (a dirty grid) must agree. This is leg (2)'s assertion with
                 //       the luck taken out — leg (2) only sees this when the SKIRMISH before it
                 //       happened to leave a VOID board behind, which is 1 process in 8.
+                //       EXTENDED (this wave): the dirt is now all eight layers, not just Ground,
+                //       and it is compared BOTH ways — the widened `BoardSignature()` and a
+                //       per-layer signature that NAMES the layer that moved. THIS is the leg that
+                //       covers Fire and Barrel — the
+                //       two Build does not own — because it exercises the seam where their clear
+                //       actually lives (`Game.SetupMission` -> `Grid.ClearHazards()`). If a future
+                //       caller stops doing Build's job, or Build starts being called from somewhere
+                //       that never did it, this fails and (14a-2) alone would not.
                 BeginDaily();
                 string cleanBoard = BoardSignature();
-                DirtyGround(Grid);
+                var cleanLayers = LayerSigs(Grid);
+                DirtyGround(Grid); DirtyHazards(Grid);
                 BeginDaily();
                 string dirtyBoard = BoardSignature();
+                var dirtyLayers = LayerSigs(Grid);
                 if (dirtyBoard != cleanBoard)
                     fails.Add($"dailyBoardReadsPreviousGround(clean={cleanBoard} afterDirt={dirtyBoard})");
+                var movedDaily = new List<string>();
+                for (int i = 0; i < 8; i++) if (cleanLayers[i] != dirtyLayers[i]) movedDaily.Add(dirtyLayers[i] + "!=" + cleanLayers[i]);
+                if (movedDaily.Count != 0)
+                    fails.Add($"dailyGridReadsPreviousMission({movedDaily.Count}/8 layers: {string.Join(",", movedDaily)})");
 
                 // (14c) THE DETECTOR MUST BE ABLE TO FAIL. Re-run (14b) against the PRE-FIX seam
                 //       (what SIGHTLINE_STALEGROUND=1 restores): the same dirt MUST move the board

@@ -1,0 +1,130 @@
+===== L6bridge — THE LADDER (k clusters of 20 per rung; band = goal band of record) =====
+  rung    k    n   win% binomSE clustSE ratio jack min jack max    band   verdict
+  hR     16  320   69.7    2.57    2.94  1.14     68.7     71.0  67-83    IN  (+2.7 over floor 67; 0.91 clusterSE clear)
+  h0     16  320   42.5    2.76    2.99  1.08     40.7     43.7  47-63    OUT -4.5 (floor 47; 1.50 clusterSE under)
+  h2     16  320   35.6    2.68    2.85  1.06     34.0     36.7  32-48    IN  (+3.6 over floor 32; 1.27 clusterSE clear)
+  h4     16  320   20.9    2.27    2.42  1.07     20.0     22.0  22-38    OUT -1.1 (floor 22; 0.44 clusterSE under)
+  h6     16  320   13.1    1.89    1.93  1.02     12.3     13.7  12-28    IN  (+1.1 over floor 12; 0.58 clusterSE clear)
+  h8     16  320    7.8    1.50    1.77  1.18      7.0      8.3   5-15    IN  (+2.8 over floor 5; 1.59 clusterSE clear)
+  steps: hR->h0 +27.2  h0->h2 +6.9  h2->h4 +14.7  h4->h6 +7.8  h6->h8 +5.3
+  MONOTONE: yes, at every step
+  IN BAND: 4 of 6
+
+===== L6bridge — HEAT LEAK (does 'heat N' mean heat N?) =====
+  rung   chunks pinned  picks raised offRung missions  worst chunk
+  hR         16     16     29      0       0     1532  b0 offRung=0
+  h0         16     16     25      0       0     1369  b0 offRung=0
+  h2         16     16     22      0       0     1337  b0 offRung=0
+  h4         16     16     21      0       0     1296  b0 offRung=0
+  h6         16     16     21      0       0     1200  b0 offRung=0
+  h8         16     16     20      0       0     1111  b0 offRung=0
+  LEAK-CHECK: PASS (all 96 chunks pinned; campaignsRaised = missionsAbovePin = 0 on every one)
+
+===== L6bridge — STALEMATES by arm (harness-forced losses) =====
+  rung      n mission  run share%  where
+  hR      320      10    0   3.12  [s26s m4 Escort rt67] [s60g m2 Escort rt56] [s60s m3 Evac rt60] [s77g m4 Escort rt65] [s80g m2 Escort rt52] [s80s m2 Escort rt52] [s115s m5 Rescue rt66] [s126s m3 Sabotage rt63] [s145s m3 Escort rt62] [s155g m2 Rescue rt54]
+  h0      320       5    0   1.56  [s31s m5 Rescue rt66] [s46s m1 Eliminate rt51] [s59s m3 Escort rt64] [s89g m2 Evac rt53] [s155g m4 Rescue rt60]
+  h2      320       4    0   1.25  [s46s m1 Eliminate rt51] [s54s m3 Rescue rt54] [s74g m3 Eliminate rt52] [s79g m4 Escort rt56]
+  h4      320       5    0   1.56  [s46s m1 Eliminate rt51] [s69s m4 Rescue rt57] [s74g m3 Eliminate rt52] [s93g m4 Escort rt58] [s141s m3 Eliminate rt53]
+  h6      320       3    0   0.94  [s16g m2 Eliminate rt55] [s21g m4 Rescue rt62] [s62g m3 Escort rt66]
+  h8      320       1    0   0.31  [s105g m4 Eliminate rt66]
+  TOTAL 1920 campaigns: mission-arm 28, run-arm 0, share 1.46%
+
+===== L6bridge vs L5 (/home/user/wt/ladder-l6/docs/measurements/l6/../l5) — chunk-for-chunk on pairedPolicy.slots =====
+  hR b0: DIFFERS (7 legs)
+  hR b10: DIFFERS (5 legs)
+  hR b20: DIFFERS (5 legs)
+  hR b30: DIFFERS (2 legs)
+  hR b40: DIFFERS (6 legs)
+  hR b50: DIFFERS (5 legs)
+  hR b60: DIFFERS (7 legs)
+  hR b70: DIFFERS (7 legs)
+  hR b80: DIFFERS (5 legs)
+  hR b90: DIFFERS (3 legs)
+  hR b100: DIFFERS (3 legs)
+  hR b110: DIFFERS (4 legs)
+  hR b120: DIFFERS (4 legs)
+  hR b130: DIFFERS (5 legs)
+  hR b140: DIFFERS (4 legs)
+  hR b150: DIFFERS (4 legs)
+  h0 b0: DIFFERS (2 legs)
+  h0 b10: DIFFERS (5 legs)
+  h0 b20: DIFFERS (6 legs)
+  h0 b30: DIFFERS (8 legs)
+  h0 b40: DIFFERS (5 legs)
+  h0 b50: DIFFERS (7 legs)
+  h0 b60: DIFFERS (8 legs)
+  h0 b70: DIFFERS (8 legs)
+  h0 b80: DIFFERS (1 legs)
+  h0 b90: DIFFERS (7 legs)
+  h0 b100: DIFFERS (3 legs)
+  h0 b110: DIFFERS (5 legs)
+  h0 b120: DIFFERS (7 legs)
+  h0 b130: DIFFERS (5 legs)
+  h0 b140: DIFFERS (6 legs)
+  h0 b150: DIFFERS (5 legs)
+  h2 b0: DIFFERS (5 legs)
+  h2 b10: DIFFERS (5 legs)
+  h2 b20: DIFFERS (6 legs)
+  h2 b30: DIFFERS (4 legs)
+  h2 b40: DIFFERS (6 legs)
+  h2 b50: DIFFERS (7 legs)
+  h2 b60: DIFFERS (4 legs)
+  h2 b70: DIFFERS (8 legs)
+  h2 b80: DIFFERS (5 legs)
+  h2 b90: DIFFERS (6 legs)
+  h2 b100: DIFFERS (5 legs)
+  h2 b110: DIFFERS (5 legs)
+  h2 b120: DIFFERS (9 legs)
+  h2 b130: DIFFERS (4 legs)
+  h2 b140: DIFFERS (8 legs)
+  h2 b150: DIFFERS (6 legs)
+  h4 b0: DIFFERS (5 legs)
+  h4 b10: DIFFERS (4 legs)
+  h4 b20: DIFFERS (4 legs)
+  h4 b30: DIFFERS (6 legs)
+  h4 b40: DIFFERS (3 legs)
+  h4 b50: DIFFERS (4 legs)
+  h4 b60: DIFFERS (2 legs)
+  h4 b70: DIFFERS (5 legs)
+  h4 b80: DIFFERS (2 legs)
+  h4 b90: DIFFERS (5 legs)
+  h4 b100: DIFFERS (3 legs)
+  h4 b110: DIFFERS (3 legs)
+  h4 b120: DIFFERS (3 legs)
+  h4 b130: DIFFERS (5 legs)
+  h4 b140: DIFFERS (7 legs)
+  h4 b150: DIFFERS (6 legs)
+  h6 b0: DIFFERS (0 legs)
+  h6 b10: DIFFERS (7 legs)
+  h6 b20: DIFFERS (2 legs)
+  h6 b30: DIFFERS (2 legs)
+  h6 b40: DIFFERS (3 legs)
+  h6 b50: DIFFERS (2 legs)
+  h6 b60: DIFFERS (5 legs)
+  h6 b70: DIFFERS (5 legs)
+  h6 b80: DIFFERS (1 legs)
+  h6 b90: DIFFERS (2 legs)
+  h6 b100: DIFFERS (3 legs)
+  h6 b110: DIFFERS (3 legs)
+  h6 b120: DIFFERS (5 legs)
+  h6 b130: DIFFERS (2 legs)
+  h6 b140: DIFFERS (2 legs)
+  h6 b150: DIFFERS (2 legs)
+  h8 b0: DIFFERS (1 legs)
+  h8 b10: DIFFERS (2 legs)
+  h8 b20: DIFFERS (2 legs)
+  h8 b30: DIFFERS (1 legs)
+  h8 b40: DIFFERS (0 legs)
+  h8 b50: DIFFERS (0 legs)
+  h8 b60: DIFFERS (0 legs)
+  h8 b70: DIFFERS (3 legs)
+  h8 b80: DIFFERS (2 legs)
+  h8 b90: DIFFERS (5 legs)
+  h8 b100: DIFFERS (4 legs)
+  h8 b110: DIFFERS (2 legs)
+  h8 b120: DIFFERS (2 legs)
+  h8 b130: DIFFERS (4 legs)
+  h8 b140: DIFFERS (0 legs)
+  h8 b150: DIFFERS (3 legs)
+  chunks identical on every (slot, policy) outcome: 0/96; legs identical 1519/1920
