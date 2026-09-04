@@ -17251,6 +17251,7 @@ claimed as in band.
 |---|---|---|---|---|---|---|---|---|---|
 | RECRUIT | 16 | +3.1 | 39 | 29 | 68 | 7.22 | +1.21 | +1.40 | NOT RESOLVED |
 | h0 | 16 | **+7.5** | 52 | 28 | 80 | 7.83 | **+2.68** | **+3.22** | at the edge (p≈0.007) |
+| h0 | **32** | **+3.8** | 97 | 73 | 170 | 5.70 | +1.84 | +1.86 | NOT RESOLVED |
 | h2 | 16 | +5.3 | 60 | 43 | 103 | 8.88 | +1.68 | +1.41 | NOT RESOLVED |
 | h4 | 32 | +2.5 | 77 | 61 | 138 | 5.14 | +1.36 | +1.01 | NOT RESOLVED |
 | h6 | 32 | +2.5 | 53 | 37 | 90 | 4.15 | +1.69 | +1.43 | NOT RESOLVED |
@@ -17258,8 +17259,9 @@ claimed as in band.
 | **POOLED** 6 rungs x 16 | 16 | **+3.49** | 228 | 161 | 389 | 2.88 | **+3.40** | | **RESOLVED** |
 | **POOLED** 4 rungs x 32 | 32 | **+2.15** | 248 | 193 | 441 | 2.30 | **+2.62** | | at the edge (p≈0.009) |
 
-**NOT ONE PER-RUNG CONTRAST RESOLVES.** The lever is resolved only in aggregate. Nobody should quote
-a per-rung number from this round as a size.
+**NOT ONE PER-RUNG CONTRAST RESOLVES** — h0 is shown at both n because its 16-set reading is the
+only one that even reaches the edge, and it is the reading that does not replicate (§P24-4b). The
+lever is resolved only in aggregate. Nobody should quote a per-rung number from this round as a size.
 
 ## P24-4. THE TWO FINDINGS THAT ARE WORTH MORE THAN THE DELTA
 
