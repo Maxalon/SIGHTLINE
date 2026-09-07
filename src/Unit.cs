@@ -833,6 +833,19 @@ public static class PerkDef
         Perk.Vantage, Perk.Breaker, Perk.Siegebreaker,  // HORIZON wave 6: elevation / pin-punish / anti-turtle
     };
 
+    /// P26: is this perk still OFFERED, i.e. can a soldier ever acquire it? DERIVED from All rather
+    /// than written down a second time — the retired crit cluster (Deadeye / Opportunist /
+    /// PointBlank / Vanguard) keeps its enum member, Name, Code and Desc for save compatibility, but
+    /// nothing draws it (Run.cs:1217/1235/1284/2035 and Events.cs:476 all draw from All) and no
+    /// implementation survives in Combat.cs. The FIELD MANUAL documented all four with live
+    /// mechanical text ("+15 crit chance", "+20 crit within 2 tiles") as though they were on offer;
+    /// Codex.PerkEntries now marks them and CODEXTEST asserts it, so the manual cannot silently
+    /// promise an unobtainable perk again.
+    public static bool IsOffered(Perk p) => Array.IndexOf(All, p) >= 0;
+
+    /// The label the FIELD MANUAL appends to a perk it can no longer offer.
+    public const string RetiredTag = "[RETIRED - no longer offered]";
+
     public static string Name(Perk p) => p switch
     {
         Perk.LockOn => "LOCK-ON",

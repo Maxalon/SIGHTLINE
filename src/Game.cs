@@ -6836,7 +6836,16 @@ public partial class Game
         if (rung > Pressure)
         {
             // telegraphed escalation -- the player sees it coming and can choose to advance
-            ShowBanner(rung >= PressureMax ? "ENEMY REINFORCEMENTS - MAX PRESSURE" : "PRESSURE RISING",
+            // P26: the MAX rung's banner used to promise REINFORCEMENTS unconditionally, but the
+            // spawn three lines below is gated on ClockMayReinforce — so on ELIMINATE (where C3
+            // deliberately disabled the reinforcement arm) the game announced a wave that could
+            // never arrive. The AIM arm is real on every objective, so the banner now names the
+            // arm that is actually firing. The Reinforce CUE is kept on both paths deliberately:
+            // Audio.CueMap documents that event as "more of them arrive / THE PRESSURE CLOCK TICKS
+            // UP / artillery is coming", so it is the escalation alarm, not a spawn announcement.
+            ShowBanner(rung >= PressureMax
+                           ? (ClockMayReinforce ? "ENEMY REINFORCEMENTS - MAX PRESSURE" : "ENEMY PRESSURE - MAXIMUM")
+                           : "PRESSURE RISING",
                        false, Audio.CueFor(Audio.GameEvent.Reinforce));
         }
         Pressure = rung;

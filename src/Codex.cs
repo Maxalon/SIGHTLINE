@@ -367,8 +367,21 @@ public static class Codex
         var e = new List<CodexEntry>();
         // iterate the FULL enum (incl. the retired-from-offers perks) so any already-earned perk is
         // documented; CODEXTEST asserts each has Name + Desc.
+        // P26: ...but a retired perk is now MARKED. Four of these (Deadeye / Opportunist /
+        // PointBlank / Vanguard) are undraftable AND unimplemented, and the manual was printing
+        // their old mechanical text as live copy — a promise the game cannot keep. The Hud dossier
+        // already had this right (src/Hud.cs:6369, "Only OFFERED perks get an arm"); this is the
+        // surface that did not. CODEXTEST leg (perkRetired) is the gate.
         foreach (Perk p in Enum.GetValues(typeof(Perk)))
-            e.Add(new CodexEntry { Title = PerkDef.Name(p), Code = PerkDef.Code(p), Desc = PerkDef.Desc(p) });
+        {
+            bool offered = PerkDef.IsOffered(p);
+            e.Add(new CodexEntry
+            {
+                Title = PerkDef.Name(p),
+                Code  = PerkDef.Code(p),
+                Desc  = offered ? PerkDef.Desc(p) : $"{PerkDef.RetiredTag} {PerkDef.Desc(p)}",
+            });
+        }
         return e;
     }
 
@@ -520,6 +533,19 @@ public static class Codex
         }
 
         foreach (Perk p in Enum.GetValues(typeof(Perk)))       Chk("PERK", p.ToString(), PerkDef.Name(p), PerkDef.Desc(p));
+        // P26 leg (perkRetired) — TRUTH, not presence. The guard above asserts every perk HAS copy;
+        // it could not see that four perks' copy described mechanics no code implements and no draw
+        // can offer. Every perk the FIELD MANUAL prints must either be offerable or be marked
+        // retired. This is the assertion whose absence let the manual lie for eighteen milestones.
+        var perkDesc = new Dictionary<string, string>();
+        foreach (var pe in PerkEntries()) perkDesc[pe.Title] = pe.Desc ?? "";
+        foreach (Perk p in Enum.GetValues(typeof(Perk)))
+        {
+            if (!perkDesc.TryGetValue(PerkDef.Name(p), out var desc)) { fails.Add($"PERK:{p} missing from FIELD MANUAL"); continue; }
+            bool marked = desc.StartsWith(PerkDef.RetiredTag, StringComparison.Ordinal);
+            if (!PerkDef.IsOffered(p) && !marked) fails.Add($"PERK:{p} unofferable but not marked retired");
+            if (PerkDef.IsOffered(p) && marked)   fails.Add($"PERK:{p} offered but marked retired");
+        }
         foreach (Boon b in Enum.GetValues(typeof(Boon)))       Chk("BOON", b.ToString(), BoonDef.Name(b), BoonDef.Desc(b));
         foreach (Contract c in Enum.GetValues(typeof(Contract))) Chk("CONTRACT", c.ToString(), ContractDef.Name(c), ContractDef.Desc(c));
         foreach (Spec s in Enum.GetValues(typeof(Spec)))
