@@ -45,6 +45,13 @@ public static class Stats
         // (recorded only after TryApplyLayout's connectivity guard accepted it), or -1 for
         // the procedural fallback. Lets the report rank arenas and expose the fallback rate.
         public int Layout = -1;
+        // P26: the policy leg that PLAYED this mission ("greedy" | "sloppy" | "endless" | "dumb"),
+        // stamped from the owning RunRec at BeginMission. The report already split ACTIONS by
+        // policy (_actionsByPolicy) but every per-mission table -- byArena, byObjective -- pooled
+        // the two legs, so the project's central question ("does board geometry make skill
+        // matter?") could not be read out of a chunk at all. Purely a report split: no gameplay
+        // reads it, and every pre-P26 field keeps its exact meaning.
+        public string Policy = "";
         // W4 THE SECOND AXIS: the deployment SHAPE this mission opened with
         // (Mission.DeployFrontal/Pincer/Crossfire/Envelop). Lets a report split turn count,
         // win rate and decision density by opening geometry.
@@ -558,7 +565,8 @@ public static class Stats
             SquadStart = squad, EnemiesStart = enemies, Layout = layout, Deploy = deploy,
             NodeKind = nodeKind ?? "", SquadHpPct = squadHpPct,
             HvtKind = hvtKind, HvtMaxHp = hvtMaxHp,
-            Biome = biome ?? "", GroundTiles = groundTiles
+            Biome = biome ?? "", GroundTiles = groundTiles,
+            Policy = _run != null ? (_run.Policy ?? "") : ""   // P26: stamp the leg that plays it
         };
         ResetLeadTracker();   // swings/lead are scoped to one match
     }
@@ -722,6 +730,47 @@ public static class Stats
         if (n <= 0) return 0.0;
         double p = (double)wins / n;
         return Math.Round(100.0 * Math.Sqrt(p * (1 - p) / n), 1);
+    }
+
+    // ── P26 THE SKILL SPLIT ───────────────────────────────────────────────────────────────
+    // The MISSION-level greedy-vs-sloppy win-rate split for one group of missions (one arena,
+    // one objective). This exists because the project's central question -- "do the player's
+    // decisions change the outcome, and does board geometry change that?" -- was unanswerable
+    // from a chunk: the flywheel has always run both legs, but every per-mission table pooled
+    // them, so the only readable gap was the single pooled campaign number (measured over the
+    // p24 archive at +0.2 points on 3,200 CRN pairs, with the SLOPPY leg ahead at RECRUIT
+    // and h2).
+    //
+    // WHAT THIS CAN CONCLUDE. A mission is played on exactly one arena with exactly one
+    // objective by exactly one policy leg, so attributing a MISSION outcome to them is sound.
+    //
+    // WHAT IT CANNOT. (1) It is NOT CRN-paired: `pairedPolicy` pairs whole CAMPAIGNS by slot,
+    // and a campaign plays up to six different arenas, so a campaign-level win cannot be
+    // attributed to one board. Read this as an unpaired contrast and quote n, not just the gap.
+    // (2) Mission win rate is conditional on REACHING the mission, so the two legs are not
+    // sampled from the same population once they diverge; P15's survivorship warning applies
+    // in full. (3) An arena's cell is small -- a rung deals 35 boards across 6 missions -- so a
+    // single chunk resolves nothing. Pool the round.
+    //
+    // SENTINELS. A leg with no missions reads winRate -1, never 0.0 (CLAUDE.md records the
+    // policyGap 0.0-on-no-data defect and runWinRate's -1 fix); `gap` is null unless BOTH legs
+    // played, so an absent leg can never be read as a tie.
+    static object PolicySplit(IEnumerable<MissionRec> g)
+    {
+        var greedy = g.Where(m => m.Policy == "greedy").ToList();
+        var sloppy = g.Where(m => m.Policy == "sloppy").ToList();
+        double GWr(List<MissionRec> l) => l.Count == 0 ? -1.0 : Math.Round(100.0 * l.Count(m => m.Win) / l.Count, 1);
+        double gw = GWr(greedy), sw = GWr(sloppy);
+        return new
+        {
+            greedyN = greedy.Count,
+            greedyWinRate = gw,
+            greedySe = SeVal(greedy.Count(m => m.Win), greedy.Count),
+            sloppyN = sloppy.Count,
+            sloppyWinRate = sw,
+            sloppySe = SeVal(sloppy.Count(m => m.Win), sloppy.Count),
+            gap = (greedy.Count > 0 && sloppy.Count > 0) ? (double?)Math.Round(gw - sw, 1) : null,
+        };
     }
 
     // W2: paired per-slot outcomes over CAMPAIGN runs — a slot pairs when it has exactly one
@@ -1827,8 +1876,19 @@ public static class Stats
             byArena = missions.Where(m => m.Layout >= 0).GroupBy(m => m.Layout).OrderBy(g => g.Key).Select(g => new
             {
                 arena = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1),
+                // P26 SKILL SPLIT — the whole point of this table. `gap` is the MISSION-level
+                // greedy-minus-sloppy win-rate difference on this board. Sentinels matter here:
+                // an unplayed leg reads -1 (never 0.0, which would read as "lost every mission"),
+                // and `gap` is null unless BOTH legs have n > 0. See the block comment at
+                // PolicySplit for what this can and cannot conclude.
+                policy = PolicySplit(g),
                 byMission = g.GroupBy(m => m.Mission).OrderBy(x => x.Key)
                     .Select(x => new { mission = x.Key, n = x.Count(), winRate = WinRate(x) }).ToList()
+            }).ToList(),
+            // P26: the same split by OBJECTIVE. byObjective above is pooled over both legs.
+            byObjectivePolicy = missions.GroupBy(m => m.Objective).OrderBy(g => g.Key).Select(g => new
+            {
+                objective = g.Key, n = g.Count(), policy = PolicySplit(g)
             }).ToList(),
             proceduralFallback = new
             {
