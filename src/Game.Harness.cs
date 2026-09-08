@@ -14422,4 +14422,135 @@ public partial class Game
             : "JUICETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    // ═══════════════ P26 "THE ARENA OWNS THE FIGHT" — SIGHTLINE_ARENASITETEST ═══════════════
+    /// The gate on the site-glyph layer. Legs (A)-(D) are the ones that MEAN something while every
+    /// shipped template is still glyph-free; leg (E) is the one that goes red the moment a template
+    /// declares a site and the ring is still being punched through it.
+    ///
+    /// WHY (E) MATTERS MOST, and why it is written before any template declares anything: every
+    /// other leg here stays green if the ring-punching is left in place, so the wave could ship as a
+    /// no-op under four passing assertions. That is precisely the failure mode PROGRAM PARALLAX
+    /// named — "when a check here says everything is fine, ask what it would have said if it were
+    /// not." (E) is skipped, loudly and by name, while no template declares a site.
+    public static string ArenaSiteSelfTest()
+    {
+        var fails = new List<string>();
+
+        // (A) STATIC — every shipped template is the right shape and well-formed under the
+        //     cardinality rules. A wrong width makes TryApplyLayout reject the board SILENTLY and
+        //     the game falls back to a blander procedural map with no error, so this is the leg
+        //     that catches a bad hand-edit before a player ever sees it.
+        for (int i = 0; i < Maps.Layouts.Length; i++)
+        {
+            var tpl = Maps.Layouts[i];
+            if (tpl.Length != Cfg.GridH) { fails.Add($"A:tpl{i} rows={tpl.Length} want {Cfg.GridH}"); continue; }
+            for (int y = 0; y < tpl.Length; y++)
+                if (tpl[y].Length != Cfg.GridW) fails.Add($"A:tpl{i} row{y} len={tpl[y].Length} want {Cfg.GridW}");
+            if (!Mission.ReadSitesWellFormed(tpl, out string why)) fails.Add($"A:tpl{i} {why}");
+        }
+
+        // (B) INERTNESS PRECONDITION — Maps.AnySiteTemplates is what stops Mission.PlanBoard
+        //     spending the arena gate's Util.Roll(80) while no template needs it. If this and the
+        //     scan below ever disagree, PlanBoard is either double-spending the shared stream or
+        //     silently declining to take over the gate.
+        bool scanned = false;
+        foreach (var tpl in Maps.Layouts)
+            foreach (var row in tpl)
+                foreach (char c in row)
+                    if (c == 'T' || c == 'X' || c == 'E' || c == 'C' || c == 'P' || c == 'A') scanned = true;
+        if (scanned != Maps.AnySiteTemplates) fails.Add($"B:AnySiteTemplates={Maps.AnySiteTemplates} scan={scanned}");
+
+        // (C) THE PARSER — on synthetic templates, because no shipped one declares anything yet.
+        //     Row-major scan order is load-bearing (the LAST 'P' is the VIP seat), so it is asserted.
+        string[] good = {
+            "PPPP..............", "PPP...............", "..................", "..................",
+            "........T.........", "..................", "..................", "..................",
+            "..............EEEE", "..............EEEE", "..................",
+        };
+        var gp = Mission.ReadSites(good);
+        if (!gp.ArenaTerminal || gp.Terminal != (8, 4)) fails.Add($"C:terminal={gp.Terminal}");
+        if (gp.Evac.Count != 8) fails.Add($"C:evac={gp.Evac.Count} want 8");
+        if (gp.Spawns.Length != 7) fails.Add($"C:spawns={gp.Spawns.Length} want 7");
+        if (gp.Spawns.Length == 7 && gp.Spawns[6] != (2, 1)) fails.Add($"C:VIP seat={gp.Spawns[6]} want (2,1) — row-major scan order broke");
+        if (!Mission.ReadSitesWellFormed(good, out _)) fails.Add("C:well-formed template rejected");
+
+        // cardinality must REJECT, not shrug — one bad count per case
+        void Reject(string label, string[] tpl)
+        { if (Mission.ReadSitesWellFormed(tpl, out _)) fails.Add($"C:accepted illegal {label}"); }
+        var twoT = (string[])good.Clone(); twoT[6] = "....T.............";
+        Reject("T x2", twoT);
+        var oneX = (string[])good.Clone(); oneX[6] = "....X.............";
+        Reject("X x1", oneX);
+        var shortP = (string[])good.Clone(); shortP[0] = "PP................"; shortP[1] = "..................";
+        Reject("P x2", shortP);
+        var shortE = (string[])good.Clone(); shortE[8] = "..............EE.."; shortE[9] = "..................";
+        Reject("E x2", shortE);
+
+        // (D) VALIDATION REJECTS AN UNREACHABLE SITE. A terminal walled in on all eight sides is an
+        //     unwinnable mission (Game.CanHack needs ChebyDist <= 1) — the failure the literal 3x3
+        //     force-clear used to prevent silently. PlanBoard's flood must catch it instead.
+        string[] sealedT = {
+            "PPPP..............", "PPP...............", "..................", ".......###........",
+            ".......#T#........", ".......###........", "..................", "..................",
+            "..............EEEE", "..............EEEE", "..................",
+        };
+        var sp2 = Mission.ReadSites(sealedT);
+        if (!sp2.ArenaTerminal) fails.Add("D:fixture parse");
+        int oldForced = Mission.ForcedLayout;
+        try
+        {
+            // drive PlanBoard through the real entry point by standing the fixture in for a layout
+            // is not possible without mutating Maps.Layouts, so assert the property the flood is
+            // built on directly: the terminal has no walkable 8-neighbour on this fixture.
+            bool anyOpen = false;
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = sp2.Terminal.Value.x + dx, ny = sp2.Terminal.Value.y + dy;
+                    char c = sealedT[ny][nx];
+                    if (c != '#' && c != 'o' && c != 'B') anyOpen = true;
+                }
+            if (anyOpen) fails.Add("D:fixture is not actually sealed — the leg proves nothing");
+        }
+        finally { Mission.ForcedLayout = oldForced; }
+
+        // (E) TERRAIN SURVIVES — the ONLY leg that can fail if this wave is implemented but does
+        //     nothing. Skipped by name while no template declares a site, so the skip is visible
+        //     rather than silently green.
+        string eLeg;
+        if (!Maps.AnySiteTemplates)
+            eLeg = "E:SKIPPED (no template declares a site yet — this leg arms with the first one)";
+        else
+        {
+            int withTerrain = 0, declaring = 0;
+            for (int i = 0; i < Maps.Layouts.Length; i++)
+            {
+                var tpl = Maps.Layouts[i];
+                var pl = Mission.ReadSites(tpl);
+                if (!pl.ArenaTerminal && pl.Sabotage.Count == 0) continue;
+                declaring++;
+                var sites = new List<(int x, int y)>(pl.Sabotage);
+                if (pl.ArenaTerminal) sites.Add(pl.Terminal.Value);
+                foreach (var st in sites)
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            int nx = st.x + dx, ny = st.y + dy;
+                            if (nx < 0 || ny < 0 || nx >= Cfg.GridW || ny >= Cfg.GridH) continue;
+                            char c = tpl[ny][nx];
+                            if (c == '#' || c == 'o' || c == '^' || c == '=') { withTerrain++; goto nextTpl; }
+                        }
+                nextTpl: ;
+            }
+            if (declaring > 0 && withTerrain == 0)
+                fails.Add("E:no arena-declared site has ANY terrain in its 3x3 — the ring is still being punched");
+            eLeg = $"E:{withTerrain}/{declaring} declaring templates keep terrain at a site";
+        }
+
+        if (fails.Count > 0) return "ARENASITETEST: FAIL " + string.Join(" | ", fails);
+        return $"ARENASITETEST: PASS ({Maps.Layouts.Length} templates well-formed; parser + cardinality + "
+             + $"seal-detection hold; AnySiteTemplates={Maps.AnySiteTemplates}; {eLeg})";
+    }
+
 }

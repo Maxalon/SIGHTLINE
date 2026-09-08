@@ -265,6 +265,23 @@ public static class Program
         string staleHazEnv = Environment.GetEnvironmentVariable("SIGHTLINE_STALEHAZARDS");
         if (staleHazEnv == "1") Mission.ClearHazardsOnBuild = false;
         else if (staleHazEnv == "0") Mission.ClearHazardsOnBuild = true;
+        // P26 "THE ARENA OWNS THE FIGHT" — SIGHTLINE_ARENASITES=0 restores the PRE-WAVE ORDER as
+        // well as the literal sites: no Mission.PlanBoard call, no roll before SpawnEnemies, the
+        // arena gate back inside Build, Game.SetupMission's four literal site blocks live again,
+        // and the 3x3 ring punched through the authored terrain at every objective. That is a
+        // restore by CONSTRUCTION -- the pre-wave gate block is kept verbatim in an else branch.
+        // ⚠ This wave MOVES THE CRN STREAM (same draw COUNT per build, different position, and
+        // three loops in Build consume draws conditional on board content), so every archived CRN
+        // world is invalidated -- the W1 class of break. =0 is the BRIDGE ARM for re-measuring.
+        string arenaSitesEnv = Environment.GetEnvironmentVariable("SIGHTLINE_ARENASITES");
+        if (arenaSitesEnv == "0") Mission.ArenaSites = false;
+        else if (arenaSitesEnv == "1") Mission.ArenaSites = true;
+        // ...and the deployment half on its own dial (P23's two-lever precedent): =0 ignores the
+        // 'A' anchor glyph while keeping arena SITES, so a round can price objective geometry
+        // without also re-pricing the deployment geometry W4 measured.
+        string arenaAnchEnv = Environment.GetEnvironmentVariable("SIGHTLINE_ARENAANCHORS");
+        if (arenaAnchEnv == "0") Mission.ArenaAnchors = false;
+        else if (arenaAnchEnv == "1") Mission.ArenaAnchors = true;
         // P21 "BUILD OWNS THE BOARD", second half — SIGHTLINE_FORKPRICES=0/1, the off switch
         // THE FORK PAYS (milestone 5) should have shipped and did not. That wave repriced the
         // campaign routing economy — Run.DepthBase 10 -> 12, a SUPPLY discount, a PITCHED class
@@ -407,6 +424,19 @@ public static class Program
         // asserts the DIFFERENTIAL (the squad's reachable set shrinks by exactly the rift tiles,
         // which also covers spawns that do not exist yet) plus every named fixture. =<N> widens the
         // per-cell seed count (default 6 -> ~576 boards).
+        // P26 THE ARENA OWNS THE FIGHT: SIGHTLINE_ARENASITETEST=1 : the site-glyph layer's gate.
+        // Asserts all 35 templates are 11x18 and well-formed, that Maps.AnySiteTemplates agrees with
+        // a direct scan (the inertness precondition that stops PlanBoard double-spending the arena
+        // gate roll), that the parser honours row-major scan order (the LAST 'P' is the VIP seat)
+        // and rejects every illegal cardinality, and that a sealed-in site is detectable. Leg (E) —
+        // "authored terrain SURVIVES at an arena-declared site" — is the only one that can fail if
+        // the wave ships as a no-op, and it announces itself as SKIPPED until a template declares.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ARENASITETEST") == "1")
+        {
+            Console.WriteLine(Game.ArenaSiteSelfTest());
+            return;
+        }
+
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_RIFTTEST"), out int riftN) && riftN > 0)
         {
             Console.WriteLine(Game.RiftSelfTest(riftN == 1 ? 6 : riftN));

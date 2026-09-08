@@ -2121,8 +2121,31 @@ public partial class Game
         Hvt = null;
         HvtBuffed = false;
         CaptiveLocked = false;
+
+        // ═══════════════ P26 "THE ARENA OWNS THE FIGHT" — THE INVERSION ═══════════════
+        // The dependency used to run: fix every objective site as a literal, seat the squad, THEN
+        // let Mission.Build pick an arena. So the arena could never own the fight, and Build's
+        // `occupied` ring then erased its terrain in a 3x3 at exactly the tile the mission
+        // converges on. Now the arena is chosen and its sites read and validated FIRST.
+        // FUL-9: DeckSeed must be published before PlanBoard, because PickLayout -> DeckPick reads
+        // it. Hoisted here from below the objective block; nothing between reads or writes it, and
+        // no Util.Rng draw occurs in SetupMission before the Build call, so the moved roll is the
+        // first draw of mission setup either way.
+        Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
+        bool wantEvac = Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue;
+        var plan = Mission.PlanBoard(n,
+                                     needEvac: wantEvac,
+                                     needTerminal: Objective == Objective.Hack,
+                                     needSabotage: Objective == Objective.Sabotage,
+                                     needCaptive: Objective == Objective.Rescue,
+                                     squadSize: Players.Count);
+
         // Evac / Escort / Rescue all extract to the same top-right zone
-        if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
+        if (wantEvac && plan.Valid && plan.ArenaEvac)
+        {
+            foreach (var t in plan.Evac) EvacZone.Add(t);   // the arena said where extraction is
+        }
+        else if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
         {
             // A 2x4 extraction block (8 tiles) in the top-right. CRITICAL: with deploy-growth the
             // squad can field up to DeployCapMax soldiers, and EVAC requires ALL of them to stand
@@ -2135,13 +2158,18 @@ public partial class Game
             }
         }
         if (Objective == Objective.Hack)
-            Terminal = (Grid.W / 2 + 1, Grid.H / 2);
+            Terminal = plan.Valid && plan.ArenaTerminal ? plan.Terminal.Value : (Grid.W / 2 + 1, Grid.H / 2);
         if (Objective == Objective.Sabotage)
         {
-            int my = Grid.H / 2;
-            SabotageSites.Add((Grid.W / 2 - 4, my - 2));
-            SabotageSites.Add((Grid.W / 2 + 1, my));
-            SabotageSites.Add((Grid.W / 2 + 4, my + 2));
+            if (plan.Valid && plan.ArenaSabotage)
+                foreach (var t in plan.Sabotage) SabotageSites.Add(t);
+            else
+            {
+                int my = Grid.H / 2;
+                SabotageSites.Add((Grid.W / 2 - 4, my - 2));
+                SabotageSites.Add((Grid.W / 2 + 1, my));
+                SabotageSites.Add((Grid.W / 2 + 4, my + 2));
+            }
         }
         if (Objective == Objective.Escort)
         {
@@ -2222,8 +2250,14 @@ public partial class Game
         // bites when PrepFaction == MissionFaction, and was consumed off _run right after BeginMission.)
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
+        // P26: on the Rescue path this must carry the ARENA's captive tile when it declared one --
+        // Build knows it as `terminal` and it feeds five consumers (EnvelopLegal, the `occupied`
+        // reservation, TryApplyLayout's reachability leg, PlaceBarrels' required set and
+        // EnsureConnectivity's stuck list), so a stale value protects the wrong tile five ways.
         (int x, int y)? reserve = HasTerminal ? Terminal
-            : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
+            : (Objective == Objective.Rescue
+                   ? (plan.Valid && plan.ArenaCaptive ? plan.Captive.Value : (Grid.W / 2, Grid.H / 2))
+                   : ((int, int)?)null);
         // P21 BUILD OWNS THE BOARD — `Mission.Build` now clears Fire and Barrel itself (beside its
         // ground clear), so BUILD IS THE OWNER of all eight per-tile layers and this line is a
         // proven no-op: Array.Clear on already-zero arrays, 28 lines before the Build that repeats
@@ -2235,9 +2269,6 @@ public partial class Game
         // which asserts the whole eight-layer contract at THIS seam and would go quiet about the
         // caller if the caller stopped doing anything.
         Grid.ClearHazards();              // wipe last mission's fire/barrels (Mission.Build repeats it; Build owns the layer)
-        // FUL-9: publish the run seed for the arena deck (pure derivation — Mission.PickLayout
-        // deals draw n of a MapSeed-keyed no-repeat deck; all five mode entries route through here)
-        Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
         // THE MODES GET THE BESTIARY — ROSTER DEPTH, decoupled from the stat bump. SKIRMISH/DAILY
         // enter at n == 1 (W9 made that n's heat ARITHMETIC real; it is left exactly alone), but the
         // roster gates keyed on n — SelectArchetype's tier, pods of 3, the mid-boss slot — were
@@ -2280,7 +2311,8 @@ public partial class Game
                       // FINALE strips it; Mission.FinaleHeatStat needs the heat half back, and a
                       // sum cannot be un-summed. Already m1-2-graced by the block above, so the
                       // opener is untouched by construction. Every other Build caller passes 0.
-                      heatStat);
+                      heatStat,
+                      plan);   // P26: the arena's own sites + spawns, already validated
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
@@ -2296,9 +2328,16 @@ public partial class Game
             // W4 (SIGNAL): clear Grid.Barrel too — Tiles=Floor alone left Mission.Build's hazard
             // barrels in the ring, blocking the freeing approach (IsFloor excludes barrels) and
             // parking a chain-detonatable bomb beside the win-condition asset.
-            Vip.X = Grid.W / 2; Vip.Y = Grid.H / 2;
-            for (int dx = -1; dx <= 1; dx++)
-                for (int dy = -1; dy <= 1; dy++)
+            // P26: same rule as Mission.Build's `occupied` ring, applied at the second place the
+            // game punches one. An ARENA-declared captive keeps its authored surroundings -- only
+            // its own tile is force-cleared (it must be standable). PlanBoard already proved it has
+            // >= 1 walkable neighbour, which is what TryFreeCaptive's ChebyDist <= 1 needs.
+            bool arenaCaptive = plan.Valid && plan.ArenaCaptive;
+            if (arenaCaptive) { Vip.X = plan.Captive.Value.x; Vip.Y = plan.Captive.Value.y; }
+            else              { Vip.X = Grid.W / 2; Vip.Y = Grid.H / 2; }
+            int ring = arenaCaptive ? 0 : 1;
+            for (int dx = -ring; dx <= ring; dx++)
+                for (int dy = -ring; dy <= ring; dy++)
                 {
                     int nx = Vip.X + dx, ny = Vip.Y + dy;
                     if (Grid.InBounds(nx, ny) && !IsOccupiedByOther(nx, ny, Vip))

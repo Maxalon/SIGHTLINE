@@ -144,6 +144,7 @@ echo -n "BIOMETEST  : "; verdict "$(SIGHTLINE_BIOMETEST=1 run | grep -oE "BIOMET
 # stamp, so enumerating today's fixtures would pass a board whose only sealed pocket is where the
 # third wave lands.
 echo -n "RIFTTEST   : "; verdict "$(SIGHTLINE_RIFTTEST=1 run | grep -oE "RIFTTEST: (PASS|FAIL)" | head -1)"
+echo -n "ARENASITETEST: "; verdict "$(SIGHTLINE_ARENASITETEST=1 run | grep -oE "ARENASITETEST: (PASS|FAIL)" | head -1)"
 echo -n "BENCHTEST  : "; verdict "$(SIGHTLINE_BENCHTEST=1 run | grep -oE "BENCHTEST: (PASS|FAIL)" | head -1)"
 echo -n "DRAFTTEST  : "; verdict "$(SIGHTLINE_DRAFTTEST=1 run | grep -oE "DRAFTTEST: (PASS|FAIL)" | head -1)"
 echo -n "METATEST   : "; verdict "$(SIGHTLINE_METATEST=1 run | grep -oE "METATEST: (PASS|FAIL)" | head -1)"
