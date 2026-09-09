@@ -204,33 +204,85 @@ public static class View3D
     /// its tile with a light pooled underneath and its marker on the top face. Not a map pin: a pin
     /// says "a location on a diagram", a chip says "a piece on a table", and the second is the thing
     /// a hologram operator is looking at.
+    /// One soldier chip. Modelled as a shallow CUP, not a plain disc: an outer wall rising a little
+    /// above a recessed inner face. That lip is what makes it read as a machined token rather than a
+    /// coloured circle, and it is the shape that catches an edge highlight.
+    static void Chip(Grid g, Unit u, bool ghost)
+    {
+        bool friend = u.Team == Team.Player;
+        Color ring = u.IsVip ? Pal.VipGold : (friend ? Pal.Friend : Pal.Elite);
+        Color dk = u.IsVip ? Pal.VipDk : (friend ? Pal.FriendDk : Pal.EliteDk);
+
+        float baseY = TierH * g.Height[u.X, u.Y];
+        float cx = u.X + 0.5f, cz = u.Y + 0.5f;
+        float y = baseY + ChipFloat;
+
+        // A real RING, not a disc. DrawCylinder with equal radii is a filled disc — the first
+        // attempt used it as a "ring" and it flooded the chip's top face, turning the cup into a
+        // coloured lozenge AND hiding the marker (same colour glyph on same colour face). Raylib
+        // has no annulus, so one is made by overdraw: a bright disc with a body-coloured disc
+        // dropped on top of it, a hair higher.
+        void Ring(float atY, float rad, float thick, Color c, float a)
+        {
+            Raylib.DrawCylinder(new Vector3(cx, atY, cz), rad, rad, 0.005f, 40, Fade(c, a));
+            Raylib.DrawCylinder(new Vector3(cx, atY + 0.004f, cz), rad - thick, rad - thick, 0.005f, 40,
+                                Fade(ghost ? Pal.Bg : dk, ghost ? 0.0f : 0.97f));
+        }
+
+        if (ghost)
+        {
+            // OUTLINES, NOT A FILLED FORM. The read is "someone is there, and they are BEHIND this",
+            // so the silhouette carries it and the body stays nearly empty — a filled ghost competes
+            // with the chips you actually have eyes on, which is what the first version got wrong.
+            Raylib.DrawCylinderWires(new Vector3(cx, y, cz), ChipR, ChipR, ChipH, 26, Fade(ring, 0.30f));
+            Raylib.DrawCylinder(new Vector3(cx, y + ChipH, cz), ChipR, ChipR, 0.005f, 40, Fade(ring, 0.55f));
+            Raylib.DrawCylinder(new Vector3(cx, y + ChipH + 0.004f, cz), ChipR - 0.05f, ChipR - 0.05f, 0.005f, 40, Fade(Pal.Bg, 0.80f));
+            Raylib.DrawCylinder(new Vector3(cx, y, cz), ChipR, ChipR, ChipH, 32, Fade(dk, 0.12f));
+            return;
+        }
+
+        // light pooled on the tile: three stacked discs rather than one, so it falls off toward the
+        // edge instead of reading as a flat sticker
+        Raylib.DrawCylinder(new Vector3(cx, baseY + 0.055f, cz), 0.48f, 0.48f, 0.004f, 32, Fade(ring, 0.16f));
+        Raylib.DrawCylinder(new Vector3(cx, baseY + 0.060f, cz), 0.38f, 0.38f, 0.004f, 32, Fade(ring, 0.26f));
+        Raylib.DrawCylinder(new Vector3(cx, baseY + 0.065f, cz), 0.24f, 0.24f, 0.004f, 32, Fade(ring, 0.40f));
+
+        // the cup: a dark outer wall, a bright lip where the wall meets the top, and a DARK recessed
+        // face — the face has to stay dark or the marker printed on it has nothing to contrast with.
+        Raylib.DrawCylinder(new Vector3(cx, y, cz), ChipR, ChipR, ChipH, 32, Fade(dk, 0.97f));
+        Ring(y + ChipH, ChipR, 0.055f, ring, 1f);                 // the lip
+        Ring(y + ChipH * 0.80f, ChipR * 0.84f, 0.030f, ring, 0.6f);  // inner step of the recess
+    }
+
     /// THE 3D HALF — must be called INSIDE BeginMode3D. (It was not, the first time: the cylinder
     /// calls landed outside the 3D pass and every chip silently vanished, leaving only the 2D
     /// glyphs floating on an empty board. Raylib does not complain; it just draws nothing.)
+    ///
+    /// THE X-RAY PASS, and why it needs no shader. The obvious idea — a shader making the BLOCKS
+    /// translucent — is the wrong lever: it would mean you always see through walls, which throws
+    /// away the occlusion the view exists to give. The effect belongs on the CHIP.
+    ///
+    /// Two passes, ordered, and the result is exact PER PIXEL:
+    ///   1. GHOST with the depth test OFF, so it paints over whatever is in front of it.
+    ///   2. SOLID with the depth test ON, which covers the ghost everywhere the chip is genuinely
+    ///      visible and leaves it standing everywhere the chip is not.
+    /// So a chip half behind a wall is half solid and half x-ray, on the exact pixel boundary, with
+    /// no depth-function control (which Raylib does not expose) and no shader.
+    ///
+    /// Rlgl.DrawRenderBatchActive() before each state change is NOT optional: Raylib batches draw
+    /// calls, so flipping depth state without flushing applies it to geometry already queued.
     public static void DrawChips(Grid g, List<Unit> units)
     {
-        foreach (var u in units)
-        {
-            if (!u.Alive) continue;
-            bool friend = u.Team == Team.Player;
-            Color ring = u.IsVip ? Pal.VipGold : (friend ? Pal.Friend : Pal.Elite);
-            Color dk = u.IsVip ? Pal.VipDk : (friend ? Pal.FriendDk : Pal.EliteDk);
+        Rlgl.DrawRenderBatchActive();
+        Rlgl.DisableDepthTest();
+        Rlgl.DisableDepthMask();     // the ghost must not write depth or it occludes the solid pass
+        foreach (var u in units) if (u.Alive) Chip(g, u, ghost: true);
+        Rlgl.DrawRenderBatchActive();
+        Rlgl.EnableDepthMask();
+        Rlgl.EnableDepthTest();
 
-            float baseY = TierH * g.Height[u.X, u.Y];
-            float cx = u.X + 0.5f, cz = u.Y + 0.5f;
-
-            // the light pooled on the tile below — what makes the chip read as FLOATING rather than
-            // as a disc lying flat, and what keeps "which tile is it on" unambiguous
-            Raylib.DrawCylinder(new Vector3(cx, baseY + 0.055f, cz), 0.48f, 0.48f, 0.004f, 28, Fade(ring, 0.16f));
-            Raylib.DrawCylinder(new Vector3(cx, baseY + 0.060f, cz), 0.38f, 0.38f, 0.004f, 28, Fade(ring, 0.26f));
-            Raylib.DrawCylinder(new Vector3(cx, baseY + 0.065f, cz), 0.24f, 0.24f, 0.004f, 28, Fade(ring, 0.38f));
-
-            float chipY = baseY + ChipFloat;
-            Raylib.DrawCylinder(new Vector3(cx, chipY, cz), ChipR, ChipR, ChipH, 20, Fade(dk, 0.80f));
-            // the raised rim: a chip has an edge, and the edge is what catches the light
-            Raylib.DrawCylinder(new Vector3(cx, chipY + ChipH - 0.02f, cz), ChipR * 1.03f, ChipR * 1.03f, 0.045f, 20, Fade(ring, 0.55f));
-            Raylib.DrawCylinderWires(new Vector3(cx, chipY, cz), ChipR, ChipR, ChipH, 20, Fade(ring, 0.9f));
-        }
+        foreach (var u in units) if (u.Alive) Chip(g, u, ghost: false);
+        Rlgl.DrawRenderBatchActive();
     }
 
     /// THE 2D HALF — the marker on each chip's top face, drawn after EndMode3D and therefore not
@@ -249,11 +301,11 @@ public static class View3D
             if (!u.Alive) continue;
             float baseY = TierH * g.Height[u.X, u.Y];
             var top = new Vector3(u.X + 0.5f, baseY + ChipFloat + ChipH + 0.05f, u.Y + 0.5f);
-            // A marker painted over the wall in front of it is the exact artifact that made the
-            // first render read wrong. Occluded chips keep only a whisper, so a contact you cannot
-            // see is felt rather than read — and rotating the projection brings it back.
+            // Paired with the x-ray pass below the glyph: an occluded chip keeps its identity but
+            // drops out of the foreground read, so you can see WHO is behind the wall without them
+            // competing with the units you actually have eyes on.
             bool vis = VisibleFrom(g, top, toCam);
-            float a = vis ? 1f : 0.10f;
+            float a = vis ? 1f : 0.45f;
 
             bool friend = u.Team == Team.Player;
             Color ring = u.IsVip ? Pal.VipGold : (friend ? Pal.Friend : Pal.Elite);
