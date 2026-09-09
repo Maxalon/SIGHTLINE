@@ -217,27 +217,27 @@ public static class View3D
         float cx = u.X + 0.5f, cz = u.Y + 0.5f;
         float y = baseY + ChipFloat;
 
-        // A real RING, not a disc. DrawCylinder with equal radii is a filled disc — the first
-        // attempt used it as a "ring" and it flooded the chip's top face, turning the cup into a
-        // coloured lozenge AND hiding the marker (same colour glyph on same colour face). Raylib
-        // has no annulus, so one is made by overdraw: a bright disc with a body-coloured disc
-        // dropped on top of it, a hair higher.
-        void Ring(float atY, float rad, float thick, Color c, float a)
+        // A ring, made by overdraw: Raylib has no annulus, and DrawCylinderWires is not one either
+        // — it draws a vertical line per slice, which reads as gear teeth. That hatching WAS the
+        // prominent-lines artifact on the chip edges.
+        void Ring(float atY, float rad, float thick, Color c, float a, Color inner, float innerA)
         {
-            Raylib.DrawCylinder(new Vector3(cx, atY, cz), rad, rad, 0.005f, 40, Fade(c, a));
-            Raylib.DrawCylinder(new Vector3(cx, atY + 0.004f, cz), rad - thick, rad - thick, 0.005f, 40,
-                                Fade(ghost ? Pal.Bg : dk, ghost ? 0.0f : 0.97f));
+            Raylib.DrawCylinder(new Vector3(cx, atY, cz), rad, rad, 0.004f, 44, Fade(c, a));
+            Raylib.DrawCylinder(new Vector3(cx, atY + 0.003f, cz), rad - thick, rad - thick, 0.004f, 44, Fade(inner, innerA));
         }
 
         if (ghost)
         {
-            // OUTLINES, NOT A FILLED FORM. The read is "someone is there, and they are BEHIND this",
-            // so the silhouette carries it and the body stays nearly empty — a filled ghost competes
-            // with the chips you actually have eyes on, which is what the first version got wrong.
-            Raylib.DrawCylinderWires(new Vector3(cx, y, cz), ChipR, ChipR, ChipH, 26, Fade(ring, 0.30f));
-            Raylib.DrawCylinder(new Vector3(cx, y + ChipH, cz), ChipR, ChipR, 0.005f, 40, Fade(ring, 0.55f));
-            Raylib.DrawCylinder(new Vector3(cx, y + ChipH + 0.004f, cz), ChipR - 0.05f, ChipR - 0.05f, 0.005f, 40, Fade(Pal.Bg, 0.80f));
-            Raylib.DrawCylinder(new Vector3(cx, y, cz), ChipR, ChipR, ChipH, 32, Fade(dk, 0.12f));
+            // OUTLINES, NOT A FILLED FORM — and no hatching. Two clean rings and a whisper of fill
+            // say "someone is there, behind this" without competing with the chips you can see.
+            // Drawn a hair SMALLER than the solid: at identical size the ghost's silhouette survived
+            // around the rim of every VISIBLE chip too, which is the other half of the same artifact.
+            const float G = 0.94f;
+            float gr = ChipR * G;
+            Raylib.DrawCylinder(new Vector3(cx, y + 0.012f, cz), gr, gr, ChipH * G, 44, Fade(dk, 0.10f));
+            Ring(y + 0.012f, gr, 0.030f, ring, 0.50f, Pal.Bg, 0f);
+            Ring(y + ChipH * G, gr, 0.034f, ring, 0.62f, Pal.Bg, 0f);
+            Ring(y + ChipH * G + 0.006f, gr * 0.72f, 0.022f, ring, 0.30f, Pal.Bg, 0f);
             return;
         }
 
@@ -247,11 +247,25 @@ public static class View3D
         Raylib.DrawCylinder(new Vector3(cx, baseY + 0.060f, cz), 0.38f, 0.38f, 0.004f, 32, Fade(ring, 0.26f));
         Raylib.DrawCylinder(new Vector3(cx, baseY + 0.065f, cz), 0.24f, 0.24f, 0.004f, 32, Fade(ring, 0.40f));
 
-        // the cup: a dark outer wall, a bright lip where the wall meets the top, and a DARK recessed
-        // face — the face has to stay dark or the marker printed on it has nothing to contrast with.
-        Raylib.DrawCylinder(new Vector3(cx, y, cz), ChipR, ChipR, ChipH, 32, Fade(dk, 0.97f));
-        Ring(y + ChipH, ChipR, 0.055f, ring, 1f);                 // the lip
-        Ring(y + ChipH * 0.80f, ChipR * 0.84f, 0.030f, ring, 0.6f);  // inner step of the recess
+        // The lip stays a drawn RING rather than lathed geometry: it is a highlight, and it is what
+        // keeps the chip legible at full-board zoom where the whole mesh is a few pixels tall.
+        Ring(y + 0.135f, ChipR * 0.885f, 0.048f, ring, 0.9f, dk, 0.95f);
+    }
+
+    static Model _chipModel;
+    static bool _chipReady;
+
+    /// Lazy because a mesh upload needs a live GL context, which does not exist at type init.
+    /// LoadModelFromMesh rather than a bare Mesh + Material: DrawModel sets up the material,
+    /// transform and shader state itself, where hand-rolled DrawMesh calls interleaved with rlgl's
+    /// batched primitives left state the batch then drew under — visible as huge coloured wedges at
+    /// exactly the yaws where more chips were occluded (so more batched ghost geometry preceded the
+    /// mesh draws). The mesh data was never wrong: 1728/1728 verts, bbox +-0.38, counts correct.
+    static void EnsureChipMesh()
+    {
+        if (_chipReady) return;
+        _chipModel = Raylib.LoadModelFromMesh(Mesh3D.Lathe(Mesh3D.ChipProfile, 48));
+        _chipReady = true;
     }
 
     /// THE 3D HALF — must be called INSIDE BeginMode3D. (It was not, the first time: the cylinder
@@ -282,6 +296,24 @@ public static class View3D
         Rlgl.EnableDepthTest();
 
         foreach (var u in units) if (u.Alive) Chip(g, u, ghost: false);
+
+        // MESH DRAWS GO TOGETHER, ONCE — never interleaved with batched primitives.
+        // Raylib has two drawing paths that do not mix freely: DrawCube/DrawCylinder queue into
+        // rlgl's vertex batch under the default shader, while DrawMesh binds its own VAO and shader
+        // and draws immediately. Interleaving them per-unit left the batch drawing under the mesh's
+        // shader state and painted huge garbage wedges across the frame. One flush, every mesh, one
+        // flush back is both correct and cheaper than 2N context switches.
+        EnsureChipMesh();
+        Rlgl.DrawRenderBatchActive();
+        foreach (var u in units)
+        {
+            if (!u.Alive) continue;
+            bool friend = u.Team == Team.Player;
+            Color dk = u.IsVip ? Pal.VipDk : (friend ? Pal.FriendDk : Pal.EliteDk);
+            Raylib.DrawModel(_chipModel,
+                             new Vector3(u.X + 0.5f, TierH * g.Height[u.X, u.Y] + ChipFloat, u.Y + 0.5f),
+                             1f, Fade(dk, 0.97f));
+        }
         Rlgl.DrawRenderBatchActive();
     }
 
