@@ -73,6 +73,34 @@ public static class Program
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
+        // ══ P27 PROTOTYPE — SIGHTLINE_VIEW3DSHOT ══
+        // Photograph the SAME staged board through the projected 3D camera at a sweep of angles, so
+        // the "what pitch does this game want?" question is answered by looking rather than by
+        // argument. Value is a comma-separated list of pitch:yaw pairs in degrees, e.g.
+        //   SIGHTLINE_VIEW3DSHOT=25:0,40:0,55:0,90:0,40:45
+        // Writes view3d_p<pitch>_y<yaw>.png per entry and exits. Pair with SIGHTLINE_SHOT=760
+        // (the briefing card covers the board before ~700) and SIGHTLINE_SEED=<n> to hold the board
+        // fixed across a sweep. View3D.Enabled is set ONLY here, so no other path can reach it.
+        List<(float pitch, float yaw)> view3dSweep = null;
+        {
+            string v3 = Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3DSHOT");
+            if (!string.IsNullOrWhiteSpace(v3))
+            {
+                view3dSweep = new List<(float, float)>();
+                foreach (var pair in v3.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var pq = pair.Split(':');
+                    float.TryParse(pq[0].Trim(), System.Globalization.NumberStyles.Float,
+                                   System.Globalization.CultureInfo.InvariantCulture, out float pd);
+                    float yd = 0f;
+                    if (pq.Length > 1)
+                        float.TryParse(pq[1].Trim(), System.Globalization.NumberStyles.Float,
+                                       System.Globalization.CultureInfo.InvariantCulture, out yd);
+                    view3dSweep.Add((pd, yd));
+                }
+                if (view3dSweep.Count > 0) View3D.Enabled = true;
+            }
+        }
         // SIGHTLINE_SEED=<n> : pin Util.Rng so two harness runs stage the SAME arena/roster. The
         // renderer still reads the wall clock in ~50 places, so frames are not byte-identical — but
         // this makes a before/after screenshot pair show the same BOARD, which is what a visual
@@ -1815,6 +1843,23 @@ public static class Program
             // whole cost of an autoplay smoke run; keeping W5's two-pass call on the draw side
             // preserves the crisp-HUD split without paying for it in the smoke test.
             // (lead, at the W5 merge: W1 supplies the fast path, W5 the drawn one.)
+            // P27: the projected-camera sweep. Deliberately does NOT go through Display.RenderFrame
+            // (no render target, no post-FX) — this is a look-at-it prototype, and the fewer layers
+            // between the geometry and the PNG the more honestly it answers the question.
+            if (view3dSweep != null && shot && frame >= shotFrame)
+            {
+                var all = new List<Unit>(game.Players);
+                all.AddRange(game.Enemies);
+                foreach (var (pd, yd) in view3dSweep)
+                {
+                    View3D.PitchDeg = pd; View3D.YawDeg = yd;
+                    Raylib.BeginDrawing();
+                    View3D.DrawFrame(game.Grid, all);
+                    Raylib.EndDrawing();
+                    Raylib.TakeScreenshot($"view3d_p{pd:00}_y{yd:000}.png");
+                }
+                break;
+            }
             if (autoplay && !shot) BatchPump();
             else Display.RenderFrame(game.DrawBoardLayer, game.DrawHudLayer);
 
