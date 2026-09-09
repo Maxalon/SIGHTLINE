@@ -53,6 +53,10 @@ public static class View3D
     const float HighH = 1.15f;   // high cover: taller than a soldier — the only sight blocker
     const float TierH = 0.5f;    // one elevation tier
     const float CapH = 0.06f;    // the lit top plate that makes a box read as a solid
+    const float ChipR = 0.38f;      // soldier chip radius
+    const float ChipH = 0.13f;      // chip thickness
+    const float ChipFloat = 0.30f;  // how far the chip hovers above its tile — the GAP is what
+                                    // makes it read as a piece resting on the projection
 
     public static Vector3 TileWorld(int x, int y, float h = 0f) => new Vector3(x + 0.5f, h, y + 0.5f);
 
@@ -162,52 +166,102 @@ public static class View3D
             }
     }
 
-    // ── The 2D pass: everything else, projected ──────────────────────────────────────────────
-    /// Draw one unit marker at its projected screen position. This is the half that proves the
-    /// point: it is ordinary 2D drawing — the same rings and glyphs Renderer.cs already uses — and
-    /// the ONLY thing that changed is where the Vector2 came from.
-    public static void DrawOverlay(Grid g, List<Unit> units, Camera3D cam)
+    // ── The unit pass: CHIPS, not map pins ───────────────────────────────────────────────────
+    /// The tallest solid standing on a tile (plateau + whatever sits on it), in world units.
+    /// Used by the occlusion test — this is "what could hide something".
+    static float SolidTop(Grid g, int x, int y)
     {
-        // On-screen size of one world unit, measured rather than assumed — under orthographic it is
-        // constant across the board, which is exactly why orthographic is the right projection here.
-        Vector2 o = Raylib.GetWorldToScreen(new Vector3(0, 0, 0), cam);
-        Vector2 ux = Raylib.GetWorldToScreen(new Vector3(1, 0, 0), cam);
-        float px = Vector2.Distance(o, ux);
+        if (!g.InBounds(x, y)) return 0f;
+        if (Terrain.Enabled && g.Ground != null && g.Ground[x, y] == GroundKind.Rift) return 0f;
+        float h = TierH * g.Height[x, y];
+        var t = g.Tiles[x, y];
+        if (t == TileType.LowCover) h += LowH;
+        else if (t == TileType.HighCover) h += HighH;
+        else if (g.Barrel[x, y]) h += 0.64f;
+        return h;
+    }
 
-        // far-to-near so nearer markers land on top
-        var order = new List<Unit>(units);
-        order.Sort((a, b) =>
+    /// Is this world point visible from the camera, or is a solid in the way?
+    ///
+    /// The CHIP itself needs no help — it is real 3D geometry, so the depth buffer occludes it
+    /// correctly and for free. This exists for the GLYPH on its top face, which is 2D drawn after
+    /// EndMode3D and therefore not depth-tested. Marching the view ray is exact enough and cheap:
+    /// orthographic means one shared direction for the whole board, so this is a short walk over
+    /// tile heights, not a raycast against geometry.
+    static bool VisibleFrom(Grid g, Vector3 p, Vector3 toCamera)
+    {
+        for (float t = 0.55f; t < 48f; t += 0.2f)
         {
-            float da = Vector3.Distance(cam.Position, TileWorld(a.X, a.Y));
-            float db = Vector3.Distance(cam.Position, TileWorld(b.X, b.Y));
-            return db.CompareTo(da);
-        });
+            Vector3 q = p + toCamera * t;
+            int tx = (int)MathF.Floor(q.X), tz = (int)MathF.Floor(q.Z);
+            if (!g.InBounds(tx, tz)) return true;          // ray left the board — nothing left to hide it
+            if (q.Y < SolidTop(g, tx, tz) - 0.03f) return false;
+        }
+        return true;
+    }
 
-        foreach (var u in order)
+    /// A soldier reads as a CHIP resting on the projection — a translucent disc floating just above
+    /// its tile with a light pooled underneath and its marker on the top face. Not a map pin: a pin
+    /// says "a location on a diagram", a chip says "a piece on a table", and the second is the thing
+    /// a hologram operator is looking at.
+    /// THE 3D HALF — must be called INSIDE BeginMode3D. (It was not, the first time: the cylinder
+    /// calls landed outside the 3D pass and every chip silently vanished, leaving only the 2D
+    /// glyphs floating on an empty board. Raylib does not complain; it just draws nothing.)
+    public static void DrawChips(Grid g, List<Unit> units)
+    {
+        foreach (var u in units)
         {
             if (!u.Alive) continue;
-            float baseY = TierH * g.HeightAt(u.X, u.Y);
-            Vector2 foot = Raylib.GetWorldToScreen(TileWorld(u.X, u.Y, baseY + 0.02f), cam);
-            Vector2 head = Raylib.GetWorldToScreen(TileWorld(u.X, u.Y, baseY + 0.85f), cam);
-
             bool friend = u.Team == Team.Player;
             Color ring = u.IsVip ? Pal.VipGold : (friend ? Pal.Friend : Pal.Elite);
             Color dk = u.IsVip ? Pal.VipDk : (friend ? Pal.FriendDk : Pal.EliteDk);
 
-            // THE STALK. Without it a projected view cannot distinguish "on the plateau" from
-            // "behind the plateau" — the single worst readability failure of an angled grid.
-            Raylib.DrawLineEx(foot, head, MathF.Max(1.5f, px * 0.035f), Fade(ring, 0.55f));
-            // ground anchor: a flat ellipse reads as contact with the floor plane
-            Raylib.DrawEllipse((int)foot.X, (int)foot.Y, px * 0.34f, px * 0.34f * MathF.Sin(PitchDeg * MathF.PI / 180f),
-                               Fade(ring, 0.22f));
+            float baseY = TierH * g.Height[u.X, u.Y];
+            float cx = u.X + 0.5f, cz = u.Y + 0.5f;
 
-            float r = px * 0.30f;
-            Raylib.DrawCircleV(head, r, Fade(dk, 0.92f));
-            Raylib.DrawCircleLines((int)head.X, (int)head.Y, r, ring);
+            // the light pooled on the tile below — what makes the chip read as FLOATING rather than
+            // as a disc lying flat, and what keeps "which tile is it on" unambiguous
+            Raylib.DrawCylinder(new Vector3(cx, baseY + 0.055f, cz), 0.48f, 0.48f, 0.004f, 28, Fade(ring, 0.16f));
+            Raylib.DrawCylinder(new Vector3(cx, baseY + 0.060f, cz), 0.38f, 0.38f, 0.004f, 28, Fade(ring, 0.26f));
+            Raylib.DrawCylinder(new Vector3(cx, baseY + 0.065f, cz), 0.24f, 0.24f, 0.004f, 28, Fade(ring, 0.38f));
+
+            float chipY = baseY + ChipFloat;
+            Raylib.DrawCylinder(new Vector3(cx, chipY, cz), ChipR, ChipR, ChipH, 20, Fade(dk, 0.80f));
+            // the raised rim: a chip has an edge, and the edge is what catches the light
+            Raylib.DrawCylinder(new Vector3(cx, chipY + ChipH - 0.02f, cz), ChipR * 1.03f, ChipR * 1.03f, 0.045f, 20, Fade(ring, 0.55f));
+            Raylib.DrawCylinderWires(new Vector3(cx, chipY, cz), ChipR, ChipR, ChipH, 20, Fade(ring, 0.9f));
+        }
+    }
+
+    /// THE 2D HALF — the marker on each chip's top face, drawn after EndMode3D and therefore not
+    /// depth-tested, so it carries the occlusion test itself.
+    public static void DrawMarkers(Grid g, List<Unit> units, Camera3D cam)
+    {
+        Vector3 toCam = Vector3.Normalize(cam.Position - cam.Target);
+        var order = new List<Unit>(units);
+        order.Sort((a, b) => Vector3.Distance(cam.Position, TileWorld(b.X, b.Y))
+                            .CompareTo(Vector3.Distance(cam.Position, TileWorld(a.X, a.Y))));
+        Vector2 o = Raylib.GetWorldToScreen(new Vector3(0, 0, 0), cam);
+        float px = Vector2.Distance(o, Raylib.GetWorldToScreen(new Vector3(1, 0, 0), cam));
+
+        foreach (var u in order)
+        {
+            if (!u.Alive) continue;
+            float baseY = TierH * g.Height[u.X, u.Y];
+            var top = new Vector3(u.X + 0.5f, baseY + ChipFloat + ChipH + 0.05f, u.Y + 0.5f);
+            // A marker painted over the wall in front of it is the exact artifact that made the
+            // first render read wrong. Occluded chips keep only a whisper, so a contact you cannot
+            // see is felt rather than read — and rotating the projection brings it back.
+            bool vis = VisibleFrom(g, top, toCam);
+            float a = vis ? 1f : 0.10f;
+
+            bool friend = u.Team == Team.Player;
+            Color ring = u.IsVip ? Pal.VipGold : (friend ? Pal.Friend : Pal.Elite);
+            Vector2 sp = Raylib.GetWorldToScreen(top, cam);
             string ini = string.IsNullOrEmpty(u.Name) ? "?" : u.Name.Substring(0, 1);
-            int fs = (int)MathF.Max(12f, r * 1.05f);
+            int fs = (int)MathF.Max(13f, px * 0.52f);
             Vector2 m = Cfg.Measure(ini, fs, 1f);
-            Cfg.Text(ini, head - m * 0.5f, fs, 1f, ring);
+            Cfg.Text(ini, sp - m * 0.5f, fs, 1f, Fade(ring, a));
         }
     }
 
@@ -218,8 +272,9 @@ public static class View3D
         var cam = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
         Raylib.BeginMode3D(cam);
         DrawTerrain(g);
+        DrawChips(g, units);      // real geometry: the depth buffer occludes these for free
         Raylib.EndMode3D();
-        DrawOverlay(g, units, cam);
+        DrawMarkers(g, units, cam);
 
         string label = $"PITCH {PitchDeg:0} DEG   YAW {YawDeg:0} DEG";
         Cfg.Text(label, new Vector2(18, 14), 18, 1f, Pal.TxtDim);
