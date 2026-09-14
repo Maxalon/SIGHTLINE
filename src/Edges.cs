@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 
 namespace Sightline;
 
@@ -173,5 +174,63 @@ public static class Edges
         return fails.Count == 0
             ? "EDGETEST: PASS"
             : "EDGETEST: FAIL\n  " + string.Join("\n  ", fails);
+    }
+}
+
+// ══════════════════ P29 — SIGHTLINE_BOARDSIZETEST ══════════════════
+public static class BoardSize
+{
+    /// The board became a runtime size in P29. Two things then need guarding, and neither has a
+    /// natural home anywhere else: that the SHIPPED default did not move, and that the camera's
+    /// pan bounds actually follow the board rather than a constant nobody re-derived.
+    public static string SelfTest()
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        void Is(bool c, string w) { if (!c) fails.Add(w); }
+        int w0 = Cfg.GridW, h0 = Cfg.GridH, t0 = Cfg.Tile;
+
+        // (A) THE SHIPPED GAME IS UNCHANGED. Every authored arena and every archived balance
+        //     number assumes 18x11 at 64px; a default that drifted would invalidate all of it
+        //     without a single test going red anywhere else.
+        Is(Cfg.GridW == 18 && Cfg.GridH == 11 && Cfg.Tile == 64,
+           $"A: default board moved to {Cfg.GridW}x{Cfg.GridH}@{Cfg.Tile} (want 18x11@64)");
+        Is(Mission.ArenasFitBoard, "A: the authored arenas do not fit the DEFAULT board");
+        Is(Cfg.BoardW <= Cfg.ScreenW && Cfg.BoardH + 40 <= Cfg.ScreenH,
+           "A: the default board no longer fits the screen");
+
+        // (B) A board that FITS must not pan at zoom 1 — the pre-P29 behaviour, which the new
+        //     bounds have to reproduce by arithmetic rather than by a special case.
+        var bc = new Vector2(Cfg.OriginX + Cfg.BoardW / 2f, Cfg.OriginY + Cfg.BoardH / 2f);
+        var p = Game.ClampPan(new Vector2(500f, 500f), bc, 1f);
+        Is(p.X == 0f && p.Y == 0f, $"B: default board panned at zoom 1 to {p.X},{p.Y}");
+
+        // (C) ...and must still pan when zoomed IN, or the existing zoom feature dies.
+        var p2 = Game.ClampPan(new Vector2(9999f, 0f), bc, 2f);
+        Is(p2.X > 0f, "C: no pan available at zoom 2 on the default board");
+
+        // (D) A BIG board pans at zoom 1, and by exactly the overflow: the visible rectangle may
+        //     reach the board's edge and not one pixel further.
+        Cfg.SetBoard(40, 28);
+        Is(Cfg.GridW == 40 && Cfg.GridH == 28, "D: SetBoard did not take");
+        Is(Cfg.Tile >= 16 && Cfg.Tile <= 64, $"D: derived tile {Cfg.Tile} out of range");
+        Is(Cfg.BoardW > Cfg.ScreenW, "D: 40x28 did not overflow the screen width");
+        Is(!Mission.ArenasFitBoard, "D: 18x11 arenas claimed to fit a 40x28 board");
+        var bcB = new Vector2(Cfg.OriginX + Cfg.BoardW / 2f, Cfg.OriginY + Cfg.BoardH / 2f);
+        var pb = Game.ClampPan(new Vector2(99999f, 0f), bcB, 1f);
+        float wantX = (Cfg.BoardW - Cfg.ScreenW) / 2f;
+        Is(MathF.Abs(pb.X - wantX) < 0.5f, $"D: max pan {pb.X:F1}, overflow/2 is {wantX:F1}");
+        var pbn = Game.ClampPan(new Vector2(-99999f, 0f), bcB, 1f);
+        Is(MathF.Abs(pbn.X + wantX) < 0.5f, $"D: min pan {pbn.X:F1}, want {-wantX:F1}");
+
+        // (E) A tall board CENTRES vertically, so CamPan = 0 is a centred view rather than one
+        //     pinned 188px low by a layout constant meant for a board that fits under the HUD.
+        Is(MathF.Abs(bcB.Y - Cfg.ScreenH / 2f) < 1f,
+           $"E: tall board centre Y is {bcB.Y:F0}, screen centre is {Cfg.ScreenH / 2}");
+
+        Cfg.SetBoard(w0, h0, t0);
+        Is(Cfg.GridW == w0 && Cfg.GridH == h0 && Cfg.Tile == t0, "F: failed to restore the board");
+
+        return fails.Count == 0 ? "BOARDSIZETEST: PASS"
+                                : "BOARDSIZETEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 }

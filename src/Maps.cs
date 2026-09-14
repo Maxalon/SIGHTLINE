@@ -61,6 +61,14 @@ public static class Maps
         return false;
     }
 
+    /// P29 — THE SIZE THESE ARENAS WERE DRAWN FOR, which is not necessarily the size of the
+    /// board being played. Every template below is TemplateH rows of TemplateW characters, and
+    /// that is a property of the FILE, fixed forever; `Cfg.GridW/H` is a property of the RUN and
+    /// can now change. Conflating the two is what let a board-size change orphan all 35 arenas in
+    /// silence. SIGHTLINE_TEMPLATEGATE checks the templates against THESE and then, separately,
+    /// reports whether the live board can use them at all.
+    public const int TemplateW = 18, TemplateH = 11;
+
     public static readonly string[][] Layouts =
     {
         new[] // PLAZA — a raised central platform ringed with cover

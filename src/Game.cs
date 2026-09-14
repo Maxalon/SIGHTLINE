@@ -2458,6 +2458,8 @@ public partial class Game
         //   not just fail TUTTEST, it breaks the lesson for a real player.
         if (Mode != GameMode.Training && !Grid.AnyRift)
             Mission.StampBuildings(Grid, Players, Enemies);
+
+        FrameCameraOnSquad();   // P29: a board bigger than the screen must open ON the squad
         if (Mode == GameMode.Campaign)
         {
             string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
@@ -5367,12 +5369,65 @@ public partial class Game
         }
         if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
 
-        if (CamZoom <= 1.001f) { CamZoom = 1f; CamPan = Vector2.Zero; }  // no pan when fully out
-        else
+        if (CamZoom <= 1.001f) CamZoom = 1f;
+        ClampCamPan();
+    }
+
+    /// P29 — OPEN THE MISSION ON THE SQUAD, not on the middle of the map.
+    ///
+    /// The camera is reset to identity at every mission start, which on an 18x11 board means "the
+    /// whole board, centred" and is exactly right. On a board larger than the viewport it means
+    /// "the middle of a map the squad is not standing in" — measured on a 40x28 board, the squad
+    /// deploys at an edge and is entirely off screen on turn 1, which is not a framing choice, it
+    /// is a broken opening.
+    ///
+    /// Only fires when the board actually overflows, so the shipped 18x11 game is untouched by
+    /// construction. ClampCamPan does the rest: the framing can never expose void beyond the
+    /// board edge, so a squad deploying in a corner still gets a legal view.
+    void FrameCameraOnSquad()
+    {
+        if (Cfg.BoardW <= Cfg.ScreenW && Cfg.BoardH <= Cfg.ScreenH) return;
+        int n = 0; float sx = 0f, sy = 0f;
+        foreach (var u in Players)
         {
-            CamPan.X = Util.Clamp(CamPan.X, -Cfg.BoardW * 0.5f, Cfg.BoardW * 0.5f);
-            CamPan.Y = Util.Clamp(CamPan.Y, -Cfg.BoardH * 0.5f, Cfg.BoardH * 0.5f);
+            if (!u.Alive) continue;
+            var c = Util.TileCenter(u.X, u.Y);
+            sx += c.X; sy += c.Y; n++;
         }
+        if (n == 0) return;
+        CamPan = new Vector2(sx / n, sy / n) - BoardCenter;
+        ClampCamPan();
+    }
+
+    /// P29 — PAN IS ALLOWED WHENEVER THE BOARD IS BIGGER THAN THE VIEW, at any zoom.
+    ///
+    /// This used to read `if (CamZoom <= 1.001f) CamPan = Vector2.Zero` — "no pan when fully out"
+    /// — which was correct for exactly as long as the board was guaranteed to fit on screen. On a
+    /// board larger than 1280x800 that line makes most of the map permanently unreachable, and it
+    /// is the single blocker docs/ROADMAP.md named for the bigger board.
+    ///
+    /// The replacement is derived, not tuned. `ViewCamera` uses Offset = BoardCenter and
+    /// Target = BoardCenter + CamPan, so a world point W lands at screen (W - bc - pan) * zoom + bc.
+    /// Solving "the visible rectangle stays inside the board" for pan gives the bounds below.
+    /// When the board is SMALLER than the view on an axis the range comes out empty — the old
+    /// behaviour, reached by arithmetic rather than by a special case — and pan is zero there.
+    ///
+    /// It is also TIGHTER than the ±BoardW/2 it replaces, which let a zoomed-in player drag the
+    /// board halfway off the screen and stare into the void beside it.
+    void ClampCamPan() => CamPan = ClampPan(CamPan, BoardCenter, CamZoom);
+
+    /// The bounds themselves: static and PURE so SIGHTLINE_BOARDTESTS can assert them without
+    /// standing up a Game, a window or a mission. A camera rule nothing can check is how the old
+    /// "no pan when fully out" line survived long enough to become the bigger board's only blocker.
+    public static Vector2 ClampPan(Vector2 pan, Vector2 bc, float zoom)
+    {
+        float z = MathF.Max(0.01f, zoom);
+        float loX = Cfg.OriginX - bc.X + bc.X / z;
+        float hiX = Cfg.OriginX + Cfg.BoardW - bc.X - (Cfg.ScreenW - bc.X) / z;
+        float loY = Cfg.OriginY - bc.Y + bc.Y / z;
+        float hiY = Cfg.OriginY + Cfg.BoardH - bc.Y - (Cfg.ScreenH - bc.Y) / z;
+        return new Vector2(loX <= hiX ? Util.Clamp(pan.X, loX, hiX) : 0f,
+                           loY <= hiY ? Util.Clamp(pan.Y, loY, hiY) : 0f);
     }
 
     // Auto-cam: gently lerps CamZoom/CamPan toward the focus unit each frame.
