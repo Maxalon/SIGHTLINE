@@ -1931,6 +1931,7 @@ public static class Program
                 {
                     View3D.PitchDeg = pd; View3D.YawDeg = yd;
                     Raylib.BeginDrawing();
+                    View3D.Scene = game.Biome;   // P31: the projected view joins its biome
                     View3D.DrawFrame(game.Grid, all);
                     Raylib.EndDrawing();
                     Raylib.TakeScreenshot($"view3d_p{pd:00}_y{yd:000}.png");

@@ -77,6 +77,16 @@ public static class Ship
         "assets/NotoMono-LICENSE.txt",
         "assets/ChakraPetch-Bold.ttf",
         "assets/ChakraPetch-LICENSE.txt",
+        // P31 — the 3D prop kit View3D loads. Listed so SHIPTEST resolves them STRICTLY against
+        // AppContext.BaseDirectory: that is the only check that tests the artifact a player gets
+        // rather than the repo a developer is standing in.
+        "assets/props/wall_high.glb",
+        "assets/props/wall_low.glb",
+        "assets/props/wall_door.glb",
+        "assets/props/tree.glb",
+        "assets/props/crate.glb",
+        "assets/props/car.glb",
+        "assets/props/CREDITS.txt",
         "assets/sfx/CREDITS.txt",
         "assets/music/CREDITS.txt",
         "THIRD-PARTY-NOTICES.txt",
