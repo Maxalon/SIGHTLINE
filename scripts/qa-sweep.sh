@@ -108,6 +108,8 @@ echo -n "BEACONTEST : "; verdict "$(SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACO
 echo -n "COMBATTEST : "; verdict "$(SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1)"
 # P28: the EDGE layer -- walls on tile boundaries. Pure grid logic, no window.
 echo -n "EDGETEST   : "; verdict "$(SIGHTLINE_EDGETEST=1 run | grep -oE "EDGETEST: (PASS|FAIL)" | head -1)"
+# P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
+echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"
 # P29: the board is a runtime size -- the shipped default must not drift and the camera pan
 # bounds must follow the board. Pure arithmetic, no window.
 echo -n "BOARDSIZETEST: "; verdict "$(SIGHTLINE_BOARDSIZETEST=1 run | grep -oE "BOARDSIZETEST: (PASS|FAIL)" | head -1)"

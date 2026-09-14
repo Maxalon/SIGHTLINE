@@ -3824,9 +3824,27 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
 
 #### OPEN — the agreed direction (owner decisions already made, see DEVLOG §P27-N)
 
-- [ ] **Bake lighting into the TERRAIN.** Blocks are still flat `DrawCube` + a faked top cap.
-      Generated bevelled blocks with real normals (the `Mesh3D.Lathe` idea, different generator)
-      would do more for the projected view than any further chip refinement. **This is the top item.**
+- [x] **Bake lighting into the TERRAIN.** DONE (P30/1). `Mesh3D.BevelBox` — 6 faces + 12 edge
+      strips + 8 corners, key light baked per-vertex, one unit mesh scaled per draw (the lighting
+      is baked, so a non-uniform scale cannot break shading the way it would break a runtime
+      normal). `View3D.Solid`'s body was replaced and its signature kept, so every call site gained
+      it at once. **Two real bugs found by LOOKING at a render, neither by a test:** `Mesh3D.Key`'s
+      Z sign lit the faces pointing AWAY from the camera (the lathed chip hid it — rotationally
+      symmetric, so the X term still made a gradient; a box cannot), and both Y faces plus half the
+      X-Z edge strips were wound backwards and were being back-face culled, which drew a block as a
+      dark hole with a lit rim. Winding is now ASSERTED against each face's declared normal rather
+      than hand-checked.
+- [x] **The 3D view knows about edges.** DONE (P30/1). `View3D.DrawEdges` — a wall is a thin slab
+      straddling the grid line, never a filled cell; a door is two jambs and a lintel. Before this
+      a building placed under `SIGHTLINE_BUILDINGS=1` was INVISIBLE in 3D.
+- [x] **A DISCOVERY layer.** DONE (P30/2). `src/Vision.cs`: Unseen / Remembered / Visible, per TILE
+      and per EDGE FACE. Unseen is not drawn at all — not dimmed, not hinted. A wall observed from
+      one side renders as a half-thickness plane flush to the observed face, so the operator cannot
+      read a depth nobody has been round the back to measure. It reads `Grid.HasLineOfSight` — the
+      same predicate that decides whether a soldier can SHOOT — so what is shown and what the rules
+      permit cannot drift. Sight is the owner's own rule from §P27-N: 9 tiles, +1 per level below.
+      `SIGHTLINE_DISCOVERY=0` restores an all-known board. **Presentation only** — nothing in `Ai`,
+      `Combat` or `Mission` consults it.
 - [x] **Make a template dimension mismatch a LOUD failure.** DONE (P28). `Mission.TryApplyLayout`
       now separates a wrong SIZE (a template bug) from a connectivity rejection (a runtime
       outcome): it counts `Mission.LayoutDimMismatches` and writes a named warning to stderr.
@@ -3852,6 +3870,25 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       arena branches are gated on it, and `SIGHTLINE_TEMPLATEGATE` now answers two separate
       questions — are the templates self-consistent (a FAIL) and can this board use them (a
       report, since OUT OF PLAY is deliberate under BIGMAP).
+
+#### OPEN — the projected view, after P30
+
+- [ ] **The props are still boxes.** Cover, barrels and plateaus are lit bevelled blocks now, which
+      is most of the "looks 3D" win, but a tree is a box and a car is a box. `assets/props/*.glb`
+      (from P28's Blender pipeline) has tree/crate/car/wall meshes ready; loading them needs them
+      added to the `.csproj` copy list AND `Ship.RequiredFiles`, or C6's cwd-fallback hides a
+      broken build. That is the next visible step.
+- [ ] **The RAY/coverage render is not in the game.** `Vision` is per-face binary. The
+      angular-footprint coverage masks in `prototypes/lidar` give PARTIAL knowledge of a surface
+      and a confidence gradient, and need a texture atlas to decouple material grain from mask
+      grain. That is a real chunk of work and the prototype README says exactly what it costs.
+- [ ] **The projected view is still a SCREENSHOT HOOK.** `SIGHTLINE_VIEW3DSHOT` photographs it;
+      nothing lets you PLAY in it. Making it the live view needs mouse picking through the 3D
+      camera, HUD integration, and a decision about whether the 2D board survives as an option.
+      **This is the gap between "it looks right" and "it is the game".**
+- [ ] **Discovery does not affect the RULES.** It decides what is drawn. True fog of war — the AI
+      and targeting honouring it — is a separate decision with real balance consequences, and the
+      peek-LoS trap in P28's notes applies to it too.
 
 #### OPEN — what a bigger board still needs
 
