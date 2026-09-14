@@ -133,4 +133,13 @@
            Text="TRIMMED PUBLISH GUARD: TrimmerRootAssembly is empty. Re-enabling the JSON reflection fallback above is only safe BECAUSE our own assembly is rooted; without it ILLink strips the metadata that fallback needs and the SIGHTLINE_BALANCE telemetry export throws NotSupportedException ('parameter names have been trimmed by ILLink'). Measured: save/meta persistence still works without this root (source-generated contexts), so this guards the flywheel, not the player's profile. See docs/DISTRIBUTION.md section 3." />
   </Target>
 
+
+  <ItemGroup>
+    <!-- P28: prototypes/ is a scratch area for throwaway harnesses (see prototypes/lidar).
+         The SDK globs **/*.cs from the project directory, which is the repo ROOT, so without
+         this every prototype Main() would be compiled into the game. -->
+    <Compile Remove="prototypes/**" />
+    <None Remove="prototypes/**" />
+  </ItemGroup>
+
 </Project>
