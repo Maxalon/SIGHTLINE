@@ -2446,6 +2446,18 @@ public partial class Game
         // (MapSeed, mission) alone. Terrain.Stamp is pure; this call site is not, and that is fine:
         // zero draws is the invariant, not board-identity across ambient streams.
         StampBiomeGround(n);
+
+        // ══ P28 — BUILDINGS, after the ground layer and before anything reads the board ═══════
+        // TWO EXCLUSIONS, both earned rather than chosen:
+        //   RIFT boards. Terrain.StampRift guarantees a minimum chasm size by re-walking until it
+        //   gets one, refusing any candidate that would cut the board. Walls consume the same
+        //   connectivity headroom, so with buildings on, VOID fell under Terrain.RiftFloor and
+        //   BIOMETEST went red. The rift's guarantee is older and load-bearing; buildings yield.
+        //   TRAINING. The tutorial teaches on AUTHORED geometry — its FLANK lesson poses a
+        //   specific problem on a specific board. A procedural building in the middle of it does
+        //   not just fail TUTTEST, it breaks the lesson for a real player.
+        if (Mode != GameMode.Training && !Grid.AnyRift)
+            Mission.StampBuildings(Grid, Players, Enemies);
         if (Mode == GameMode.Campaign)
         {
             string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";

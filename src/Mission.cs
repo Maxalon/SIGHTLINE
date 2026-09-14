@@ -215,17 +215,34 @@ public static class Mission
     /// therefore never seal a pocket, never strand a unit and never orphan an objective — not
     /// because the placement rules are clever, but because the failures are undone.
     ///
-    /// DEFAULT OFF, AND THAT IS NOT TIMIDITY — NOTHING CAN DRAW A WALL YET. `Renderer.cs` knows
-    /// only about tiles, so a shipped building would be an INVISIBLE obstacle: the player would
-    /// walk into a boundary with nothing on screen to explain it, which is a worse game than one
-    /// with no buildings. The gameplay side is proven (autoplay is clean with them on, and
-    /// BUILDINGTEST forces them on), so this default flips in the commit that teaches the
-    /// renderer about edges — not before. `SIGHTLINE_BUILDINGS=1` turns them on meanwhile.
+    /// ═══ DEFAULT OFF, AND THE REASON IS A MEASUREMENT, NOT CAUTION ═══════════════════════════
+    /// Everything works: walls block, shelter and draw, the validator never strands a tile, and
+    /// autoplay is clean. The blocker is `SIGHTLINE_AICOVTEST`, which guards C1's dead-row class —
+    /// no AI branch may fall under 0.10% of acts, or it is effectively dead and nobody notices.
+    ///
+    /// MEASURED, two runs per arm, deterministic and reproducible (AICOVTEST=6, ~9,771 acts):
+    ///     buildings OFF   sap = 19 (0.21%)   PASS, PASS
+    ///     buildings ON    sap =  9 (0.09%)   FAIL, FAIL
+    ///
+    /// The cause is real and is NOT a tuning problem. `Ai`'s sap branch destroys the COVER TILE a
+    /// target is hiding behind; `Grid.CoverHp` is a per-TILE array and `DamageCover` takes tile
+    /// coordinates. A soldier sheltering behind a building WALL therefore cannot be sapped at all
+    /// — cover moved from tiles to edges and the AI's cover-destruction branch could not follow
+    /// it. Buildings do not make the opponent dumber by accident; they remove one of its options.
+    ///
+    /// SO THE FIX IS DESTRUCTIBLE EDGES (per-edge HP, High -> Low -> None, `SapTile` gaining an
+    /// edge form) — which is exactly the "wall-bangs and destructible elements" the owner deferred
+    /// as future work. It is a wave of its own and it deserves a measured round, not a rushed one.
+    /// Lowering the AICOVTEST threshold to fit would be tuning a gate to pass, which this project
+    /// does not do; shipping a measurably duller opponent by default is worse than shipping the
+    /// walls behind a flag.
+    ///
+    /// `SIGHTLINE_BUILDINGS=1` turns them on. Everything below this line is live either way.
     public static bool Buildings = false;
     /// Why candidates were refused, for BUILDINGTEST to report. `Sealed` is the interesting one:
     /// it counts would-be buildings the reachability validator actually caught, so a zero there
     /// would mean the validator is decoration rather than a guard.
-    public static int BuildDbgDirty, BuildDbgSealed, BuildDbgOob;
+    public static int BuildDbgDirty, BuildDbgSealed, BuildDbgOob, BuildDbgOverlap;
 
     public static bool ClearGroundOnBuild = true;
 
@@ -543,9 +560,6 @@ public static class Mission
         // must never wall a hostile or objective off from the squad — carve a lane if it did.
         EnsureConnectivity(grid, players, enemies, evacSet, terminal, sabotage);
 
-        // P28: buildings LAST, after every tile-level guarantee is in place, so the reachability
-        // baseline they validate against is the final board. They add no tiles — only edges.
-        StampBuildings(grid, players, enemies);
 
         grid.ResetCoverHp();   // charge every cover tile to full now the terrain is final (3.6)
 
@@ -557,7 +571,17 @@ public static class Mission
     /// Lay 1-2 rectangular buildings as EDGE walls with doors. Adds no tiles: the interior stays
     /// walkable floor, which is the whole point of an edge wall and the reason a building here is
     /// a place to fight over rather than a lump of cover to walk around.
-    static void StampBuildings(Grid g, List<Unit> players, List<Unit> enemies)
+    /// CALLED FROM `Game.SetupMission`, AFTER `StampBiomeGround`, NOT FROM `Build`.
+    ///
+    /// That placement is a measured correction, not a preference. Build runs BEFORE the biome
+    /// ground layer exists, so a building stamped there cannot see the RIFT — and the two compete
+    /// for the same resource. `Terrain.StampRift` guarantees a minimum number of chasm tiles by
+    /// re-walking until it gets them, rejecting every candidate that would cut the board; walls
+    /// eat exactly that connectivity headroom, so with buildings on, VOID boards fell under
+    /// `Terrain.RiftFloor` and SIGHTLINE_BIOMETEST went red (riftFloorMissed=7). The rift's
+    /// guarantee is older, load-bearing and already has a test; buildings yield to it.
+    /// Running here also means the reachability baseline is the TRUE final board.
+    public static void StampBuildings(Grid g, List<Unit> players, List<Unit> enemies)
     {
         if (!Buildings || !Edges.Enabled) return;      // MUST spend zero draws when off
         if (players.Count == 0) return;
@@ -570,6 +594,11 @@ public static class Mission
 
         int want = Util.RandInt(1, 2);
         var undo = new List<(bool vert, int x, int y, EdgeKind was)>();
+        // Footprints already taken. Two buildings that overlap produce a double-walled shape
+        // nobody authored and no player can read as a building — and the reachability validator
+        // happily passes it, because a nonsense shape with doors is still connected. Geometry
+        // this layer cannot check for itself has to be refused up front.
+        var taken = new List<(int x0, int y0, int x1, int y1)>();
 
         for (int attempt = 0, made = 0; attempt < 14 && made < want; attempt++)
         {
@@ -578,6 +607,11 @@ public static class Mission
             int y0 = Util.RandInt(1, Math.Max(1, g.H - bh - 2));
             int x1 = x0 + bw, y1 = y0 + bh;                     // exclusive upper bounds
             if (x1 >= g.W || y1 >= g.H) { BuildDbgOob++; continue; }
+
+            bool clash = false;                       // keep a clear tile of air between buildings
+            foreach (var t in taken)
+                if (x0 <= t.x1 + 1 && x1 + 1 >= t.x0 && y0 <= t.y1 + 1 && y1 + 1 >= t.y0) { clash = true; break; }
+            if (clash) { BuildDbgOverlap++; continue; }
 
             // The interior needs to be a ROOM, not solid rock — but it does not need to be
             // pristine. A crate or a plateau inside a building is furniture, and a rift inside one
@@ -626,6 +660,7 @@ public static class Mission
                 }
                 BuildDbgSealed++; continue;
             }
+            taken.Add((x0, y0, x1, y1));
             made++;
         }
     }
@@ -653,11 +688,13 @@ public static class Mission
             Util.Reseed(42000 + s);
             var g1 = new Grid(); var sq1 = TrainingSquad(); var fo1 = new List<Unit>();
             Build(g1, sq1, fo1, 3);
+            StampBuildings(g1, sq1, fo1);      // Game.SetupMission's call, reproduced
 
             Buildings = false; Edges.Enabled = true;
             Util.Reseed(42000 + s);
             var g2 = new Grid(); var sq2 = TrainingSquad(); var fo2 = new List<Unit>();
             Build(g2, sq2, fo2, 3);
+            StampBuildings(g2, sq2, fo2);      // with Buildings=false this must do nothing at all
 
             // (A) the restore flag really restores
             if (g2.AnyEdges) fails.Add($"seed{s}: BUILDINGS=0 still placed an edge");

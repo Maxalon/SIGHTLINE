@@ -323,10 +323,15 @@ public partial class Game
             shooter = Players.First(u => u.Alive && !u.IsVip);
             var foes = Enemies.Where(x => x.Alive).Take(2).ToList();
             tgtPod = foes[0]; bystanderPod = foes[1];
-            // clear a floor window around the firing lane so LoS/targeting is unconditional
+            // clear a floor window around the firing lane so LoS/targeting is unconditional.
+            // P28: "unconditional" now has to include the EDGE layer. This probe tests
+            // CONCEALMENT, not architecture, and a procedural building wall landing across the
+            // staged lane made the control shot fail to fire at all — which read as
+            // "concealment did not break" and blamed the wrong system entirely.
             for (int x = shooter.X; x <= shooter.X + 4 && x < Grid.W; x++)
                 for (int y = Math.Max(0, shooter.Y - 1); y <= Math.Min(Grid.H - 1, shooter.Y + 3); y++)
                 { Grid.Tiles[x, y] = TileType.Floor; Grid.Barrel[x, y] = false; }
+            Grid.ClearEdges();
             tgtPod.PodId = 90; tgtPod.Alert = AlertLevel.Unaware;
             tgtPod.X = Math.Min(Grid.W - 1, shooter.X + 3); tgtPod.Y = shooter.Y; tgtPod.SyncPos();
             bystanderPod.PodId = 91; bystanderPod.Alert = AlertLevel.Unaware;

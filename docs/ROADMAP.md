@@ -3862,19 +3862,59 @@ direction: the player is an operator at HQ reading a holographic reconstruction 
 the squad's own LiDAR has scanned. Read `prototypes/lidar/README.md` before starting — it lists four
 bugs already found and fixed, all of the same class, so they are not re-found.
 
-- [ ] **`EdgeKind` in `Grid`, behind `SIGHTLINE_EDGES=0`.** Walls on tile EDGES, so a soldier can
-      hold either face and a wall does not consume a tile. `EdgeV[W+1,H]` / `EdgeH[W,H+1]`, each
-      edge stored ONCE so the two sides cannot disagree. Four touchpoints, all already the single
-      truth both teams read: `IsFloor` (unchanged — a wall occupies no tile), `CostMap` (an edge
-      blocks the step; a diagonal needs both L-routes), `HasLineOfSight` (check the crossed edge;
-      the existing diagonal corner-pair rule becomes an edge pair), `GetCover` (`LevelAt` becomes
-      `max(edge between, neighbour's tile obstacle)`). **`GetCover` is already an edge model in
-      disguise** — a cover tile is just an object blocking all four of its edges — so this is a
-      generalisation, not a rewrite, and `Ai.cs` gains ZERO lines. **Not a save-format break**:
-      `TileType` is not among the thirteen persisted-by-ordinal enums and `Grid` never enters
-      `SaveGame` (verified). Authoring needs a double-resolution template format (`2W+1 x 2H+1`,
-      odd rows/cols are edges) — do NOT retrofit the 35 existing 18x11 arenas, they are orphaned
-      by the size change anyway.
+- [x] **`EdgeKind` in `Grid`, behind `SIGHTLINE_EDGES=0`.** DONE (P28/1). `EdgeV[W+1,H]` /
+      `EdgeH[W,H+1]`, each boundary stored once. **FIVE touchpoints, not the four predicted here**
+      — the fifth is `GetCover`'s `anyAdjacent`, which scanned adjacent cover TILES only, so a
+      soldier sheltered by a wall and shot from the open side read as out in the open and the
+      crit-vs-exposed bonus and LOCK-ON flank perk would have silently stopped firing against
+      exactly the geometry the layer creates. EDGETEST leg (D) failed on the first build, which is
+      how it was found. `Ai.cs` gained zero lines. Not a save break. Inert until P28/2 placed one,
+      proven by PAIRTEST.
+- [x] **Buildings — the first producer of edges.** DONE (P28/2). `Mission.StampBuildings`,
+      `SIGHTLINE_BUILDINGS=0/1`. Validates on `Terrain.StampRift`'s precedent: every candidate is
+      re-flooded through `Grid.CostMap` and reverted whole unless every reachable tile is still
+      reachable. Measured: the validator refuses ~40-60 would-be seals per 24 boards, so it is a
+      guard and not decoration. **The first placement rule was doing all the rejecting and none of
+      the protecting** — demanding a pristine floor footprint threw out 330 candidates against the
+      validator's 1 and walled only 4 of 24 boards; a crate inside a building is furniture.
+      Relaxed to "half the interior is floor": 24/24 boards walled, 0 stranded.
+- [x] **Draw them.** DONE (P28/3). `Renderer.DrawEdges` paints a wall straddling the grid LINE
+      rather than filling a cell, in the cover palette so it reads as the same class of quiet
+      terrain, with a door drawn as two jamb stubs because the opening is the information. The
+      move overlay needed no work — it comes from `CostMap`, so it stops at a wall already.
+
+#### OPEN — wave P28, still to do
+
+- [ ] **DESTRUCTIBLE EDGES — the one thing gating buildings ON by default.** MEASURED, two runs
+      per arm, deterministic: with buildings on, `Ai`'s `sap` branch falls from 19 acts (0.21%) to
+      9 (0.09%) and `SIGHTLINE_AICOVTEST` goes red on C1's dead-row floor. The cause is not a
+      tuning problem: sap destroys the COVER TILE a target hides behind, `Grid.CoverHp` is a
+      per-TILE array and `DamageCover` takes tile coordinates — so a soldier behind a building
+      WALL cannot be sapped at all. Cover moved from tiles to edges and the opponent's
+      cover-destruction branch could not follow it. Needs per-edge HP (High -> Low -> None), an
+      edge form of `SapTile`, and a damaged-wall visual. This is the owner's deferred "wall-bangs
+      and destructible elements", and it deserves its own measured wave. **Lowering the AICOVTEST
+      threshold to fit is not an option** — that is tuning a gate to pass.
+- [ ] **Wall readability is a first pass, not a finished look.** They read as a building outline
+      and they are distinct from cover blocks, but they are thin beside the chunky faux-3D cover
+      volumes. `Renderer.DrawEdges`' `HiW`/`HiLift` constants are the dials. Judge it against
+      pillar 1 on a real screen before calling it done.
+- [ ] **The 3D view does not know about edges.** `src/View3D.cs` still draws only tiles, so the
+      projected camera shows a board with no buildings on it. `prototypes/lidar` has the geometry
+      worked out (`World.WallT`, a wall as a thin slab straddling the boundary).
+- [ ] **Nothing authored places an edge.** Buildings are procedural rectangles. The double-
+      resolution template format (`2W+1 x 2H+1`, odd rows/cols are edges) is still the plan for
+      authored arenas, and still should NOT be retrofitted into the 35 existing 18x11 templates.
+- [ ] **Buildings are unpriced.** They change the board, so they sever the CRN chain: this is a
+      LEVEL lever and `SIGHTLINE_BUILDINGS=0` is its arm (free — it spends zero `Util.Rng` draws).
+      Nothing has measured what a building does to win rate, decision density, or the policy gap.
+      **That last one is the interesting question**: P26 measured skill at +0.2 points, and a
+      partly-enclosed board with doors is exactly the situation where playing well should start to
+      beat playing badly.
+- [ ] **The AI does not understand a door.** `Ai.cs` re-prices itself through `GetCover`/`CostMap`
+      so it will not walk through walls, but nothing makes it PREFER a doorway, stack on one, or
+      treat a room as a place to be cleared. It sees a wall as terrain, not as architecture.
+
 - [ ] **Peek line-of-sight, behind `SIGHTLINE_PEEKLOS=0`.** Rays leave from a ring over the
       soldier's own footprint (radius 0.34 against a half-tile of 0.5, so a lean can never reach
       through a wall) rather than from a point at their centre. Measured **+43% of the world
