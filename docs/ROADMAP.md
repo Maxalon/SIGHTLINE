@@ -3811,3 +3811,64 @@ fun. Raw round: `docs/measurements/p25/`.
       pixel probes (`BOARDTEST`, `CONTRASTTEST`, `FITTEST`, which read a rendered frame but do not
       diff a before/after pair). A probe that renders TWO frames and diffs them would close it and
       would make the 12 arm rows assertable. That is its own wave.
+
+---
+
+### WAVE P26/P27 (2026-09-07..14, base `74b0e5a`, details in DEVLOG §P26/P27 and `docs/REVIEW-2026-09.md`)
+
+**SHIPPED.** External design review adjudicated against code + archive; two shipped lies fixed
+(four unobtainable perks documented in the FIELD MANUAL, the max-pressure banner promising
+reinforcements that cannot arrive on ELIMINATE); the flywheel's per-mission tables split by POLICY
+so "does skill matter" is readable from a chunk; `Mission.PlanBoard` so an arena can own its
+objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-camera prototype.
+
+#### OPEN — the agreed direction (owner decisions already made, see DEVLOG §P27-N)
+
+- [ ] **Bake lighting into the TERRAIN.** Blocks are still flat `DrawCube` + a faked top cap.
+      Generated bevelled blocks with real normals (the `Mesh3D.Lathe` idea, different generator)
+      would do more for the projected view than any further chip refinement. **This is the top item.**
+- [ ] **Make a template dimension mismatch a LOUD failure.** `TryApplyLayout` returns false for a
+      wrong-sized template exactly as it does for a legitimate connectivity rejection, so the game
+      silently falls back to procedural for every mission. Two lines, and it must land before any
+      board-size change or a size bump orphans all 35 arenas invisibly.
+- [ ] **`SIGHTLINE_BIGMAP` prototype (~50x50).** `Grid` already carries instance `W`/`H` and only
+      five `Cfg.GridW/H` references exist in `src/`. The camera blocker is ONE line — `Game.cs`
+      forces `CamPan = Vector2.Zero` when `CamZoom <= 1.001f`; zooming in already works
+      (`CamZoom` clamped `[1, 2.4]`). Then author 2-3 boards and read the per-board greedy-vs-sloppy
+      gap that P26 made readable.
+- [ ] **Do NOT author site glyphs into the existing 35 18x11 templates.** They are orphaned by a
+      size change. The P26 glyph vocabulary (`T X E C P A`) is the authoring format for the NEW maps.
+- [ ] **Sector patrols.** 2-4 posts per group; group moves at its slowest member's speed; arrives
+      within Chebyshev 1; turns around next turn; 1-2 tiles of formation slop. Keep groups apart by
+      AUTHORING (build-time guard on overlapping routes), not runtime avoidance. Simulate all,
+      animate only the visible. Additive to `Ai.Plan`: `if (tier == Unaware) PatrolStep(); else Plan()`.
+- [ ] **A captain that calls backup.** `LinkRange = 6` and `HackNoise` are already half of it. The
+      call needs a ONE-TURN WIND-UP with a visible marker, or killing the captain first is not a
+      choice, it is a coin flip resolved after the fact.
+- [ ] **Vision by elevation — NO FLOORS NEEDED.** "9 tiles at your level or above, +1 per level
+      below" works on the existing `Grid.Height` scalar. Prove the feel before paying for the 3D
+      data model (which touches all eight per-tile arrays, CostMap, HasLineOfSight, GetCover, Build,
+      every AI query and all 35 arenas).
+- [ ] **Fog of war.** The prerequisite is board size, not code: sight range 9 on an 18-wide board is
+      half the board, so fog there is a no-op. At 30 wide the SAME number is 30%. `Game.ClosestSightedDist`
+      is a per-team visibility query in all but name; `SquadConcealed` is already a one-way gate.
+
+#### OPEN — found during the review, untouched
+
+- [ ] **The squad chronicle.** `KillUnit` already computes the killer (`Game.cs:3367`) and discards
+      it to a class string. `FallenRec` is five fields. Recording who/where/beside-whom is a few
+      lines at a seam where all three are in scope.
+- [ ] **`Ai.Tier` is nearly inert** — four constants, two of them bypassed whenever a SPOTTER is
+      alive, and at Tier 2 one is an exact no-op against the SPOTTER branch. C1's dead-row class,
+      one layer down.
+- [ ] **The autopilot has no target-priority entry for twelve of ~21 archetypes**, including ones
+      whose design brief is "kill it first" — they score as a GRUNT. **Every balance number in this
+      project was produced by a bot that cannot tell them apart.**
+- [ ] **Shoot-and-hold is legal.** `Unit.BeginTurn` gives 2 actions, a shot costs 1, and
+      `DoOverwatch` gates only on `!CanAct || Ammo <= 0` — there is no `FiredThisTurn` check. The
+      exclusive "shoot vs hold the reaction" bet does not exist. Consequence nobody recorded: a
+      grenade costs TWO actions thrown first and ONE thrown second.
+- [ ] **Mission 1 is always the same encounter class** — forced Eliminate, forced no-faction, and
+      only SCOUT/GRUNT. It is also the mission that ends roughly a quarter of all runs.
+- [ ] **Retire bot win rate as the objective function.** Not because it cannot see fun — because
+      §P26-2 shows it cannot see PLAY. The policy GAP is the better target and is now readable.
