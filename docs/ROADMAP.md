@@ -3901,10 +3901,37 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       angular-footprint coverage masks in `prototypes/lidar` give PARTIAL knowledge of a surface
       and a confidence gradient, and need a texture atlas to decouple material grain from mask
       grain. That is a real chunk of work and the prototype README says exactly what it costs.
-- [ ] **The projected view is still a SCREENSHOT HOOK.** `SIGHTLINE_VIEW3DSHOT` photographs it;
-      nothing lets you PLAY in it. Making it the live view needs mouse picking through the 3D
-      camera, HUD integration, and a decision about whether the 2D board survives as an option.
-      **This is the gap between "it looks right" and "it is the game".**
+- [x] **The projected view is PLAYABLE.** DONE (P32). `I` toggles it mid-mission;
+      `SIGHTLINE_VIEW3D=1` starts in it. `Game.PickTile` is the ONE picking seam (three call sites
+      used to inline `GetScreenToWorld2D` — a second projection would have had to be added in three
+      places and rotted in two); in 3D it is a ray/ground-plane intersection, exact because the
+      camera is orthographic. `SIGHTLINE_PICKTEST` proves the INPUT path by round trip — every tile
+      projected to a pixel and picked back, 792 round-trips over four pitch/yaw pairs, plus a
+      refusal check so an off-board pixel does not clamp to an edge tile and make the HUD margin
+      act like a live board click. **The HUD needed no work at all**: it is screen-space and never
+      knew the board had a projection. Move range, path preview and hover are drawn as REAL ground
+      geometry, so they are depth-tested against terrain for free — a range tile behind a wall is
+      occluded without an occlusion test.
+- [x] **Discovery made opt-in, because a RENDER toggle must not change what the player knows.**
+      DONE (P32). Only `View3D` consults `Vision`, so with it on, pressing `I` hid or revealed
+      parts of the board. `SIGHTLINE_DISCOVERY=1` enables it; the default is off until it applies
+      to BOTH renderers or becomes a real rule the AI honours.
+
+#### OPEN — the projected view, after P32
+
+- [ ] **No pan or zoom in 3D.** `CamZoom`/`CamPan` drive the 2D camera only; `View3D.MakeCamera`
+      always frames the whole board. Fine at 18x11 where the board fits; on `SIGHTLINE_BIGMAP` it
+      means you cannot reach most of the map. The 2D path's derived pan bounds (`Game.ClampPan`,
+      P29) are the model to copy.
+- [ ] **No pitch/yaw control.** Fixed at 52/0. The whole point of a projected view is looking round
+      a wall, and nothing lets the player do it yet.
+- [ ] **Only three overlays are ported.** Move range, path preview and hover. The 2D board also has
+      threat/overwatch zones, the aim reticle, objective markers, evac zones, grenade blast radius,
+      scorch decals and the whole `Fx` layer (tracers, floating numbers, particles). Each needs a
+      ground-plane or projected-screen equivalent; none is hard, and the list is the honest scope of
+      "feature parity".
+- [ ] **No post-FX in 3D.** The 3D path draws straight to the framebuffer; `Display.RenderFrame`'s
+      render target, bloom and colour grade are bypassed, so the two views do not match in grade.
 - [ ] **Discovery does not affect the RULES.** It decides what is drawn. True fog of war — the AI
       and targeting honouring it — is a separate decision with real balance consequences, and the
       peek-LoS trap in P28's notes applies to it too.

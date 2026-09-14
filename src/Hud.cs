@@ -2502,8 +2502,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // UpdateHoverAndAim uses) — g.HoverX/Y only refresh in UpdatePlayer, so during the
             // enemy turn / anim playback the card would follow the cursor while identifying the
             // STALE tile's unit (and mis-label an enemy that walked onto it). Display-only.
-            var world = Raylib.GetScreenToWorld2D(Mouse(), g.ViewCamera(false));
-            if (Util.ScreenToTile(world, out int hx, out int hy))
+            if (g.PickTile(Mouse(), out int hx, out int hy))
             {
                 var u = g.UnitAt(hx, hy);
                 if (u != null && u.Team == Team.Enemy) d = u;
@@ -2564,8 +2563,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         var sel = g.Selected;
         if (sel == null || sel.Team != Team.Player || !sel.CanAct) return;
 
-        var world = Raylib.GetScreenToWorld2D(Mouse(), g.ViewCamera(false));
-        if (!Util.ScreenToTile(world, out int tx, out int ty)) return;
+        if (!g.PickTile(Mouse(), out int tx, out int ty)) return;
         if (g.UnitAt(tx, ty) != null && !(tx == sel.X && ty == sel.Y)) return;   // a body owns its own hover
         bool here = tx == sel.X && ty == sel.Y;
         if (!here && g.MoveCost[tx, ty] <= 0) return;                            // unreachable: nothing to forecast
