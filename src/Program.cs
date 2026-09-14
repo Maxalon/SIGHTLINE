@@ -187,6 +187,21 @@ public static class Program
         //   SIGHTLINE_FORCECEILING=<n> : Mission.ForceCeiling, the board-SEATING limit (shipped
         //                             12, unchanged by P23). Priced by FORCETEST leg (E), unspent.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CLAMPLAST") == "0") Mission.ClampLast = false;
+        // ── P28 RESTORE FLAGS ────────────────────────────────────────────────────────────────
+        //   SIGHTLINE_EDGES=0      : the EDGE layer off. Gates every edge QUERY rather than the
+        //                            arrays, so even a hand-stamped wall is inert and the board is
+        //                            the pre-P28 board EXACTLY.
+        //   SIGHTLINE_BUILDINGS=1  : buildings ON. They default OFF only because Renderer.cs
+        //                            cannot draw a wall yet — an invisible obstacle is worse than
+        //                            no obstacle. Flip the default with the renderer, not before.
+        //   SIGHTLINE_BUILDINGS=0  : the only thing that PLACES an edge, off. Spends zero
+        //                            Util.Rng draws when off, so it is a free arm and not merely
+        //                            a faithful one — a flag that moves the RNG stream cannot be
+        //                            used to isolate anything.
+        // The pair is what "restore the pre-P28 board" means: EDGES alone leaves the draws spent.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGES") == "0") Edges.Enabled = false;
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "0") Mission.Buildings = false;
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "1") Mission.Buildings = true;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FORCECEILING"), out int xceil) && xceil >= 3)
             Mission.ForceCeiling = xceil;
@@ -799,6 +814,13 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRASTTEST") == "1")
         {
             Console.WriteLine(ContrastSelfTest());
+            return;
+        }
+        // SIGHTLINE_BUILDINGTEST=1 : P28 — buildings on REAL boards through the REAL Build:
+        // they appear, they never strand a tile, and they leave the tile board untouched.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGTEST") == "1")
+        {
+            Console.WriteLine(Mission.BuildingSelfTest());
             return;
         }
         // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary

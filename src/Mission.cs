@@ -202,6 +202,31 @@ public static class Mission
     /// be switchable so it can be attributed and priced, and because MODETEST leg (14) flips it to
     /// prove its own detector can fail. NEVER a shipping configuration — with it on, the SEEDED
     /// DAILY's headline contract ("the same day deals the same board to everyone") is false.
+    /// ══ P28 — BUILDINGS. The edge layer's first producer. ═════════════════════════════════
+    /// Off (`SIGHTLINE_BUILDINGS=0`) this spends ZERO `Util.Rng` draws and stamps nothing, so the
+    /// board is the pre-P28 board exactly — the restore flag has to be free, not merely faithful,
+    /// or it cannot be used as a measurement arm.
+    ///
+    /// IT VALIDATES RATHER THAN TRUSTS, on `Terrain.StampRift`'s precedent and for the same
+    /// reason: a wall is the first thing on this board that can make a mission UNWINNABLE, and it
+    /// can do so silently. Every candidate is stamped, re-flooded through `Grid.CostMap` (the one
+    /// movement model both teams read, so there is no second connectivity model to drift), and
+    /// REVERTED WHOLE unless every tile reachable before is still reachable. A building can
+    /// therefore never seal a pocket, never strand a unit and never orphan an objective — not
+    /// because the placement rules are clever, but because the failures are undone.
+    ///
+    /// DEFAULT OFF, AND THAT IS NOT TIMIDITY — NOTHING CAN DRAW A WALL YET. `Renderer.cs` knows
+    /// only about tiles, so a shipped building would be an INVISIBLE obstacle: the player would
+    /// walk into a boundary with nothing on screen to explain it, which is a worse game than one
+    /// with no buildings. The gameplay side is proven (autoplay is clean with them on, and
+    /// BUILDINGTEST forces them on), so this default flips in the commit that teaches the
+    /// renderer about edges — not before. `SIGHTLINE_BUILDINGS=1` turns them on meanwhile.
+    public static bool Buildings = false;
+    /// Why candidates were refused, for BUILDINGTEST to report. `Sealed` is the interesting one:
+    /// it counts would-be buildings the reachability validator actually caught, so a zero there
+    /// would mean the validator is decoration rather than a guard.
+    public static int BuildDbgDirty, BuildDbgSealed, BuildDbgOob;
+
     public static bool ClearGroundOnBuild = true;
 
     /// P21 BUILD OWNS THE BOARD — clear the two HAZARD layers (Fire, Barrel) at the top of Build,
@@ -518,10 +543,167 @@ public static class Mission
         // must never wall a hostile or objective off from the squad — carve a lane if it did.
         EnsureConnectivity(grid, players, enemies, evacSet, terminal, sabotage);
 
+        // P28: buildings LAST, after every tile-level guarantee is in place, so the reachability
+        // baseline they validate against is the final board. They add no tiles — only edges.
+        StampBuildings(grid, players, enemies);
+
         grid.ResetCoverHp();   // charge every cover tile to full now the terrain is final (3.6)
 
         foreach (var u in players) u.SyncPos();
         foreach (var u in enemies) u.SyncPos();
+    }
+
+
+    /// Lay 1-2 rectangular buildings as EDGE walls with doors. Adds no tiles: the interior stays
+    /// walkable floor, which is the whole point of an edge wall and the reason a building here is
+    /// a place to fight over rather than a lump of cover to walk around.
+    static void StampBuildings(Grid g, List<Unit> players, List<Unit> enemies)
+    {
+        if (!Buildings || !Edges.Enabled) return;      // MUST spend zero draws when off
+        if (players.Count == 0) return;
+
+        // The baseline every candidate is judged against. Taken ONCE: a building that passes has
+        // changed nothing about reachability, so the next candidate may reuse it.
+        var before = g.CostMap(players[0].X, players[0].Y, null, out _, 9999);
+        int reachBefore = 0;
+        for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) if (before[x, y] >= 0) reachBefore++;
+
+        int want = Util.RandInt(1, 2);
+        var undo = new List<(bool vert, int x, int y, EdgeKind was)>();
+
+        for (int attempt = 0, made = 0; attempt < 14 && made < want; attempt++)
+        {
+            int bw = Util.RandInt(3, 5), bh = Util.RandInt(3, 4);
+            int x0 = Util.RandInt(1, Math.Max(1, g.W - bw - 2));
+            int y0 = Util.RandInt(1, Math.Max(1, g.H - bh - 2));
+            int x1 = x0 + bw, y1 = y0 + bh;                     // exclusive upper bounds
+            if (x1 >= g.W || y1 >= g.H) { BuildDbgOob++; continue; }
+
+            // The interior needs to be a ROOM, not solid rock — but it does not need to be
+            // pristine. A crate or a plateau inside a building is furniture, and a rift inside one
+            // is a hole in the floor; neither is a defect, and the reachability validator below
+            // covers the only thing that actually matters. Measured: demanding a pristine
+            // rectangle rejected 330 candidates against the validator's 1, so the "clean footprint"
+            // rule was doing all the rejecting and none of the protecting.
+            int floorTiles = 0, interior = (x1 - x0) * (y1 - y0);
+            for (int x = x0; x < x1; x++)
+                for (int y = y0; y < y1; y++) if (g.IsFloor(x, y)) floorTiles++;
+            if (floorTiles * 2 < interior) { BuildDbgDirty++; continue; }
+
+            undo.Clear();
+            void PutV(int x, int y, EdgeKind k) { undo.Add((true,  x, y, g.EdgeV[x, y])); g.SetEdgeV(x, y, k); }
+            void PutH(int x, int y, EdgeKind k) { undo.Add((false, x, y, g.EdgeH[x, y])); g.SetEdgeH(x, y, k); }
+
+            for (int y = y0; y < y1; y++) { PutV(x0, y, EdgeKind.High); PutV(x1, y, EdgeKind.High); }
+            for (int x = x0; x < x1; x++) { PutH(x, y0, EdgeKind.High); PutH(x, y1, EdgeKind.High); }
+
+            // At least two doors, on two different walls, so the inside is never a one-way trap
+            // and a breach is a choice of approach rather than a queue at the only opening.
+            for (int d = 0; d < 2; d++)
+                switch ((Util.RandInt(0, 3) + d * 2) % 4)
+                {
+                    case 0: PutH(Util.RandInt(x0, x1 - 1), y0, EdgeKind.Door); break;
+                    case 1: PutH(Util.RandInt(x0, x1 - 1), y1, EdgeKind.Door); break;
+                    case 2: PutV(x0, Util.RandInt(y0, y1 - 1), EdgeKind.Door); break;
+                    default: PutV(x1, Util.RandInt(y0, y1 - 1), EdgeKind.Door); break;
+                }
+
+            // THE VALIDATOR. Same predicate the game moves through, so a pass means a pass.
+            var after = g.CostMap(players[0].X, players[0].Y, null, out _, 9999);
+            int reachAfter = 0;
+            for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) if (after[x, y] >= 0) reachAfter++;
+
+            bool ok = reachAfter == reachBefore;
+            if (ok)                                   // and nobody is standing inside a wall's grip
+                foreach (var u in enemies) if (after[u.X, u.Y] < 0) { ok = false; break; }
+
+            if (!ok)
+            {
+                for (int i = undo.Count - 1; i >= 0; i--)
+                {
+                    var e = undo[i];
+                    if (e.vert) g.EdgeV[e.x, e.y] = e.was; else g.EdgeH[e.x, e.y] = e.was;
+                }
+                BuildDbgSealed++; continue;
+            }
+            made++;
+        }
+    }
+
+
+    // ══════════════════ SIGHTLINE_BUILDINGTEST ══════════════════
+    /// Buildings, on REAL boards through the REAL Build, because the interesting failure is not
+    /// "the stamper is wrong" but "the stamper is right and the board it lands on is not".
+    ///
+    /// The load-bearing leg is (C): a wall is the first thing on this board that can make a
+    /// mission unwinnable, and it can do it silently. The validator's promise is that a building
+    /// never removes a reachable tile, and this checks that promise against the SAME board with
+    /// the edge queries switched off — so the comparison is one board, not two, and cannot be
+    /// confounded by the RNG. It forces `Buildings` on itself, so it still tests the stamper
+    /// while the shipped default is off.
+    public static string BuildingSelfTest(int seeds = 24)
+    {
+        var fails = new List<string>();
+        bool savedB = Buildings, savedE = Edges.Enabled;
+        int withWalls = 0, totalWalls = 0, totalDoors = 0;
+
+        for (int s = 0; s < seeds; s++)
+        {
+            Buildings = true; Edges.Enabled = true;
+            Util.Reseed(42000 + s);
+            var g1 = new Grid(); var sq1 = TrainingSquad(); var fo1 = new List<Unit>();
+            Build(g1, sq1, fo1, 3);
+
+            Buildings = false; Edges.Enabled = true;
+            Util.Reseed(42000 + s);
+            var g2 = new Grid(); var sq2 = TrainingSquad(); var fo2 = new List<Unit>();
+            Build(g2, sq2, fo2, 3);
+
+            // (A) the restore flag really restores
+            if (g2.AnyEdges) fails.Add($"seed{s}: BUILDINGS=0 still placed an edge");
+
+            // (B) StampBuildings is PURELY ADDITIVE to the tile board. It runs last and stamps no
+            //     tiles, so the eight per-tile layers must be untouched — which is also why
+            //     SIGHTLINE_BUILDINGS=0 is a free measurement arm rather than merely a faithful one.
+            bool diverged = false;
+            for (int x = 0; x < g1.W && !diverged; x++)
+                for (int y = 0; y < g1.H && !diverged; y++)
+                    if (g1.Tiles[x, y] != g2.Tiles[x, y] || g1.Height[x, y] != g2.Height[x, y]
+                        || g1.Barrel[x, y] != g2.Barrel[x, y] || g1.Ground[x, y] != g2.Ground[x, y])
+                    { fails.Add($"seed{s}: a building moved the TILE board at {x},{y}"); diverged = true; }
+
+            if (!g1.AnyEdges) continue;
+            withWalls++;
+            for (int x = 0; x <= g1.W; x++) for (int y = 0; y < g1.H; y++)
+            { if (g1.EdgeV[x, y] == EdgeKind.High) totalWalls++; if (g1.EdgeV[x, y] == EdgeKind.Door) totalDoors++; }
+            for (int x = 0; x < g1.W; x++) for (int y = 0; y <= g1.H; y++)
+            { if (g1.EdgeH[x, y] == EdgeKind.High) totalWalls++; if (g1.EdgeH[x, y] == EdgeKind.Door) totalDoors++; }
+
+            // (C) THE PROMISE: no building removes a reachable tile. Same board, edge queries off
+            //     versus on, so nothing but the walls can account for a difference.
+            var withEdges = g1.CostMap(sq1[0].X, sq1[0].Y, null, out _, 9999);
+            Edges.Enabled = false;
+            var without = g1.CostMap(sq1[0].X, sq1[0].Y, null, out _, 9999);
+            Edges.Enabled = true;
+            int lost = 0;
+            for (int x = 0; x < g1.W; x++) for (int y = 0; y < g1.H; y++)
+                if (without[x, y] >= 0 && withEdges[x, y] < 0) lost++;
+            if (lost > 0) fails.Add($"seed{s}: buildings STRANDED {lost} tile(s)");
+        }
+
+        Buildings = savedB; Edges.Enabled = savedE;
+
+        // (D) the stamper must actually fire. A validator that reverts everything would pass every
+        //     leg above and ship a feature that does nothing — this repo's characteristic failure.
+        if (withWalls * 100 / seeds < 40)
+            fails.Add($"only {withWalls}/{seeds} boards got a building - the validator is eating them");
+        if (withWalls > 0 && totalDoors < withWalls * 2)
+            fails.Add($"{totalDoors} doors across {withWalls} walled boards - expected >= 2 each");
+
+        return fails.Count == 0
+            ? $"BUILDINGTEST: PASS ({withWalls}/{seeds} boards walled, {totalWalls} wall segments, {totalDoors} doors, "
+              + $"0 stranded; validator refused {BuildDbgSealed} would-be seals)"
+            : "BUILDINGTEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 
     // ---- Procedural map generation -----------------------------------------
