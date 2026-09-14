@@ -5098,13 +5098,26 @@ public partial class Game
         ThreatMs = _threatClock.Elapsed.TotalMilliseconds;
     }
 
+    /// P32 — THE ONE PICKING SEAM: a screen pixel becomes a board tile, in whichever projection is
+    /// live. Three call sites used to do this inline (UpdateHoverAndAim plus two in Hud.cs for the
+    /// threat card and the enemy hover card), each hard-wired to GetScreenToWorld2D — so a second
+    /// projection would have had to be added in three places and would have rotted in two of them.
+    public bool PickTile(Vector2 screen, out int tx, out int ty)
+    {
+        if (View3D.Enabled) return View3D.PickTile(Grid, screen, Cam3D, out tx, out ty);
+        return Util.ScreenToTile(Raylib.GetScreenToWorld2D(screen, ViewCamera(false)), out tx, out ty);
+    }
+
+    /// The projected camera for this board. Rebuilt per call: it depends only on the grid and the
+    /// pitch/yaw, both of which are cheap, and caching it would need invalidating on every one.
+    public Camera3D Cam3D => View3D.MakeCamera(Grid, (float)Cfg.ScreenW / Cfg.ScreenH);
+
     void UpdateHoverAndAim()
     {
         ShowOdds = false;
         PathPreview.Clear();
         // mouse -> board tile, through the (stable) picking camera so zoom/pan work
-        var world = Raylib.GetScreenToWorld2D(Hud.Mouse(), ViewCamera(false));   // PARALLAX: through the harness pin (NaN = live)
-        HoverValid = Util.ScreenToTile(world, out HoverX, out HoverY);
+        HoverValid = PickTile(Hud.Mouse(), out HoverX, out HoverY);   // PARALLAX: through the harness pin (NaN = live)
         if (KbCursor) { HoverX = CurX; HoverY = CurY; HoverValid = Grid.InBounds(CurX, CurY); }
 
         Unit hovered = HoverValid ? UnitAt(HoverX, HoverY) : null;
@@ -5368,6 +5381,16 @@ public partial class Game
             CamPan -= Raylib.GetMouseDelta() / CamZoom;
         }
         if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
+        // P32 — I toggles the PROJECTED view. Derived free-letter check at the time of binding
+        // (grep KeyboardKey. over src/) said I, J and Z were the only unclaimed letters.
+        // The 2D camera is reset on the way in and out: its pan/zoom mean nothing to the 3D
+        // camera, and a stale pan left the board off-centre on the way back.
+        if (Raylib.IsKeyPressed(KeyboardKey.I))
+        {
+            View3D.Enabled = !View3D.Enabled;
+            CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
+            ShowBanner(View3D.Enabled ? "PROJECTED VIEW" : "FLAT VIEW", false);
+        }
 
         if (CamZoom <= 1.001f) CamZoom = 1f;
         ClampCamPan();
@@ -8995,11 +9018,20 @@ public partial class Game
     /// Pass 1 — the bloom source. Board, death-flash, overlay-screen atmosphere.
     public void DrawBoardLayer()
     {
-        Raylib.ClearBackground(Pal.Bg);
-
-        Raylib.BeginMode2D(ViewCamera(true));
-        Renderer.DrawBoard(this);
-        Raylib.EndMode2D();
+        // P32 — the board is drawn in ONE of two projections. The HUD pass after this is
+        // untouched either way: it is screen-space and never knew the board had a projection.
+        if (View3D.Enabled)
+        {
+            View3D.Scene = Biome;
+            View3D.DrawPlayable(this);
+        }
+        else
+        {
+            Raylib.ClearBackground(Pal.Bg);
+            Raylib.BeginMode2D(ViewCamera(true));
+            Renderer.DrawBoard(this);
+            Raylib.EndMode2D();
+        }
 
         // red death-flash over the board (under the HUD) when a soldier falls
         if (DeathFlash > 0)

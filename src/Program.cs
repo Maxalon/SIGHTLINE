@@ -225,7 +225,11 @@ public static class Program
             }
         }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGES") == "0") Edges.Enabled = false;
-        if (Environment.GetEnvironmentVariable("SIGHTLINE_DISCOVERY") == "0") Vision.Enabled = false;
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DISCOVERY") == "1") Vision.Enabled = true;
+        // P32 — start in the PROJECTED view. Unlike SIGHTLINE_VIEW3DSHOT (which photographs the
+        // board through a bypass path and exits), this sets the same flag the I key toggles, so the
+        // game runs normally: full HUD, full input, the 3D board underneath.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3D") == "1") View3D.Enabled = true;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "0") Mission.Buildings = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "1") Mission.Buildings = true;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
@@ -860,6 +864,17 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VISIONTEST") == "1")
         {
             Console.WriteLine(Vision.SelfTest());
+            return;
+        }
+        // SIGHTLINE_PICKTEST=1 : P32 — the projected view's INPUT path. Projects every tile to a
+        // screen pixel and picks it back, at four camera angles. Needs a window (GetWorldToScreen
+        // reads the live framebuffer size).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PICKTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "picktest");
+            Console.WriteLine(View3D.PickSelfTest());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary

@@ -38,7 +38,17 @@ public static class Vision
 
     public static byte[,] Tile;           // [W, H]
     public static byte[,,] FaceV, FaceH;  // [W+1, H, 2] / [W, H+1, 2] — per EDGE FACE
-    public static bool Enabled = true;    // SIGHTLINE_DISCOVERY=0 restores "the board is all known"
+    /// ═══ DEFAULT OFF, AND THE REASON IS COHERENCE, NOT DOUBT ═════════════════════════════════
+    /// P32 made the projected view PLAYABLE and toggleable with one key. Only `View3D` consults
+    /// this layer, so with it on, pressing that key HID OR REVEALED PARTS OF THE BOARD: a
+    /// RENDERING toggle would have changed what the player knows. That is incoherent in any game
+    /// and especially in this one, whose architecture is that both teams read one truth.
+    ///
+    /// So discovery is opt-in (`SIGHTLINE_DISCOVERY=1`) until it applies to BOTH renderers — which
+    /// means teaching `Renderer.cs` about it, or accepting it as a real fog-of-war rule that the
+    /// AI and targeting honour too. Either is a decision with balance consequences and neither is
+    /// a side effect of choosing a camera. docs/ROADMAP.md carries it.
+    public static bool Enabled;
 
     static int _w, _h;
 
@@ -116,7 +126,7 @@ public static class Vision
     {
         var fails = new System.Collections.Generic.List<string>();
         void Is(bool c, string w) { if (!c) fails.Add(w); }
-        bool saved = Enabled; Enabled = true;
+        bool saved = Enabled; Enabled = true;   // the test drives the layer regardless of the default
 
         var g = new Grid();
         for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) g.Tiles[x, y] = TileType.Floor;

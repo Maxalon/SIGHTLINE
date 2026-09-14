@@ -18185,3 +18185,64 @@ Props take their own lift so their lit faces land where a block's lit face does.
 Only VERDANT has a species; ARID wants rocks, MAGMA slag, NEON signage, each one a `props.py` entry
 and a line in `CoverProp`. And the projected view is **still a screenshot hook**: it now looks like
 a place, and you still cannot play in it.
+
+---
+
+## P32. THE PROJECTED VIEW BECOMES THE GAME
+
+**2026-09-14, base `4d80fd7`.** *"make the 3d view playable then - hud, input, everything."*
+
+### The HUD needed no work, and that is the architecture paying out
+
+`Game.DrawBoardLayer` was already `BeginMode2D → Renderer.DrawBoard → EndMode2D`, and
+`DrawHudLayer` was already `Hud.Draw(this)` — pure screen space. So the board layer swaps for a 3D
+pass and **the HUD comes along untouched**, because it never knew the board had a projection. The
+whole of "hud" in the request cost one `if`.
+
+### Input was the real work, and it is ONE seam
+
+Three call sites turned a mouse position into a tile — `UpdateHoverAndAim`, plus the threat card
+and the enemy hover card in `Hud.cs` — and each inlined `GetScreenToWorld2D`. A second projection
+would have had to be added in three places and would have rotted in two. `Game.PickTile` is now the
+single seam; in 3D it is a ray/ground-plane intersection, exact rather than perspective-warped
+because the camera is orthographic.
+
+**`SIGHTLINE_PICKTEST` asserts the input path by ROUND TRIP**: project a tile's centre to a screen
+pixel with the same camera the frame is drawn with, hand that pixel back to the picker, get the
+same tile. 792 round-trips over four pitch/yaw pairs, because the failure that matters — an axis
+flipped, a half-tile offset, a yaw the inverse does not undo — is invisible at one angle and
+obvious at another. Plus a refusal check: an off-board pixel must be refused, not clamped to an
+edge tile, or the entire HUD margin behaves like a live board click.
+
+That test exists because **nothing else in this repository could see this bug class.** Every other
+check looks at pixels or at rules; picking is the seam BETWEEN them, and a view that renders
+beautifully and picks the wrong tile is not playable.
+
+### Overlays are geometry, not projected 2D
+
+Move range, path preview and hover are drawn as real quads and lines on the ground plane, so they
+are **depth-tested against the terrain for free** — a range tile behind a wall is occluded by that
+wall and nobody wrote an occlusion test. They also needed retuning: on the flat board the move
+overlay is a tint on a tile, but here it is a plate lying on lit geometry, so the same alpha read
+far heavier and buried the terrain the 3D view exists to show. The information moved into the
+outline and the fill was dropped to a grouping hint.
+
+### A design bug the toggle exposed, and it is the interesting one
+
+Only `View3D` consults `Vision`, so with discovery on, **pressing `I` hid or revealed parts of the
+board**. A RENDERING toggle was changing what the player knows. That is incoherent in any game and
+especially in this one, whose whole architecture is that both teams read one truth.
+
+Discovery is opt-in now (`SIGHTLINE_DISCOVERY=1`) until it either applies to both renderers or
+becomes a real fog-of-war rule the AI and targeting honour. Both are decisions with balance
+consequences; neither is a side effect of choosing a camera.
+
+### The honest scope of "playable"
+
+It plays: select, hover, see your range, preview the path, click to move or fire, full HUD, toggle
+back to flat mid-mission. What is NOT there, and is listed in `docs/ROADMAP.md`: no pan or zoom in
+3D (fine at 18x11 where the board fits, useless on `SIGHTLINE_BIGMAP`); no pitch/yaw control, which
+is most of the POINT of a projected view; only three of the board's overlays ported (threat zones,
+aim reticle, objective markers, evac zones, blast radius, scorch decals and the whole `Fx` layer
+still have no 3D equivalent); and no post-FX, since the 3D path draws straight to the framebuffer
+and bypasses `Display.RenderFrame`'s render target, bloom and grade.

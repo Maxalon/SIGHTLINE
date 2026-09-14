@@ -37,7 +37,7 @@ public static class View3D
 
     /// Camera elevation above the horizon, degrees. 90 = straight down (today's game), 0 = ground
     /// level. The whole point of the prototype is that we do not know what this should be.
-    public static float PitchDeg = 40f;
+    public static float PitchDeg = 52f;
 
     /// Rotation around the board's vertical axis, degrees. 0 = today's orientation (north up).
     public static float YawDeg = 0f;
@@ -613,6 +613,156 @@ public static class View3D
     /// "forty-five grey widgets in a coloured room read as a whitebox level" was RESONANCE V3's
     /// finding about the 2D board, and the 3D view had quietly reintroduced exactly that.
     public static Biome Scene = Biome.All[0];
+
+
+
+    // ══════════════════ SIGHTLINE_PICKTEST ══════════════════
+    /// THE INPUT PATH, ASSERTED. A projected view that draws beautifully and picks the wrong tile
+    /// is not playable, and nothing else in this repository can tell the difference — every other
+    /// check looks at pixels or at rules, and this is the seam BETWEEN them.
+    ///
+    /// The claim is a ROUND TRIP: project a tile's centre to a screen pixel with the same camera
+    /// the frame is drawn with, hand that pixel back to the picker, and get the same tile. Run over
+    /// every tile of the board, at several pitch/yaw pairs, because the failure mode that matters
+    /// (an axis flipped, a half-tile offset, a yaw the inverse does not undo) is invisible at one
+    /// angle and obvious at another.
+    ///
+    /// Needs a real window: Raylib.GetWorldToScreen reads the live framebuffer size.
+    public static string PickSelfTest()
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        var g = new Grid();
+        for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) g.Tiles[x, y] = TileType.Floor;
+        float savedP = PitchDeg, savedY = YawDeg;
+        int checkedTiles = 0;
+
+        foreach (var (pd, yd) in new[] { (52f, 0f), (40f, 20f), (64f, -35f), (30f, 45f) })
+        {
+            PitchDeg = pd; YawDeg = yd;
+            var cam = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            int bad = 0;
+            for (int y = 0; y < g.H; y++)
+                for (int x = 0; x < g.W; x++)
+                {
+                    var screen = Raylib.GetWorldToScreen(TileWorld(x, y), cam);
+                    checkedTiles++;
+                    if (!PickTile(g, screen, cam, out int px, out int py) || px != x || py != y)
+                        if (++bad <= 2) fails.Add($"p{pd:0}/y{yd:0}: tile {x},{y} picked as {px},{py}");
+                }
+            if (bad > 2) fails.Add($"p{pd:0}/y{yd:0}: {bad} tiles mis-picked in total");
+
+            // A pixel well outside the board must be refused, not clamped to an edge tile — a
+            // picker that clamps makes the whole HUD margin act like a live board click.
+            var far = Raylib.GetWorldToScreen(new Vector3(g.W + 25f, 0f, g.H + 25f), cam);
+            if (PickTile(g, far, cam, out _, out _)) fails.Add($"p{pd:0}/y{yd:0}: a point off the board picked a tile");
+        }
+
+        PitchDeg = savedP; YawDeg = savedY;
+        return fails.Count == 0
+            ? $"PICKTEST: PASS ({checkedTiles} tile round-trips over 4 camera angles)"
+            : "PICKTEST: FAIL\n  " + string.Join("\n  ", fails);
+    }
+
+    // ══════════════════ P32 — PLAYABLE: PICKING AND OVERLAYS ══════════════════
+    /// Screen pixel -> board tile, through the projected camera. The ground is the y = 0 plane, so
+    /// this is one ray/plane intersection and nothing more; the camera being ORTHOGRAPHIC means the
+    /// ray direction is the same everywhere and the result is exact rather than perspective-warped.
+    ///
+    /// This is the half that makes a VIEW into a GAME. Everything the projected camera drew was
+    /// output; until the mouse can be turned back into a tile there is nothing to click.
+    public static bool PickTile(Grid g, Vector2 screen, Camera3D cam, out int tx, out int ty)
+    {
+        tx = ty = -1;
+        var r = Raylib.GetScreenToWorldRay(screen, cam);
+        if (MathF.Abs(r.Direction.Y) < 1e-6f) return false;
+        float t = -r.Position.Y / r.Direction.Y;
+        if (t < 0f) return false;
+        var hit = r.Position + r.Direction * t;
+        tx = (int)MathF.Floor(hit.X); ty = (int)MathF.Floor(hit.Z);
+        return g.InBounds(tx, ty);
+    }
+
+    /// A flat quad on the ground plane. Overlays are drawn as REAL GEOMETRY rather than projected
+    /// 2D, so they are depth-tested against the terrain for free — a move-range tile behind a wall
+    /// is occluded by that wall without anyone writing an occlusion test.
+    static void GroundQuad(int x, int y, float h, float inset, Color c)
+    {
+        float a = x + inset, b = x + 1 - inset, p = y + inset, q = y + 1 - inset;
+        Raylib.DrawTriangle3D(new(a, h, p), new(a, h, q), new(b, h, q), c);
+        Raylib.DrawTriangle3D(new(a, h, p), new(b, h, q), new(b, h, p), c);
+    }
+    static void GroundOutline(int x, int y, float h, float inset, Color c)
+    {
+        float a = x + inset, b = x + 1 - inset, p = y + inset, q = y + 1 - inset;
+        Raylib.DrawLine3D(new(a, h, p), new(b, h, p), c); Raylib.DrawLine3D(new(b, h, p), new(b, h, q), c);
+        Raylib.DrawLine3D(new(b, h, q), new(a, h, q), c); Raylib.DrawLine3D(new(a, h, q), new(a, h, p), c);
+    }
+
+    /// The interactive feedback a tactics game cannot be played without: where can I go, what will
+    /// I walk, what am I pointing at. Deliberately NOT a port of Renderer.cs's ~480 2D draw calls —
+    /// this is the short list that turns "a picture of a board" into "a board you can act on", and
+    /// everything else (roster, action bar, cards, numbers) is screen-space HUD that already works
+    /// unchanged because it never knew about the board's projection in the first place.
+    static void DrawOverlays(Game g)
+    {
+        float Top(int x, int y) => TierH * g.Grid.HeightAt(x, y) + 0.03f;
+
+        // MOVE RANGE — every tile the selected soldier can reach this turn.
+        if (g.MoveCost != null && g.Selected != null)
+            for (int y = 0; y < g.Grid.H; y++)
+                for (int x = 0; x < g.Grid.W; x++)
+                {
+                    if (g.MoveCost[x, y] < 0) continue;
+                    if (Vision.At(x, y) == Vision.Unseen) continue;
+                    bool dash = g.MoveCost[x, y] > g.Selected.MoveBudget;   // second-action reach
+                    // Quiet FILL, legible EDGE. On the flat board the move overlay is a tint on a
+                    // tile; here it is a plate lying on lit geometry, so the same alpha reads far
+                    // heavier and buries the terrain the 3D view exists to show. Carry the
+                    // information in the outline and let the fill only group it.
+                    var c = dash ? Fade(Pal.Accent, 0.07f) : Fade(Pal.Friend, 0.09f);
+                    GroundQuad(x, y, Top(x, y), 0.08f, c);
+                    GroundOutline(x, y, Top(x, y) + 0.002f, 0.08f, Fade(dash ? Pal.Accent : Pal.Friend, 0.30f));
+                }
+
+        // PATH PREVIEW — the actual walk, not a straight line to the cursor.
+        if (g.PathPreview.Count > 0)
+        {
+            Vector3 prev = default; bool have = false;
+            foreach (var (px, py) in g.PathPreview)
+            {
+                var pt = new Vector3(px + 0.5f, Top(px, py) + 0.04f, py + 0.5f);
+                if (have) Raylib.DrawLine3D(prev, pt, Pal.Accent);
+                Raylib.DrawCube(pt, 0.10f, 0.02f, 0.10f, Pal.Accent);
+                prev = pt; have = true;
+            }
+        }
+
+        // HOVER — the tile under the cursor, always drawn last so it wins.
+        if (g.HoverValid)
+            GroundOutline(g.HoverX, g.HoverY, Top(g.HoverX, g.HoverY) + 0.006f, 0.02f, Pal.Txt);
+    }
+
+    /// The PLAYABLE frame: the same board the screenshot hook draws, plus the interaction layer.
+    /// Called from Game.DrawBoardLayer in place of the 2D board; Hud.Draw runs after it untouched.
+    public static void DrawPlayable(Game g)
+    {
+        Raylib.ClearBackground(Pal.Bg);
+        Vision.Refresh(g.Grid, AllUnits(g));
+        var cam = MakeCamera(g.Grid, (float)Cfg.ScreenW / Cfg.ScreenH);
+        Raylib.BeginMode3D(cam);
+        DrawTerrain(g.Grid);
+        DrawOverlays(g);
+        DrawChips(g.Grid, AllUnits(g));
+        Raylib.EndMode3D();
+        DrawMarkers(g.Grid, AllUnits(g), cam);
+    }
+
+    static List<Unit> AllUnits(Game g)
+    {
+        var all = new List<Unit>(g.Players);
+        all.AddRange(g.Enemies);
+        return all;
+    }
 
     public static void DrawFrame(Grid g, List<Unit> units)
     {
