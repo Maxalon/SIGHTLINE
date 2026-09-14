@@ -225,6 +225,7 @@ public static class Program
             }
         }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGES") == "0") Edges.Enabled = false;
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DISCOVERY") == "0") Vision.Enabled = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "0") Mission.Buildings = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "1") Mission.Buildings = true;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
@@ -853,6 +854,12 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BOARDSIZETEST") == "1")
         {
             Console.WriteLine(BoardSize.SelfTest());
+            return;
+        }
+        // SIGHTLINE_VISIONTEST=1 : P30 — the DISCOVERY layer. What HQ knows vs what is there.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VISIONTEST") == "1")
+        {
+            Console.WriteLine(Vision.SelfTest());
             return;
         }
         // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary

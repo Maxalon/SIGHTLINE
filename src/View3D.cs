@@ -128,6 +128,12 @@ public static class View3D
     // The unit block, built once on first use because UploadMesh needs a live GL context. Scaled
     // per draw: the lighting is BAKED into the vertices, so a non-uniform scale cannot break the
     // shading the way it would break a runtime normal.
+    /// Scale a colour toward black by the knowledge factor. REMEMBERED terrain is DIMMED, never
+    /// recoloured: brightness alone then carries "how well do we know this", which leaves hue free
+    /// to mean something else later.
+    static Color Known(Color c, float f) =>
+        Pal.RGBA((int)(c.R * f), (int)(c.G * f), (int)(c.B * f), c.A);
+
     static Model _block; static bool _blockReady;
     static Model Blocks
     {
@@ -161,27 +167,42 @@ public static class View3D
             for (int y = 0; y < g.H; y++)
             {
                 var k = g.EdgeV[x, y]; if (k == EdgeKind.None) continue;
-                var at = new Vector3(x, 0f, y + 0.5f);
+                byte w0 = Vision.FaceVAt(x, y, 0), w1 = Vision.FaceVAt(x, y, 1);
+                if (w0 == Vision.Unseen && w1 == Vision.Unseen) continue;
+                // ONE SIDE KNOWN = ONE PLANE. Half the thickness, flush to the face that was
+                // actually observed, so the operator cannot read a depth nobody has been round
+                // the back to measure. Both sides known and the wall gets its real thickness.
+                float th = (w0 != Vision.Unseen && w1 != Vision.Unseen) ? T : T * 0.5f;
+                float off = (w0 != Vision.Unseen && w1 != Vision.Unseen) ? 0f
+                          : (w0 != Vision.Unseen ? -T * 0.25f : T * 0.25f);
+                float vf = Vision.Dim(Math.Max(w0, w1));
+                var at = new Vector3(x + off, 0f, y + 0.5f);
                 if (k == EdgeKind.Door)
                 {
-                    Slab(at with { Z = y + 0.18f }, T, HighH * 0.95f, 0.36f, Pal.CoverHiTop);
-                    Slab(at with { Z = y + 0.82f }, T, HighH * 0.95f, 0.36f, Pal.CoverHiTop);
-                    Slab(at with { Y = HighH * 0.78f }, T, HighH * 0.22f, 1f, Pal.CoverHiTop);
+                    Slab(at with { Z = y + 0.18f }, th, HighH * 0.95f, 0.36f, Known(Pal.CoverHiTop, vf));
+                    Slab(at with { Z = y + 0.82f }, th, HighH * 0.95f, 0.36f, Known(Pal.CoverHiTop, vf));
+                    Slab(at with { Y = HighH * 0.78f }, th, HighH * 0.22f, 1f, Known(Pal.CoverHiTop, vf));
                 }
-                else Slab(at, T, k == EdgeKind.High ? HighH : LowH, 1f, Pal.CoverHiTop);
+                else Slab(at, th, k == EdgeKind.High ? HighH : LowH, 1f, Known(Pal.CoverHiTop, vf));
             }
         for (int x = 0; x < g.W; x++)
             for (int y = 0; y <= g.H; y++)
             {
                 var k = g.EdgeH[x, y]; if (k == EdgeKind.None) continue;
-                var at = new Vector3(x + 0.5f, 0f, y);
+                byte n0 = Vision.FaceHAt(x, y, 0), n1 = Vision.FaceHAt(x, y, 1);
+                if (n0 == Vision.Unseen && n1 == Vision.Unseen) continue;
+                float th = (n0 != Vision.Unseen && n1 != Vision.Unseen) ? T : T * 0.5f;
+                float off = (n0 != Vision.Unseen && n1 != Vision.Unseen) ? 0f
+                          : (n0 != Vision.Unseen ? -T * 0.25f : T * 0.25f);
+                float vf = Vision.Dim(Math.Max(n0, n1));
+                var at = new Vector3(x + 0.5f, 0f, y + off);
                 if (k == EdgeKind.Door)
                 {
-                    Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, T, Pal.CoverHiTop);
-                    Slab(at with { X = x + 0.82f }, 0.36f, HighH * 0.95f, T, Pal.CoverHiTop);
-                    Slab(at with { Y = HighH * 0.78f }, 1f, HighH * 0.22f, T, Pal.CoverHiTop);
+                    Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, th, Known(Pal.CoverHiTop, vf));
+                    Slab(at with { X = x + 0.82f }, 0.36f, HighH * 0.95f, th, Known(Pal.CoverHiTop, vf));
+                    Slab(at with { Y = HighH * 0.78f }, 1f, HighH * 0.22f, th, Known(Pal.CoverHiTop, vf));
                 }
-                else Slab(at, 1f, k == EdgeKind.High ? HighH : LowH, T, Pal.CoverHiTop);
+                else Slab(at, 1f, k == EdgeKind.High ? HighH : LowH, th, Known(Pal.CoverHiTop, vf));
             }
     }
 
@@ -193,12 +214,24 @@ public static class View3D
             for (int x = 0; x < g.W; x++)
             {
                 if (Terrain.Enabled && g.Ground != null && g.Ground[x, y] == GroundKind.Rift) continue;
-                Raylib.DrawCube(TileWorld(x, y, -0.05f), 1f, 0.1f, 1f, ((x + y) & 1) == 0 ? Pal.FloorA : Pal.FloorB);
+                byte st = Vision.At(x, y); if (st == Vision.Unseen) continue;
+                float f = Vision.Dim(st);
+                Raylib.DrawCube(TileWorld(x, y, -0.05f), 1f, 0.1f, 1f,
+                                Known(((x + y) & 1) == 0 ? Pal.FloorA : Pal.FloorB, f));
             }
-        for (int x = 0; x <= g.W; x++)
-            Raylib.DrawLine3D(new Vector3(x, 0.006f, 0), new Vector3(x, 0.006f, g.H), Pal.GridLine);
-        for (int y = 0; y <= g.H; y++)
-            Raylib.DrawLine3D(new Vector3(0, 0.006f, y), new Vector3(g.W, 0.006f, y), Pal.GridLine);
+        // Per-TILE outlines rather than board-spanning lines: a line drawn across the whole board
+        // would run through ground nobody has looked at, which is the one thing this layer exists
+        // to stop. The lattice has to stop where the knowledge does.
+        for (int y = 0; y < g.H; y++)
+            for (int x = 0; x < g.W; x++)
+            {
+                byte st = Vision.At(x, y); if (st == Vision.Unseen) continue;
+                var c = Known(Pal.GridLine, Vision.Dim(st));
+                Raylib.DrawLine3D(new Vector3(x, 0.006f, y), new Vector3(x + 1, 0.006f, y), c);
+                Raylib.DrawLine3D(new Vector3(x, 0.006f, y), new Vector3(x, 0.006f, y + 1), c);
+                if (x == g.W - 1) Raylib.DrawLine3D(new Vector3(x + 1, 0.006f, y), new Vector3(x + 1, 0.006f, y + 1), c);
+                if (y == g.H - 1) Raylib.DrawLine3D(new Vector3(x, 0.006f, y + 1), new Vector3(x + 1, 0.006f, y + 1), c);
+            }
 
         var e = Fade(Pal.Accent, 0.55f);
         Raylib.DrawLine3D(new Vector3(0, 0.03f, 0), new Vector3(g.W, 0.03f, 0), e);
@@ -218,25 +251,27 @@ public static class View3D
                     continue;
                 }
 
+                if (Vision.At(x, y) == Vision.Unseen) continue;   // P30: not known, not drawn
+                float vf = Vision.Dim(Vision.At(x, y));
                 int h = g.Height[x, y];
                 float baseY = 0f;
                 if (h > 0)
                 {
                     float ht = TierH * h;
                     Solid(TileWorld(x, y, ht * 0.5f), 1f, ht, 1f,
-                          Pal.HighSide, ((x + y) & 1) == 0 ? Pal.HighA : Pal.HighB);
+                          Known(Pal.HighSide, vf), Known(((x + y) & 1) == 0 ? Pal.HighA : Pal.HighB, vf));
                     baseY = ht;
                 }
 
                 var t = g.Tiles[x, y];
                 if (t == TileType.LowCover)
-                    Solid(TileWorld(x, y, baseY + LowH * 0.5f), 0.86f, LowH, 0.86f, Pal.CoverLo, Pal.CoverLoTop);
+                    Solid(TileWorld(x, y, baseY + LowH * 0.5f), 0.86f, LowH, 0.86f, Known(Pal.CoverLo, vf), Known(Pal.CoverLoTop, vf));
                 else if (t == TileType.HighCover)
-                    Solid(TileWorld(x, y, baseY + HighH * 0.5f), 0.92f, HighH, 0.92f, Pal.CoverHi, Pal.CoverHiTop);
+                    Solid(TileWorld(x, y, baseY + HighH * 0.5f), 0.92f, HighH, 0.92f, Known(Pal.CoverHi, vf), Known(Pal.CoverHiTop, vf));
 
                 if (g.Barrel[x, y])
                     Solid(TileWorld(x, y, baseY + 0.32f), 0.52f, 0.64f, 0.52f,
-                          Pal.RGBA(110, 82, 24), Pal.VipGold);
+                          Known(Pal.RGBA(110, 82, 24), vf), Known(Pal.VipGold, vf));
             }
 
         DrawEdges(g);      // P30: the walls P28 put between tiles, finally visible in 3D
@@ -361,17 +396,31 @@ public static class View3D
     ///
     /// Rlgl.DrawRenderBatchActive() before each state change is NOT optional: Raylib batches draw
     /// calls, so flipping depth state without flushing applies it to geometry already queued.
+    /// P30 — A HOSTILE IS ONLY DRAWN WHERE THE SQUAD CAN SEE IT.
+    ///
+    /// The first build of the discovery layer gated TERRAIN and forgot the units, so on a big
+    /// board the enemy chips sat out in the black, plainly visible on ground nobody had scanned.
+    /// That does not merely leak information, it defeats the entire mechanic: an operator who can
+    /// see every hostile has no reason to care what the terrain memory says.
+    ///
+    /// VISIBLE only, never REMEMBERED: terrain that was seen an hour ago is still where it was,
+    /// but a soldier who was seen an hour ago has moved. Drawing a stale hostile at a stale tile
+    /// would be an outright lie rather than an honest memory. Friendlies are always drawn — HQ
+    /// knows where it sent its own people.
+    static bool Shown(Unit u) =>
+        u.Team == Team.Player || !Vision.Enabled || Vision.At(u.X, u.Y) == Vision.Visible;
+
     public static void DrawChips(Grid g, List<Unit> units)
     {
         Rlgl.DrawRenderBatchActive();
         Rlgl.DisableDepthTest();
         Rlgl.DisableDepthMask();     // the ghost must not write depth or it occludes the solid pass
-        foreach (var u in units) if (u.Alive) Chip(g, u, ghost: true);
+        foreach (var u in units) if (u.Alive && Shown(u)) Chip(g, u, ghost: true);
         Rlgl.DrawRenderBatchActive();
         Rlgl.EnableDepthMask();
         Rlgl.EnableDepthTest();
 
-        foreach (var u in units) if (u.Alive) Chip(g, u, ghost: false);
+        foreach (var u in units) if (u.Alive && Shown(u)) Chip(g, u, ghost: false);
 
         // MESH DRAWS GO TOGETHER, ONCE — never interleaved with batched primitives.
         // Raylib has two drawing paths that do not mix freely: DrawCube/DrawCylinder queue into
@@ -383,7 +432,7 @@ public static class View3D
         Rlgl.DrawRenderBatchActive();
         foreach (var u in units)
         {
-            if (!u.Alive) continue;
+            if (!u.Alive || !Shown(u)) continue;
             bool friend = u.Team == Team.Player;
             Color dk = u.IsVip ? Pal.VipDk : (friend ? Pal.FriendDk : Pal.EliteDk);
             Raylib.DrawModel(_chipModel,
@@ -406,7 +455,7 @@ public static class View3D
 
         foreach (var u in order)
         {
-            if (!u.Alive) continue;
+            if (!u.Alive || !Shown(u)) continue;   // P30: no glyph for a hostile nobody can see
             float baseY = TierH * g.Height[u.X, u.Y];
             var top = new Vector3(u.X + 0.5f, baseY + ChipFloat + ChipH + 0.05f, u.Y + 0.5f);
             // Paired with the x-ray pass below the glyph: an occluded chip keeps its identity but
@@ -429,6 +478,7 @@ public static class View3D
     public static void DrawFrame(Grid g, List<Unit> units)
     {
         Raylib.ClearBackground(Pal.Bg);
+        Vision.Refresh(g, units);   // P30: what HQ knows, before anything is drawn from it
         var cam = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
         Raylib.BeginMode3D(cam);
         DrawTerrain(g);

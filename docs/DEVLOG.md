@@ -18055,3 +18055,80 @@ and the cover archetypes were tuned for 198 tiles; at 1,120 they spread the same
 range are all still 18x11 numbers. Those are in `docs/ROADMAP.md` and the answer to most of them is
 the one P27-N already gave: author real boards, insert NEAR the objective, and let size buy lateral
 choice rather than distance.
+
+---
+
+## P30. THE PROJECTED VIEW STOPS LOOKING FLAT — and learns what it does not know
+
+**2026-09-14, base `857b6ed`.** The owner's redirect, and the priority call in it is the useful
+part: *"i'd say that angled camera and what we're trying to do here is more important. discovery
+system and ray render system together with the actual 3d looking things... from the screenshot you
+sent it still looks flat and 2d with the top down view."*
+
+### The camera was never the problem
+
+`View3D` had an angled orthographic camera from P27. The board still read as flat because
+**Raylib's default shader applies no lighting**: `DrawCube` paints every face of a solid the same
+colour, so terrain built from it is coloured paper at any angle. The prototype had solved this in
+P28 and the engine had not.
+
+`Mesh3D.BevelBox` bakes the key light into per-vertex colours — 6 faces, 12 edge strips, 8 corners,
+44 triangles, the count Blender's bevel modifier gives for one segment. One unit mesh, scaled per
+draw: the lighting is baked, so a non-uniform scale cannot break the shading the way it would break
+a runtime normal. `View3D.Solid` was the chokepoint (a flat cube plus a brighter cube faking a lit
+cap), so replacing its body upgraded plateaus, cover and barrels in one edit.
+
+### Two bugs, both found by looking at a render, neither by a test
+
+**`Mesh3D.Key`'s Z sign lit the back of the board.** The camera sits at +Z, so the visible faces
+are +Z; the key's `-0.32` lit the faces pointing away. The lathed chip survived it for two waves
+because it is rotationally symmetric and the `-0.40` X term still produced a left-right gradient. A
+BOX cannot hide it — every front face lands on the ambient floor.
+
+**Both Y faces and half the X-Z edge strips were wound backwards.** OpenGL back-face-culled them,
+so a block rendered as a dark hole with a lit rim round it — plainly wrong on screen, and invisible
+to every assertion in the repository. A bevelled box is 26 faces built from three sign loops and
+nobody gets all 26 windings right by inspection. **Since each face already declares the normal it
+wants, the geometric normal of the winding is now compared against it and the order flipped on
+disagreement.** Self-correcting, and it cannot rot as faces are added.
+
+That is the wave's contribution to PARALLAX's standing thesis. Its sibling from P28 was "an
+indexing convention will leak into appearance unless something stops it". This one:
+
+> **Geometry has no assertions. The only instrument that sees a winding bug is an eye.**
+> So generators should CHECK their own invariants rather than rely on the author having been
+> careful, because nothing downstream will ever complain.
+
+### The discovery layer
+
+`src/Vision.cs`. Three states — Unseen / Remembered / Visible — per TILE and per EDGE FACE. Unseen
+is not drawn at all: the operator is never told there is something they cannot see, the board
+simply stops. A wall observed from one side renders as a half-thickness plane flush to the observed
+face, so its depth stays unreadable until somebody walks round it — which falls out of P28's edge
+layer, because a boundary already had two sides and one home.
+
+**It reads `Grid.HasLineOfSight`, not a second model.** A LiDAR-style ray sweep gives finer partial
+coverage (`prototypes/lidar` shows exactly what that looks like) and would be a SECOND visibility
+model; this project's whole architecture is that both teams read one truth. Fidelity second,
+agreement first. Sight range is the owner's own rule from §P27-N — nine tiles, plus one per level
+below — which works on the existing `Grid.Height` scalar and needs no 3D data model.
+
+**The first build gated terrain and forgot the units**, so on a big board the hostile chips sat out
+in the black on unscanned ground. That does not leak information so much as defeat the mechanic
+entirely: an operator who can see every hostile has no reason to care what the terrain memory says.
+Fixed at all three unit passes. Hostiles are drawn on VISIBLE only, never REMEMBERED — terrain seen
+an hour ago is still where it was, a soldier seen an hour ago has moved, and drawing a stale
+hostile at a stale tile is a lie rather than an honest memory.
+
+`SIGHTLINE_VISIONTEST` covers it, and leg (E) caught the AUTHOR rather than the code: the first
+version moved the soldier to a tile five away on the same side of the wall and asserted the old
+ground had gone to Remembered. It had not, correctly.
+
+### What is NOT done
+
+The props are still boxes — `assets/props/*.glb` is sitting there from P28 and wiring it needs the
+`.csproj` copy list and `Ship.RequiredFiles` together, or C6's cwd fallback hides a broken build.
+The ray/coverage render (partial per-surface knowledge with a confidence gradient) is still only in
+the prototype and needs a texture atlas. Discovery is presentation-only. And the projected view is
+**still a screenshot hook** — nothing lets you play in it, which is the gap between "it looks
+right" and "it is the game".
