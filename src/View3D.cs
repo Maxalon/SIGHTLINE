@@ -99,16 +99,90 @@ public static class View3D
     /// the palette was already built for it: every cover and plateau colour ships as a SIDE/TOP pair
     /// (CoverHi/CoverHiTop, HighSide/HighA). So each solid is drawn as a dark body in the side
     /// colour plus a thin bright CAP in the top colour, and the volume reads instantly.
+    /// P30 — ONE LIT, BEVELLED MESH instead of two flat cubes.
+    ///
+    /// This used to be `DrawCube` for the body plus a second, brighter `DrawCube` sitting on top
+    /// faking a lit cap. Raylib's default shader applies NO lighting, so every face of a cube is
+    /// the same flat colour and terrain built from it reads as coloured paper however the camera
+    /// is angled. That — not the camera — is why the projected view still looked 2D.
+    ///
+    /// `Mesh3D.BevelBox` bakes the key light into per-vertex colours, and the default shader
+    /// multiplies texel x material x vertex, so the per-draw tint still supplies the biome/team
+    /// colour on top. The chamfer is what makes the silhouette catch a highlight.
+    ///
+    /// EVERY CALL SITE IS UNCHANGED: same centre-and-size signature, so plateaus, cover, barrels
+    /// and anything added later all gain the lighting through this one chokepoint. `top` becomes
+    /// the tint (the bake only ever DARKENS, so tinting with the brighter of the pair lands the
+    /// lit face where the old flat cap sat); `side` and `capA` are kept for signature
+    /// compatibility and are deliberately unused.
     static void Solid(Vector3 centre, float w, float h, float d, Color side, Color top, float capA = 1f)
     {
-        Raylib.DrawCube(centre, w, h, d, side);
-        // The cap sits ENTIRELY ON TOP of the body rather than flush with its top face. A flush cap
-        // shares a plane with the face beneath it and the depth buffer cannot order them, which
-        // stripes every tall block with z-fighting bands — visible and ugly the first time it was
-        // rendered. Half a cap-height of clearance costs nothing and removes the artifact.
-        var cap = centre with { Y = centre.Y + h * 0.5f + CapH * 0.5f };
-        Raylib.DrawCube(cap, w * 0.99f, CapH, d * 0.99f, Fade(top, capA));
-        Raylib.DrawCubeWires(centre, w, h, d, Fade(top, 0.45f));
+        // The bake only ever darkens, so tint with a LIFT: the lit top face then lands where the
+        // old flat cap sat instead of a third under it.
+        var tint = Pal.RGBA(Math.Min(255, top.R * 5 / 4), Math.Min(255, top.G * 5 / 4),
+                            Math.Min(255, top.B * 5 / 4), top.A);
+        Raylib.DrawModelEx(Blocks, centre with { Y = centre.Y - h * 0.5f }, Vector3.UnitY, 0f,
+                           new Vector3(w, h, d), tint);
+    }
+
+    // The unit block, built once on first use because UploadMesh needs a live GL context. Scaled
+    // per draw: the lighting is BAKED into the vertices, so a non-uniform scale cannot break the
+    // shading the way it would break a runtime normal.
+    static Model _block; static bool _blockReady;
+    static Model Blocks
+    {
+        get
+        {
+            if (!_blockReady)
+            {
+                _block = Raylib.LoadModelFromMesh(Mesh3D.BevelBox(1f, 1f, 1f, 0.07f, 0.52f));
+                _blockReady = true;
+            }
+            return _block;
+        }
+    }
+
+    // ── P30: THE EDGE LAYER IN THREE DIMENSIONS ──────────────────────────────────────────────
+    /// P28 put walls on tile BOUNDARIES and taught the 2D renderer to draw them; the projected
+    /// view never learned, so a building placed under SIGHTLINE_BUILDINGS=1 was simply INVISIBLE
+    /// here — the one thing a 3D view should show better than a top-down one.
+    ///
+    /// A wall is a thin slab straddling the grid line, never a filled cell: the player has to be
+    /// able to see that both tiles beside it are still standable. A door is two jambs and a lintel
+    /// so the opening reads as a way through rather than as a gap in the geometry.
+    public static void DrawEdges(Grid g)
+    {
+        if (g == null || !g.AnyEdges || !Edges.Enabled) return;
+        float T = 0.16f;
+        void Slab(Vector3 baseCentre, float w, float h, float d, Color c) =>
+            Solid(baseCentre with { Y = baseCentre.Y + h * 0.5f }, w, h, d, c, c);
+
+        for (int x = 0; x <= g.W; x++)
+            for (int y = 0; y < g.H; y++)
+            {
+                var k = g.EdgeV[x, y]; if (k == EdgeKind.None) continue;
+                var at = new Vector3(x, 0f, y + 0.5f);
+                if (k == EdgeKind.Door)
+                {
+                    Slab(at with { Z = y + 0.18f }, T, HighH * 0.95f, 0.36f, Pal.CoverHiTop);
+                    Slab(at with { Z = y + 0.82f }, T, HighH * 0.95f, 0.36f, Pal.CoverHiTop);
+                    Slab(at with { Y = HighH * 0.78f }, T, HighH * 0.22f, 1f, Pal.CoverHiTop);
+                }
+                else Slab(at, T, k == EdgeKind.High ? HighH : LowH, 1f, Pal.CoverHiTop);
+            }
+        for (int x = 0; x < g.W; x++)
+            for (int y = 0; y <= g.H; y++)
+            {
+                var k = g.EdgeH[x, y]; if (k == EdgeKind.None) continue;
+                var at = new Vector3(x + 0.5f, 0f, y);
+                if (k == EdgeKind.Door)
+                {
+                    Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, T, Pal.CoverHiTop);
+                    Slab(at with { X = x + 0.82f }, 0.36f, HighH * 0.95f, T, Pal.CoverHiTop);
+                    Slab(at with { Y = HighH * 0.78f }, 1f, HighH * 0.22f, T, Pal.CoverHiTop);
+                }
+                else Slab(at, 1f, k == EdgeKind.High ? HighH : LowH, T, Pal.CoverHiTop);
+            }
     }
 
     public static void DrawTerrain(Grid g)
@@ -164,6 +238,8 @@ public static class View3D
                     Solid(TileWorld(x, y, baseY + 0.32f), 0.52f, 0.64f, 0.52f,
                           Pal.RGBA(110, 82, 24), Pal.VipGold);
             }
+
+        DrawEdges(g);      // P30: the walls P28 put between tiles, finally visible in 3D
     }
 
     // ── The unit pass: CHIPS, not map pins ───────────────────────────────────────────────────

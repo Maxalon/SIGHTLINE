@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Raylib_cs;
 
@@ -24,7 +25,14 @@ public static class Mesh3D
 {
     /// Fixed key light. Above, slightly to the viewer's left — the same direction the 2D board's
     /// faux-3D cover has always been lit from, so the projected view agrees with the flat one.
-    static readonly Vector3 Key = Vector3.Normalize(new Vector3(-0.40f, 0.86f, -0.32f));
+    /// P30 — THE Z SIGN WAS WRONG AND IT LIT THE BACK OF THE BOARD.
+    /// `View3D.MakeCamera` puts the camera at +Z (dir = (cos p sin y, sin p, cos p cos y), and the
+    /// position is target + dir * 40), so the faces a player SEES are the +Z ones. A key with
+    /// Z = -0.32 lit the faces pointing AWAY from the camera. The lathed chip survived it because
+    /// it is rotationally symmetric and the -0.40 X term still produced a left-right gradient; a
+    /// BOX cannot, and every front face would have landed on the ambient floor — measured at
+    /// exactly 0.34 x 255 = 87, dead flat, when the same bake was tried offline.
+    static readonly Vector3 Key = Vector3.Normalize(new Vector3(-0.40f, 0.86f, 0.32f));
 
     /// Ambient floor: how lit an unlit face is. Below ~0.3 the underside of a chip goes to mud.
     const float Ambient = 0.34f;
@@ -88,6 +96,108 @@ public static class Mesh3D
         // to draw state instead.
         if (vi != vCount || ii != tCount * 3)
             Console.Error.WriteLine($"LATHE UNDERFILL verts={vi}/{vCount} idx={ii}/{tCount * 3}");
+        Raylib.UploadMesh(&mesh, false);
+        return mesh;
+    }
+
+    // ══════════════════ P30 — THE BEVELLED BLOCK ══════════════════
+    /// A box with chamfered edges and a directional light BAKED PER FACE, which is the whole of
+    /// docs/ROADMAP.md's top open item. `Raylib.DrawCube` paints every face of a solid the same
+    /// flat colour — there is no lighting in the default shader — so terrain built from it reads
+    /// as coloured paper no matter how the camera is angled. That is why the projected view looked
+    /// 2D: not the camera, the SHADING.
+    ///
+    /// THE BEVEL IS NOT DECORATION. A chamfer gives every edge a narrow face at a different angle
+    /// to the key, so the silhouette catches a highlight and the block reads as a solid with a
+    /// direction rather than as a flat region of colour. 6 faces + 12 edge strips + 8 corners =
+    /// 44 triangles, the same count Blender's bevel modifier produces for one segment.
+    ///
+    /// Base sits at y = 0 so a caller places a block by its FOOTPRINT, not by its centre.
+    /// `ambient` overrides the module floor. TERRAIN wants a higher one than the chip does: the
+    /// chip is a small object read against a flat board and can afford a deep unlit side, while a
+    /// cover block's dark faces are most of what the player looks at. At the chip's 0.34 the side
+    /// of a block landed at 0.34 x its tint, well UNDER the flat colour the old two-cube draw used
+    /// — better form, worse legibility. 0.52 keeps the modelling and puts the dark faces back
+    /// roughly where the eye expects them.
+    public static unsafe Mesh BevelBox(float w, float h, float d, float bevel, float ambient = -1f)
+    {
+        float bx = MathF.Min(bevel, w * 0.49f), by = MathF.Min(bevel, h * 0.49f), bz = MathF.Min(bevel, d * 0.49f);
+        float hw = w * 0.5f, hd = d * 0.5f;
+        // inner corner grid: the eight points the chamfer is cut back to
+        Vector3 P(int sx, int sy, int sz) => new(sx * (hw - bx), sy > 0 ? h - by : by, sz * (hd - bz));
+
+        var verts = new List<(Vector3 p, Vector3 n)>();
+        var tris = new List<int>();
+        // WINDING IS ASSERTED, NOT HAND-CHECKED. A bevelled box is 26 faces built from three
+        // sign loops, and getting the vertex ORDER right for every one of them by inspection is a
+        // job nobody does correctly: the first version had the two Y faces and half the X-Z edge
+        // strips wound backwards, so OpenGL back-face-culled them and a block rendered as a dark
+        // hole with a lit rim round it. Since each face already declares the normal it WANTS, the
+        // geometric normal of the winding can simply be compared against it and the order flipped
+        // when they disagree. Self-correcting, and it cannot rot as faces are added.
+        void Quad(Vector3 a, Vector3 b2, Vector3 c, Vector3 e, Vector3 n)
+        {
+            if (Vector3.Dot(Vector3.Cross(b2 - a, c - b2), n) < 0f) (a, b2, c, e) = (e, c, b2, a);
+            int i0 = verts.Count;
+            verts.Add((a, n)); verts.Add((b2, n)); verts.Add((c, n)); verts.Add((e, n));
+            tris.Add(i0); tris.Add(i0 + 1); tris.Add(i0 + 2);
+            tris.Add(i0); tris.Add(i0 + 2); tris.Add(i0 + 3);
+        }
+        void Tri(Vector3 a, Vector3 b2, Vector3 c, Vector3 n)
+        {
+            if (Vector3.Dot(Vector3.Cross(b2 - a, c - b2), n) < 0f) (a, c) = (c, a);
+            int i0 = verts.Count;
+            verts.Add((a, n)); verts.Add((b2, n)); verts.Add((c, n));
+            tris.Add(i0); tris.Add(i0 + 1); tris.Add(i0 + 2);
+        }
+        // push an inner corner out onto one of the three face planes
+        Vector3 OnX(int sx, int sy, int sz) { var v = P(sx, sy, sz); v.X = sx * hw; return v; }
+        Vector3 OnY(int sx, int sy, int sz) { var v = P(sx, sy, sz); v.Y = sy > 0 ? h : 0f; return v; }
+        Vector3 OnZ(int sx, int sy, int sz) { var v = P(sx, sy, sz); v.Z = sz * hd; return v; }
+
+        for (int s = -1; s <= 1; s += 2)
+        {
+            var nx = new Vector3(s, 0, 0);
+            Quad(OnX(s, -1, -s), OnX(s, 1, -s), OnX(s, 1, s), OnX(s, -1, s), nx);
+            var nz = new Vector3(0, 0, s);
+            Quad(OnZ(s, -1, s), OnZ(s, 1, s), OnZ(-s, 1, s), OnZ(-s, -1, s), nz);
+            var ny = new Vector3(0, s, 0);
+            Quad(OnY(-1, s, -s), OnY(1, s, -s), OnY(1, s, s), OnY(-1, s, s), ny);
+        }
+        // 12 edge strips
+        for (int sx = -1; sx <= 1; sx += 2) for (int sz = -1; sz <= 1; sz += 2)
+        {
+            var n = Vector3.Normalize(new Vector3(sx, 0, sz));
+            Quad(OnX(sx, -1, sz), OnX(sx, 1, sz), OnZ(sx, 1, sz), OnZ(sx, -1, sz), n);
+        }
+        for (int sx = -1; sx <= 1; sx += 2) for (int sy = -1; sy <= 1; sy += 2)
+        {
+            var n = Vector3.Normalize(new Vector3(sx, sy, 0));
+            Quad(OnX(sx, sy, -1), OnX(sx, sy, 1), OnY(sx, sy, 1), OnY(sx, sy, -1), n);
+        }
+        for (int sz = -1; sz <= 1; sz += 2) for (int sy = -1; sy <= 1; sy += 2)
+        {
+            var n = Vector3.Normalize(new Vector3(0, sy, sz));
+            Quad(OnZ(-1, sy, sz), OnZ(1, sy, sz), OnY(1, sy, sz), OnY(-1, sy, sz), n);
+        }
+        // 8 corners
+        for (int sx = -1; sx <= 1; sx += 2) for (int sy = -1; sy <= 1; sy += 2) for (int sz = -1; sz <= 1; sz += 2)
+            Tri(OnX(sx, sy, sz), OnY(sx, sy, sz), OnZ(sx, sy, sz), Vector3.Normalize(new Vector3(sx, sy, sz)));
+
+        var mesh = new Mesh(verts.Count, tris.Count / 3);
+        mesh.Vertices = (float*)Raylib.MemAlloc((uint)(verts.Count * 3 * sizeof(float)));
+        mesh.Normals = (float*)Raylib.MemAlloc((uint)(verts.Count * 3 * sizeof(float)));
+        mesh.TexCoords = (float*)Raylib.MemAlloc((uint)(verts.Count * 2 * sizeof(float)));
+        mesh.Colors = (byte*)Raylib.MemAlloc((uint)(verts.Count * 4 * sizeof(byte)));
+        mesh.Indices = (ushort*)Raylib.MemAlloc((uint)(tris.Count * sizeof(ushort)));
+        for (int i = 0; i < verts.Count; i++)
+        {
+            var (pv, nv) = verts[i];
+            float amb = ambient < 0f ? Ambient : ambient;
+            float lit = amb + (1f - amb) * MathF.Max(0f, Vector3.Dot(nv, Key));
+            Put(mesh, i, pv.X, pv.Y, pv.Z, nv, (byte)Util.Clamp(lit * 255f, 0f, 255f));
+        }
+        for (int i = 0; i < tris.Count; i++) mesh.Indices[i] = (ushort)tris[i];
         Raylib.UploadMesh(&mesh, false);
         return mesh;
     }
