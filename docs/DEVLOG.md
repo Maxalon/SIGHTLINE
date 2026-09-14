@@ -17919,3 +17919,79 @@ before GREEN** — truncating one column of `Maps.Layouts[0]` fails it by name.
 Everything else is `prototypes/` and `tools/`: nothing in `src/` loads a `.glb`, and
 `assets/props/**` is deliberately NOT in the `.csproj` copy list or `Ship.RequiredFiles`, because
 adding a file to the manifest before anything needs it would make SHIPTEST assert a lie.
+
+### P28 addendum — the layer shipped, in three stages
+
+The owner's correction, and it was the right one: *"if it should be a multistaged implementation
+with multiple commits instead of one that just do that. noones forcing you to do it as one commit.
+but i'd rather have this implemented by the end of this session than not."* The first pass stopped
+at the foundation out of caution the project's own rules do not ask for.
+
+**P28/1 — the layer.** `EdgeKind`, `Grid.EdgeV/EdgeH`, and the touchpoints. The roadmap predicted
+four; there were **five**. The fifth is `GetCover`'s `anyAdjacent`, which scanned adjacent cover
+TILES only — so a soldier sheltered by a wall and shot from the open side read as simply out in
+the open, and the crit-vs-exposed bonus and the LOCK-ON flank perk would both have stopped firing
+against precisely the geometry this layer exists to create. It is not a subtle bug and nothing
+would have reported it: the cover number would simply have been right and the flank flag wrong.
+**EDGETEST leg (D) failed on the first build, which is how it was found** — the test was written
+from the contract rather than from the implementation, which is the only reason it could disagree
+with the code.
+
+**P28/2 — buildings, and a lesson about which rule was actually protecting anything.** The stamper
+validates on `Terrain.StampRift`'s precedent — stamp, re-flood through `Grid.CostMap`, revert whole
+unless every reachable tile is still reachable. It first shipped with a second rule too: the
+footprint had to be pristine floor. Measured, that rule rejected **330 candidates against the
+validator's 1**, and only 4 of 24 boards got a building. The rule doing all the visible work was
+doing none of the protecting; a crate inside a building is furniture and a rift inside one is a
+hole in the floor. Relaxed to "half the interior is floor": 24/24 walled, 0 stranded, and the
+validator's own refusal count rose to 42-63 — it had been idle because nothing reached it.
+
+**P28/3 — drawing it, which was not optional.** P28/2 shipped with `Mission.Buildings` defaulting
+OFF, for one commit, on a rule worth keeping: **a wall nothing can draw is an invisible obstacle,
+and a player walking into a boundary with nothing on screen to explain it is a worse game than one
+with no buildings.** `Renderer.DrawEdges` paints a wall straddling the grid LINE rather than
+filling a cell — if a wall looked like a cover tile the player would read it as occupying the
+square and be wrong about where they can stand. The move overlay needed no work at all: it is
+computed from `CostMap`, so it stopped at walls the moment the walls existed.
+
+**P28/3 also found three real collisions, and the sweep is what found them.** Turning buildings on
+by default took the sweep from green to nine FAIL lines, and not one of them was a test being
+precious:
+
+* **BIOMETEST (`riftFloorMissed=7`) is a genuine design collision.** `Terrain.StampRift` guarantees
+  a minimum chasm by re-walking until it gets one, refusing any candidate that would cut the board.
+  **Walls consume exactly that connectivity headroom**, so on VOID the rift could no longer meet
+  its floor. Two features competing for one resource, and neither is wrong. The rift's guarantee is
+  older, load-bearing and already tested, so buildings yield: no buildings on a rift board.
+* **TUTTEST is a product bug, not a test failure.** The tutorial teaches FLANK by posing a specific
+  problem on authored geometry. A procedural building in the middle of it does not merely fail the
+  probe — it breaks the lesson for a real player. No buildings in TRAINING.
+* **CONCEALTEST blamed the wrong system.** Its staged scene clears a floor window "so LoS/targeting
+  is unconditional"; it cleared Tiles and Barrel and knew nothing of the edge layer. A wall across
+  the staged lane made the control shot fail to fire, which surfaced as *"concealment did not
+  break"*. The fix is one line in the same spirit as the code already there.
+
+The first of those moved the code: **buildings are stamped from `Game.SetupMission` after
+`StampBiomeGround`, not from `Mission.Build`**, because Build runs before the ground layer exists
+and a building placed there cannot see a rift at all.
+
+**And a fourth collision, which is why buildings ship OFF by default.** `SIGHTLINE_AICOVTEST`
+guards C1's dead-row class — no AI branch may fall under 0.10% of acts. Measured, two runs per arm,
+deterministic and reproducible: buildings OFF gives `sap` 19 acts (0.21%, PASS); ON gives 9 (0.09%,
+FAIL). **The cause is real and is not a tuning problem.** `Ai`'s sap branch destroys the COVER TILE
+a target hides behind; `Grid.CoverHp` is a per-TILE array and `DamageCover` takes tile coordinates.
+A soldier sheltering behind a building WALL cannot be sapped at all — cover moved from tiles to
+edges and the opponent's cover-destruction branch could not follow it. Buildings make the AI
+measurably duller, by removing one of its options rather than by confusing it.
+
+The fix is destructible edges, which is precisely the "wall-bangs and destructible elements" the
+owner deferred. Lowering the threshold to fit would be tuning a gate to pass, which this project
+does not do, and shipping a measurably duller opponent by default is worse than shipping the walls
+behind a flag. So `SIGHTLINE_BUILDINGS=1` is the switch and the roadmap carries the unlock.
+
+**What is NOT done, and should not be claimed:** the 3D view still draws only tiles; nothing
+authored places an edge (buildings are procedural rectangles); the wall's look is a first pass;
+and **nothing has priced a building.** That last is the interesting one — P26 measured skill at
++0.2 points, and a partly-enclosed board with doors is exactly the situation where playing well
+should start to beat playing badly. `SIGHTLINE_BUILDINGS=0` is a free arm (zero `Util.Rng` draws),
+so the round is set up and unrun.

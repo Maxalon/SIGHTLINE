@@ -23,6 +23,15 @@ public class Grid
     // by the three functions BOTH teams already ask for the truth: GetCover, CostMap and
     // HasLineOfSight. NOT persisted (SaveGame never serialises a Grid).
     public GroundKind[,] Ground;
+
+    // ── P28: THE EDGE LAYER. Two arrays, not one per tile: a boundary is shared, so it gets
+    //    exactly one home. EdgeV[x,y] is the edge on the WEST side of tile (x,y) (so x runs
+    //    0..W inclusive); EdgeH[x,y] is the edge on its NORTH side (y runs 0..H inclusive).
+    public EdgeKind[,] EdgeV;      // [W+1, H]
+    public EdgeKind[,] EdgeH;      // [W, H+1]
+    /// Fast-out: true only once something has actually placed an edge. Every predicate below
+    /// checks it first, so a board with no walls pays nothing for the layer existing.
+    public bool AnyEdges;
     // Fast "does this board have any at all" flags, so the hot paths (HasLineOfSight is called
     // W*H*foes times per threat rebuild) pay one static bool + one field read on a normal board.
     public bool AnyFoliage, AnyIce, AnyVent, AnyRift, AnySand;
@@ -41,6 +50,8 @@ public class Grid
         Fire = new int[W, H];
         Barrel = new bool[W, H];
         Ground = new GroundKind[W, H];
+        EdgeV = new EdgeKind[W + 1, H];
+        EdgeH = new EdgeKind[W, H + 1];
         ClearCoverSeeds();
     }
 
@@ -232,6 +243,46 @@ public class Grid
         return pick;
     }
 
+    // ---------- P28: the EDGE layer ----------
+    // Every accessor gates on Edges.Enabled AND AnyEdges, so SIGHTLINE_EDGES=0 restores the
+    // pre-P28 board exactly and a board with no walls never pays for the check.
+    public EdgeKind EdgeVAt(int x, int y) =>
+        (!Edges.Enabled || !AnyEdges || x < 0 || x > W || y < 0 || y >= H) ? EdgeKind.None : EdgeV[x, y];
+    public EdgeKind EdgeHAt(int x, int y) =>
+        (!Edges.Enabled || !AnyEdges || x < 0 || x >= W || y < 0 || y > H) ? EdgeKind.None : EdgeH[x, y];
+
+    /// The edge between two ORTHOGONALLY adjacent tiles. A diagonal pair shares no single edge,
+    /// so it answers None by design — callers must decompose a diagonal into its two L-routes
+    /// (CostMap and HasLineOfSight both do). Returning None there rather than guessing is what
+    /// keeps "can I cut this corner" a decision made in one place.
+    public EdgeKind EdgeBetween(int x0, int y0, int x1, int y1)
+    {
+        int dx = x1 - x0, dy = y1 - y0;
+        if (dy == 0 && dx ==  1) return EdgeVAt(x1, y0);   // west face of the tile we ENTER
+        if (dy == 0 && dx == -1) return EdgeVAt(x0, y0);   // west face of the tile we LEAVE
+        if (dx == 0 && dy ==  1) return EdgeHAt(x0, y1);   // north face of the tile we ENTER
+        if (dx == 0 && dy == -1) return EdgeHAt(x0, y0);   // north face of the tile we LEAVE
+        return EdgeKind.None;
+    }
+
+    public bool EdgeStopsMove(int x0, int y0, int x1, int y1) => Edges.BlocksMove(EdgeBetween(x0, y0, x1, y1));
+    public bool EdgeStopsSight(int x0, int y0, int x1, int y1) => Edges.BlocksSight(EdgeBetween(x0, y0, x1, y1));
+
+    public void SetEdgeV(int x, int y, EdgeKind k)
+    { if (x >= 0 && x <= W && y >= 0 && y < H) { EdgeV[x, y] = k; if (k != EdgeKind.None) AnyEdges = true; } }
+    public void SetEdgeH(int x, int y, EdgeKind k)
+    { if (x >= 0 && x < W && y >= 0 && y <= H) { EdgeH[x, y] = k; if (k != EdgeKind.None) AnyEdges = true; } }
+
+    /// P20/P21's rule extended: `Mission.Build` owns EVERY per-tile layer, and the edge layer is
+    /// no exception. A stale wall from the previous mission would move this board exactly as the
+    /// stale GROUND layer did, and through the same predicates.
+    public void ClearEdges()
+    {
+        Array.Clear(EdgeV, 0, EdgeV.Length);
+        Array.Clear(EdgeH, 0, EdgeH.Length);
+        AnyEdges = false;
+    }
+
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < W && y < H;
     public TileType At(int x, int y) => Tiles[x, y];
     public bool IsCover(int x, int y) => InBounds(x, y) && Tiles[x, y] != TileType.Floor;
@@ -351,6 +402,25 @@ public class Grid
                 bool cornerB = overHighCover ? IsVapor(cx, cy + sy) : BlocksSight(cx, cy + sy);
                 if (cornerA && cornerB) return false;
             }
+            // P28 — THE EDGE the step CROSSES. `overHighCover` (a commanding shooter seeing over
+            // high cover) deliberately does NOT see over a wall: it is an elevation allowance
+            // against a chest-high block, not x-ray vision, and a building wall is the one thing
+            // on this board that should still stop it. Smoke keeps its own rule above.
+            if (AnyEdges && Edges.Enabled)
+            {
+                if (stepX && stepY)
+                {
+                    // Same shape as the corner-pair rule above: one open route still sees.
+                    if (!pointBlank)
+                    {
+                        bool routeA = !EdgeStopsSight(cx, cy, cx + sx, cy) && !EdgeStopsSight(cx + sx, cy, cx + sx, cy + sy);
+                        bool routeB = !EdgeStopsSight(cx, cy, cx, cy + sy) && !EdgeStopsSight(cx, cy + sy, cx + sx, cy + sy);
+                        if (!routeA && !routeB) return false;
+                    }
+                }
+                else if (stepX) { if (EdgeStopsSight(cx, cy, cx + sx, cy)) return false; }
+                else if (stepY) { if (EdgeStopsSight(cx, cy, cx, cy + sy)) return false; }
+            }
             if (stepX) { err -= dy; cx += sx; }
             if (stepY) { err += dx; cy += sy; }
             // endpoint reached after step?
@@ -379,13 +449,20 @@ public class Grid
     {
         int dx = fx - tx, dy = fy - ty;
 
+        // P28: the facing side of a tile is sheltered by EITHER a wall on that edge OR a cover
+        // tile beyond it, whichever is stronger. That is the whole of the edge layer's effect on
+        // combat — every rule downstream (the diagonal corner read, Partial, Flanked, the foliage
+        // floor, high ground seeing over LOW cover, Ai's tile scoring, the HUD pip) is untouched,
+        // because they all consume this one number. A cover TILE is simply an object that blocks
+        // all four of its own edges, which is why the two sources max together rather than fight.
         int LevelAt(int sx, int sy)
         {
             int nx = tx + sx, ny = ty + sy;
-            if (!InBounds(nx, ny)) return 0;
-            if (Tiles[nx, ny] == TileType.HighCover) return 2;
-            if (Tiles[nx, ny] == TileType.LowCover) return 1;
-            return 0;
+            int lvl = Edges.CoverLevel(EdgeBetween(tx, ty, nx, ny));
+            if (!InBounds(nx, ny)) return lvl;
+            if (Tiles[nx, ny] == TileType.HighCover) return Math.Max(lvl, 2);
+            if (Tiles[nx, ny] == TileType.LowCover) return Math.Max(lvl, 1);
+            return lvl;
         }
 
         bool horiz = Math.Abs(dx) > Math.Abs(dy) && dx != 0;
@@ -439,10 +516,20 @@ public class Grid
             best = 1; partial = false; foliage = true;
         }
 
+        // FLANKED means "you had cover here, and it is not helping against THIS angle". P28: an
+        // edge wall is cover you have, so it has to count here too — otherwise a soldier sheltered
+        // by a building wall and shot from the open side reads as simply out in the open, and the
+        // crit-vs-exposed bonus and the LOCK-ON flank perk both silently stop firing against
+        // exactly the geometry the edge layer exists to create. SIGHTLINE_EDGETEST leg (D) is
+        // this line: it failed on the first build, which is how the fifth touchpoint was found.
         bool anyAdjacent = false;
         int[,] dirs = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
         for (int i = 0; i < 4; i++)
-            if (IsCover(tx + dirs[i, 0], ty + dirs[i, 1])) anyAdjacent = true;
+        {
+            int ax = tx + dirs[i, 0], ay = ty + dirs[i, 1];
+            if (IsCover(ax, ay)) anyAdjacent = true;
+            if (Edges.CoverLevel(EdgeBetween(tx, ty, ax, ay)) > 0) anyAdjacent = true;
+        }
 
         return new CoverInfo { Level = best, Partial = partial, Foliage = foliage,
                                Flanked = best == 0 && anyAdjacent };
@@ -492,7 +579,19 @@ public class Grid
                     // forbid cutting around the corner of any non-walkable tile
                     if (!IsFloor(cx + ddx, cy) || !IsFloor(cx, cy + ddy)) continue;
                     if (blocked != null && (blocked(cx + ddx, cy) || blocked(cx, cy + ddy))) continue;
+                    // P28 — THE EDGE LAYER, same rule one level down. A diagonal is really two
+                    // orthogonal steps, and there are two ways round the corner; a wall on either
+                    // leg of BOTH routes closes it. This deliberately matches the conservative
+                    // tile rule directly above (both facing tiles must be walkable) rather than
+                    // inventing a laxer one for edges — one movement model, not two.
+                    if (AnyEdges && Edges.Enabled)
+                    {
+                        bool routeA = !EdgeStopsMove(cx, cy, cx + ddx, cy) && !EdgeStopsMove(cx + ddx, cy, nx, ny);
+                        bool routeB = !EdgeStopsMove(cx, cy, cx, cy + ddy) && !EdgeStopsMove(cx, cy + ddy, nx, ny);
+                        if (!routeA || !routeB) continue;
+                    }
                 }
+                else if (EdgeStopsMove(cx, cy, nx, ny)) continue;   // P28: a wall between the tiles
 
                 int step = diagonal ? 3 : 2;
                 // C4 — the GROUND has a price, and BOTH teams pay it out of this one cost map

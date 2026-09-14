@@ -927,6 +927,7 @@ public static class Renderer
         DrawGridLines(g);
         DrawPathPreview(g);
         DrawCover(g);
+        DrawEdges(g);            // P28: walls that live on tile BOUNDARIES, not on tiles
         DrawBarrels(g);           // explosive drums — objects at cover/terrain level (under the figures)
         DrawHoverAndShields(g);
         DrawKbCursor(g);
@@ -2201,6 +2202,74 @@ public static class Renderer
         if (!crowded) return;
         Raylib.DrawRectangleRounded(new Rectangle(cx - 10f, y + 1f, 20f, h - 2f), 0.55f, 6,
                                     Raylib.Fade(Pal.RGBA(5, 8, 12), 0.66f));
+    }
+
+
+    // ── P28: THE EDGE LAYER, DRAWN ────────────────────────────────────────────────────────────
+    /// A wall sits ON the boundary between two tiles, so it is drawn straddling a grid LINE
+    /// rather than filling a cell. That distinction has to survive into the picture or the whole
+    /// layer is a lie: if a wall looked like a cover tile, the player would read it as occupying
+    /// the square and be wrong about where they can stand.
+    ///
+    /// It borrows the cover palette deliberately (Pal.CoverHi/Top, CoverLo/Top, biome-tinted by
+    /// the same pull) so walls read as the same CLASS of thing as a cover block — quiet terrain,
+    /// never the loudest object on screen — while the SHAPE says which kind it is. A door is
+    /// drawn as two jamb stubs with the middle left open, because the opening is the information.
+    static void DrawEdges(Game g)
+    {
+        var grid = g.Grid;
+        if (grid == null || !grid.AnyEdges || !Edges.Enabled) return;
+
+        Color tint = g.Biome.Tint;
+        Color shade = Pal.RGBA(8, 11, 15);
+        // A shade DARKER in the body than a cover block, so a wall reads as a built thing rather
+        // than a low slab, while the lit cap keeps it in the same family.
+        Color hi    = Lift(Pal.Mix(Pal.Mix(Pal.CoverHi,    tint, 0.55f), shade, 0.10f), -30);
+        Color hiTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.55f), shade, 0.14f), 92, 52);
+        Color lo    = Lift(Pal.Mix(Pal.Mix(Pal.CoverLo,    tint, 0.55f), shade, 0.10f), -26);
+        Color loTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.55f), shade, 0.14f), 80, 52);
+
+        const float HiW = 8f, LoW = 7f;     // wall thickness in px, straddling the grid line
+        const float HiLift = 9f, LoLift = 4f;   // how far the lit cap is offset "up" (faux-3D)
+
+        // One segment, given the boundary line's two endpoints in pixels.
+        void Seg(float px, float py, float w, float h, EdgeKind k)
+        {
+            bool high = k == EdgeKind.High;
+            float lift = high ? HiLift : LoLift;
+            Raylib.DrawRectangleRec(new Rectangle(px, py, w, h), high ? hi : lo);
+            Raylib.DrawRectangleRec(new Rectangle(px, py - lift, w, h), high ? hiTop : loTop);
+        }
+
+        // A door: two short jambs, the middle deliberately empty. Drawn at LOW profile so an
+        // opening never reads as taller than the wall it interrupts.
+        void Door(float px, float py, float w, float h, bool vertical)
+        {
+            float f = 0.30f;
+            if (vertical) { Seg(px, py, w, h * f, EdgeKind.Low); Seg(px, py + h * (1f - f), w, h * f, EdgeKind.Low); }
+            else          { Seg(px, py, w * f, h, EdgeKind.Low); Seg(px + w * (1f - f), py, w * f, h, EdgeKind.Low); }
+        }
+
+        for (int x = 0; x <= grid.W; x++)
+            for (int y = 0; y < grid.H; y++)
+            {
+                var k = grid.EdgeV[x, y]; if (k == EdgeKind.None) continue;
+                float w = k == EdgeKind.High ? HiW : LoW;
+                float px = Cfg.OriginX + x * Cfg.Tile - w * 0.5f;
+                float py = Cfg.OriginY + y * Cfg.Tile;
+                if (k == EdgeKind.Door) Door(px, py, w, Cfg.Tile, true);
+                else Seg(px, py, w, Cfg.Tile, k);
+            }
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y <= grid.H; y++)
+            {
+                var k = grid.EdgeH[x, y]; if (k == EdgeKind.None) continue;
+                float h = k == EdgeKind.High ? HiW : LoW;
+                float px = Cfg.OriginX + x * Cfg.Tile;
+                float py = Cfg.OriginY + y * Cfg.Tile - h * 0.5f;
+                if (k == EdgeKind.Door) Door(px, py, Cfg.Tile, h, false);
+                else Seg(px, py, Cfg.Tile, h, k);
+            }
     }
 
     static void DrawCover(Game g)
