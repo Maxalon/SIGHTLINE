@@ -106,6 +106,8 @@ echo -n "STAGGERTEST: "; verdict "$(SIGHTLINE_STAGGERTEST=1 run | grep -oE "STAG
 echo -n "MORALETEST : "; verdict "$(SIGHTLINE_MORALETEST=1 run | grep -oE "MORALETEST: (PASS|FAIL)" | head -1)"
 echo -n "BEACONTEST : "; verdict "$(SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACONTEST: (PASS|FAIL)" | head -1)"
 echo -n "COMBATTEST : "; verdict "$(SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1)"
+# P28: the EDGE layer -- walls on tile boundaries. Pure grid logic, no window.
+echo -n "EDGETEST   : "; verdict "$(SIGHTLINE_EDGETEST=1 run | grep -oE "EDGETEST: (PASS|FAIL)" | head -1)"
 echo -n "SAVETEST   : "; verdict "$(SIGHTLINE_SAVETEST=1 run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1)"
 echo -n "AITEST     : "; verdict "$(SIGHTLINE_AITEST=1 run | grep -oE "AITEST: (PASS|FAIL)" | head -1)"
 echo -n "DECLINETEST: "; verdict "$(SIGHTLINE_DECLINETEST=1 run | grep -oE "DECLINETEST: (PASS|FAIL)" | head -1)"

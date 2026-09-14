@@ -554,6 +554,10 @@ public partial class Game
                 Mix(Grid.CoverHp[x, y]);         Mix(Grid.CoverSeed[x, y]); Mix(Grid.Fire[x, y]);
                 Mix(Grid.Barrel[x, y] ? 1 : 0);  Mix((int)Grid.Ground[x, y]);
             }
+        // P28: and the EDGE layer. L6 caught this hash blind to six of eight layers; a tenth
+        // one that Grid.CostMap and HasLineOfSight both read must not be added without it.
+        for (int x = 0; x <= Grid.W; x++) for (int y = 0; y < Grid.H; y++) Mix((int)Grid.EdgeV[x, y]);
+        for (int x = 0; x < Grid.W; x++) for (int y = 0; y <= Grid.H; y++) Mix((int)Grid.EdgeH[x, y]);
         foreach (var u in Players) { Mix(u.X); Mix(u.Y); }
         foreach (var e in Enemies) { Mix(e.X); Mix(e.Y); }
         return h.ToString("x8");

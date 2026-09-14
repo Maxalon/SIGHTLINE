@@ -801,6 +801,13 @@ public static class Program
             Console.WriteLine(ContrastSelfTest());
             return;
         }
+        // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary
+        // between two tiles, consumes no floor, and is directional). Pure grid logic, no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGETEST") == "1")
+        {
+            Console.WriteLine(Edges.SelfTest());
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());

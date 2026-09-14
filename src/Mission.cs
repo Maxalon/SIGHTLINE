@@ -323,6 +323,10 @@ public static class Mission
         // build is NO ground, and leaving the last one in place made the arena a function of the
         // board before it. MODETEST leg (14) is the gate.
         if (ClearGroundOnBuild) grid.ClearGround();
+        // P28 — the EDGE layer joins P20's ground and P21's hazards: Build owns every per-tile
+        // layer without exception. A wall left over from the previous mission would move this
+        // board through exactly the predicates P20's stale ground did.
+        grid.ClearEdges();
         // P21 BUILD OWNS THE BOARD — and the same argument for the other two layers L6 found.
         // `Grid.IsFloor` is `InBounds && Tiles==Floor && !Barrel[x,y] && !rift`: a BARREL sits in
         // the same predicate the rift was added to, so every connectivity flood inside Build reads
