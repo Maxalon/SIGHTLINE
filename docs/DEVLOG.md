@@ -17995,3 +17995,63 @@ and **nothing has priced a building.** That last is the interesting one — P26 
 +0.2 points, and a partly-enclosed board with doors is exactly the situation where playing well
 should start to beat playing badly. `SIGHTLINE_BUILDINGS=0` is a free arm (zero `Util.Rng` draws),
 so the round is set up and unrun.
+
+---
+
+## P29. THE BOARD IS A SIZE — the camera and the maps, together
+
+**2026-09-14, base `23c60da`.** The owner's call: *"we need to adjust the camera and the maps at
+the same time i think."* Correct, and they are the same change — a bigger board is unusable
+without a camera that can reach it, and the camera fix is pointless without a board worth panning.
+
+### What moved
+
+`Cfg.GridW/GridH/Tile` were `const`, so the board's dimensions were baked into every call site at
+compile time. They are `static` now, set once by `Cfg.SetBoard` before the window opens, driven by
+`SIGHTLINE_BIGMAP=<W>x<H>[x<TILE>]`. **The defaults are the shipped game, unchanged** — 18x11 at
+64px is what all 35 arenas are drawn for and what every archived balance number was measured on.
+
+### Two claims in the roadmap were wrong, and both mattered
+
+**"Only five `Cfg.GridW/H` references exist in `src/`."** It is **10 in game code and 12 more in
+the harness**. Derived with a grep, which is what CLAUDE.md says to do with every written-down list
+in this repository, including this one.
+
+**"The camera blocker is ONE line."** True only in the sense that one line had to go. Deleting
+`if (CamZoom <= 1.001f) CamPan = Vector2.Zero` does not give a working camera — it gives an
+unclamped one, because the clamp sitting beside it was `±BoardW/2`, a constant that lets a player
+drag a 40-wide board a thousand pixels into the void. The replacement is **derived**: `ViewCamera`
+uses `Offset = BoardCenter` and `Target = BoardCenter + CamPan`, so solving "the visible rectangle
+stays inside the board" for `CamPan` gives the bounds directly (`Game.ClampPan`, static and pure so
+`SIGHTLINE_BOARDSIZETEST` can assert them without a window). It allows pan whenever the board
+overflows the view at any zoom; when the board fits, the range comes out empty and pan is zero —
+**the old behaviour reached by arithmetic instead of by a special case**; and it is strictly
+tighter than what it replaced.
+
+Two things the item did not mention at all. `Cfg.OriginY` was a constant 40 ("board floats near the
+top"), which on a board taller than the screen put the board's centre 188px below the screen's, so
+`CamPan = 0` was not a centred view — it centres now, exactly as `OriginX` always has. And the
+camera **opens on the board centre**, which on 40x28 means the squad deploys at an edge and is
+entirely off screen on turn 1. `FrameCameraOnSquad` fixes it, gated on the board actually
+overflowing so the shipped game is untouched by construction.
+
+### P28's loud-template work paid off here, which is why it was landed first
+
+A board-size change orphans all 35 authored arenas. That is now **explicit rather than silent**:
+`Maps.TemplateW/H` is the size the arenas were drawn for (a property of the FILES, fixed forever),
+`Mission.ArenasFitBoard` asks whether the live board can use them (a property of the RUN, which can
+now change), all three arena branches are gated on it, and the refusal is said ONCE with a named
+reason instead of 35 per-mission rejections indistinguishable from a legitimate connectivity
+refusal. `SIGHTLINE_TEMPLATEGATE` answers the two questions separately: are the templates
+self-consistent at their authored size (a FAIL — somebody mis-typed a row), and can this board use
+them (a report — OUT OF PLAY is deliberate under BIGMAP, a bug anywhere else).
+
+### The honest state of a big board
+
+It runs: 40x28 at 42px autoplays to WIN and LOSE with no exceptions, buildings place, the camera
+frames and pans. **It is not yet playable, and the reason is content, not code.** `BuildProcedural`
+and the cover archetypes were tuned for 198 tiles; at 1,120 they spread the same furniture over
+5.7x the area and the board reads as a near-empty plain. Enemy counts, mission pacing and sight
+range are all still 18x11 numbers. Those are in `docs/ROADMAP.md` and the answer to most of them is
+the one P27-N already gave: author real boards, insert NEAR the objective, and let size buy lateral
+choice rather than distance.

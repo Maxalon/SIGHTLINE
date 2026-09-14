@@ -486,7 +486,8 @@ public static class Mission
         // not roll again (that would double-spend the draw) and must not re-derive the pick. The
         // else branch below is the PRE-P26 BLOCK VERBATIM, which is what makes SIGHTLINE_ARENASITES=0
         // a restore by construction rather than by argument.
-        if (plan.GateSpent)
+        NoteArenaFit();          // P29: say ONCE, loudly, if this board cannot use the arenas
+        if (plan.GateSpent && ArenasFitBoard)
         {
             // PlanBoard already spent the gate roll and made the pick. Rolling again here would
             // double-spend the shared stream. A spent gate with Layout < 0 is the procedural
@@ -500,13 +501,13 @@ public static class Mission
                 if (authored) AppliedLayout = plan.Layout;
             }
         }
-        else if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
+        else if (ArenasFitBoard && ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
         {
             attempted = true;
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
             if (authored) AppliedLayout = ForcedLayout;
         }
-        else if (Util.Roll(80))
+        else if (ArenasFitBoard && Util.Roll(80))
         {
             attempted = true;
             int pick = PickLayout(missionNum);
@@ -888,6 +889,22 @@ public static class Mission
     /// because the board it made was unreachable). Must be 0 in a healthy build; the gate asserts
     /// it, and Game.TemplateGate() checks every authored arena up front so this never has to fire
     /// in the first place.
+    /// P29 — can the board being played use the hand-authored arenas at all? They are drawn for
+    /// Maps.TemplateW x TemplateH; at any other size every one of them is orphaned. Asking ONCE,
+    /// here, is the difference between a deliberate configuration and 35 silent per-mission
+    /// rejections that look exactly like a legitimate connectivity refusal.
+    public static bool ArenasFitBoard => Cfg.GridW == Maps.TemplateW && Cfg.GridH == Maps.TemplateH;
+    static bool _saidArenasUnusable;
+
+    public static void NoteArenaFit()
+    {
+        if (ArenasFitBoard || _saidArenasUnusable) return;
+        _saidArenasUnusable = true;
+        Console.Error.WriteLine($"SIGHTLINE: board is {Cfg.GridW}x{Cfg.GridH} but the {Maps.Layouts.Length} "
+            + $"authored arenas are drawn for {Maps.TemplateW}x{Maps.TemplateH}. They are OUT OF PLAY for this "
+            + "run and every mission will be procedural. Expected under SIGHTLINE_BIGMAP.");
+    }
+
     public static int LayoutDimMismatches;
 
     static bool TryApplyLayout(Grid g, HashSet<(int, int)> occupied, List<Unit> players,

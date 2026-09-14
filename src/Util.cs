@@ -9,14 +9,43 @@ public static class Cfg
 {
     public const int ScreenW = 1280;
     public const int ScreenH = 800;
-    public const int Tile = 64;                     // full-bleed board (Phase 4.1): bigger tiles reclaim the margin
-    public const int GridW = 18;
-    public const int GridH = 11;
+    // ══ P29 — THE BOARD IS A SIZE, NOT A CONSTANT ═══════════════════════════════════════════
+    // These were `const`, which meant the board's dimensions were baked into every call site at
+    // compile time and a bigger map could not be tried without a rebuild of the whole idea. They
+    // are `static` now and set ONCE before the window opens (Cfg.SetBoard, driven by
+    // SIGHTLINE_BIGMAP). Nothing mutates them during play: Grid captures W/H at construction and
+    // Renderer reads Tile every frame, so a mid-mission change would tear the board in half.
+    //
+    // THE DEFAULTS ARE THE SHIPPED GAME, UNCHANGED. 18x11 at 64px is what every one of the 35
+    // authored arenas is drawn for and what every balance number in docs/measurements was
+    // measured on. A different size is a different game and must be asked for explicitly.
+    public static int Tile = 64;                    // full-bleed board (Phase 4.1): bigger tiles reclaim the margin
+    public static int GridW = 18;
+    public static int GridH = 11;
+
+    /// The only way to change the board. Call before InitWindow. Tile is chosen for the caller
+    /// when it is not given: big boards want smaller tiles so a useful share of the map is on
+    /// screen at zoom 1, with the camera panning for the rest.
+    public static void SetBoard(int w, int h, int tile = 0)
+    {
+        GridW = Math.Max(4, w);
+        GridH = Math.Max(4, h);
+        if (tile > 0) { Tile = Math.Max(8, tile); return; }
+        // Fit the LONGER axis to roughly one and a half screens: enough of the board visible to
+        // plan with, enough off-screen that panning is a real act rather than a formality.
+        int byW = (int)(ScreenW * 1.5f) / Math.Max(1, GridW);
+        int byH = (int)(ScreenH * 1.5f) / Math.Max(1, GridH);
+        Tile = Math.Clamp(Math.Min(byW, byH), 16, 64);
+    }
 
     public static int BoardW => GridW * Tile;       // 1152
     public static int BoardH => GridH * Tile;       // 704
     public static int OriginX => (ScreenW - BoardW) / 2; // 64 — NOTE: the roster strip (x 8..140) still overlaps board column 0 (x 64..128); Hud.DrawRoster reflows occluded chips
-    public const int OriginY = 40;                  // board floats near the top; translucent HUD overlays its edges
+    // P29: 40 while the board FITS under it (the shipped layout — board floats near the top,
+    // translucent HUD overlays its edges). Once the board is taller than the screen there is no
+    // "near the top" to float at, and leaving it pinned put the board's centre 228px below the
+    // screen's, so CamPan = 0 was not a centred view. Centre it then, exactly as OriginX does.
+    public static int OriginY => BoardH + 40 <= ScreenH ? 40 : (ScreenH - BoardH) / 2;
 
     // ---- Type (Phase 5.3 font; RESONANCE V1 two-atlas + display face) --------------------
     // Loaded in Program.cs after InitWindow; each falls back gracefully if its TTF is missing.

@@ -3833,13 +3833,40 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       `SIGHTLINE_TEMPLATEGATE` checks all 36 authored arenas against `Cfg.GridW/H` up front, so
       the failure is caught before a mission is ever built. **Verified RED before GREEN** — a
       one-column truncation of `Maps.Layouts[0]` fails the gate by name.
-- [ ] **`SIGHTLINE_BIGMAP` prototype (~50x50).** `Grid` already carries instance `W`/`H` and only
-      five `Cfg.GridW/H` references exist in `src/`. The camera blocker is ONE line — `Game.cs`
-      forces `CamPan = Vector2.Zero` when `CamZoom <= 1.001f`; zooming in already works
-      (`CamZoom` clamped `[1, 2.4]`). Then author 2-3 boards and read the per-board greedy-vs-sloppy
-      gap that P26 made readable.
+- [x] **`SIGHTLINE_BIGMAP` prototype.** DONE (P29). `SIGHTLINE_BIGMAP=<W>x<H>[x<TILE>]`;
+      `Cfg.GridW/H/Tile` went `const` -> `static` with `Cfg.SetBoard`, read before any `Grid` is
+      built. **Two claims in this item were wrong and are corrected here:** it is not "five
+      `Cfg.GridW/H` references" — it is **10 in game code and 12 more in the harness**, derived,
+      not remembered. And the camera blocker was one line only in the sense that one line had to
+      GO: `CamPan = Vector2.Zero` when `CamZoom <= 1.001f` was replaced by pan bounds DERIVED from
+      where the board's edges land on screen (`Game.ClampPan`, pure and tested), which allows pan
+      whenever the board overflows the view at any zoom, produces the old no-pan behaviour by
+      arithmetic when it fits, and is tighter than the `±BoardW/2` it replaced — that let a
+      zoomed-in player drag the board halfway off screen. `Cfg.OriginY` also had to start centring
+      once the board is taller than the screen, or `CamPan = 0` was a view pinned 188px low.
+      Measured working at 40x28@42px: autoplay WIN and LOSE, no exceptions.
 - [ ] **Do NOT author site glyphs into the existing 35 18x11 templates.** They are orphaned by a
       size change. The P26 glyph vocabulary (`T X E C P A`) is the authoring format for the NEW maps.
+      P29 made the orphaning EXPLICIT rather than silent: `Maps.TemplateW/H` is the size the arenas
+      were drawn for, `Mission.ArenasFitBoard` asks whether the live board can use them, all three
+      arena branches are gated on it, and `SIGHTLINE_TEMPLATEGATE` now answers two separate
+      questions — are the templates self-consistent (a FAIL) and can this board use them (a
+      report, since OUT OF PLAY is deliberate under BIGMAP).
+
+#### OPEN — what a bigger board still needs
+
+- [ ] **PROCEDURAL DENSITY DOES NOT SCALE, and this is the blocker for BIGMAP being playable.**
+      `BuildProcedural` and the cover archetypes were tuned for 18x11 = 198 tiles. At 40x28 = 1,120
+      tiles they produce the same amount of furniture spread over 5.7x the area, so the board reads
+      as a near-empty plain with a few islands on it. Screenshot it and the problem is obvious.
+      Either scale the archetypes with board AREA or author real boards — and authoring is what
+      the P26/P27 direction actually asked for.
+- [ ] **Enemy count, mission pacing and sight range are all still 18x11 numbers.** `DESIGN.md` §3D
+      already names "empty traversal = boredom"; at 40x28 with ~6-tile moves, crossing the map is
+      nine turns of walking. The P27-N note's answer stands: insert NEAR the objective and let size
+      buy lateral choice, not distance.
+- [ ] **Nothing has measured a big board.** It is a LEVEL lever on every axis at once and severs
+      the CRN chain completely. `SIGHTLINE_BIGMAP` unset is the arm.
 - [ ] **Sector patrols.** 2-4 posts per group; group moves at its slowest member's speed; arrives
       within Chebyshev 1; turns around next turn; 1-2 tiles of formation slop. Keep groups apart by
       AUTHORING (build-time guard on overlapping routes), not runtime avoidance. Simulate all,

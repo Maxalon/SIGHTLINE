@@ -8120,11 +8120,11 @@ public partial class Game
         {
             checkedCount++;
             if (tpl == null) { fails.Add($"{name}: NULL template"); return; }
-            if (tpl.Length != Cfg.GridH)
-                fails.Add($"{name}: {tpl.Length} rows, board wants {Cfg.GridH}");
+            if (tpl.Length != Maps.TemplateH)
+                fails.Add($"{name}: {tpl.Length} rows, authored size is {Maps.TemplateH}");
             for (int y = 0; y < tpl.Length; y++)
-                if (tpl[y].Length != Cfg.GridW)
-                    fails.Add($"{name}: row {y} is {tpl[y].Length} cols, board wants {Cfg.GridW}");
+                if (tpl[y].Length != Maps.TemplateW)
+                    fails.Add($"{name}: row {y} is {tpl[y].Length} cols, authored size is {Maps.TemplateW}");
         }
 
         for (int i = 0; i < Maps.Layouts.Length; i++) Check($"Maps.Layouts[{i}]", Maps.Layouts[i]);
@@ -8134,12 +8134,26 @@ public partial class Game
             fails.Add($"Mission.LayoutDimMismatches = {Mission.LayoutDimMismatches}, expected 0");
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"TEMPLATEGATE: {checkedCount} authored arenas checked against {Cfg.GridW}x{Cfg.GridH}");
+        sb.AppendLine($"TEMPLATEGATE: {checkedCount} authored arenas checked against their authored " +
+                      $"size {Maps.TemplateW}x{Maps.TemplateH}");
         foreach (var f in fails) sb.AppendLine($"  FAIL {f}");
+
+        // P29 — TWO DIFFERENT QUESTIONS, AND CONFLATING THEM IS THE ORIGINAL BUG.
+        //   (1) are the templates SELF-CONSISTENT at the size they were drawn for? That is a
+        //       property of the files and a FAIL: somebody mis-typed a row.
+        //   (2) can the board being played actually USE them? That is a property of the RUN. On a
+        //       SIGHTLINE_BIGMAP board the answer is no, and that is a deliberate configuration,
+        //       not a defect — so it is reported loudly and does not fail the gate.
+        bool fits = Cfg.GridW == Maps.TemplateW && Cfg.GridH == Maps.TemplateH;
+        sb.AppendLine(fits
+            ? $"TEMPLATEGATE: live board {Cfg.GridW}x{Cfg.GridH} matches - authored arenas are IN PLAY"
+            : $"TEMPLATEGATE: live board {Cfg.GridW}x{Cfg.GridH} does NOT match the authored " +
+              $"{Maps.TemplateW}x{Maps.TemplateH} - all {checkedCount} arenas are OUT OF PLAY and every " +
+              "mission is procedural. Deliberate under SIGHTLINE_BIGMAP; a bug anywhere else.");
         sb.Append(fails.Count == 0
             ? "TEMPLATEGATE: PASS"
-            : $"TEMPLATEGATE: FAIL ({fails.Count} problem(s)) - these arenas are ORPHANED and every " +
-              "mission using them falls back to a procedural board.");
+            : $"TEMPLATEGATE: FAIL ({fails.Count} problem(s)) - a template does not match the size it " +
+              "was authored at, so it is ORPHANED at every board size.");
         return sb.ToString();
     }
 

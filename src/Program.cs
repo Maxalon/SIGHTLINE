@@ -199,6 +199,31 @@ public static class Program
         //                            a faithful one — a flag that moves the RNG stream cannot be
         //                            used to isolate anything.
         // The pair is what "restore the pre-P28 board" means: EDGES alone leaves the draws spent.
+        // ── P29 SIGHTLINE_BIGMAP=<W>x<H>[x<TILE>] ────────────────────────────────────────────
+        // Grows the board. MUST be read before any Grid is constructed (Grid captures W/H at
+        // construction) and before InitWindow (Tile drives the layout), which is why it lives up
+        // here with the other pre-flight switches rather than in SetupMission.
+        //
+        // IT ORPHANS THE 35 AUTHORED ARENAS, DELIBERATELY AND LOUDLY. They are drawn for 18x11;
+        // at any other size Mission.PlanBoard refuses them ONCE with a named reason instead of
+        // silently falling back per mission, and SIGHTLINE_TEMPLATEGATE reports them unusable.
+        // That was P28's whole purpose in making a dimension mismatch loud — this is the change
+        // it was landed ahead of.
+        {
+            string bm = Environment.GetEnvironmentVariable("SIGHTLINE_BIGMAP");
+            if (!string.IsNullOrWhiteSpace(bm))
+            {
+                var parts = bm.Split('x', 'X');
+                if (parts.Length >= 2 && int.TryParse(parts[0], out int bw) && int.TryParse(parts[1], out int bh))
+                {
+                    int bt = parts.Length >= 3 && int.TryParse(parts[2], out int t) ? t : 0;
+                    Cfg.SetBoard(bw, bh, bt);
+                    Console.WriteLine($"SIGHTLINE_BIGMAP: board {Cfg.GridW}x{Cfg.GridH} @ {Cfg.Tile}px "
+                                    + $"({Cfg.BoardW}x{Cfg.BoardH} px vs {Cfg.ScreenW}x{Cfg.ScreenH} screen)");
+                }
+                else Console.Error.WriteLine($"SIGHTLINE_BIGMAP: could not read \"{bm}\" - want <W>x<H> or <W>x<H>x<TILE>. Board unchanged.");
+            }
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGES") == "0") Edges.Enabled = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "0") Mission.Buildings = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "1") Mission.Buildings = true;
@@ -821,6 +846,13 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGTEST") == "1")
         {
             Console.WriteLine(Mission.BuildingSelfTest());
+            return;
+        }
+        // SIGHTLINE_BOARDSIZETEST=1 : P29 — the board is a runtime size now. Asserts the SHIPPED
+        // default did not drift and that the camera's pan bounds follow the board.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BOARDSIZETEST") == "1")
+        {
+            Console.WriteLine(BoardSize.SelfTest());
             return;
         }
         // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary
