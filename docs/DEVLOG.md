@@ -17675,3 +17675,154 @@ top three rungs.
 - `PAIRTEST` PASS — the two shipped fixes are presentation-only and the CRN identity is intact.
 - `SIGHTLINE_JUICETEST=1` — PASS, byte-identical on two consecutive runs, 2.7 s.
 - 22/22 RED demonstrations, every assertion family covered.
+
+---
+
+# §P26/P27 — "THE ARENA OWNS THE FIGHT" + "THE PROJECTED VIEW" (2026-09-07..14, base `74b0e5a`)
+
+**Trigger: the owner had an external model ("Fable") review the game, and handed the review over.**
+It is adjudicated in full in **`docs/REVIEW-2026-09.md`** — read that first; this section is what
+was done about it, and the mid-flight state.
+
+## P26-1. THE REVIEW WAS GOOD, AND FOUR OF ITS CLAIMS WERE WRONG IN USEFUL DIRECTIONS
+
+Its headline numbers were derived from `docs/measurements/`, not guessed, and re-derive exactly:
+move/shoot/hunker **72.4%** (it said 72), grenades **0.37%** (0.4), open floor **85.3%** (84),
+530/45 commits with all 45 human ones merges, 17 active days. Its central claim — no human has
+ever played this — is true, and `DESIGN.md` §5 gates the fog decision on a playtest that never
+happened.
+
+Corrections that changed what to build, **two of them making the work cheaper**:
+* **"The kill seam takes no attacker."** The killer IS computed inside `KillUnit` (`Game.cs:3367`)
+  and thrown away to a class string. The chronicle is a matter of not discarding a local.
+* **"Walls that block sight" is new engine work.** `Grid.BlocksSight` already returns true for
+  HighCover. The boards average **12.1 sight-blocking tiles per 198-tile board**, scattered as
+  singletons. The mechanic exists; the ARCHITECTURE does not. That is content, not engine.
+* **Board size is a hard blocker.** Stale. `Grid` carries instance `W`/`H` and sizes all eight
+  arrays from them; **five** `Cfg.GridW/H` references exist in all of `src/`, two in the harness.
+* **"23 verbs" / "the cull breaks the enum pins."** `VerbTable` is 16 rows; the archive has ever
+  recorded 26 action types, 14 under 1%, and **SHOVE and VAULT have never been recorded once** in
+  the whole 209 MB archive. Arenas and archetypes are not persisted, so culling them is save-safe.
+
+## P26-2. THE FINDING THE ARCHIVE ALREADY OWNED: SKILL IS WORTH 0.2 POINTS
+
+Pooled over **3,200 CRN-paired campaigns** (all 320 chunks of `p24/`): greedy **29.0%**, sloppy
+**28.7%**. 770 of 3,200 worlds discordant (389 greedy-only, 381 sloppy-only). Same missions
+cleared (3.83 vs 3.79), same run length, dying on the same objectives within 0.9 points on all
+eight. **At RECRUIT and h2 the SLOPPY leg is AHEAD, in both P24 arms independently.**
+
+Caveat kept everywhere it is quoted: the sloppy model is BOUNDED, so this is "a 15%-degraded
+player", not "a bad player" — the defensible claim is *skill is worth 0.2 ± ~3.5 points within the
+band the instrument models*. That is still fatal to the programme, because every balance
+conclusion here came from that instrument. FUL-13 measured this, called it forgiving-by-design and
+**accepted** it; eleven programs then tuned the win rate of a bot whose skill does not move it.
+
+**Mechanism.** 23.3% of the deployed hostile force is ever killed on mid-run missions (Evac 7.6%,
+Decapitate 12.5%, Rescue 12.6%). Declining the fight is optimal on most objectives — and the
+greedy bot fights.
+
+**Mechanism under THAT.** Objective sites are literals (the HACK terminal is ALWAYS `(10,5)`) and
+`Mission.Build` forces a bare 3x3 around each one which `TryApplyLayout` then skips. Measured:
+`corr(arena open-floor %, win %)` = **−0.15**, and **−0.153** controlling for mission number. 35
+hand-authored boards move nothing because the geometry is deleted where it would matter.
+
+## P26-3. WHAT SHIPPED
+
+* **Two shipped lies** (`1a1414c`): the FIELD MANUAL documented four perks the game cannot give
+  (retired from `PerkDef.All`, unimplemented in `Combat.cs`) because CODEXTEST asserted every perk
+  HAS copy rather than that the copy describes something reachable — `PerkDef.IsOffered` is now
+  DERIVED from `All`, retired perks are marked, and the new leg is RED pre-fix. And the
+  max-pressure banner announced reinforcements that cannot arrive on ELIMINATE.
+* **The skill split** (`204bdbb`): `MissionRec.Policy`, `byArena[].policy`, `byObjectivePolicy[]`.
+  Sentinels: an unplayed leg reads −1, never 0.0; `gap` is null unless both legs played. **Proven
+  inert** — same seed/rung, pre- vs post-binary, all 52 report fields byte-identical.
+* **The arena engine** (`1976040`): `Mission.PlanBoard` chooses the arena, reads its site glyphs
+  (`T X E C P A`) and VALIDATES before `Game.SetupMission` seats anything. **The ring is a property
+  of a LITERAL site, not of a site** — an arena-owned site reserves its own tile only and keeps its
+  authored surroundings. `SitePlan.GateSpent` makes a double-spend of the gate roll impossible, and
+  `Maps.AnySiteTemplates` stops `PlanBoard` spending it at all while every template is glyph-free.
+  **Proven inert at h4/n=10, all 52 fields byte-identical.** `SIGHTLINE_ARENASITES=0` /
+  `SIGHTLINE_ARENAANCHORS=0`; `SIGHTLINE_ARENASITETEST` (leg E announces itself SKIPPED until a
+  template declares, rather than passing silently).
+
+## P27. THE PROJECTED VIEW — a prototype to look at, not a commitment
+
+The owner's thesis, arrived at in conversation and **better than either the review's or mine**:
+authored maps not procedural; **~50x50**; bigger boards are not for variety but because they let
+FOG be a strategic layer and let enemy groups sit in **sectors on patrol** instead of one clump
+opposite one clump. The measured backing is §P26-2: a moving, partly-observed opposition is exactly
+the situation where playing well should beat playing badly, and static clusters are why it
+currently does not.
+
+`src/View3D.cs` + `src/Mesh3D.cs`, gated on `View3D.Enabled` (default FALSE, set only by
+`SIGHTLINE_VIEW3DSHOT=<pitch:yaw,...>`). No data-model change, no gameplay change.
+
+**The architecture that makes it cheap, and it is the load-bearing finding:** terrain goes 3D
+(~30 draw sites); everything else stays 2D drawn after `EndMode3D` at a `GetWorldToScreen`
+position. `Renderer.cs` has ~480 raw 2D draw calls and they survive a move to 3D unchanged — only
+the ~52 tile->pixel conversion sites become world->screen ones. **A projected view is a VIEW
+change. FLOORS are a data-model change** (`Grid.Height` is one int per (x,y); real floors make all
+eight arrays 3D and touch CostMap/HasLineOfSight/GetCover/Build/every AI query/all 35 arenas).
+
+**Decisions the owner made against renders:** pitch **38°**, default yaw **45** (isometric — yaw 0
+was the weakest frame in a 12-pitch sweep, which reversed my own "snap at yaw 0" advice); soldiers
+are **chips** (discs floating over a lit tile), not map pins; occluded chips **x-ray** through the
+block as outlines rather than vanishing; the fiction is a **hologram operator rotating the
+projection**, not a viewer walking around — which is also why VR is coherent later.
+
+**Five bugs, every one found by rendering and looking:**
+1. `DrawCube` takes ONE colour and does no lighting — plain cubes read as flat cards. The palette
+   already shipped SIDE/TOP pairs for the 2D faux-3D renderer; faking a lit cap fixed it.
+2. A cap flush with the body's top face shares a plane — z-fighting stripes on every tall block.
+3. Cylinders drawn OUTSIDE `BeginMode3D` render nothing at all; Raylib does not complain.
+4. `DrawMesh` interleaved with batched `DrawCylinder` corrupts rlgl's vertex batch — giant triangle
+   fans from one point. Flushing helped; `LoadModelFromMesh` + `DrawModel` fixed it completely
+   (12,234 stray pixels -> 42). The mesh was PROVEN correct first (1728/1728 verts, exact bbox),
+   which is what ruled out geometry and pointed at draw state.
+5. `DrawCylinderWires` draws one vertical line per slice — gear teeth, not an outline. That was the
+   "prominent lines on the coin edges" the owner flagged.
+
+**`src/Mesh3D.cs` answers "can you model assets": yes, by generating them.** A chip is
+rotationally symmetric, so its shape IS its side profile — ten `(radius, height)` pairs revolved,
+with a directional key light BAKED into per-vertex colours as greyscale and the team colour
+supplied by the per-draw tint (the default shader multiplies texel x material x vertex). No shader
+files, no committed binaries, every dimension a diffable number.
+
+## P27-N. MID-FLIGHT — WHERE A FRESH SESSION PICKS UP
+
+**Nothing here is blocked. In priority order:**
+1. **Bake lighting into the TERRAIN** (the owner's open question when the session ended). Blocks are
+   still flat `DrawCube` + a faked cap; generated bevelled blocks with real normals would do more
+   for the look than any further chip work. Same `Mesh3D.Lathe` idea, different generator.
+2. **Do NOT author site glyphs into the 35 existing 18x11 templates.** A size change orphans them
+   (`TryApplyLayout` rejects a dimension mismatch **silently** — make that loud first, it is two
+   lines). The P26 glyph vocabulary is the authoring format for the NEW big maps.
+3. **`SIGHTLINE_BIGMAP` prototype**: grow `Cfg.GridW/H`, shrink `Cfg.Tile`, allow pan at zoom 1.0
+   (`Game.cs` forces `CamPan = 0` when `CamZoom <= 1.001` — that one line is the whole blocker;
+   `CamZoom` is clamped `[1, 2.4]` so zooming IN already works). Then author 2-3 boards and read
+   the per-board greedy-vs-sloppy gap P26 made readable.
+4. **Sector patrols.** Owner's spec: 2-4 posts per group, group moves at its slowest member's speed,
+   arrive within Chebyshev 1, turn around next turn, 1-2 tiles of formation slop. Keep groups apart
+   by AUTHORING (a build-time guard on overlapping routes), not runtime avoidance. Simulate all
+   patrols, animate only visible ones. `Ai.Plan` is a COMBAT planner — a patrol is a separate
+   behaviour that only runs while a pod is Unaware, so it is additive: `if (tier == Unaware)
+   PatrolStep(); else Ai.Plan();`
+5. **Alert propagation already half-exists**: `LinkRange = 6` (pod-to-pod "they heard the guns") and
+   `HackNoise`/`HackNoiseRange`. A captain who calls backup is that mechanic with an actor attached
+   — give the call a ONE-TURN WIND-UP with a visible marker or killing the captain first is not a
+   choice, it is a coin flip resolved after the fact.
+6. **Vision by elevation needs no floors.** The owner's rule — 9 tiles at your level or above, +1
+   per level below — works on the existing `Grid.Height` scalar today. Prove the feel before paying
+   for the 3D data model.
+
+**Two risks to carry:** at 50x50 with ~6-tile moves, crossing the map is nine turns of walking and
+`DESIGN.md` §3D already names "empty traversal = boredom" — the answer is probably that you insert
+NEAR your objective and size buys lateral choice, not distance. And **this whole direction voids
+the measurement archive**, which is fine: its own headline is that the instrument cannot tell good
+play from bad.
+
+**Still open from P26 and untouched:** the squad chronicle (cheap, the killer is already in scope at
+the kill seam); `Ai.Tier` is nearly inert (four constants, two bypassed when a SPOTTER is alive);
+the autopilot has no target-priority entry for twelve of ~21 archetypes, so **every balance number
+was produced by a bot that cannot tell them apart**; and shoot-and-hold is legal (`DoOverwatch` has
+no `FiredThisTurn` gate), so a grenade costs two actions first and one action second.

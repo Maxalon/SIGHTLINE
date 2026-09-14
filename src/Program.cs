@@ -73,6 +73,34 @@ public static class Program
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
+        // ══ P27 PROTOTYPE — SIGHTLINE_VIEW3DSHOT ══
+        // Photograph the SAME staged board through the projected 3D camera at a sweep of angles, so
+        // the "what pitch does this game want?" question is answered by looking rather than by
+        // argument. Value is a comma-separated list of pitch:yaw pairs in degrees, e.g.
+        //   SIGHTLINE_VIEW3DSHOT=25:0,40:0,55:0,90:0,40:45
+        // Writes view3d_p<pitch>_y<yaw>.png per entry and exits. Pair with SIGHTLINE_SHOT=760
+        // (the briefing card covers the board before ~700) and SIGHTLINE_SEED=<n> to hold the board
+        // fixed across a sweep. View3D.Enabled is set ONLY here, so no other path can reach it.
+        List<(float pitch, float yaw)> view3dSweep = null;
+        {
+            string v3 = Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3DSHOT");
+            if (!string.IsNullOrWhiteSpace(v3))
+            {
+                view3dSweep = new List<(float, float)>();
+                foreach (var pair in v3.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var pq = pair.Split(':');
+                    float.TryParse(pq[0].Trim(), System.Globalization.NumberStyles.Float,
+                                   System.Globalization.CultureInfo.InvariantCulture, out float pd);
+                    float yd = 0f;
+                    if (pq.Length > 1)
+                        float.TryParse(pq[1].Trim(), System.Globalization.NumberStyles.Float,
+                                       System.Globalization.CultureInfo.InvariantCulture, out yd);
+                    view3dSweep.Add((pd, yd));
+                }
+                if (view3dSweep.Count > 0) View3D.Enabled = true;
+            }
+        }
         // SIGHTLINE_SEED=<n> : pin Util.Rng so two harness runs stage the SAME arena/roster. The
         // renderer still reads the wall clock in ~50 places, so frames are not byte-identical — but
         // this makes a before/after screenshot pair show the same BOARD, which is what a visual
@@ -265,6 +293,23 @@ public static class Program
         string staleHazEnv = Environment.GetEnvironmentVariable("SIGHTLINE_STALEHAZARDS");
         if (staleHazEnv == "1") Mission.ClearHazardsOnBuild = false;
         else if (staleHazEnv == "0") Mission.ClearHazardsOnBuild = true;
+        // P26 "THE ARENA OWNS THE FIGHT" — SIGHTLINE_ARENASITES=0 restores the PRE-WAVE ORDER as
+        // well as the literal sites: no Mission.PlanBoard call, no roll before SpawnEnemies, the
+        // arena gate back inside Build, Game.SetupMission's four literal site blocks live again,
+        // and the 3x3 ring punched through the authored terrain at every objective. That is a
+        // restore by CONSTRUCTION -- the pre-wave gate block is kept verbatim in an else branch.
+        // ⚠ This wave MOVES THE CRN STREAM (same draw COUNT per build, different position, and
+        // three loops in Build consume draws conditional on board content), so every archived CRN
+        // world is invalidated -- the W1 class of break. =0 is the BRIDGE ARM for re-measuring.
+        string arenaSitesEnv = Environment.GetEnvironmentVariable("SIGHTLINE_ARENASITES");
+        if (arenaSitesEnv == "0") Mission.ArenaSites = false;
+        else if (arenaSitesEnv == "1") Mission.ArenaSites = true;
+        // ...and the deployment half on its own dial (P23's two-lever precedent): =0 ignores the
+        // 'A' anchor glyph while keeping arena SITES, so a round can price objective geometry
+        // without also re-pricing the deployment geometry W4 measured.
+        string arenaAnchEnv = Environment.GetEnvironmentVariable("SIGHTLINE_ARENAANCHORS");
+        if (arenaAnchEnv == "0") Mission.ArenaAnchors = false;
+        else if (arenaAnchEnv == "1") Mission.ArenaAnchors = true;
         // P21 "BUILD OWNS THE BOARD", second half — SIGHTLINE_FORKPRICES=0/1, the off switch
         // THE FORK PAYS (milestone 5) should have shipped and did not. That wave repriced the
         // campaign routing economy — Run.DepthBase 10 -> 12, a SUPPLY discount, a PITCHED class
@@ -407,6 +452,19 @@ public static class Program
         // asserts the DIFFERENTIAL (the squad's reachable set shrinks by exactly the rift tiles,
         // which also covers spawns that do not exist yet) plus every named fixture. =<N> widens the
         // per-cell seed count (default 6 -> ~576 boards).
+        // P26 THE ARENA OWNS THE FIGHT: SIGHTLINE_ARENASITETEST=1 : the site-glyph layer's gate.
+        // Asserts all 35 templates are 11x18 and well-formed, that Maps.AnySiteTemplates agrees with
+        // a direct scan (the inertness precondition that stops PlanBoard double-spending the arena
+        // gate roll), that the parser honours row-major scan order (the LAST 'P' is the VIP seat)
+        // and rejects every illegal cardinality, and that a sealed-in site is detectable. Leg (E) —
+        // "authored terrain SURVIVES at an arena-declared site" — is the only one that can fail if
+        // the wave ships as a no-op, and it announces itself as SKIPPED until a template declares.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ARENASITETEST") == "1")
+        {
+            Console.WriteLine(Game.ArenaSiteSelfTest());
+            return;
+        }
+
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_RIFTTEST"), out int riftN) && riftN > 0)
         {
             Console.WriteLine(Game.RiftSelfTest(riftN == 1 ? 6 : riftN));
@@ -1785,6 +1843,23 @@ public static class Program
             // whole cost of an autoplay smoke run; keeping W5's two-pass call on the draw side
             // preserves the crisp-HUD split without paying for it in the smoke test.
             // (lead, at the W5 merge: W1 supplies the fast path, W5 the drawn one.)
+            // P27: the projected-camera sweep. Deliberately does NOT go through Display.RenderFrame
+            // (no render target, no post-FX) — this is a look-at-it prototype, and the fewer layers
+            // between the geometry and the PNG the more honestly it answers the question.
+            if (view3dSweep != null && shot && frame >= shotFrame)
+            {
+                var all = new List<Unit>(game.Players);
+                all.AddRange(game.Enemies);
+                foreach (var (pd, yd) in view3dSweep)
+                {
+                    View3D.PitchDeg = pd; View3D.YawDeg = yd;
+                    Raylib.BeginDrawing();
+                    View3D.DrawFrame(game.Grid, all);
+                    Raylib.EndDrawing();
+                    Raylib.TakeScreenshot($"view3d_p{pd:00}_y{yd:000}.png");
+                }
+                break;
+            }
             if (autoplay && !shot) BatchPump();
             else Display.RenderFrame(game.DrawBoardLayer, game.DrawHudLayer);
 

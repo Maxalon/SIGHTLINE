@@ -6,12 +6,61 @@ namespace Sightline;
 ///   '^' tier-1 plateau   '=' tier-2 plateau   (both walkable high ground)
 ///   'B' explosive barrel (impassable like cover, but blows up when shot — a hazard;
 ///       the tile stays floor underneath, so a destroyed barrel leaves open ground)
-/// Each layout is GridH (11) rows of GridW (18) chars. Reserved tiles — player and
-/// enemy spawns, the evac zone, the terminal + its ring — are always left as open
-/// floor regardless of the template, and `Mission` verifies connectivity before
-/// committing to a layout (falling back to the procedural generator otherwise).
+/// Each layout is GridH (11) rows of GridW (18) chars.
+///
+/// P26 "THE ARENA OWNS THE FIGHT" — SITE GLYPHS. A template may declare where the
+/// objective actually happens. Each of these is OPEN FLOOR for terrain purposes (the
+/// stamp writes nothing for it, exactly like '.'); it only tells Mission.PlanBoard
+/// where a site goes:
+///   'T' HACK terminal        — exactly 0 or 1 per template
+///   'X' SABOTAGE site        — exactly 0 or 3
+///   'E' EVAC / extraction    — 0, or >= 8 mutually reachable tiles
+///   'C' RESCUE captive       — exactly 0 or 1
+///   'P' player spawn         — 0, or >= 7; the LAST 'P' in row-major scan order is the
+///                              VIP/captive seat (carries PlayerSpawns[Length-1] over)
+///   'A' enemy pod anchor     — 0..6 (EnemyPodColOffset.Length)
+/// A template that declares NO site glyphs behaves exactly as it did before P26.
+///
+/// WHY THIS EXISTS. Before P26 every objective sat on a literal tile — the HACK terminal
+/// was ALWAYS (10,5) — and Mission.Build force-cleared a 3x3 ring around it that
+/// TryApplyLayout then SKIPPED, so the authored terrain was erased at the exact point the
+/// fight converges on. CITADEL's bunker and PLAZA's plateau could not shape the fight, by
+/// construction. Measured over 6,400 campaigns: corr(open-floor %, win %) = -0.15 across
+/// all 35 boards. The ring is a property of a LITERAL site, not of a site: a template that
+/// places its own 'T' has authored the terrain around it, so no ring is punched.
+///
+/// Reserved tiles — player and enemy spawns, the evac zone, and a LITERAL terminal or
+/// sabotage site + its ring — are still left as open floor regardless of the template, and
+/// `Mission` verifies connectivity before committing to a layout (falling back to the
+/// procedural generator otherwise).
 public static class Maps
 {
+    /// P26: does ANY shipped template declare a site glyph? Computed once, purely, at type init.
+    ///
+    /// THIS IS THE INERTNESS GATE, and it is load-bearing. Mission.PlanBoard must not spend the
+    /// arena gate's Util.Roll(80) unless it is actually going to take over the gate, because Build
+    /// still rolls on the pre-P26 path and two rolls would double-spend the shared stream. While
+    /// every template is glyph-free this is false, PlanBoard consumes NOTHING, and the wave is
+    /// byte-identical by construction. The first template to declare a site flips it — and THAT is
+    /// the commit that moves the CRN stream, not the engine change.
+    /// Lazy, NOT a field initializer: `Layouts` is declared BELOW this point and C# runs static
+    /// field initializers in declaration order, so an eager `= ComputeAnySiteTemplates()` would
+    /// read a null Layouts and throw at type init.
+    static int _anySite = -1;
+    public static bool AnySiteTemplates
+    {
+        get { if (_anySite < 0) _anySite = ComputeAnySiteTemplates() ? 1 : 0; return _anySite == 1; }
+    }
+
+    static bool ComputeAnySiteTemplates()
+    {
+        foreach (var tpl in Layouts)
+            foreach (var row in tpl)
+                foreach (char c in row)
+                    if (c == 'T' || c == 'X' || c == 'E' || c == 'C' || c == 'P' || c == 'A') return true;
+        return false;
+    }
+
     public static readonly string[][] Layouts =
     {
         new[] // PLAZA — a raised central platform ringed with cover

@@ -219,6 +219,42 @@ public static class Mission
     /// can be shown to fail: MODETEST leg (14a-2) flips it to prove its own dirt still bites.
     public static bool ClearHazardsOnBuild = true;
 
+    // ════════════════════════ P26 "THE ARENA OWNS THE FIGHT" ════════════════════════
+    // Before P26 every objective site was a literal expression in Game.SetupMission — the HACK
+    // terminal was ALWAYS (Grid.W/2+1, Grid.H/2) = (10,5), evac ALWAYS the 2x4 block at cols
+    // 16-17 — and Build force-cleared a 3x3 ring around each one into `occupied`, which
+    // TryApplyLayout then SKIPS. So the authored arena was erased in a 3x3 at the exact tile the
+    // mission converges on, on all 35 boards, at every heat, in every mode. Measured over the
+    // 6,400-campaign P24 archive: corr(arena open-floor %, win %) = -0.15, and -0.153 controlling
+    // for mission number. Thirty-five hand-authored boards moved nothing, because the geometry was
+    // deleted where it would have mattered.
+    //
+    // SIGHTLINE_ARENASITES=0 restores the PRE-WAVE ORDER as well as the literal sites: no
+    // PlanBoard call, no roll before SpawnEnemies, the arena gate back inside Build, and Game's
+    // four literal blocks live again. That is a full restore by CONSTRUCTION (the old gate block is
+    // kept verbatim in an else branch), not by argument.
+    //
+    // ⚠ THIS MOVES THE CRN STREAM. The draw COUNT per build is unchanged (still exactly one
+    // Util.Roll(80) gate, skipped under ForcedLayout; PickLayout/DeckPick draw zero), so the FUL-9
+    // draw-order contract's letter holds. But the draw MOVES ahead of SpawnEnemies' row shuffle,
+    // and three loops in Build consume a draw count that depends on board CONTENT (Sprinkle's
+    // reject-retry, PlaceBarrels' identical shape, SpawnEnemies' collision-relocate). The moment a
+    // site moves, occupancy moves and the streams diverge irrecoverably. Every archived CRN world
+    // is invalidated — the W1 class of break. Do NOT rescale a P24 number onto this tree;
+    // re-measure, with SIGHTLINE_ARENASITES=0 as the bridge arm.
+    public static bool ArenaSites = true;
+
+    // SIGHTLINE_ARENAANCHORS=0 ignores the 'A' glyph while keeping arena sites. Two dials, not
+    // one (P23's precedent): the SITE lever moves objective geometry, the ANCHOR lever moves the
+    // deployment geometry W4 measured. A round that wants to price one without the other must be
+    // able to.
+    public static bool ArenaAnchors = true;
+
+    // Telemetry mirroring AppliedLayout: which site categories the LAST build actually took from
+    // the arena. Read by SIGHTLINE_ARENASITETEST; never by gameplay.
+    public static SitePlan LastPlan;
+
+
 
     // W2 arena telemetry: the authored layout index the LAST Build actually applied, or -1 for
     // the procedural fallback. Recorded only AFTER TryApplyLayout's connectivity guard accepted
@@ -271,7 +307,8 @@ public static class Mission
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
                              int dmgDelta = 0, bool defend = false, int defendKeep = 0,
                              int rosterTier = -1, bool midBossSlot = false, bool eliteNode = false,
-                             bool finalApproach = false, int heatStat = 0)
+                             bool finalApproach = false, int heatStat = 0,
+                             SitePlan plan = default)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -309,7 +346,10 @@ public static class Mission
         // (DeckSeed, missionNum): zero RNG draws, so the shared stream is untouched.
         int shape = DeployFor(DeckSeed, missionNum, EnvelopLegal(evac, terminal, sabotage));
         AppliedDeploy = shape;
-        var spawnTable = SpawnTableFor(shape);
+        // P26: the ARENA owns where the squad STANDS when it declared a 'P' table; the deployment
+        // SHAPE still owns where the force comes from (AppliedDeploy stays published, so pod
+        // bearings, SpawnReinforcements' rim wave and the HORDETEST/BALANCE telemetry are unmoved).
+        var spawnTable = plan.Valid && plan.ArenaSpawns ? plan.Spawns : SpawnTableFor(shape);
 
         // place players at their deployment footprint, refresh per-mission state (HP persists)
         for (int i = 0; i < players.Count && i < spawnTable.Length; i++)
@@ -355,15 +395,33 @@ public static class Mission
         foreach (var u in players) occupied.Add((u.X, u.Y));
         foreach (var u in enemies) occupied.Add((u.X, u.Y));
         foreach (var t in evacSet) occupied.Add(t);   // keep the extraction zone clear of cover
-        if (terminal.HasValue)                         // keep the terminal + its ring open
-            for (int dx = -1; dx <= 1; dx++)
-                for (int dy = -1; dy <= 1; dy++)
-                    occupied.Add((terminal.Value.x + dx, terminal.Value.y + dy));
-        if (sabotage != null)                          // keep each sabotage site + its ring open
-            foreach (var s in sabotage)
+        // ═══ P26: THE RING IS A PROPERTY OF A *LITERAL* SITE, NOT OF A SITE ═══
+        // A literal site lands on terrain nobody authored around it, so Build punched a bare 3x3
+        // to guarantee it was approachable — and TryApplyLayout skips `occupied`, so that 3x3 was
+        // erased from the arena. A template that placed its own 'T'/'X' has authored the approach
+        // it wants, and PlanBoard already proved every site reachable with >= 1 walkable neighbour.
+        // So an ARENA-OWNED site reserves its own tile only (it must stay standable — a barrel or a
+        // cover block on the terminal is an unwinnable mission) and keeps its authored surroundings.
+        // This one distinction is the whole milestone.
+        bool ringTerminal = !(plan.Valid && plan.ArenaTerminal);
+        bool ringSabotage = !(plan.Valid && plan.ArenaSabotage);
+        if (terminal.HasValue)
+        {
+            if (ringTerminal)
                 for (int dx = -1; dx <= 1; dx++)
                     for (int dy = -1; dy <= 1; dy++)
-                        occupied.Add((s.x + dx, s.y + dy));
+                        occupied.Add((terminal.Value.x + dx, terminal.Value.y + dy));
+            else occupied.Add((terminal.Value.x, terminal.Value.y));
+        }
+        if (sabotage != null)
+            foreach (var s in sabotage)
+            {
+                if (ringSabotage)
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dy = -1; dy <= 1; dy++)
+                            occupied.Add((s.x + dx, s.y + dy));
+                else occupied.Add((s.x, s.y));
+            }
 
         // Either lay down a hand-authored arena (with a connectivity guard) or fall
         // back to the procedural generator. Both keep reserved tiles open.
@@ -378,7 +436,25 @@ public static class Mission
         bool authored = false;
         bool attempted = false;   // FUL-1 funnel: a template reached the connectivity guard
         AppliedLayout = -1;
-        if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
+        // P26: when PlanBoard already chose and validated a template, the gate is SETTLED — it must
+        // not roll again (that would double-spend the draw) and must not re-derive the pick. The
+        // else branch below is the PRE-P26 BLOCK VERBATIM, which is what makes SIGHTLINE_ARENASITES=0
+        // a restore by construction rather than by argument.
+        if (plan.GateSpent)
+        {
+            // PlanBoard already spent the gate roll and made the pick. Rolling again here would
+            // double-spend the shared stream. A spent gate with Layout < 0 is the procedural
+            // outcome; a spent gate with Valid false but a Layout is a template whose own sites
+            // failed validation -- it still gets stamped, just with the literal sites and the ring.
+            if (plan.Layout >= 0)
+            {
+                attempted = true;
+                authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal,
+                                          Maps.Layouts[plan.Layout], sabotage, relaxEnemies: plan.Valid);
+                if (authored) AppliedLayout = plan.Layout;
+            }
+        }
+        else if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
         {
             attempted = true;
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
@@ -393,6 +469,7 @@ public static class Mission
         }
         if (!authored)
             BuildProcedural(grid, occupied, evacSet, missionNum);
+        LastPlan = plan;   // P26 telemetry: which categories this build took from the arena
         // FUL-1 ARENA FUNNEL (telemetry only, no-op unless Stats.Enabled): the three exits sum
         // to 100% of builds — a guard REJECT was previously indistinguishable from a lost roll.
         Stats.RecordArenaFunnel(authored ? Stats.ArenaAuthored
@@ -415,11 +492,15 @@ public static class Mission
         // blocks per site (NW/SW of the site) — they don't seal the ring (it stays open floor), and
         // EnsureConnectivity below guarantees reachability if they ever pinch a lane.
         if (sabotage != null)
-            foreach (var s in sabotage)
-            {
-                TryCover(grid, occupied, s.x - 2, s.y - 1, TileType.LowCover);
-                TryCover(grid, occupied, s.x - 2, s.y + 1, TileType.LowCover);
-            }
+            // P26: these two blocks are the procedural apology for a site with no authored cover
+            // near it, and they encode a WEST-facing assumption a template need not share. A
+            // template that placed its own 'X' authored the fighting positions it wants.
+            if (!(plan.Valid && plan.ArenaSabotage))
+                foreach (var s in sabotage)
+                {
+                    TryCover(grid, occupied, s.x - 2, s.y - 1, TileType.LowCover);
+                    TryCover(grid, occupied, s.x - 2, s.y + 1, TileType.LowCover);
+                }
 
         // Environmental hazards: scatter a few explosive barrels on open floor (both the
         // procedural AND authored-layout paths), biased toward the contested mid-field /
@@ -582,7 +663,8 @@ public static class Mission
     /// Reverts and returns false if the layout is malformed or would wall anyone off.
     static bool TryApplyLayout(Grid g, HashSet<(int, int)> occupied, List<Unit> players,
                                List<Unit> enemies, HashSet<(int, int)> evac,
-                               (int x, int y)? terminal, string[] tpl, List<(int x, int y)> sabotage)
+                               (int x, int y)? terminal, string[] tpl, List<(int x, int y)> sabotage,
+                               bool relaxEnemies = false)
     {
         if (tpl.Length != g.H) return false;
         for (int y = 0; y < g.H; y++) if (tpl[y].Length != g.W) return false;
@@ -612,7 +694,14 @@ public static class Mission
 
         bool ok = true;
         foreach (var u in players) if (!Reachable(u.X, u.Y)) ok = false;
-        foreach (var u in enemies) if (!Reachable(u.X, u.Y)) ok = false;
+        // P26: on the arena-owned path PlanBoard already proved every SPAWN and every SITE mutually
+        // reachable on a strict under-approximation of this board (the stamp only ever makes
+        // `occupied` tiles MORE walkable), so the sole remaining reject cause is an enemy seated in
+        // a pocket — and EnsureConnectivity carves for exactly that, unconditionally, a few lines
+        // later. Handing it to the carve rather than to a revert is what makes the mid-build revert
+        // UNREACHABLE on the arena path; ARENASITETEST leg (C) is the standing proof.
+        if (!relaxEnemies)
+            foreach (var u in enemies) if (!Reachable(u.X, u.Y)) ok = false;
         foreach (var t in evac) if (!Reachable(t.Item1, t.Item2)) ok = false;
         if (terminal.HasValue && !Reachable(terminal.Value.x, terminal.Value.y)) ok = false;
         if (sabotage != null) foreach (var s in sabotage) if (!Reachable(s.x, s.y)) ok = false;
@@ -2079,6 +2168,218 @@ public static class Mission
     /// Build draw-order contract), zero persisted state (round-trips on load by construction).
     /// The connectivity guard in TryApplyLayout still validates whatever is dealt.
     static int PickLayout(int missionNum) => DeckPick(DeckSeed, missionNum);
+
+    // ═══════════════════ P26: READING A TEMPLATE'S OWN SITES (pure) ═══════════════════
+    /// What one arena template declares about where the fight happens. Every field is resolved
+    /// (arena-declared OR today's literal); the Arena* booleans say WHICH, because that is what
+    /// decides whether a 3x3 ring gets punched through the authored terrain.
+    public struct SitePlan
+    {
+        public int Layout;          // template index, or -1 for procedural
+        public bool Valid;          // false => the pre-P26 path entirely (literal sites, gate in Build)
+        // PlanBoard consumed the arena gate's Util.Roll(80). Build MUST NOT roll again when this is
+        // set, or the two would double-spend the shared stream — the defect this field exists to
+        // make impossible. Note it can be true with Valid FALSE: a procedural roll, or a template
+        // whose sites failed validation, both spend the gate and then fall back.
+        public bool GateSpent;
+        public (int x, int y)[] Spawns;
+        public (int x, int y)[] Anchors;
+        public List<(int x, int y)> Evac;
+        public (int x, int y)? Terminal;
+        public List<(int x, int y)> Sabotage;
+        public (int x, int y)? Captive;
+        public bool ArenaEvac, ArenaTerminal, ArenaSabotage, ArenaCaptive, ArenaSpawns;
+        public bool AnyArena => ArenaEvac || ArenaTerminal || ArenaSabotage || ArenaCaptive || ArenaSpawns;
+    }
+
+    /// Scan a template for site glyphs. PURE: zero Util.Rng draws, no Grid access, no statics read.
+    /// Row-major (y outer, x inner) — the scan order is load-bearing, because the LAST 'P' is the
+    /// VIP seat (carrying over PlayerSpawns[Length-1]).
+    public static SitePlan ReadSites(string[] tpl)
+    {
+        var plan = new SitePlan { Layout = -1, Evac = new List<(int, int)>(), Sabotage = new List<(int, int)>() };
+        var spawns = new List<(int x, int y)>();
+        var anchors = new List<(int x, int y)>();
+        if (tpl == null) { plan.Spawns = spawns.ToArray(); plan.Anchors = anchors.ToArray(); return plan; }
+        for (int y = 0; y < tpl.Length; y++)
+            for (int x = 0; x < tpl[y].Length; x++)
+                switch (tpl[y][x])
+                {
+                    case 'T': plan.Terminal = (x, y); plan.ArenaTerminal = true; break;
+                    case 'X': plan.Sabotage.Add((x, y)); plan.ArenaSabotage = true; break;
+                    case 'E': plan.Evac.Add((x, y)); plan.ArenaEvac = true; break;
+                    case 'C': plan.Captive = (x, y); plan.ArenaCaptive = true; break;
+                    case 'P': spawns.Add((x, y)); plan.ArenaSpawns = true; break;
+                    case 'A': anchors.Add((x, y)); break;
+                }
+        plan.Spawns = spawns.ToArray();
+        plan.Anchors = anchors.ToArray();
+        return plan;
+    }
+
+    /// ═══════════════════ P26: THE INVERSION ═══════════════════
+    /// Choose the arena, read its sites, and VALIDATE the resolved set — all BEFORE Game.SetupMission
+    /// seats anything. That ordering is the whole milestone: because accept/reject now happens before
+    /// any unit or objective is placed, a rejected template costs nothing to unwind, so the
+    /// "template rejected mid-build, sites already literal" coherence problem disappears by
+    /// construction rather than by careful unwinding.
+    ///
+    /// DRAWS: exactly ONE Util.Roll(80), skipped under ForcedLayout — the same count Build made
+    /// before, moved. PickLayout/DeckPick draw zero. See the ArenaSites block comment for why the
+    /// MOVE still severs every archived CRN world even though the count is unchanged.
+    ///
+    /// Returns Valid=false for: the restore flag off, a procedural roll, a malformed template, or a
+    /// template whose own sites cannot all be reached. Every one of those means "the pre-P26 path".
+    public static SitePlan PlanBoard(int missionNum, bool needEvac, bool needTerminal,
+                                     bool needSabotage, bool needCaptive, int squadSize)
+    {
+        var none = new SitePlan { Layout = -1, Valid = false };
+        // Consume NOTHING unless we are actually taking over the gate. While every shipped template
+        // is glyph-free, Maps.AnySiteTemplates is false, Build rolls exactly as it always did, and
+        // this whole wave is byte-identical by construction.
+        if (!ArenaSites || !Maps.AnySiteTemplates) return none;
+
+        var spent = new SitePlan { Layout = -1, Valid = false, GateSpent = true };
+        int cand;
+        if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length) cand = ForcedLayout;
+        else if (Util.Roll(80)) cand = PickLayout(missionNum);
+        else return spent;                                  // procedural: literal sites, gate spent
+        if (cand < 0 || cand >= Maps.Layouts.Length) return spent;
+
+        var tpl = Maps.Layouts[cand];
+        if (tpl.Length != Cfg.GridH) return spent;
+        for (int y = 0; y < tpl.Length; y++) if (tpl[y].Length != Cfg.GridW) return spent;
+        if (!ReadSitesWellFormed(tpl, out _)) return spent;
+
+        var plan = ReadSites(tpl);
+        plan.Layout = cand;
+        // A template that declares nothing is the pre-P26 board exactly — take the old path so the
+        // 35 shipped glyph-free arenas are untouched until they are re-authored.
+        if (!plan.AnyArena) return spent;
+
+        // resolve PER CATEGORY: the arena's list when it declares that category, else the literal
+        // Game.SetupMission would have used. Keeping the literals here (rather than in Game) is what
+        // lets the validation below see the SAME tiles the build will actually protect.
+        if (!plan.ArenaEvac)
+        {
+            plan.Evac.Clear();
+            if (needEvac)
+                for (int x = Cfg.GridW - 2; x < Cfg.GridW; x++)
+                    for (int y = 0; y < 4; y++) plan.Evac.Add((x, y));
+        }
+        if (!plan.ArenaTerminal && needTerminal) plan.Terminal = (Cfg.GridW / 2 + 1, Cfg.GridH / 2);
+        if (!plan.ArenaSabotage && needSabotage)
+        { plan.Sabotage.Clear(); plan.Sabotage.Add((5, 3)); plan.Sabotage.Add((10, 5)); plan.Sabotage.Add((13, 7)); }
+        if (!plan.ArenaCaptive && needCaptive) plan.Captive = (Cfg.GridW / 2, Cfg.GridH / 2);
+        // a category the objective does not use contributes nothing to validation
+        if (!needEvac)     { plan.Evac.Clear();     plan.ArenaEvac = false; }
+        if (!needTerminal) { plan.Terminal = null;  plan.ArenaTerminal = false; }
+        if (!needSabotage) { plan.Sabotage.Clear(); plan.ArenaSabotage = false; }
+        if (!needCaptive)  { plan.Captive = null;   plan.ArenaCaptive = false; }
+
+        // SPAWNS. ENVELOP is W4's measured deployment lever (squad centre, pods on every rim); an
+        // arena's 'P' table would price the two together, so ENVELOP keeps its own table.
+        bool canEnvelop = !(needEvac || needTerminal || needSabotage || needCaptive);
+        int shape = DeployFor(DeckSeed, missionNum, canEnvelop);
+        if (shape == DeployEnvelop) plan.ArenaSpawns = false;
+        var spawns = plan.ArenaSpawns ? plan.Spawns : SpawnTableFor(shape);
+        if (spawns == null || spawns.Length == 0) return spent;
+        plan.Spawns = spawns;
+
+        // VALIDATE on the template's own chars. `forcedOpen` is what Build will clear regardless.
+        var forced = new HashSet<(int, int)>();
+        foreach (var t in plan.Evac) forced.Add(t);
+        foreach (var t in plan.Sabotage) forced.Add(t);
+        if (plan.Terminal.HasValue) forced.Add(plan.Terminal.Value);
+        if (plan.Captive.HasValue) forced.Add(plan.Captive.Value);
+        foreach (var t in spawns) forced.Add(t);
+
+        var reach = TemplateReach(tpl, spawns[0], forced);
+        bool Ok(int x, int y) => x >= 0 && y >= 0 && x < Cfg.GridW && y < Cfg.GridH && reach[x, y];
+        foreach (var t in spawns)        if (!Ok(t.x, t.y)) return spent;
+        foreach (var t in plan.Evac)     if (!Ok(t.Item1, t.Item2)) return spent;
+        foreach (var t in plan.Sabotage) if (!Ok(t.Item1, t.Item2)) return spent;
+        if (plan.Terminal.HasValue && !Ok(plan.Terminal.Value.x, plan.Terminal.Value.y)) return spent;
+        if (plan.Captive.HasValue && !Ok(plan.Captive.Value.x, plan.Captive.Value.y)) return spent;
+
+        // ADJACENCY. Game.CanHack, NearestSabotageSite and TryFreeCaptive all need ChebyDist <= 1,
+        // so a site walled in on all eight sides is an UNWINNABLE mission — the failure the literal
+        // 3x3 force-clear was silently preventing. This is the check that replaces it.
+        bool HasNeighbour((int x, int y) t)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                    if ((dx != 0 || dy != 0) && Ok(t.x + dx, t.y + dy)) return true;
+            return false;
+        }
+        if (plan.Terminal.HasValue && !HasNeighbour(plan.Terminal.Value)) return spent;
+        if (plan.Captive.HasValue && !HasNeighbour(plan.Captive.Value)) return spent;
+        foreach (var sTile in plan.Sabotage) if (!HasNeighbour((sTile.x, sTile.y))) return spent;
+
+        plan.Valid = true;
+        plan.GateSpent = true;
+        return plan;
+    }
+
+    /// True if a template's declared glyph COUNTS are legal. `why` names the first rule broken, so
+    /// ARENASITETEST can print which template broke which rule instead of a bare FAIL.
+    public static bool ReadSitesWellFormed(string[] tpl, out string why)
+    {
+        why = "";
+        if (tpl == null) { why = "null template"; return false; }
+        int nT = 0, nx = 0, ne = 0, nc = 0, np = 0, na = 0;
+        for (int y = 0; y < tpl.Length; y++)
+            for (int x = 0; x < tpl[y].Length; x++)
+                switch (tpl[y][x])
+                {
+                    case 'T': nT++; break; case 'X': nx++; break; case 'E': ne++; break;
+                    case 'C': nc++; break; case 'P': np++; break; case 'A': na++; break;
+                }
+        if (nT > 1)             { why = $"T x{nT} (max 1)"; return false; }
+        if (nx != 0 && nx != 3) { why = $"X x{nx} (must be 0 or 3)"; return false; }
+        if (ne != 0 && ne < 8)  { why = $"E x{ne} (must be 0 or >= 8)"; return false; }
+        if (nc > 1)             { why = $"C x{nc} (max 1)"; return false; }
+        if (np != 0 && np < 7)  { why = $"P x{np} (must be 0 or >= 7)"; return false; }
+        if (na > EnemyPodColOffset.Length) { why = $"A x{na} (max {EnemyPodColOffset.Length})"; return false; }
+        return true;
+    }
+
+    /// Draw-free 8-direction reachability flood over a TEMPLATE's own characters — the stand-in for
+    /// TryApplyLayout's post-stamp Grid.CostMap guard, run BEFORE anything is seated. It must match
+    /// CostMap's no-corner-cutting rule exactly (src/Grid.cs): accepting a board the real guard
+    /// would reject is the one direction of error that reintroduces the mid-build revert this whole
+    /// design exists to remove. `forcedOpen` are tiles Build will clear regardless of the template.
+    static bool[,] TemplateReach(string[] tpl, (int x, int y) from, HashSet<(int, int)> forcedOpen)
+    {
+        int h = tpl.Length, w = tpl[0].Length;
+        bool Walk(int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= w || y >= h) return false;
+            if (forcedOpen != null && forcedOpen.Contains((x, y))) return true;
+            char c = tpl[y][x];
+            return c != 'o' && c != '#' && c != 'B';
+        }
+        var seen = new bool[w, h];
+        if (!Walk(from.x, from.y)) return seen;
+        var q = new Queue<(int x, int y)>();
+        seen[from.x, from.y] = true; q.Enqueue(from);
+        while (q.Count > 0)
+        {
+            var (cx, cy) = q.Dequeue();
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = cx + dx, ny = cy + dy;
+                    if (!Walk(nx, ny) || seen[nx, ny]) continue;
+                    // no corner-cutting: a diagonal needs BOTH orthogonal neighbours open
+                    if (dx != 0 && dy != 0 && (!Walk(cx + dx, cy) || !Walk(cx, cy + dy))) continue;
+                    seen[nx, ny] = true; q.Enqueue((nx, ny));
+                }
+        }
+        return seen;
+    }
+
 
     /// The deck derivation itself — public for SIGHTLINE_EXPOSURETEST. Deterministic in
     /// (seed, missionNum); recomputes draws 1..n each call (n<=6 in every real mode, trivially
