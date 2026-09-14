@@ -661,13 +661,36 @@ public static class Mission
     /// Stamp a hand-authored template onto the grid, then verify every spawn, the
     /// evac zone and the terminal stay mutually reachable over walkable terrain.
     /// Reverts and returns false if the layout is malformed or would wall anyone off.
+    /// P28: how many times a layout was refused because its DIMENSIONS were wrong (never
+    /// because the board it made was unreachable). Must be 0 in a healthy build; the gate asserts
+    /// it, and Game.TemplateGate() checks every authored arena up front so this never has to fire
+    /// in the first place.
+    public static int LayoutDimMismatches;
+
     static bool TryApplyLayout(Grid g, HashSet<(int, int)> occupied, List<Unit> players,
                                List<Unit> enemies, HashSet<(int, int)> evac,
                                (int x, int y)? terminal, string[] tpl, List<(int x, int y)> sabotage,
                                bool relaxEnemies = false)
     {
-        if (tpl.Length != g.H) return false;
-        for (int y = 0; y < g.H; y++) if (tpl[y].Length != g.W) return false;
+        // ══ P28 — A DIMENSION MISMATCH IS NOT A REJECTION ════════════════════════════════════
+        // These two lines used to `return false` exactly as a legitimate connectivity rejection
+        // does, so a template of the wrong size made the game fall back to a procedural board
+        // SILENTLY, for every mission, forever. Nothing anywhere said so. That is survivable
+        // today only because all 35 arenas happen to match Cfg.GridW/H — the moment the board
+        // grows, every authored arena is orphaned INVISIBLY and the only symptom is that the
+        // hand-made maps quietly stop appearing.
+        // A rejection is a runtime outcome. A wrong SIZE is a BUG in the template, so it is
+        // counted and shouted about. SIGHTLINE_TEMPLATEGATE turns the count into a PASS/FAIL.
+        if (tpl.Length != g.H || Array.Exists(tpl, r => r.Length != g.W))
+        {
+            LayoutDimMismatches++;
+            if (LayoutDimMismatches <= 3)     // say it, but do not flood a 300-mission autoplay
+                Console.Error.WriteLine($"SIGHTLINE: layout REJECTED for WRONG SIZE — template is " +
+                    $"{tpl.Length} rows x {(tpl.Length > 0 ? tpl[0].Length : 0)} cols, board is " +
+                    $"{g.H} x {g.W}. Falling back to a procedural board. This is a template bug, " +
+                    $"not a map-fit rejection (see Mission.TryApplyLayout / SIGHTLINE_TEMPLATEGATE).");
+            return false;
+        }
         // defense-in-depth (matches EnsureConnectivity/PlaceBarrels): the connectivity flood
         // starts from players[0], so an empty deploy must refuse the layout, not crash. The
         // real guarantee is upstream — DebriefSurvivors never leaves the squad at zero.

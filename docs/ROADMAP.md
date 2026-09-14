@@ -3827,10 +3827,12 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
 - [ ] **Bake lighting into the TERRAIN.** Blocks are still flat `DrawCube` + a faked top cap.
       Generated bevelled blocks with real normals (the `Mesh3D.Lathe` idea, different generator)
       would do more for the projected view than any further chip refinement. **This is the top item.**
-- [ ] **Make a template dimension mismatch a LOUD failure.** `TryApplyLayout` returns false for a
-      wrong-sized template exactly as it does for a legitimate connectivity rejection, so the game
-      silently falls back to procedural for every mission. Two lines, and it must land before any
-      board-size change or a size bump orphans all 35 arenas invisibly.
+- [x] **Make a template dimension mismatch a LOUD failure.** DONE (P28). `Mission.TryApplyLayout`
+      now separates a wrong SIZE (a template bug) from a connectivity rejection (a runtime
+      outcome): it counts `Mission.LayoutDimMismatches` and writes a named warning to stderr.
+      `SIGHTLINE_TEMPLATEGATE` checks all 36 authored arenas against `Cfg.GridW/H` up front, so
+      the failure is caught before a mission is ever built. **Verified RED before GREEN** — a
+      one-column truncation of `Maps.Layouts[0]` fails the gate by name.
 - [ ] **`SIGHTLINE_BIGMAP` prototype (~50x50).** `Grid` already carries instance `W`/`H` and only
       five `Cfg.GridW/H` references exist in `src/`. The camera blocker is ONE line — `Game.cs`
       forces `CamPan = Vector2.Zero` when `CamZoom <= 1.001f`; zooming in already works
@@ -3852,6 +3854,67 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
 - [ ] **Fog of war.** The prerequisite is board size, not code: sight range 9 on an 18-wide board is
       half the board, so fog there is a no-op. At 30 wide the SAME number is 30%. `Game.ClosestSightedDist`
       is a per-team visibility query in all but name; `SquadConcealed` is already a one-way gate.
+
+#### OPEN — wave P28 (the scanned-hologram vision model). Prototype is in `prototypes/lidar`.
+
+The design is settled and demonstrated; what remains is engineering, in this order. The owner's
+direction: the player is an operator at HQ reading a holographic reconstruction assembled from what
+the squad's own LiDAR has scanned. Read `prototypes/lidar/README.md` before starting — it lists four
+bugs already found and fixed, all of the same class, so they are not re-found.
+
+- [ ] **`EdgeKind` in `Grid`, behind `SIGHTLINE_EDGES=0`.** Walls on tile EDGES, so a soldier can
+      hold either face and a wall does not consume a tile. `EdgeV[W+1,H]` / `EdgeH[W,H+1]`, each
+      edge stored ONCE so the two sides cannot disagree. Four touchpoints, all already the single
+      truth both teams read: `IsFloor` (unchanged — a wall occupies no tile), `CostMap` (an edge
+      blocks the step; a diagonal needs both L-routes), `HasLineOfSight` (check the crossed edge;
+      the existing diagonal corner-pair rule becomes an edge pair), `GetCover` (`LevelAt` becomes
+      `max(edge between, neighbour's tile obstacle)`). **`GetCover` is already an edge model in
+      disguise** — a cover tile is just an object blocking all four of its edges — so this is a
+      generalisation, not a rewrite, and `Ai.cs` gains ZERO lines. **Not a save-format break**:
+      `TileType` is not among the thirteen persisted-by-ordinal enums and `Grid` never enters
+      `SaveGame` (verified). Authoring needs a double-resolution template format (`2W+1 x 2H+1`,
+      odd rows/cols are edges) — do NOT retrofit the 35 existing 18x11 arenas, they are orphaned
+      by the size change anyway.
+- [ ] **Peek line-of-sight, behind `SIGHTLINE_PEEKLOS=0`.** Rays leave from a ring over the
+      soldier's own footprint (radius 0.34 against a half-tile of 0.5, so a lean can never reach
+      through a wall) rather than from a point at their centre. Measured **+43% of the world
+      revealed at equal ray budget**. Owner's decision: **visible implies targetable.**
+      **THE TRAP, and the rule that avoids it:** if peek decides visibility but cover is computed
+      from tile centres, a 0.34-tile lean can flip a defender from full cover to flanked with
+      nothing on screen explaining why — cover becomes a continuous function of sub-tile position,
+      illegible to the player, unscoreable by the AI, and it invalidates every tuned constant in
+      `Combat.ComputeOdds`. **So: peek decides VISIBILITY; the EDGE the winning sightline crosses
+      decides COVER.** Both discrete. Leaning buys the shot, not the target's cover — peeking is an
+      accuracy trade, not a cover bypass. A doorway correctly gives no cover because a door is its
+      own `EdgeKind`, which falls out of the data rather than out of the lean.
+      **Optimisation to measure, not assume:** naive multi-origin is 49 Bresenham walks where there
+      is now 1, and `Ai.cs` calls it constantly. Try centre-to-centre FIRST and only pay for the
+      other 48 on failure — open ground succeeds immediately, so only genuinely blocked queries
+      cost more. Expected ~1.1-1.3x, but that is a guess until somebody measures it.
+- [ ] **Coverage masks + a texture ATLAS.** A ray is a cell of solid angle; what it reveals is the
+      AREA its footprint covers. **The atlas is not polish — it is what makes the separation real.**
+      The prototype draws one quad per mask cell, which forces coverage and material to share a
+      resolution and lets mask resolution set the texture's grain. In the atlas the face is ONE
+      quad, material is sampled per PIXEL, coverage is an alpha channel sampled bilinearly (which
+      also softens the stair-stepped reveal edge). Needs no GLSL — Raylib's default shader already
+      multiplies texel x material x vertex.
+- [ ] **Per-triangle coverage FRACTION for props.** Today a triangle is all-or-nothing, so a
+      partially covered one pops in whole; on a 60-triangle tree that reads as holes in the canopy.
+      Storing the fraction and fading alpha closes them with the same confidence mechanism already
+      used for walls and floor.
+- [ ] **Prop spatial bucketing.** Mesh intersection is already the dominant cost (see
+      `docs/measurements/p28/`) and the only spatial structure is a per-prop AABB. At 50x50 with
+      hundreds of props this needs per-tile bucketing or a BVH.
+- [ ] **Ray density is a tunable, and the owner wants it higher.** Measured: ray marching is
+      linear at ~3.2-4.0 M rays/s and is NOT the expensive part; coverage stamping is a roughly
+      fixed ~70-100 ms/scan. 16x the rays costs 2.9x the time. Three unspent optimisations are
+      listed in `docs/measurements/p28/README.md` — bank those before lowering the density target.
+- [ ] **Restore flags are MANDATORY here.** Changing the visibility model changes what every unit
+      can see, so it changes every AI decision and **severs the CRN chain exactly as W1 did**.
+      Every archived balance number becomes incomparable — not wrong, incomparable. The roadmap
+      already accepts that for this direction, but per the project's cardinal rule (the one THE
+      FORK PAYS broke, which cost the L5 bridge) each gameplay lever ships with its flag **in the
+      same commit**.
 
 #### OPEN — found during the review, untouched
 

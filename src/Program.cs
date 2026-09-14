@@ -699,6 +699,15 @@ public static class Program
             Console.Write(Hud.KeyTableMarkdown());
             return;
         }
+        // SIGHTLINE_TEMPLATEGATE=1 : P28 — every hand-authored arena still fits the board. A
+        // wrong-sized template is refused by Mission.TryApplyLayout with the same `return false`
+        // as a connectivity rejection, so without this a board-size change orphans all 35 arenas
+        // in total silence. Needs no window: it only measures string lengths.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_TEMPLATEGATE") == "1")
+        {
+            Console.WriteLine(Game.TemplateGate());
+            return;
+        }
         // SIGHTLINE_KEYTABLEGATE=1 : P13 — the generator above had no gate, and the table it reads
         // from had no gate either. Asserts (a) README's KEYTABLE block is byte-identical to what
         // the generator prints, and (b) every key src/Game.Audition.cs actually reads is named in

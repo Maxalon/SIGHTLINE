@@ -8091,6 +8091,53 @@ public partial class Game
         new ScreenCase("SHOP-WORST",    g => { g.DebugShop(); FitStressSquad(g); }),
     };
 
+    // ─── P28 — SIGHTLINE_TEMPLATEGATE: every authored arena still FITS the board ──────────────
+    /// `Mission.TryApplyLayout` refuses a template whose dimensions do not match the grid, and
+    /// until P28 it did so with the SAME `return false` it uses for a legitimate connectivity
+    /// rejection. So a board-size change would orphan all 35 hand-authored arenas and the only
+    /// symptom would be that authored maps quietly stop appearing — every mission procedural,
+    /// forever, with nothing logged. docs/ROADMAP.md has carried "make this loud" as a
+    /// prerequisite for the bigger board since P26/P27; this is it.
+    ///
+    /// TWO LEGS:
+    ///   (a) EVERY template in Maps.Layouts (and TrainingArena) is exactly Cfg.GridH rows of
+    ///       Cfg.GridW columns. Checked up front, by measurement, so a mismatch is caught before
+    ///       a single mission is built rather than silently absorbed at runtime.
+    ///   (b) Mission.LayoutDimMismatches is still 0 afterwards — i.e. nothing in this process has
+    ///       actually taken the wrong-size path. Leg (a) is the real check; (b) is the tripwire
+    ///       that stays armed for any template built at runtime rather than declared in Maps.
+    public static string TemplateGate()
+    {
+        var fails = new List<string>();
+        int checkedCount = 0;
+
+        void Check(string name, string[] tpl)
+        {
+            checkedCount++;
+            if (tpl == null) { fails.Add($"{name}: NULL template"); return; }
+            if (tpl.Length != Cfg.GridH)
+                fails.Add($"{name}: {tpl.Length} rows, board wants {Cfg.GridH}");
+            for (int y = 0; y < tpl.Length; y++)
+                if (tpl[y].Length != Cfg.GridW)
+                    fails.Add($"{name}: row {y} is {tpl[y].Length} cols, board wants {Cfg.GridW}");
+        }
+
+        for (int i = 0; i < Maps.Layouts.Length; i++) Check($"Maps.Layouts[{i}]", Maps.Layouts[i]);
+        Check("Maps.TrainingArena", Maps.TrainingArena);
+
+        if (Mission.LayoutDimMismatches != 0)
+            fails.Add($"Mission.LayoutDimMismatches = {Mission.LayoutDimMismatches}, expected 0");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"TEMPLATEGATE: {checkedCount} authored arenas checked against {Cfg.GridW}x{Cfg.GridH}");
+        foreach (var f in fails) sb.AppendLine($"  FAIL {f}");
+        sb.Append(fails.Count == 0
+            ? "TEMPLATEGATE: PASS"
+            : $"TEMPLATEGATE: FAIL ({fails.Count} problem(s)) - these arenas are ORPHANED and every " +
+              "mission using them falls back to a procedural board.");
+        return sb.ToString();
+    }
+
     // ─── P13 — SIGHTLINE_KEYTABLEGATE: the controls the game reads vs the controls it DOCUMENTS ──
     /// `Hud.KeyTable` is the single row-set behind BOTH the in-game FIELD MANUAL and README's
     /// generated controls block, and `SIGHTLINE_KEYTABLE` is the generator that prints the latter.

@@ -17826,3 +17826,96 @@ the kill seam); `Ai.Tier` is nearly inert (four constants, two bypassed when a S
 the autopilot has no target-priority entry for twelve of ~21 archetypes, so **every balance number
 was produced by a bot that cannot tell them apart**; and shoot-and-hold is legal (`DoOverwatch` has
 no `FiredThisTurn` gate), so a grenade costs two actions first and one action second.
+
+---
+
+## P28. THE SCANNED BOARD — a 3D asset pipeline, and the vision model it turned into
+
+**2026-09-14, base `8606c58`.** Owner-driven session. It began as "can we do 3D modelling, or is
+procedural-only actually a rule?" and ended somewhere else entirely — which the owner noted:
+*"i started the session with the intention to make 3d models, not a new lighting, vision and
+rendering system, but good thing it's done now."* Both halves landed; only the first is wired in.
+
+### The premise was already wrong
+
+`CLAUDE.md`'s asset policy was relaxed on 2026-08-29 — the "no hand-made art" hard line is gone,
+and what remains is two bars (zero cost, zero legal risk) plus a *style* preference. The real
+constraint was never policy, it was that the sandbox proxy blocks the asset sites. So the question
+was never "may we ship assets" but "can the agent AUTHOR them in here". Measured answer: yes.
+
+### Measured, not assumed (all in this container)
+
+| | |
+|---|---|
+| PyPI through the proxy | reachable — the blocklist is asset sites, not package registries |
+| `bpy` (Blender as a Python module) | **5.0.1 runs fully headless**, 634 MB venv, cp311 wheel matches the container's Python exactly |
+| Raylib-cs 8.0 native loader | `.obj .gltf/.glb .iqm .m3d .vox`, **plus skeletal animation** (`LoadModelAnimations`) |
+| Blender -> `.glb` -> `Raylib.LoadModel` | round-trips with normals AND vertex colours intact |
+| Cycles **ambient-occlusion bake** to vertex colours | works headless, CPU |
+| `Raylib.ExportMeshAsCode` | exists — raylib will emit a mesh as source |
+
+**The pipeline decision: the asset is the SCRIPT; the `.glb` is build output.** Same contract as
+`scripts/changelog.sh` — derived, not written. `tools/props/props.py` generates the six-prop kit
+(60 KB, 44-216 tris each) into `assets/props/`. Change one number, re-run, every instance changes.
+That is what "does not lock in the block shapes" means, and it was the owner's stated requirement.
+
+**Two gotchas that cost real time, both handled in `props.py`:** Blender is Z-up while glTF and
+Raylib are Y-up, so a key light baked in Blender's space lands on the wrong axis (measured: every
+top face came back at exactly `0.34*255 = 87`, dead flat); and glTF's default
+`export_vertex_color='MATERIAL'` silently drops vertex colours unless a material references them.
+
+**A real defect in shipped code, found on the way:** `View3D.MakeCamera` puts the camera at **+Z**
+at yaw 0, but `Mesh3D.Key` is `(-0.40, 0.86, -0.32)` — **it lights the faces the camera cannot
+see.** The lathe chip hides it because the `-0.40` X term still yields a left-right gradient; boxes
+would not have. Not fixed here (it is one sign, in a file the vision work will replace) —
+`docs/ROADMAP.md` carries it under the terrain item.
+
+### Then the owner redirected, and it got interesting
+
+The direction: blocks are placeholder; terrain should read as a **holographic reconstruction
+assembled from what the squad's own LiDAR has scanned**. Walls belong on tile EDGES (a soldier
+holds either face); tile obstacles are one prop each; the operator should see only what has been
+scanned, per FACE, so a wall observed from one side has no readable thickness.
+
+`prototypes/lidar/` is the working answer, with a README covering what it establishes. Headlines:
+
+- **`GetCover` is already an edge model in disguise** — `LevelAt(sx,sy)` asks "does the neighbour
+  have cover?", which is really "is there something on the edge between us?" A cover tile is an
+  object blocking all four of its edges. So edges are a generalisation, not a rewrite, and `Ai.cs`
+  gains zero lines. Verified **not a save-format break**: `TileType` is not among the thirteen
+  persisted-by-ordinal enums and `Grid` never enters `SaveGame`.
+- **Ray casting is not the expensive part.** ~3.2-4.0 M rays/s, linear; coverage *stamping* is a
+  roughly fixed 70-100 ms/scan. 16x the rays costs 2.9x the time. `docs/measurements/p28/`.
+- **Peek origins** (a ring over the soldier's own footprint, radius 0.34 vs a half-tile of 0.5, so
+  a lean cannot reach through a wall) reveal **+43% of the world at equal ray budget**.
+
+### The thesis this wave adds to PARALLAX's
+
+PARALLAX's standing thesis is that the gates here fail quiet. P28 adds a sibling, from four bugs
+the owner caught by *looking* at renders rather than by any check firing:
+
+> **An indexing or approximation convention will leak into appearance unless something stops it.**
+
+All four were the same shape. Returns recorded on the edge LINE while the renderer drew faces at
+`x +- T/2` (so they floated inside the slab and read through the unscanned side). Material sampled
+once per mask cell (so the scan's mask resolution set the texture's grain). The floor stored as 384
+per-tile masks with every footprint clipped at its tile (so the cone edge broke on grid lines). And
+an isotropic footprint with a clamp, when a scan cell's ground footprint is an ELLIPSE whose
+along-ground extent *is* the ring spacing — clamping a circle destroyed the property that makes
+footprints tile the ground, and far coverage fell apart into rings.
+
+The rule that falls out: **the unit you store coverage in must be the unit the surface actually
+is, not the unit you happen to index it by.** None of these would have been caught by a PASS/FAIL
+line, because every one of them produced a perfectly valid-looking render.
+
+### Shipped here
+
+`SIGHTLINE_TEMPLATEGATE` closes the roadmap's stated prerequisite for any board-size change:
+`Mission.TryApplyLayout` refused a wrong-sized template with the same `return false` as a
+connectivity rejection, so a size bump would have orphaned all 35 authored arenas in total
+silence. Now counted, named on stderr, and gated up front over all 36 arenas. **Verified RED
+before GREEN** — truncating one column of `Maps.Layouts[0]` fails it by name.
+
+Everything else is `prototypes/` and `tools/`: nothing in `src/` loads a `.glb`, and
+`assets/props/**` is deliberately NOT in the `.csproj` copy list or `Ship.RequiredFiles`, because
+adding a file to the manifest before anything needs it would make SHIPTEST assert a lie.
