@@ -18132,3 +18132,56 @@ The ray/coverage render (partial per-surface knowledge with a confidence gradien
 the prototype and needs a texture atlas. Discovery is presentation-only. And the projected view is
 **still a screenshot hook** — nothing lets you play in it, which is the gap between "it looks
 right" and "it is the game".
+
+---
+
+## P31. THE PROJECTED VIEW GETS ITS FLAVOUR BACK
+
+**2026-09-14, base `1c4482c`.** The owner, on P30's screenshot: *"it looks bland. we lost a lot of
+flavor and detail the game had before. with actual 3d models we should be able to remedy that
+though, no?"* Correct on both counts, and the loss was bigger than the props.
+
+### Three things the 2D board had that the 3D view had thrown away
+
+**The BIOME.** `Renderer.DrawCover` pulls cover and plateaus 0.55 toward the biome's hue and takes
+its floor checker from it — most of why eight biomes read as eight PLACES. `View3D` painted one
+grey for every room. RESONANCE V3's finding about the 2D board was *"forty-five grey widgets in a
+coloured room read as a whitebox level"*, and the projected view had quietly reintroduced exactly
+that. `View3D.Scene` + `Biomed()` uses the same 0.55 pull, so one number is honoured by two
+renderers and the board looks like the same place whichever way you are looking at it.
+
+**The GROUND layer.** C4 and P16 made five biomes mechanical on five axes and the 2D board draws
+every one. The 3D view drew none of them — a player could not see the fern giving them cover, the
+drift halving their step, or the fissure about to set them alight. Rules with no picture attached.
+Undergrowth is BLADES rather than a mat, because the fern has to read as something you stand IN.
+Scatter is `Util.Hash3`, never `Util.Rng`: this runs inside the draw, and a stream-seeded shape
+would both crawl between frames and spend draws the flywheel is counting.
+
+**The PROPS.** Every solid was a cuboid. `assets/props/*.glb` had been sitting unused since P28.
+
+### Shipping the kit, and the trap that is easy to half-do
+
+The `.csproj` copy list AND `Ship.RequiredFiles` had to change **together**. C6's whole finding was
+that `Cfg.AssetPath`'s cwd fallback resolves a missing file off the REPO when you run from the
+source tree, so a kit that is loaded but not copied works perfectly for a developer and is broken
+for every player, silently. SHIPTEST resolves the manifest strictly against
+`AppContext.BaseDirectory` and now reports 15 bundled files, none via the fallback.
+
+Cover picks its prop from **`Grid.CoverSeed`**, which P28 had already identified as the right slot:
+it is documented as *"PURELY VISUAL: stable per-tile identity of the drawn cover VOLUME"*, is
+already persisted for the mission, and is already ignored by every rule. VERDANT's high cover is a
+TREE — a tree IS high cover in a forest — and elsewhere a crate stack alternates with the plain
+block so a line of cover stops reading as extruded wallpaper.
+
+**A gotcha worth keeping:** the kit carries its own baked key light AND ambient occlusion in vertex
+colours (~0.27..1.0), and the shader multiplies that by the tint. Tinting a prop with the same
+colour a flat block gets darkens it TWICE, and the first render put every tree on the board as a
+near-black silhouette — detail rendered invisible, which is worse than the cuboid it replaced.
+Props take their own lift so their lit faces land where a block's lit face does.
+
+### Still open
+
+`car.glb` is unused because the game has no multi-tile obstacle — a DATA-MODEL gap, not an art one.
+Only VERDANT has a species; ARID wants rocks, MAGMA slag, NEON signage, each one a `props.py` entry
+and a line in `CoverProp`. And the projected view is **still a screenshot hook**: it now looks like
+a place, and you still cannot play in it.

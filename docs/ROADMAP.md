@@ -3873,11 +3873,30 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
 
 #### OPEN — the projected view, after P30
 
-- [ ] **The props are still boxes.** Cover, barrels and plateaus are lit bevelled blocks now, which
-      is most of the "looks 3D" win, but a tree is a box and a car is a box. `assets/props/*.glb`
-      (from P28's Blender pipeline) has tree/crate/car/wall meshes ready; loading them needs them
-      added to the `.csproj` copy list AND `Ship.RequiredFiles`, or C6's cwd-fallback hides a
-      broken build. That is the next visible step.
+- [x] **The props are boxes no longer.** DONE (P31). `assets/props/*.glb` is copied by the
+      `.csproj` AND listed in `Ship.RequiredFiles` — both, together, or C6's cwd fallback resolves
+      a missing file off the repo and the build is broken for a player and green for a developer.
+      SHIPTEST confirms 15 bundled files resolve next to the binary, none via the fallback. Cover
+      picks its prop from `Grid.CoverSeed` (documented as "PURELY VISUAL: stable per-tile identity
+      of the drawn cover VOLUME" — exactly the right slot, already persisted and already ignored by
+      every rule): VERDANT's high cover is a TREE, elsewhere a crate stack alternates with the
+      plain block. Props carry their OWN baked key light and AO, so they get a separate tint lift —
+      tinting them like a flat block darkens them twice and lands the mesh as a black silhouette.
+- [x] **The biome reached the 3D view.** DONE (P31). `View3D.Scene`; cover and plateaus take the
+      same 0.55 hue pull `Renderer.DrawCover` uses, and the floor checker comes from the biome.
+      RESONANCE V3's finding about the 2D board — "forty-five grey widgets in a coloured room read
+      as a whitebox level" — had been quietly reintroduced by the projected view.
+- [x] **The GROUND layer reached the 3D view.** DONE (P31). Undergrowth blades, ice drift, soft
+      sand and vent embers, deterministic from `Util.Hash3` (never `Util.Rng`: this runs inside the
+      draw, and a stream-seeded shape would both crawl between frames and spend draws the flywheel
+      counts). Before it, a player could not SEE the fern giving them cover or the fissure about to
+      set them alight — rules with no picture attached.
+- [ ] **The car mesh is unused, because the game has no multi-tile obstacle.** `car.glb` spans two
+      tiles and `Grid` has no concept of one object occupying several. That is a DATA-MODEL gap,
+      not an art one — see P28's notes on tile obstacles vs edge walls.
+- [ ] **Only VERDANT gets a species.** Every other biome alternates crate and block. ARID wants
+      rocks, MAGMA wants slag, NEON wants signage — each is a `props.py` entry and one line in
+      `View3D.CoverProp`, so this is cheap flavour whenever somebody wants it.
 - [ ] **The RAY/coverage render is not in the game.** `Vision` is per-face binary. The
       angular-footprint coverage masks in `prototypes/lidar` give PARTIAL knowledge of a surface
       and a confidence gradient, and need a texture atlas to decouple material grain from mask
