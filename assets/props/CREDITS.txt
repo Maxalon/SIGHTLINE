@@ -1,0 +1,40 @@
+SIGHTLINE — 3D PROP KIT (PROGRAM PARALLAX, wave P28)
+====================================================
+
+PROVENANCE: every file here is DERIVED, not authored by hand and not downloaded.
+The source of truth is  tools/props/props.py  — a Blender script. The .glb files are its
+build output, committed so a machine without Blender can still build and run.
+
+  REGENERATE:   python3 tools/props/props.py          (needs `pip install bpy`, Python 3.11)
+
+LICENCE: originated inside this repository, so they fall under the project's own LICENSE
+(all rights reserved). No third-party asset is included and nothing here needs a notice in
+THIRD-PARTY-NOTICES.txt. Blender is GPL, but Blender's OUTPUT is not GPL-encumbered — the
+same way a document written in a GPL editor is not.
+
+ZERO COST / ZERO LEGAL RISK (CLAUDE.md's two bars): both cleared trivially, because we made them.
+
+WHAT EACH ONE IS
+  wall_high.glb  44 tris   an EDGE wall, full height: blocks sight and gives cover
+  wall_low.glb   44 tris   an EDGE wall, waist height: cover you can shoot over
+  wall_door.glb 132 tris   two jambs + a lintel: passable, sight-permeable
+  tree.glb       60 tris   a TILE obstacle
+  crate.glb      88 tris   a TILE obstacle, stacked pair
+  car.glb       216 tris   a MULTI-TILE obstacle, spans two tiles along its long axis
+
+Total 60 KB. Each carries a directional key light AND Cycles ambient occlusion baked into
+per-vertex colours as greyscale — Raylib's default shader multiplies texel x material x vertex,
+so the per-draw material tint still supplies the team/faction colour on top. Flat-shaded facets,
+real form, no shader files, no textures.
+
+TWO GOTCHAS THAT COST REAL TIME (both are handled in props.py — do not re-derive them)
+  1. BLENDER IS Z-UP; glTF AND RAYLIB ARE Y-UP. A key light baked in Blender's space lands on
+     the wrong axis: every top face comes back at the ambient floor (measured: exactly 0.34*255
+     = 87, dead flat). props.py converts glTF(x,y,z) -> Blender(x,-z,y) before baking.
+  2. glTF's DEFAULT export_vertex_color='MATERIAL' silently drops vertex colours unless a
+     material references them, and COLOR_0 is taken from the FIRST colour attribute. props.py
+     exports with 'ACTIVE', materials 'NONE', and removes the scratch AO layer before export.
+
+NOT YET WIRED INTO THE GAME. Nothing loads these at runtime and they are deliberately NOT in
+Sightline.csproj's copy list or Ship.RequiredFiles — adding them there before something uses
+them would make SHIPTEST assert a file the game does not need. See docs/ROADMAP.md wave P28.
