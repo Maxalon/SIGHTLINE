@@ -21,8 +21,11 @@ WHAT EACH ONE IS
   tree.glb       60 tris   a TILE obstacle
   crate.glb      88 tris   a TILE obstacle, stacked pair
   car.glb       216 tris   a MULTI-TILE obstacle, spans two tiles along its long axis
+  rock.glb       40 tris   ARID's cover species: a boulder and its chip
+  slag.glb      324 tris   MAGMA's cover species: a cooled spatter heap, three chunks off-axis
+  sign.glb      108 tris   NEON's cover species: a hoarding on a post
 
-Total 60 KB. Each carries a directional key light AND Cycles ambient occlusion baked into
+Total ~106 KB. Each carries a directional key light AND Cycles ambient occlusion baked into
 per-vertex colours as greyscale — Raylib's default shader multiplies texel x material x vertex,
 so the per-draw material tint still supplies the team/faction colour on top. Flat-shaded facets,
 real form, no shader files, no textures.
@@ -35,6 +38,13 @@ TWO GOTCHAS THAT COST REAL TIME (both are handled in props.py — do not re-deri
      material references them, and COLOR_0 is taken from the FIRST colour attribute. props.py
      exports with 'ACTIVE', materials 'NONE', and removes the scratch AO layer before export.
 
-NOT YET WIRED INTO THE GAME. Nothing loads these at runtime and they are deliberately NOT in
-Sightline.csproj's copy list or Ship.RequiredFiles — adding them there before something uses
-them would make SHIPTEST assert a file the game does not need. See docs/ROADMAP.md wave P28.
+WIRED IN SINCE P31 (this paragraph used to say the opposite — it was written at P28, when nothing
+loaded them). `View3D.CoverProp` and `View3D.DrawEdges` load the kit lazily through Cfg.AssetPath,
+every file is in Sightline.csproj's copy list AND in Ship.RequiredFiles, and SHIPTEST resolves the
+manifest strictly against AppContext.BaseDirectory. Both lists, together, or C6's cwd fallback
+resolves a missing file off the REPO and the build is broken for a player and green for a developer.
+
+THE BAKE IS NOT BYTE-REPRODUCIBLE. Cycles' AO pass is stochastic at 48 samples, so regenerating the
+kit rewrites files whose GEOMETRY has not changed (the printed tri counts are the thing to compare,
+and they are stable). If a regeneration shows unrelated .glb files as modified with identical tri
+counts, that is this and not a change — revert them and keep the diff to what you meant.

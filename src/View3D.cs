@@ -207,7 +207,7 @@ public static class View3D
     // bare relative path. If any mesh fails to resolve the whole kit is declared absent and every
     // call site falls back to the bevelled block — a missing asset must degrade the LOOK, never
     // drop terrain the player is standing behind.
-    static Model _tree, _crate, _wallHi, _wallLo, _wallDoor;
+    static Model _tree, _crate, _wallHi, _wallLo, _wallDoor, _rock, _slag, _sign;
     static bool _propsTried, _propsOk;
 
     static bool Props
@@ -219,11 +219,40 @@ public static class View3D
             Model L(string n) => Raylib.LoadModel(Cfg.AssetPath($"assets/props/{n}.glb"));
             _tree = L("tree"); _crate = L("crate");
             _wallHi = L("wall_high"); _wallLo = L("wall_low"); _wallDoor = L("wall_door");
+            _rock = L("rock"); _slag = L("slag"); _sign = L("sign");   // P36 — the biome species
             _propsOk = _tree.MeshCount > 0 && _crate.MeshCount > 0 && _wallHi.MeshCount > 0
-                    && _wallLo.MeshCount > 0 && _wallDoor.MeshCount > 0;
+                    && _wallLo.MeshCount > 0 && _wallDoor.MeshCount > 0
+                    && _rock.MeshCount > 0 && _slag.MeshCount > 0 && _sign.MeshCount > 0;
             if (!_propsOk)
                 Console.Error.WriteLine("VIEW3D: assets/props/*.glb did not load - falling back to blocks.");
             return _propsOk;
+        }
+    }
+
+    /// P36 — THE BIOME'S OWN COVER. C4 and P16 made five biomes MECHANICAL and P31 gave them a
+    /// ground layer, but every biome's COVER was the same crate: the room recoloured and the things
+    /// in it did not, which is RESONANCE V3's "forty-five grey widgets in a coloured room" wearing
+    /// a different hat.
+    ///
+    /// Returns the biome's species and the scale it wants, or a null model for "no species, use the
+    /// kit default". Only the biomes with an obvious vocabulary get one — STEEL is a depot, ASH is a
+    /// burn scar and TUNDRA is a snowfield, and a crate is the right answer in all three.
+    ///
+    /// **A SPECIES IS A CHANGE OF MATERIAL, NOT OF WHAT THE TILE DOES.** Every one of these is built
+    /// to the crate's envelope and swapped in on the same scale factors, so the silhouette a player
+    /// reads as "waist-high thing I can shoot over" is the same in every room. Nothing here is read
+    /// by `Grid`, `Ai` or `Combat`; `Grid.CoverSeed`, which picks the variant, is documented as
+    /// purely visual and is ignored by every rule.
+    static Model BiomeSpecies(bool high, out float scale)
+    {
+        scale = high ? 1.45f : 0.95f;
+        switch (Scene?.Name)
+        {
+            case "VERDANT": if (!high) return default; scale = 1.25f; return _tree;
+            case "ARID":    scale = high ? 1.55f : 1.10f; return _rock;
+            case "MAGMA":   scale = high ? 1.30f : 0.92f; return _slag;
+            case "NEON":    scale = high ? 1.35f : 1.00f; return _sign;
+            default:        return default;
         }
     }
 
@@ -250,7 +279,11 @@ public static class View3D
         {
             int v = Variant(g, x, y);
             Model m; float sc;
-            if (high && Scene.Name == "VERDANT") { m = _tree; sc = 1.25f; }
+            var species = BiomeSpecies(high, out float speciesScale);
+            // The species is the ROOM's answer and wins where it exists; VERDANT's tree has always
+            // taken every high-cover tile and the other three do the same, because a landscape whose
+            // boulders are half crates reads as a landscape with crates in it.
+            if (species.MeshCount > 0) { m = species; sc = speciesScale; }
             else if ((v & 1) == 0) { m = _crate; sc = high ? 1.45f : 0.95f; }
             else { Solid(TileWorld(x, y, baseY + (high ? HighH : LowH) * 0.5f),
                          high ? 0.92f : 0.86f, high ? HighH : LowH, high ? 0.92f : 0.86f, tint, tint); return; }
@@ -1236,8 +1269,13 @@ public static class View3D
         if (parts.Count == 0) return;
 
         string line = string.Join("   ", parts) + "   [C] RESET";
+        // TOP RIGHT, under the END TURN plate. P33 put it bottom-left, which collides with the
+        // fifth roster card — the VIP / CAPTIVE slot an ESCORT or RESCUE mission fills, so the one
+        // objective whose asset you most need to see is the one it covers. The band under the top
+        // bar is empty at every screen this view can be on, and the centred BONUS line stops well
+        // short of it.
         var sz = Cfg.Measure(line, 14, 1f);
-        int x = 20, y = Cfg.ScreenH - 178;
+        int x = Cfg.ScreenW - (int)sz.X - 20, y = 52;
         Raylib.DrawRectangle(x - 8, y - 5, (int)sz.X + 16, (int)sz.Y + 10, Pal.RGBA(8, 12, 17, 170));
         Raylib.DrawRectangleLinesEx(new Rectangle(x - 8, y - 5, (int)sz.X + 16, (int)sz.Y + 10), 1f,
                                     Pal.RGBA(90, 130, 160, 110));
