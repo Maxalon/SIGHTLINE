@@ -392,6 +392,10 @@ public class Biome
 public static class Util
 {
     public static float Clamp(float v, float a, float b) => MathF.Max(a, MathF.Min(b, v));
+
+    /// Fold an angle in degrees into [0,360). Used by the projected camera's orbit so a yaw that
+    /// steps past a turn reads as 15 and not 375 in the HUD chip.
+    public static float Wrap360(float deg) { deg %= 360f; return deg < 0f ? deg + 360f : deg; }
     public static int   Clamp(int v, int a, int b)       => Math.Max(a, Math.Min(b, v));
     public static float Lerp(float a, float b, float t)  => a + (b - a) * t;
     public static int   Sign(int v) => v > 0 ? 1 : (v < 0 ? -1 : 0);

@@ -124,6 +124,9 @@ between the two `KEYTABLE` markers. The set of bound keys it must cover is deriv
 | **Wheel** | zoom |
 | **Middle-drag** | pan |
 | **C** | reset the camera (AUTO-CAM on the pause card follows the action on its own) |
+| **I** | switch between the FLAT and PROJECTED views of the board |
+| **[ / ]** | PROJECTED VIEW: orbit the board 15 degrees |
+| **, / .** | PROJECTED VIEW: tilt the camera down / up |
 
 **In a Mission**
 

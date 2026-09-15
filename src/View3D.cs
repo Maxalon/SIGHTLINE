@@ -45,6 +45,62 @@ public static class View3D
     /// Framing slack. 1.0 fits the board's rotated bounding box exactly; >1 pulls back.
     public static float Margin = 1.04f;
 
+    // ── P33: CAMERA CONTROL ──────────────────────────────────────────────────────────────────
+    /// Zoom, as a divisor on the fitted extent. 1 = the whole board framed (what MakeCamera
+    /// computes); higher = closer. The board ALWAYS fits at Zoom 1 by construction, which is why
+    /// a big map needs no pan until you have zoomed into it.
+    public static float Zoom = 1f;
+    public const float ZoomMin = 1f, ZoomMax = 3.5f;
+
+    /// Ground-plane offset of the camera's target, in world units (tiles).
+    public static Vector2 Pan;
+
+    public const float PitchMin = 18f, PitchMax = 82f;
+
+    /// Back to the framing every mission opens on. Bound to the same C the flat camera resets with,
+    /// so one key means "show me the board again" in either projection.
+    public static void ResetCamera() { PitchDeg = 52f; YawDeg = 0f; Zoom = 1f; Pan = Vector2.Zero; }
+
+    /// How far the target may stray and still leave the view full of board.
+    ///
+    /// At zoom z the camera sees 1/z of the fitted extent, so the target can range over
+    /// (span - span/z) / 2 on each axis — EXACT at yaw 0 and a close approximation as the board
+    /// rotates under it. At zoom 1 it collapses to zero, which is correct rather than a special
+    /// case: the whole board is already on screen and there is nothing to pan to.
+    public static void ClampPan(Grid g)
+    {
+        float sx = MathF.Max(0f, g.W * 0.5f * (1f - 1f / MathF.Max(Zoom, 0.01f)));
+        float sz = MathF.Max(0f, g.H * 0.5f * (1f - 1f / MathF.Max(Zoom, 0.01f)));
+        Pan = new Vector2(Util.Clamp(Pan.X, -sx, sx), Util.Clamp(Pan.Y, -sz, sz));
+    }
+
+    /// Screen-space drag -> ground-plane pan. A drag has to move the BOARD under the cursor, not
+    /// the camera in some unrelated frame, so the delta is rotated into the yaw the player is
+    /// actually looking along and un-foreshortened by the pitch. Without the pitch term a drag
+    /// away from the camera moves the board far less than the hand does, which reads as the pan
+    /// "sticking" at steep angles.
+    ///
+    /// THE ROTATION IS THE INVERSE, NOT THE ROTATION. The camera's screen-right axis on the ground
+    /// plane is (cos yaw, -sin yaw) and its screen-up axis is -sin(pitch) * (sin yaw, cos yaw), so
+    /// turning a SCREEN delta back into a WORLD one is solving that pair — which is R transposed.
+    /// Written as R it is exactly right at yaw 0 and at yaw 180, and wrong everywhere else; that is
+    /// why PICKTEST leg (B) drags at four yaws and not at one.
+    public static void DragPan(Grid g, Vector2 screenDelta, float pxPerUnit)
+    {
+        float yaw = YawDeg * MathF.PI / 180f;
+        float pitch = MathF.Max(0.2f, PitchDeg * MathF.PI / 180f);
+        float dx = -screenDelta.X / pxPerUnit;
+        float dz = -screenDelta.Y / pxPerUnit / MathF.Sin(pitch);
+        Pan += new Vector2( dx * MathF.Cos(yaw) + dz * MathF.Sin(yaw),
+                           -dx * MathF.Sin(yaw) + dz * MathF.Cos(yaw));
+        ClampPan(g);
+    }
+
+    /// Screen pixels per world unit at the camera's current framing. Orthographic FovY IS the
+    /// vertical extent in world units, so this is one division — but it has to be taken from the
+    /// LIVE camera rather than recomputed, or a drag disagrees with the frame it is dragging.
+    public static float PixelsPerUnit(Camera3D cam) => Cfg.ScreenH / MathF.Max(cam.FovY, 0.001f);
+
     // ── World mapping ────────────────────────────────────────────────────────────────────────
     // Tile (x,y) occupies the unit square [x,x+1] x [y,y+1] on the XZ plane; +Y is up. One tile is
     // one world unit, so a height of 1.0 is exactly one tile wide — the proportion a person reads
@@ -67,7 +123,7 @@ public static class View3D
     {
         float pitch = PitchDeg * MathF.PI / 180f;
         float yaw = YawDeg * MathF.PI / 180f;
-        var target = new Vector3(g.W * 0.5f, (HighH + TierH) * 0.35f, g.H * 0.5f);
+        var target = new Vector3(g.W * 0.5f + Pan.X, (HighH + TierH) * 0.35f, g.H * 0.5f + Pan.Y);
 
         float cs = MathF.Abs(MathF.Cos(yaw)), sn = MathF.Abs(MathF.Sin(yaw));
         float spanX = g.W * cs + g.H * sn;        // screen-horizontal footprint after rotation
@@ -75,7 +131,8 @@ public static class View3D
         // Depth compresses by sin(pitch) on screen; add headroom for the tallest geometry.
         float needV = spanZ * MathF.Sin(pitch) + (HighH + TierH * 2f) * MathF.Cos(pitch) + 1.0f;
         float needH = spanX + 1.0f;
-        float fovY = MathF.Max(needV, needH / MathF.Max(aspect, 0.01f)) * Margin;
+        float fovY = MathF.Max(needV, needH / MathF.Max(aspect, 0.01f)) * Margin
+                   / Util.Clamp(Zoom, ZoomMin, ZoomMax);
 
         var dir = new Vector3(MathF.Cos(pitch) * MathF.Sin(yaw),
                               MathF.Sin(pitch),
@@ -633,13 +690,32 @@ public static class View3D
         var fails = new System.Collections.Generic.List<string>();
         var g = new Grid();
         for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) g.Tiles[x, y] = TileType.Floor;
-        float savedP = PitchDeg, savedY = YawDeg;
+        float savedP = PitchDeg, savedY = YawDeg, savedZ = Zoom;
+        var savedPan = Pan;
         int checkedTiles = 0;
 
-        foreach (var (pd, yd) in new[] { (52f, 0f), (40f, 20f), (64f, -35f), (30f, 45f) })
+        // P33 added ZOOM and PAN, and they are exactly the states a round-trip can break in a way
+        // four fixed angles cannot see: both move the camera TARGET, which is the term the inverse
+        // has to undo. The last four rows are the new ones.
+        var states = new[]
         {
-            PitchDeg = pd; YawDeg = yd;
+            (52f,   0f, 1f,   0f,  0f),
+            (40f,  20f, 1f,   0f,  0f),
+            (64f, -35f, 1f,   0f,  0f),
+            (30f,  45f, 1f,   0f,  0f),
+            (52f,   0f, 2.2f, 0f,  0f),          // zoomed, centred
+            (52f,   0f, 2.2f, 3.5f, -2.5f),      // zoomed and panned, no yaw
+            (44f,  30f, 3.5f, -4f,  3f),         // zoomed, panned and rotated — all three at once
+            (22f, 135f, 1.8f, 2f,   2f),         // a shallow tilt past the pitch the board opens on
+        };
+
+        foreach (var (pd, yd, z, panX, panY) in states)
+        {
+            PitchDeg = pd; YawDeg = yd; Zoom = z;
+            Pan = new Vector2(panX, panY);
+            ClampPan(g);                          // a state the player could not reach is not a test
             var cam = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            string tag = $"p{pd:0}/y{yd:0}/z{Zoom:0.0}/pan{Pan.X:0.0},{Pan.Y:0.0}";
             int bad = 0;
             for (int y = 0; y < g.H; y++)
                 for (int x = 0; x < g.W; x++)
@@ -647,19 +723,55 @@ public static class View3D
                     var screen = Raylib.GetWorldToScreen(TileWorld(x, y), cam);
                     checkedTiles++;
                     if (!PickTile(g, screen, cam, out int px, out int py) || px != x || py != y)
-                        if (++bad <= 2) fails.Add($"p{pd:0}/y{yd:0}: tile {x},{y} picked as {px},{py}");
+                        if (++bad <= 2) fails.Add($"{tag}: tile {x},{y} picked as {px},{py}");
                 }
-            if (bad > 2) fails.Add($"p{pd:0}/y{yd:0}: {bad} tiles mis-picked in total");
+            if (bad > 2) fails.Add($"{tag}: {bad} tiles mis-picked in total");
 
             // A pixel well outside the board must be refused, not clamped to an edge tile — a
             // picker that clamps makes the whole HUD margin act like a live board click.
             var far = Raylib.GetWorldToScreen(new Vector3(g.W + 25f, 0f, g.H + 25f), cam);
-            if (PickTile(g, far, cam, out _, out _)) fails.Add($"p{pd:0}/y{yd:0}: a point off the board picked a tile");
+            if (PickTile(g, far, cam, out _, out _)) fails.Add($"{tag}: a point off the board picked a tile");
         }
 
-        PitchDeg = savedP; YawDeg = savedY;
+        // ── Leg (B): the PAN CONTRACT. A drag has to move the BOARD under the hand, so the tile
+        // under a pixel before the drag must be the tile under pixel+delta after it. This is what
+        // the yaw rotation and the 1/sin(pitch) term in DragPan are FOR, and neither of them is
+        // visible to the round-trip above, which never calls DragPan at all.
+        foreach (var (pd, yd) in new[] { (52f, 0f), (40f, 60f), (30f, -120f), (70f, 210f) })
+        {
+            PitchDeg = pd; YawDeg = yd; Zoom = 2.5f; Pan = Vector2.Zero;
+            var cam0 = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            var anchor = new Vector2(Cfg.ScreenW * 0.5f, Cfg.ScreenH * 0.5f);
+            if (!PickTile(g, anchor, cam0, out int bx, out int by)) { fails.Add($"pan p{pd:0}/y{yd:0}: centre picked nothing"); continue; }
+
+            var delta = new Vector2(60f, 40f);
+            DragPan(g, delta, PixelsPerUnit(cam0));
+            var cam1 = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            if (!PickTile(g, anchor + delta, cam1, out int ax, out int ay))
+                fails.Add($"pan p{pd:0}/y{yd:0}: dragged point picked nothing");
+            else if (ax != bx || ay != by)
+                fails.Add($"pan p{pd:0}/y{yd:0}: board slipped under the drag — {bx},{by} -> {ax},{ay}");
+        }
+
+        // ── Leg (C): the clamp. At zoom 1 the whole board is framed, so there is nowhere to pan
+        // and Pan must collapse to zero rather than drifting the board off one edge.
+        Zoom = 1f; Pan = new Vector2(9f, -9f); ClampPan(g);
+        if (Pan != Vector2.Zero) fails.Add($"clamp: zoom 1 left pan at {Pan.X:0.0},{Pan.Y:0.0}");
+        Zoom = 3f; Pan = new Vector2(999f, -999f); ClampPan(g);
+        float limX = g.W * 0.5f * (1f - 1f / 3f), limY = g.H * 0.5f * (1f - 1f / 3f);
+        if (MathF.Abs(Pan.X - limX) > 0.01f || MathF.Abs(Pan.Y + limY) > 0.01f)
+            fails.Add($"clamp: zoom 3 let pan reach {Pan.X:0.00},{Pan.Y:0.00} (limit {limX:0.00},{limY:0.00})");
+
+        // ── Leg (D): ResetCamera returns EVERY term, not the two it started life with. A reset
+        // that forgets zoom or pan strands the player looking at a corner with no way back.
+        PitchDeg = 11f; YawDeg = 123f; Zoom = 3.4f; Pan = new Vector2(4f, 4f);
+        ResetCamera();
+        if (PitchDeg != 52f || YawDeg != 0f || Zoom != 1f || Pan != Vector2.Zero)
+            fails.Add($"reset: left p{PitchDeg:0}/y{YawDeg:0}/z{Zoom:0.0}/pan{Pan.X:0.0},{Pan.Y:0.0}");
+
+        PitchDeg = savedP; YawDeg = savedY; Zoom = savedZ; Pan = savedPan;
         return fails.Count == 0
-            ? $"PICKTEST: PASS ({checkedTiles} tile round-trips over 4 camera angles)"
+            ? $"PICKTEST: PASS ({checkedTiles} tile round-trips over {states.Length} camera states; pan/clamp/reset legs OK)"
             : "PICKTEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 
@@ -755,6 +867,35 @@ public static class View3D
         DrawChips(g.Grid, AllUnits(g));
         Raylib.EndMode3D();
         DrawMarkers(g.Grid, AllUnits(g), cam);
+    }
+
+    /// P33 — the camera's state, as one line of chrome. It exists because ORBIT costs the player
+    /// "north": once the board is turned, a mission's deployment edge is no longer the bottom of
+    /// the screen and there is nothing on the board itself to re-anchor to. The chip is drawn in
+    /// the CHROME pass (Game.DrawHudLayer), not with the board, so it contributes nothing to the
+    /// bloom — the same seam every other number in this game is on.
+    ///
+    /// It says nothing at rest. A line that is always there is a line nobody reads, and a camera
+    /// sitting at its opening framing has nothing to report; the chip appears the moment one of
+    /// the three terms leaves its default and names only the terms that moved.
+    public static void DrawCameraChip()
+    {
+        var parts = new List<string>();
+        // No degree sign: the baked atlases carry ASCII plus nine punctuation codepoints and U+00B0
+        // is not one of them, so it paints as '?'. Adding it would repack both atlases and move
+        // every glyph in the game for one cosmetic character.
+        if (MathF.Abs(YawDeg) > 0.5f && MathF.Abs(YawDeg - 360f) > 0.5f) parts.Add($"YAW {YawDeg:0} DEG");
+        if (MathF.Abs(PitchDeg - 52f) > 0.5f) parts.Add($"TILT {PitchDeg:0} DEG");
+        if (Zoom > 1.01f) parts.Add($"x{Zoom:0.0}");
+        if (parts.Count == 0) return;
+
+        string line = string.Join("   ", parts) + "   [C] RESET";
+        var sz = Cfg.Measure(line, 14, 1f);
+        int x = 20, y = Cfg.ScreenH - 178;
+        Raylib.DrawRectangle(x - 8, y - 5, (int)sz.X + 16, (int)sz.Y + 10, Pal.RGBA(8, 12, 17, 170));
+        Raylib.DrawRectangleLinesEx(new Rectangle(x - 8, y - 5, (int)sz.X + 16, (int)sz.Y + 10), 1f,
+                                    Pal.RGBA(90, 130, 160, 110));
+        Cfg.Text(line, new Vector2(x, y), 14, 1f, Pal.TxtDim);
     }
 
     static List<Unit> AllUnits(Game g)

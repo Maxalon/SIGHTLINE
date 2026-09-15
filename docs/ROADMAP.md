@@ -3917,14 +3917,26 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       parts of the board. `SIGHTLINE_DISCOVERY=1` enables it; the default is off until it applies
       to BOTH renderers or becomes a real rule the AI honours.
 
-#### OPEN — the projected view, after P32
+#### OPEN — the projected view, after P33
 
-- [ ] **No pan or zoom in 3D.** `CamZoom`/`CamPan` drive the 2D camera only; `View3D.MakeCamera`
-      always frames the whole board. Fine at 18x11 where the board fits; on `SIGHTLINE_BIGMAP` it
-      means you cannot reach most of the map. The 2D path's derived pan bounds (`Game.ClampPan`,
-      P29) are the model to copy.
-- [ ] **No pitch/yaw control.** Fixed at 52/0. The whole point of a projected view is looking round
-      a wall, and nothing lets the player do it yet.
+- [x] **Pan, zoom, orbit and tilt.** DONE (P33). `View3D.Zoom` (1..3.5), `View3D.Pan` (ground-plane
+      world units), `PitchMin/PitchMax` 18..82. Wheel zooms and middle-drag pans — the two gestures
+      the flat camera already trained the player on — and the two a 3D camera adds get keys, because
+      there is no mouse axis left: `[` / `]` orbit in 15-degree steps and `,` / `.` tilt. `C` resets
+      both cameras. Pan bounds are DERIVED the way `Game.ClampPan` derives the 2D ones: at zoom z the
+      view holds 1/z of the fitted extent, so the slack is `span * 0.5 * (1 - 1/z)` per axis, which
+      collapses to zero at zoom 1 — correct rather than a special case, because the whole board is
+      already framed there and there is nowhere to pan to.
+      **`View3D.DragPan`'s rotation is the INVERSE of the yaw, not the yaw.** Turning a SCREEN delta
+      back into a WORLD one means solving against the camera's ground-plane axes — screen-right is
+      `(cos yaw, -sin yaw)`, screen-up is `-sin(pitch) * (sin yaw, cos yaw)` — and that is R
+      transposed. Written as R it is exactly right at yaw 0 and at yaw 180 and wrong at every other
+      angle, which is the whole reason PICKTEST leg (B) drags at four yaws: the first version of
+      this wave shipped R, passed at yaw 0, and was caught only by the leg that rotates.
+- [ ] **The camera is not framed on anything.** `C` reframes the whole board; there is no
+      "centre on the selected soldier" the way `Game.FrameCameraOnSquad` (P29) opens the flat view.
+      At zoom 1 it does not matter — the board is entirely on screen — so this only bites once
+      BIGMAP is playable, and it is one line against `Pan` when it does.
 - [ ] **Only three overlays are ported.** Move range, path preview and hover. The 2D board also has
       threat/overwatch zones, the aim reticle, objective markers, evac zones, grenade blast radius,
       scorch decals and the whole `Fx` layer (tracers, floating numbers, particles). Each needs a
