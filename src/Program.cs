@@ -905,6 +905,7 @@ public static class Program
         {
             Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fxbridgetest");
+            LoadGameFonts();   // leg (E) measures GLYPH INK; without the real atlases it measures nothing
             Console.WriteLine(View3D.FxBridgeSelfTest());
             Raylib.CloseWindow();
             return;

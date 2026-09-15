@@ -18415,3 +18415,82 @@ is to say the bridge already carries them correctly. What stops `Renderer.DrawBo
 wholesale is only the half of it the 3D view draws itself (floor, faux-3D cover, units, their
 chrome). So the remaining "feature parity" item is **curating a subset**, not writing geometry.
 That is the next wave, and it is in `docs/ROADMAP.md` in those terms.
+
+---
+
+## P35. THE OVERLAYS FOLLOW — and the text escape moves to the one funnel
+
+**2026-09-15, base `a6ac874`.** P34 built a bridge and carried the `Fx` layer over it. The same
+bridge already carried everything else; nobody had asked it to.
+
+### Twenty-seven methods, none of them rewritten
+
+Threat and overwatch zones, focus cones, siege zones, banner auras, the EVAC / TERMINAL / SABOTAGE
+/ INTEL markers, barrels, enemy intent, scorch, fire, smoke, vent steam, the aim reticle, the barrel
+reticle, crossfire prongs, the grenade / item / shove previews, the bounty chevron, and the mark and
+pin indicators and previews are **all** `Renderer` methods drawing board-pixel shapes at tile
+positions. That is exactly what `View3D.BoardPxMatrix` carries correctly: an evac plate, a threat
+pip, a blast ring and a scorch decal all belong ON THE GROUND, and the bridge squashes them by the
+pitch exactly as it squashes the ground.
+
+So `Renderer.DrawGroundOverlays` is a call list, in `DrawBoard`'s own order with the excluded
+entries removed — layering tuned over a dozen waves survives intact. **The line between "in" and
+"out" is not taste: it is "does the 3D view already own this?"** The floor, the vignette, the
+elevation plates, the grid lines, the faux-3D cover, the edge walls, the units and their chrome, the
+move overlay, the path preview, the hover and the keyboard cursor are all drawn as geometry — that
+is the point of the view — and the flat version on top of them would double them.
+
+### The escape belongs at the funnel, not at the call site
+
+P34 gave `Fx` its own text projector, because `Fx.DrawText` was the one call site known to paint a
+glyph under the matrix. The first overlay ported here — EVAC, which paints a label — showed why
+that does not generalise: **any** code drawing under the bridge may paint a glyph, and a glyph under
+the bridge is a parallelogram.
+
+Every drawn string in this game already goes through `Cfg.Text` / `TitleText` / `Measure` /
+`TitleMeasure`. That is a house rule in CLAUDE.md, and this wave is what it is worth: the escape
+went in there, `View3D.BeginBridge` / `EndBridge` arm and disarm it with the matrix (one operation,
+because they are one operation), and P34's `Fx.ProjectText` was **deleted**. `Fx.DrawText` went back
+to the code it had before P34 and comes out correct anyway.
+
+`DrawEscaped` pushes and loads identity rather than popping: it does not know how deep the stack is,
+and popping someone else's matrix turns a text bug into a whole-frame bug.
+
+### `Cfg.TextUnmap`, which is the half worth understanding
+
+Call sites centre by measuring and subtracting: `pos.X -= Measure(...).X / 2`. Under the flat camera
+board pixels *are* screen pixels and that is correct. Under the bridge the subtraction happens in
+BOARD space, and because the projection is affine, `project(p - u) = project(p) - A·u`. So if
+`Measure` returns `A⁻¹ · screenSize`, the sheared subtraction lands as **exactly** the screen-space
+offset the call site meant.
+
+That is an identity, not an approximation. Get it wrong — return the raw screen measurement, the
+obvious thing — and every centred label in the game slides half its own width diagonally at yaw 45
+while looking perfect at yaw 0, which is the orientation anybody testing would look at first.
+
+### The leg that passed with the feature deleted
+
+Leg (E)'s first version asserted "ink near the projected anchor, no ink at the raw board pixel". It
+passed. It also passed with the escape **deleted**, because an un-escaped glyph is still taken to
+roughly the same place by the pushed matrix — the escape does not change WHERE the text is, it
+changes what SHAPE it is.
+
+Rewritten, it measures the ink bounding box: at yaw 62 / pitch 44 a four-glyph run is about 50×20
+drawn upright and about 49×45 sheared into the ground plane. The width barely moves. The **height**
+is the discriminator, so the height is what is asserted. Both halves of the leg were then verified
+falsifiable — deleting the escape, and replacing `TextUnmap` with the naive identity, each turn it
+red in their own way.
+
+It also needed `LoadGameFonts()` in its harness branch, which no other self-test here has wanted:
+this is the first leg that measures GLYPH INK, and without the real atlases `MeasureTextEx` returns
+zero and the assertion compares against nothing. That is the same "a check that cannot fail" shape
+PROGRAM PARALLAX keeps finding, caught this time by an expectation printing as `0`.
+
+### Two honest differences left in
+
+**Barrels are a decal**, so an explosive drum is a flat card lying on the ground. It reads, but it
+is the one entry in the subset that visibly wants geometry. **Ambient is drawn over the board in 3D
+and under it in 2D**, because these are screen-space primitives with no depth and the ground plane
+is opaque — "under the board" means "invisible". Over reads as atmosphere between the operator and
+the hologram, which suits the premise, but it is a difference nobody chose. Both are in
+`docs/ROADMAP.md`.

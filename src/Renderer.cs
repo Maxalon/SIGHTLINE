@@ -955,6 +955,58 @@ public static class Renderer
         g.Fx.DrawText();
     }
 
+    /// P35 — THE GROUND-PLANE OVERLAYS, FOR THE PROJECTED VIEW.
+    ///
+    /// Everything in this list draws BOARD-PIXEL shapes at TILE positions, which is precisely what
+    /// `View3D.BoardPxMatrix` carries correctly: an evac plate, a threat pip, a blast ring and a
+    /// scorch decal all belong ON THE GROUND, and the bridge squashes them by the pitch exactly as
+    /// it squashes the ground. So the projected view does not need 3D equivalents of any of them —
+    /// it needs to call the same methods under the same matrix, which is what this is.
+    ///
+    /// WHAT IS DELIBERATELY NOT HERE, and why: the floor, the vignette, the elevation plates, the
+    /// grid lines, the faux-3D cover, the edge walls, the units and their chrome, the move overlay,
+    /// the path preview, the hover and the keyboard cursor. Every one of those is drawn by the 3D
+    /// view AS GEOMETRY — that is the whole point of the view — and drawing the flat version on top
+    /// would double it. The line between the two lists is not taste: it is "does the 3D view
+    /// already own this?".
+    ///
+    /// The order is `DrawBoard`'s own, with the excluded entries removed, so layering that was
+    /// tuned over a dozen waves survives. Text inside these methods escapes the matrix through
+    /// `Cfg.TextProject` and stays upright — see the note on it in `Util.cs`.
+    public static void DrawGroundOverlays(Game g)
+    {
+        EnsureNoise();                       // some of these tint through the shared noise texture
+        float t = (float)Now();
+
+        DrawOverwatchThreat(g);
+        DrawFocusCones(g);
+        DrawThreat(g);
+        DrawSiegeZones(g);
+        DrawBannerAuras(g);
+        DrawEvac(g);
+        DrawTerminal(g);
+        DrawSabotage(g);
+        DrawIntelCache(g);
+        DrawBarrels(g);
+        DrawEnemyIntent(g);
+        DrawScorch(g);
+        DrawFire(g);
+        DrawSmoke(g);
+        DrawVentSteam(g, t);
+        DrawAim(g);
+        DrawBarrelAimReticle(g);
+        DrawCrossfire(g);
+        DrawGrenade(g);
+        DrawItem(g);
+        DrawShove(g);
+        DrawBountyMark(g);
+        DrawMarkIndicators(g);
+        DrawMark(g);
+        DrawGrapple(g);
+        DrawPinIndicators(g);
+        DrawPin(g);
+    }
+
     // Inward AO ramp on the board rect: VignetteDepth 1px rings, alpha falling off quadratically
     // from the edge, in the biome-tinted deep. Square rings (DrawRectangleRoundedLines is
     // version-volatile per CLAUDE.md; the board backing is only 0.02-rounded anyway).

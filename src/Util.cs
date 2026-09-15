@@ -129,14 +129,43 @@ public static class Cfg
     /// Null in every normal run: one predictable branch, no allocation, no behaviour change.
     public static Action<string, Vector2, Vector2, float, float> InkProbe;
 
+    // ── P35: THE BRIDGE'S TEXT ESCAPE ──────────────────────────────────────────────────────
+    // The projected view draws the game's whole 2D layer — Fx, anims and the board's ground
+    // overlays — by pushing ONE affine matrix on rlgl's stack (View3D.BoardPxMatrix) and letting
+    // the existing code run unchanged. That is exactly right for a tracer, an evac plate or a
+    // blast ring, and exactly WRONG for a GLYPH: sheared by yaw and squashed by pitch, a label is
+    // an unreadable parallelogram.
+    //
+    // Every drawn string in this game already goes through the four methods below — that is a
+    // house rule, and this is what it is worth. Set `TextProject` while the matrix is pushed and
+    // text steps outside it: the position is projected, the glyphs are drawn upright at
+    // `TextScale`, and the transform is restored. Null is the identity, so the flat view is
+    // untouched by construction.
+    //
+    // `TextUnmap` is the half that makes CENTRED text exact rather than approximately right, and
+    // it is worth understanding before touching it. Call sites centre by measuring and then
+    // subtracting: `pos.X -= Measure(...).X / 2`. Under the flat camera board pixels ARE screen
+    // pixels and that is correct. Under the bridge the subtraction happens in BOARD space and the
+    // projection is affine, so `project(p - u) = project(p) - A*u` — which means if `Measure`
+    // returns `A-inverse * screenSize`, the sheared offset lands as EXACTLY the screen-space
+    // offset the call site meant. Not an approximation: an identity. Get it wrong and every
+    // centred label slides half its own width diagonally at yaw 45 and looks fine at yaw 0.
+    public static Func<Vector2, Vector2> TextProject;
+    public static Func<Vector2, Vector2> TextUnmap;
+    public static float TextScale = 1f;
+
     public static void Text(string t, Vector2 pos, float size, float spacing, Color tint)
     {
         if (CaptureText != null) CaptureText.Add((t, size));
         if (InkProbe != null) InkProbe(t, pos, Measure(t, size, spacing), size, tint.A / 255f);
+        if (TextProject != null) { DrawEscaped(FontFor(size), t, pos, size, spacing, tint); return; }
         Raylib.DrawTextEx(FontFor(size), t, pos, Scaled(size), spacing, tint);
     }
-    public static Vector2 Measure(string t, float size, float spacing) =>
-        Raylib.MeasureTextEx(FontFor(size), t, Scaled(size), spacing);
+    public static Vector2 Measure(string t, float size, float spacing)
+    {
+        var m = Raylib.MeasureTextEx(FontFor(size), t, Scaled(size) * TextScale, spacing);
+        return TextUnmap != null ? TextUnmap(m) : m;
+    }
 
     /// Title text — routed to the display face. Use for headline/card titles only; numerals and
     /// data stay on NotoMono (a good data face) via Text/Measure.
@@ -144,10 +173,25 @@ public static class Cfg
     {
         if (CaptureText != null) CaptureText.Add((t, size));
         if (InkProbe != null) InkProbe(t, pos, TitleMeasure(t, size, spacing), size, tint.A / 255f);
+        if (TextProject != null) { DrawEscaped(TitleFontFor(size), t, pos, size, spacing, tint); return; }
         Raylib.DrawTextEx(TitleFontFor(size), t, pos, Scaled(size), spacing, tint);
     }
-    public static Vector2 TitleMeasure(string t, float size, float spacing) =>
-        Raylib.MeasureTextEx(TitleFontFor(size), t, Scaled(size), spacing);
+    public static Vector2 TitleMeasure(string t, float size, float spacing)
+    {
+        var m = Raylib.MeasureTextEx(TitleFontFor(size), t, Scaled(size) * TextScale, spacing);
+        return TextUnmap != null ? TextUnmap(m) : m;
+    }
+
+    /// Draw one string OUTSIDE whatever transform is currently pushed on rlgl's matrix stack.
+    /// Push-then-identity rather than pop-then-push: this does not know how deep the stack is, and
+    /// popping someone else's matrix is how you turn a text bug into a whole-frame bug.
+    static void DrawEscaped(Font f, string t, Vector2 pos, float size, float spacing, Color tint)
+    {
+        Rlgl.PushMatrix();
+        Rlgl.LoadIdentity();
+        Raylib.DrawTextEx(f, t, TextProject(pos), Scaled(size) * TextScale, spacing, tint);
+        Rlgl.PopMatrix();
+    }
 
     /// Resolve a bundled asset next to the BINARY, not the current working directory.
     /// V1 ship-blocker: every asset path was relative to the cwd, so launching the built

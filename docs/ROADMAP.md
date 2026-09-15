@@ -3960,15 +3960,40 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       `SIGHTLINE_FXSHOT=1` stages the layer six frames before the capture (staged at setup like
       every other `*SHOT` hook, it photographs nothing: at frame 760 every particle has been dead
       for eleven seconds). Pair it with and without `SIGHTLINE_VIEW3D=1` for the wave's before/after.
-- [ ] **THE SAME BRIDGE CARRIES THE STATIC OVERLAYS, AND THIS IS THE NEXT WAVE.** Threat and
-      overwatch zones, the aim reticle, objective markers, evac zones, grenade/item/shove blast
-      previews, scorch decals, fire and smoke are all `Renderer` methods drawing board-pixel shapes
-      at tile positions — exactly what P34's matrix already carries correctly. What stops
-      `Renderer.DrawBoard` being called wholesale is the half of it the 3D view draws itself (floor,
-      faux-3D cover, units, their chrome), so the work is **curating the subset**, not writing
-      geometry: a `Renderer` entry point that runs the ground-plane decal draws and nothing else.
-      Unit-attached chrome (HP pips, status glyphs, silhouettes) must NOT go through it for the same
-      reason text does not.
+- [x] **The static overlays crossed the same bridge.** DONE (P35). `Renderer.DrawGroundOverlays`
+      is the curated subset — 27 methods: overwatch and focus cones, threat, siege zones, banner
+      auras, EVAC / TERMINAL / SABOTAGE / INTEL markers, barrels, enemy intent, scorch, fire, smoke,
+      vent steam, the aim reticle, the barrel reticle, crossfire, grenade / item / shove previews,
+      the bounty chevron, and the mark / pin indicators and previews. Called under P34's matrix, in
+      `DrawBoard`'s own order with the excluded entries removed, so a dozen waves of layering
+      survives. **The line between the two lists is not taste — it is "does the 3D view already own
+      this?"**: the floor, vignette, elevation, grid lines, faux-3D cover, edge walls, units, their
+      chrome, the move overlay, the path preview, the hover and the keyboard cursor are drawn as
+      GEOMETRY and would double.
+      **The text escape moved to `Cfg`, and P34's Fx-specific hook is deleted.** Any code drawing
+      under the bridge may paint a glyph, so the escape belongs at the one funnel every string in
+      this game already goes through (`Cfg.Text` / `TitleText` / `Measure` / `TitleMeasure` — the
+      house rule, and this is what it is worth). `Cfg.TextUnmap` is the subtle half: call sites
+      centre with `pos -= Measure(...)/2`, and because the projection is affine,
+      `project(p - u) = project(p) - A*u` — so `Measure` returning `A⁻¹ * screenSize` makes the
+      sheared subtraction land as EXACTLY the screen offset the call site meant. An identity, not
+      an approximation; get it wrong and every centred label slides half its width diagonally at
+      yaw 45 while looking perfect at yaw 0.
+      `SIGHTLINE_FXBRIDGETEST` leg (E) pins all of it, **and its ink half measures SHAPE, not
+      position** — the first version checked "ink here, not there" and passed with the escape
+      deleted, because the pushed matrix takes an un-escaped glyph to roughly the same place. What
+      the escape buys is that the glyph is UPRIGHT, so the assertion is on the ink bounding box: at
+      yaw 62 / pitch 44 a four-glyph run is ~50x20 drawn upright and ~49x45 sheared. The width
+      barely moves; the height is the discriminator.
+- [ ] **Barrels are a decal, not an object.** `DrawBarrels` rides the bridge, so an explosive drum
+      is a flat card lying on the ground in the projected view. It reads (you can see where it is
+      and that it is a drum) but it is the one entry in the subset that visibly wants geometry —
+      `crate.glb` is already in the prop kit and a barrel is one more `props.py` entry.
+- [ ] **`Fx.DrawAmbient` is drawn OVER the board in 3D, under it in 2D.** There is nowhere else to
+      put it: these are screen-space primitives with no depth and the ground plane is opaque, so
+      "under the board" means "invisible". It reads as atmosphere between the operator and the
+      hologram, which suits the premise — but it is a difference between the two views, not a
+      choice anybody made.
 - [ ] **No post-FX in 3D.** The 3D path draws straight to the framebuffer; `Display.RenderFrame`'s
       render target, bloom and colour grade are bypassed, so the two views do not match in grade.
 - [ ] **Discovery does not affect the RULES.** It decides what is drawn. True fog of war — the AI

@@ -878,9 +878,100 @@ public static class View3D
                 fails.Add("(C) the zoom punch moved the camera as well as its extent");
         }
 
+        // ── (E) P35: THE TEXT ESCAPE. Three claims, and the middle one is the subtle one.
+        //   1. A glyph drawn under the bridge lands at the PROJECTED position, upright — not at the
+        //      raw board pixel, and not sheared into the transform with everything else.
+        //   2. `Cfg.Measure` reports widths in BOARD space, such that a call site centring by
+        //      `pos -= Measure/2` gets EXACTLY the screen-space offset it meant. Stated as the
+        //      identity it is: project(p - unmap(v)) == project(p) - v. Skip this and every centred
+        //      label slides half its own width diagonally at yaw 45 while looking perfect at yaw 0.
+        //   3. EndBridge disarms. A leaked escape would project the HUD.
+        {
+            PitchDeg = 44f; YawDeg = 62f; Zoom = 1f; Pan = Vector2.Zero;
+            var cam = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            // Pick the tile whose projected position is FURTHEST from its raw board pixel, and
+            // refuse to run the ink half unless that distance is large compared with the glyph.
+            // At the board's centre the two coincide to within a glyph's width, and a leg that
+            // looks for ink "here but not there" when here and there overlap proves nothing.
+            Vector2 anchor = Vector2.Zero, want = Vector2.Zero; float far = -1f;
+            for (int y = 0; y < g.H; y++)
+                for (int x = 0; x < g.W; x++)
+                {
+                    var raw = Util.TileCenter(x, y);
+                    var prj = ProjectBoardPx(raw, cam);
+                    float d = Vector2.Distance(raw, prj);
+                    if (d > far) { far = d; anchor = raw; want = prj; }
+                }
+            if (far < 120f) fails.Add($"(E) no tile projects further than {far:0}px from its board pixel — the ink leg would be vacuous");
+
+            Raylib.BeginDrawing();
+            Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
+            BeginBridge(cam);
+
+            if (Cfg.TextProject == null || Cfg.TextUnmap == null)
+                fails.Add("(E) BeginBridge did not arm the text escape");
+            else
+            {
+                if (Vector2.Distance(Cfg.TextProject(anchor), want) > 0.05f)
+                    fails.Add("(E) the armed projector disagrees with ProjectBoardPx");
+                foreach (var v in new[] { new Vector2(40f, 0f), new Vector2(0f, 17f), new Vector2(-23f, 9f) })
+                {
+                    var lhs = ProjectBoardPx(anchor - Cfg.TextUnmap(v), cam);
+                    var rhs = want - v;
+                    if (Vector2.Distance(lhs, rhs) > 0.05f)
+                        fails.Add($"(E) unmap is not the inverse: a {v.X:0},{v.Y:0} screen offset came back as {(want - lhs).X:0.0},{(want - lhs).Y:0.0}");
+                }
+            }
+            // The expected UPRIGHT screen extent, measured through the same font and the same size
+            // the escape is about to draw at. Taken from Raylib directly rather than from
+            // Cfg.Measure, which under the bridge deliberately answers in BOARD space — and rather
+            // than from a constant, because this self-test runs before the game loads its atlases
+            // and a hard-coded 60x24 measures a font that is not there.
+            float escScale = Cfg.TextScale;
+            var flatSize = Raylib.MeasureTextEx(Cfg.FontFor(24f), "HHHH", Cfg.Scaled(24f) * escScale, 1f);
+            Cfg.Text("HHHH", anchor, 24f, 1f, Pal.RGBA(255, 0, 255));
+            EndBridge();
+            Raylib.EndDrawing();
+
+            if (Cfg.TextProject != null || Cfg.TextUnmap != null || Cfg.TextScale != 1f)
+                fails.Add("(E) EndBridge left the text escape armed");
+
+            // THE INK LEG MEASURES SHAPE, NOT POSITION, and that is the whole point. Without the
+            // escape the glyph still lands near the projected anchor — the pushed matrix takes it
+            // there — so "is there ink here" cannot tell the two apart and a leg written that way
+            // passes with the escape deleted. What the escape actually buys is that the glyph is
+            // UPRIGHT, so the claim is about its ink BOUNDING BOX: at yaw 62 / pitch 44 a 4-glyph
+            // run measures about 50x20 drawn upright and about 49x45 sheared into the ground plane.
+            // The width barely moves. The HEIGHT is the discriminator, so that is what is asserted.
+            var img = Raylib.LoadImageFromScreen();
+            int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue;
+            for (int dy = -120; dy <= 120; dy++)
+                for (int dx = -120; dx <= 120; dx++)
+                {
+                    int px = (int)want.X + dx, py = (int)want.Y + dy;
+                    if (px < 0 || py < 0 || px >= Cfg.ScreenW || py >= Cfg.ScreenH) continue;
+                    var c = Raylib.GetImageColor(img, px, py);
+                    if (c.R <= 150 || c.B <= 150) continue;
+                    if (px < minX) minX = px; if (px > maxX) maxX = px;
+                    if (py < minY) minY = py; if (py > maxY) maxY = py;
+                }
+            Raylib.UnloadImage(img);
+
+            if (maxX < minX) fails.Add($"(E) no glyph ink anywhere near the projected anchor {want.X:0},{want.Y:0}");
+            else
+            {
+                float inkH = maxY - minY + 1, inkW = maxX - minX + 1;
+                float wantH = flatSize.Y, wantW = flatSize.X;
+                if (inkH > wantH * 1.5f)
+                    fails.Add($"(E) the glyph is {inkH:0}px tall against {wantH:0} upright — it was drawn INTO the transform, sheared");
+                if (inkW < wantW * 0.6f || inkW > wantW * 1.6f)
+                    fails.Add($"(E) the glyph is {inkW:0}px wide against {wantW:0} expected");
+            }
+        }
+
         PitchDeg = savedP; YawDeg = savedY; Zoom = savedZ; Pan = savedPan;
         return fails.Count == 0
-            ? "FXBRIDGETEST: PASS (rlgl convention drawn and read back; bridge matches GetWorldToScreen within 0.05px on 990 tiles over 5 camera states; shake and punch pinned)"
+            ? "FXBRIDGETEST: PASS (rlgl convention drawn and read back; bridge matches GetWorldToScreen within 0.05px on 990 tiles over 5 camera states; shake and punch pinned; text escapes the matrix and Measure inverts it)"
             : "FXBRIDGETEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 
@@ -1084,22 +1175,44 @@ public static class View3D
     /// hologram, which is what this view is supposed to be anyway.
     static void DrawFxLayer(Game g, Camera3D cam)
     {
-        var m = BoardPxMatrix(cam);
-        Rlgl.PushMatrix();
-        Rlgl.MultMatrixf(m);
+        BeginBridge(cam);
+        Renderer.DrawGroundOverlays(g);    // P35 — the board's own decal layer, on the ground
         g.Fx.DrawAmbient();
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
-        Rlgl.PopMatrix();
-
-        // Text is the one thing the bridge must not touch. Hand Fx a projector for the anchor and
-        // an isotropic size scale, and let it draw its glyphs the way it always has.
-        BoardPxAxes(cam, FxPlaneY, out Vector2 ax, out Vector2 az, out Vector2 t);
-        Fx.ProjectText = px => ax * px.X + az * px.Y + t;
-        Fx.ProjectTextScale = BoardPxScale(cam);
         g.Fx.DrawText();
-        Fx.ProjectText = null;
-        Fx.ProjectTextScale = 1f;
+        EndBridge();
+    }
+
+    /// P35 — push the bridge matrix AND arm the text escape, as one operation, because they are one
+    /// operation: any code drawing under this transform may paint a glyph, and a glyph under this
+    /// transform is a parallelogram. P34 shipped them apart (`Fx.ProjectText`, a special case for
+    /// the one call site that was known to draw text), and the first overlay ported in P35 — EVAC,
+    /// which paints a label — showed why that does not generalise.
+    ///
+    /// `TextUnmap` is the LINEAR part inverted, with no translation: it turns a screen-space
+    /// measurement back into the board-space offset a centring call site is about to subtract. See
+    /// the long note on `Cfg.TextProject`.
+    public static void BeginBridge(Camera3D cam, float worldY = FxPlaneY)
+    {
+        BoardPxAxes(cam, worldY, out Vector2 ax, out Vector2 az, out Vector2 tr);
+        Rlgl.PushMatrix();
+        Rlgl.MultMatrixf(BoardPxMatrix(cam, worldY));
+
+        float det = ax.X * az.Y - ax.Y * az.X;
+        if (MathF.Abs(det) < 1e-6f) det = det < 0f ? -1e-6f : 1e-6f;   // degenerate only at pitch 0
+        Cfg.TextProject = px => ax * px.X + az * px.Y + tr;
+        Cfg.TextUnmap = v => new Vector2(( az.Y * v.X - az.X * v.Y) / det,
+                                         (-ax.Y * v.X + ax.X * v.Y) / det);
+        Cfg.TextScale = BoardPxScale(cam, worldY);
+    }
+
+    public static void EndBridge()
+    {
+        Cfg.TextProject = null;
+        Cfg.TextUnmap = null;
+        Cfg.TextScale = 1f;
+        Rlgl.PopMatrix();
     }
 
     /// P33 — the camera's state, as one line of chrome. It exists because ORBIT costs the player
