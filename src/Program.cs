@@ -898,6 +898,17 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FXBRIDGETEST=1 : P34 — the board-pixel -> projected-screen bridge that carries
+        // the whole Fx/Anim layer into the 3D view. Draws through the real rlgl matrix stack and
+        // reads the framebuffer back, so it needs a window AND a drawn frame.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FXBRIDGETEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fxbridgetest");
+            Console.WriteLine(View3D.FxBridgeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary
         // between two tiles, consumes no floor, and is directional). Pure grid logic, no window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGETEST") == "1")
@@ -1797,6 +1808,12 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VERB2") == "1") game.DebugVerbs();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_COVER") == "1") game.DebugCover();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
+        // P34: SIGHTLINE_FXSHOT is staged INSIDE the loop, a few frames before the capture — see
+        // the fxShot branch below. Staging it here (as every other *SHOT hook does) photographs
+        // nothing at all: this layer is transient by definition, and at SIGHTLINE_SHOT=760 every
+        // particle it spawns has been dead for eleven seconds.
+        bool fxShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_FXSHOT") == "1";
+        int fxShotFrame = Math.Max(1, shotFrame - 6);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
         if (shot && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SIGHTLINE_PREP"))) game.DebugPrep();
@@ -1974,6 +1991,11 @@ public static class Program
                 }
                 break;
             }
+            // P34 — stage the feedback layer a few frames BEFORE the capture, so the shot catches
+            // it mid-life: the tracer wake still travelling, the numbers past their pop and into
+            // their rise, the shake at most of its amplitude. Six frames is a tenth of a second,
+            // which is where this layer actually lives.
+            if (fxShot && frame == fxShotFrame) game.DebugFxShot();
             if (autoplay && !shot) BatchPump();
             else Display.RenderFrame(game.DrawBoardLayer, game.DrawHudLayer);
 

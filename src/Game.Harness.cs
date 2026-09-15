@@ -1770,6 +1770,59 @@ public partial class Game
             }
     }
 
+    /// P34 harness hook (screenshot only): STAGE THE WHOLE FEEDBACK LAYER on one frame.
+    ///
+    /// The Fx layer is the part of this game that only exists in MOTION — tracers, muzzle flare,
+    /// impact rings, floating damage numbers, dust, screen shake, the hit-stop zoom punch. Nothing
+    /// in the harness could photograph it, so when the projected view shipped without any of it
+    /// (P32), no shot showed the loss and no shot could show the repair. Hunting for the frame an
+    /// autoplay happens to be firing on is not verification; it is luck with a filename.
+    ///
+    /// Everything here is spawned at BOARD-PIXEL coordinates off real tiles, which is precisely
+    /// what the P34 bridge has to carry. Pair with SIGHTLINE_VIEW3D=1 to see it projected and
+    /// without it to see the flat original — the two shots are the before/after of the whole wave.
+    public void DebugFxShot()
+    {
+        var live = Players.Where(p => p.Alive).ToList();
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        if (live.Count == 0) return;
+        var shooter = live[0];
+        Selected = shooter;
+        shooter.RecoilAnim = 1f;
+
+        var from = Util.TileCenter(shooter.X, shooter.Y);
+        var target = foes.Count > 0 ? foes[0]
+                                    : (live.Count > 1 ? live[1] : shooter);
+        var to = Util.TileCenter(target.X, target.Y);
+        var dir = Vector2.Normalize(to - from + new Vector2(0.001f, 0f));
+
+        // the shot itself: muzzle at the gun, a wake down the line, an impact at the far end
+        Fx.Muzzle(from + dir * 14f, dir, Pal.Friend);
+        Fx.TracerWake(from, to, Pal.Friend, 5);
+        Fx.Impact(to, Pal.Foe, 16f);
+        Fx.DirSparks(to, -dir, Pal.Foe, 10, 210f);
+        Fx.ImpactStreak(to, dir, Pal.Foe, 26f, 3f);
+        Fx.Shockwave(to, Pal.Foe, 6f, 34f);
+        Fx.Burst(to, Pal.Foe, 14, 190f, 0.5f);
+
+        // the numbers: one big crit and two ordinary hits, so the pop curve and the stacking rungs
+        // both appear, and so a projected frame shows text that is UPRIGHT over a sheared board
+        Fx.PopText(to, "7", Pal.Accent, 34f);
+        if (foes.Count > 1) Fx.PopText(Util.TileCenter(foes[1].X, foes[1].Y), "3", Pal.Foe);
+        if (live.Count > 1) Fx.PopText(Util.TileCenter(live[1].X, live[1].Y), "2", Pal.Suspect);
+        Fx.Stamp(Util.TileCenter(target.X, target.Y) - new Vector2(0f, 34f), "CRIT", Pal.Accent, 18f, 1.2f);
+
+        // ground-level dust under a couple of soldiers, and a scorch where something fell
+        foreach (var u in live.Take(3)) Fx.Dust(Util.TileCenter(u.X, u.Y), 5);
+        AddScorch(Util.TileCenter(Util.Clamp(shooter.X + 2, 0, Grid.W - 1),
+                                  Util.Clamp(shooter.Y + 1, 0, Grid.H - 1)), Pal.Foe);
+
+        // and the two camera terms the flat view gets from Camera2D and the projected one has to
+        // fold into the camera itself
+        Fx.AddShake(7f);
+        AddZoomPunch(0.05f);
+    }
+
     /// Harness hook (screenshot only): force a barracks rank-up perk choice.
     public void DebugBarracksPerk()
     {

@@ -775,6 +775,115 @@ public static class View3D
             : "PICKTEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 
+    // ══════════════════ P34 — THE BRIDGE'S SELF-TEST ══════════════════
+    /// What this pins, and why each leg exists.
+    ///
+    /// (A) THE rlgl MATRIX CONVENTION. `Rlgl.MultMatrixf` wants the TRANSPOSE of the
+    ///     System.Numerics layout — translation in M14/M24, not M41/M42 — and nothing in the type
+    ///     system says so. Passed the wrong way it does not throw and does not warn: the whole Fx
+    ///     layer simply draws at the board's top-left corner, which is a plausible-looking bug to
+    ///     chase for an hour. CLAUDE.md's Raylib gotchas list is full of this class, so the leg
+    ///     DRAWS A PIXEL THROUGH THE REAL STACK and reads the framebuffer back, rather than
+    ///     asserting arithmetic that would agree with itself either way.
+    /// (B) THE MAP IS THE CAMERA'S. `ProjectBoardPx(TileCenter(x,y))` must equal
+    ///     `GetWorldToScreen(TileWorld(x,y, FxPlaneY))` for every tile — i.e. the affine shortcut
+    ///     agrees with Raylib's own projection, at every camera state, or a tracer lands one tile
+    ///     off at yaw 45 and nowhere else.
+    /// (C) SHAKE MOVES THE IMAGE BY THE SHAKE. `ApplyShake` folds a pixel offset into a 3D camera
+    ///     through its own screen axes; the leg projects a fixed world point with and without it
+    ///     and checks the screen delta IS the offset asked for. Sign errors here are invisible in
+    ///     a still frame and read as "the shake feels wrong" in motion.
+    /// (D) THE BRIDGE AND THE BOARD SHAKE TOGETHER. The matrix is built from the shaken camera on
+    ///     purpose; if it were built from the unshaken one, the board would shake and every tracer
+    ///     over it would stand still. The leg checks the bridge's own output moved by the same
+    ///     amount as (C).
+    ///
+    /// Needs a real window: two of the four legs read the live framebuffer.
+    public static string FxBridgeSelfTest()
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        var g = new Grid();
+        for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) g.Tiles[x, y] = TileType.Floor;
+        float savedP = PitchDeg, savedY = YawDeg, savedZ = Zoom; var savedPan = Pan;
+
+        // ── (A) the convention, measured through the real stack.
+        {
+            PitchDeg = 52f; YawDeg = 0f; Zoom = 1f; Pan = Vector2.Zero;
+            var cam = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            var probe = Util.TileCenter(g.W / 2, g.H / 2);
+            var want = ProjectBoardPx(probe, cam);
+
+            Raylib.BeginDrawing();
+            Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
+            Rlgl.PushMatrix();
+            Rlgl.MultMatrixf(BoardPxMatrix(cam));
+            Raylib.DrawRectangle((int)probe.X - 3, (int)probe.Y - 3, 7, 7, Pal.RGBA(255, 0, 255));
+            Rlgl.PopMatrix();
+            Raylib.EndDrawing();
+
+            var img = Raylib.LoadImageFromScreen();
+            var hit = Raylib.GetImageColor(img, (int)want.X, (int)want.Y);
+            if (hit.R < 200 || hit.B < 200)
+                fails.Add($"(A) nothing drawn at the projected point {want.X:0},{want.Y:0} — rlgl matrix convention");
+            Raylib.UnloadImage(img);
+        }
+
+        // ── (B) the affine shortcut against Raylib's own projection, at five camera states.
+        foreach (var (pd, yd, z, pnx, pny) in new[]
+                 { (52f, 0f, 1f, 0f, 0f), (40f, 45f, 1f, 0f, 0f), (22f, -100f, 1f, 0f, 0f),
+                   (52f, 0f, 2.4f, 3f, -2f), (70f, 210f, 1.8f, -2f, 2f) })
+        {
+            PitchDeg = pd; YawDeg = yd; Zoom = z; Pan = new Vector2(pnx, pny); ClampPan(g);
+            var cam = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            float worst = 0f; int wx = -1, wy = -1;
+            for (int y = 0; y < g.H; y++)
+                for (int x = 0; x < g.W; x++)
+                {
+                    var viaBridge = ProjectBoardPx(Util.TileCenter(x, y), cam);
+                    var viaRaylib = Raylib.GetWorldToScreen(TileWorld(x, y, FxPlaneY), cam);
+                    float d = Vector2.Distance(viaBridge, viaRaylib);
+                    if (d > worst) { worst = d; wx = x; wy = y; }
+                }
+            if (worst > 0.05f)
+                fails.Add($"(B) p{pd:0}/y{yd:0}/z{z:0.0}: bridge and GetWorldToScreen disagree by {worst:0.000}px at tile {wx},{wy}");
+        }
+
+        // ── (C) + (D) shake, on the camera and through the bridge.
+        {
+            PitchDeg = 52f; YawDeg = 37f; Zoom = 1f; Pan = Vector2.Zero;
+            var probeWorld = TileWorld(g.W / 2, g.H / 2, FxPlaneY);
+            var probePx = Util.TileCenter(g.W / 2, g.H / 2);
+            var calm = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            var calmScreen = Raylib.GetWorldToScreen(probeWorld, calm);
+            var calmBridge = ProjectBoardPx(probePx, calm);
+
+            var shake = new Vector2(9f, -5f);
+            var shook = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            ApplyShake(ref shook, shake, 0f);
+            var moved = Raylib.GetWorldToScreen(probeWorld, shook) - calmScreen;
+            if (Vector2.Distance(moved, shake) > 0.2f)
+                fails.Add($"(C) shake {shake.X:0},{shake.Y:0} moved the image by {moved.X:0.0},{moved.Y:0.0}");
+
+            var movedBridge = ProjectBoardPx(probePx, shook) - calmBridge;
+            if (Vector2.Distance(movedBridge, moved) > 0.05f)
+                fails.Add($"(D) the board moved {moved.X:0.0},{moved.Y:0.0} and the Fx bridge moved {movedBridge.X:0.0},{movedBridge.Y:0.0}");
+
+            // the zoom punch is a pure extent scale — bigger pulse, tighter frame, never a shift
+            var punched = MakeCamera(g, (float)Cfg.ScreenW / Cfg.ScreenH);
+            float beforeFov = punched.FovY;
+            ApplyShake(ref punched, Vector2.Zero, 0.25f);
+            if (MathF.Abs(punched.FovY - beforeFov / 1.25f) > 0.001f)
+                fails.Add($"(C) a 0.25 zoom punch took FovY {beforeFov:0.000} to {punched.FovY:0.000}");
+            if (punched.Position != calm.Position || punched.Target != calm.Target)
+                fails.Add("(C) the zoom punch moved the camera as well as its extent");
+        }
+
+        PitchDeg = savedP; YawDeg = savedY; Zoom = savedZ; Pan = savedPan;
+        return fails.Count == 0
+            ? "FXBRIDGETEST: PASS (rlgl convention drawn and read back; bridge matches GetWorldToScreen within 0.05px on 990 tiles over 5 camera states; shake and punch pinned)"
+            : "FXBRIDGETEST: FAIL\n  " + string.Join("\n  ", fails);
+    }
+
     // ══════════════════ P32 — PLAYABLE: PICKING AND OVERLAYS ══════════════════
     /// Screen pixel -> board tile, through the projected camera. The ground is the y = 0 plane, so
     /// this is one ray/plane intersection and nothing more; the camera being ORTHOGRAPHIC means the
@@ -854,6 +963,101 @@ public static class View3D
             GroundOutline(g.HoverX, g.HoverY, Top(g.HoverX, g.HoverY) + 0.006f, 0.02f, Pal.Txt);
     }
 
+    // ══════════════════ P34 — THE BOARD-PIXEL BRIDGE ══════════════════
+    /// The whole `Fx` layer and every `Anim` draw in this game work in BOARD-PIXEL space: the 2D
+    /// coordinates `Util.TileCenter` produces, drawn inside `BeginMode2D`. That is thousands of
+    /// lines across `Fx.cs`, `Anim.cs` and `Renderer.cs`, and porting it call-by-call to 3D was
+    /// never going to happen — which is why the projected view shipped with no tracers, no floating
+    /// damage numbers, no particles and no screen shake, i.e. with pillar 2 switched off.
+    ///
+    /// IT DOES NOT NEED PORTING, because the map is AFFINE. The projected camera is ORTHOGRAPHIC,
+    /// so a ground-plane point maps to a screen point with no perspective divide: board pixel ->
+    /// tile is a scale and an offset, tile -> screen is a fixed 2x2 (the camera's two ground axes,
+    /// sheared by yaw and squashed by pitch) plus an offset. Compose them and the entire 2D layer
+    /// is one matrix away from being correct in 3D.
+    ///
+    /// So `Fx` and the anims are drawn UNCHANGED, with that matrix pushed on rlgl's stack — the
+    /// same mechanism `BeginMode2D` itself uses. A tracer between two tiles lands between those
+    /// two tiles; an impact ring lies on the ground and is squashed by the pitch exactly as the
+    /// ground is; dust drifts along the board, not up the screen.
+    ///
+    /// THE ONE THING THAT MUST NOT GO THROUGH IT IS TEXT. A floating damage number sheared into the
+    /// ground plane is unreadable, and at yaw 45 it is a parallelogram. `Fx.ProjectText` gets the
+    /// anchor projected and the glyphs drawn upright — see `Fx.DrawText`.
+    ///
+    /// Everything here rides at CHIP HEIGHT rather than at the floor, because the layer is almost
+    /// all combat feedback (muzzles, tracers, impacts, blood) and combat happens at the height of
+    /// the pieces, not under them.
+    public const float FxPlaneY = ChipFloat + ChipH;
+
+    /// rlgl wants the TRANSPOSE of the System.Numerics convention — translation in M14/M24, not
+    /// M41/M42. Measured, not assumed: a translate-only matrix pushed the un-transposed way leaves
+    /// the drawn rect at the origin. This is exactly the "version-volatile signature" class
+    /// CLAUDE.md warns about, so the assertion lives in `FxBridgeSelfTest` rather than in a comment.
+    public static Matrix4x4 BoardPxMatrix(Camera3D cam, float worldY = FxPlaneY)
+    {
+        BoardPxAxes(cam, worldY, out Vector2 ax, out Vector2 az, out Vector2 t);
+        var m = new Matrix4x4();
+        m.M11 = ax.X; m.M12 = az.X; m.M13 = 0f; m.M14 = t.X;
+        m.M21 = ax.Y; m.M22 = az.Y; m.M23 = 0f; m.M24 = t.Y;
+        m.M33 = 1f;
+        m.M44 = 1f;
+        return m;
+    }
+
+    /// The affine map, as its parts: screen = ax * boardPx.X + az * boardPx.Y + t.
+    public static void BoardPxAxes(Camera3D cam, float worldY, out Vector2 ax, out Vector2 az, out Vector2 t)
+    {
+        var p0 = Raylib.GetWorldToScreen(new Vector3(0f, worldY, 0f), cam);
+        ax = (Raylib.GetWorldToScreen(new Vector3(1f, worldY, 0f), cam) - p0) / Cfg.Tile;
+        az = (Raylib.GetWorldToScreen(new Vector3(0f, worldY, 1f), cam) - p0) / Cfg.Tile;
+        t  = p0 - ax * Cfg.OriginX - az * Cfg.OriginY;
+    }
+
+    /// One board pixel through the bridge, for the call sites that need a POINT rather than a
+    /// pushed transform (text anchors, anything measured before it is drawn).
+    public static Vector2 ProjectBoardPx(Vector2 px, Camera3D cam, float worldY = FxPlaneY)
+    {
+        BoardPxAxes(cam, worldY, out Vector2 ax, out Vector2 az, out Vector2 t);
+        return ax * px.X + az * px.Y + t;
+    }
+
+    /// An ISOTROPIC scale for things the bridge must not shear — glyph sizes, mostly. The map
+    /// squashes one axis and not the other, so there is no single honest answer; the square root
+    /// of the AREA scale is the one that keeps a number the same visual weight as the board it is
+    /// floating over, at every pitch.
+    public static float BoardPxScale(Camera3D cam, float worldY = FxPlaneY)
+    {
+        BoardPxAxes(cam, worldY, out Vector2 ax, out Vector2 az, out _);
+        float area = MathF.Abs(ax.X * az.Y - ax.Y * az.X);
+        return MathF.Sqrt(MathF.Max(area, 1e-6f));
+    }
+
+    /// Screen shake and the hit-stop zoom punch, applied to the PROJECTED camera.
+    ///
+    /// The flat view gets both from `Camera2D` (an Offset and a Zoom multiplier) and there is no
+    /// such field on a 3D camera, so they are folded into the camera itself: the punch scales the
+    /// orthographic extent, and the shake slides BOTH position and target along the camera's own
+    /// screen-right and screen-up axes, which is the only offset that moves the image without
+    /// turning the camera. `ppu` converts the shake's PIXELS into the world units those axes are in.
+    ///
+    /// Doing it on the camera rather than on the final image is what keeps the Fx bridge honest:
+    /// the matrix is built FROM this camera, so the board and everything drawn over it shake
+    /// together instead of sliding apart by the shake amount.
+    public static void ApplyShake(ref Camera3D cam, Vector2 shakePx, float pulse)
+    {
+        if (pulse > 0.0001f) cam.FovY /= 1f + pulse;
+        if (shakePx == Vector2.Zero) return;
+        float ppu = Cfg.ScreenH / MathF.Max(cam.FovY, 0.001f);
+        float yaw = YawDeg * MathF.PI / 180f, pitch = PitchDeg * MathF.PI / 180f;
+        var right = new Vector3(MathF.Cos(yaw), 0f, -MathF.Sin(yaw));
+        var up    = new Vector3(-MathF.Sin(pitch) * MathF.Sin(yaw), MathF.Cos(pitch),
+                                -MathF.Sin(pitch) * MathF.Cos(yaw));
+        var d = right * (-shakePx.X / ppu) + up * (shakePx.Y / ppu);
+        cam.Position += d;
+        cam.Target += d;
+    }
+
     /// The PLAYABLE frame: the same board the screenshot hook draws, plus the interaction layer.
     /// Called from Game.DrawBoardLayer in place of the 2D board; Hud.Draw runs after it untouched.
     public static void DrawPlayable(Game g)
@@ -861,12 +1065,41 @@ public static class View3D
         Raylib.ClearBackground(Pal.Bg);
         Vision.Refresh(g.Grid, AllUnits(g));
         var cam = MakeCamera(g.Grid, (float)Cfg.ScreenW / Cfg.ScreenH);
+        ApplyShake(ref cam, g.Fx.ShakeOffset, g.CamPulse);
         Raylib.BeginMode3D(cam);
         DrawTerrain(g.Grid);
         DrawOverlays(g);
         DrawChips(g.Grid, AllUnits(g));
         Raylib.EndMode3D();
         DrawMarkers(g.Grid, AllUnits(g), cam);
+        DrawFxLayer(g, cam);
+    }
+
+    /// P34 — the 2D feedback layer, over the projected board, through the bridge.
+    ///
+    /// Drawn AFTER the 3D pass and therefore over everything, which is a deliberate difference
+    /// from the flat view (where ambient sits under the units). There is nowhere else to put it:
+    /// these are screen-space primitives with no depth, and the ground plane is opaque, so
+    /// "under the board" means "invisible". Over reads as atmosphere between the operator and the
+    /// hologram, which is what this view is supposed to be anyway.
+    static void DrawFxLayer(Game g, Camera3D cam)
+    {
+        var m = BoardPxMatrix(cam);
+        Rlgl.PushMatrix();
+        Rlgl.MultMatrixf(m);
+        g.Fx.DrawAmbient();
+        g.ActiveAnim?.Draw(g);
+        g.Fx.Draw();
+        Rlgl.PopMatrix();
+
+        // Text is the one thing the bridge must not touch. Hand Fx a projector for the anchor and
+        // an isotropic size scale, and let it draw its glyphs the way it always has.
+        BoardPxAxes(cam, FxPlaneY, out Vector2 ax, out Vector2 az, out Vector2 t);
+        Fx.ProjectText = px => ax * px.X + az * px.Y + t;
+        Fx.ProjectTextScale = BoardPxScale(cam);
+        g.Fx.DrawText();
+        Fx.ProjectText = null;
+        Fx.ProjectTextScale = 1f;
     }
 
     /// P33 — the camera's state, as one line of chrome. It exists because ORBIT costs the player
