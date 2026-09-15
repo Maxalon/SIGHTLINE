@@ -5365,6 +5365,12 @@ public partial class Game
     // ---------------- camera + pause ----------------
     void HandleCamera()
     {
+        // P33 — in the PROJECTED view the same three gestures drive a different camera. The flat
+        // camera's pan/zoom are meaningless there (they pan a render that no longer exists), so
+        // the branch is total rather than additive: one of the two cameras takes the input, never
+        // both. I and the pause keys below are shared.
+        if (View3D.Enabled) { HandleCamera3D(); return; }
+
         float wheel = Raylib.GetMouseWheelMove();
         if (wheel != 0)
         {
@@ -5381,19 +5387,57 @@ public partial class Game
             CamPan -= Raylib.GetMouseDelta() / CamZoom;
         }
         if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
-        // P32 — I toggles the PROJECTED view. Derived free-letter check at the time of binding
-        // (grep KeyboardKey. over src/) said I, J and Z were the only unclaimed letters.
-        // The 2D camera is reset on the way in and out: its pan/zoom mean nothing to the 3D
-        // camera, and a stale pan left the board off-centre on the way back.
-        if (Raylib.IsKeyPressed(KeyboardKey.I))
-        {
-            View3D.Enabled = !View3D.Enabled;
-            CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
-            ShowBanner(View3D.Enabled ? "PROJECTED VIEW" : "FLAT VIEW", false);
-        }
+        ToggleViewKey();
 
         if (CamZoom <= 1.001f) CamZoom = 1f;
         ClampCamPan();
+    }
+
+    /// P32 — I toggles the PROJECTED view. Derived free-letter check at the time of binding
+    /// (grep KeyboardKey. over src/) said I, J and Z were the only unclaimed letters.
+    /// BOTH cameras are reset on the way in and out: neither one's framing means anything to the
+    /// other, and a stale pan left the board off-centre on the way back.
+    void ToggleViewKey()
+    {
+        if (!Raylib.IsKeyPressed(KeyboardKey.I)) return;
+        View3D.Enabled = !View3D.Enabled;
+        CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
+        View3D.ResetCamera();
+        ShowBanner(View3D.Enabled ? "PROJECTED VIEW" : "FLAT VIEW", false);
+    }
+
+    /// P33 — the projected view's camera. Three gestures, all of them the ones the flat camera
+    /// already trained the player on: wheel zooms, middle-drag pans, C reframes. The two that are
+    /// NEW to a 3D camera get the keys instead, because there is no second mouse axis left:
+    /// [ / ] orbit and , / . tilt.
+    ///
+    /// Orbit is stepped to 15 degrees rather than continuous ON PURPOSE. A free orbit makes every
+    /// screenshot a different board and makes "north" a thing the player has to re-find; 24 stops
+    /// keep the cardinal read while still letting a wall be looked behind.
+    void HandleCamera3D()
+    {
+        if (Raylib.IsKeyPressed(KeyboardKey.LeftBracket))  View3D.YawDeg = Util.Wrap360(View3D.YawDeg - 15f);
+        if (Raylib.IsKeyPressed(KeyboardKey.RightBracket)) View3D.YawDeg = Util.Wrap360(View3D.YawDeg + 15f);
+
+        float tilt = 0f;
+        if (Raylib.IsKeyDown(KeyboardKey.Comma))  tilt -= 1f;
+        if (Raylib.IsKeyDown(KeyboardKey.Period)) tilt += 1f;
+        if (tilt != 0f)
+            View3D.PitchDeg = Util.Clamp(View3D.PitchDeg + tilt * 60f * Raylib.GetFrameTime(),
+                                         View3D.PitchMin, View3D.PitchMax);
+
+        float wheel = Raylib.GetMouseWheelMove();
+        if (wheel != 0f)
+        {
+            View3D.Zoom = Util.Clamp(View3D.Zoom + wheel * 0.18f, View3D.ZoomMin, View3D.ZoomMax);
+            View3D.ClampPan(Grid);
+        }
+
+        if (Raylib.IsMouseButtonDown(MouseButton.Middle))
+            View3D.DragPan(Grid, Raylib.GetMouseDelta(), View3D.PixelsPerUnit(Cam3D));
+
+        if (Raylib.IsKeyPressed(KeyboardKey.C)) View3D.ResetCamera();
+        ToggleViewKey();
     }
 
     /// P29 — OPEN THE MISSION ON THE SQUAD, not on the middle of the map.
@@ -9041,7 +9085,13 @@ public partial class Game
     }
 
     /// Pass 2 — the chrome. Every plate, label and number, drawn after the bright pass has run.
-    public void DrawHudLayer() => Hud.Draw(this);
+    public void DrawHudLayer()
+    {
+        Hud.Draw(this);
+        // P33 — the projected camera's state chip. In the chrome pass on purpose (see its header),
+        // and silent unless the camera has actually been moved off its opening framing.
+        if (View3D.Enabled) View3D.DrawCameraChip();
+    }
 
     /// Single-pass draw, kept for callers that don't split (and as the definition of the order).
     public void Draw() { DrawBoardLayer(); DrawHudLayer(); }

@@ -18246,3 +18246,87 @@ is most of the POINT of a projected view; only three of the board's overlays por
 aim reticle, objective markers, evac zones, blast radius, scorch decals and the whole `Fx` layer
 still have no 3D equivalent); and no post-FX, since the 3D path draws straight to the framebuffer
 and bypasses `Display.RenderFrame`'s render target, bloom and grade.
+
+---
+
+## P33. THE CAMERA MOVES
+
+**2026-09-15, base `ff9887e`.** P32 left the projected view fixed at pitch 52, yaw 0, framing the
+whole board. Looking round a wall is most of what a projected view is FOR, and nothing let the
+player do it.
+
+### Four terms, and only two of them get the mouse
+
+`View3D` gained `Zoom` (1..3.5, a divisor on the fitted extent), `Pan` (ground-plane offset of the
+camera target, in tiles), and pitch limits (18..82). The bindings split on a principle rather than
+on what was free: **the two gestures the flat camera already trained the player on keep their
+meaning** — wheel zooms, middle-drag pans — and the two terms a 3D camera ADDS take keys, because
+there is no third mouse axis. `[` / `]` orbit, `,` / `.` tilt, `C` resets (the same key the flat
+camera resets with, so one key means "show me the board again" in either projection).
+
+Orbit is stepped to 15 degrees on purpose. A free orbit makes "north" something the player has to
+re-find every time they let go of the mouse, and this game's deployment edge, evac zone and
+objective markers all read off a stable board orientation; 24 stops keep the cardinal read while
+still letting you look behind a wall.
+
+`HandleCamera` branches TOTALLY rather than additively — one of the two cameras takes the input,
+never both. The flat camera's pan and zoom mean nothing in 3D (they pan a render that no longer
+exists), and a camera that half-responds is worse than one that does not move.
+
+### The bug, and the leg that caught it
+
+`DragPan` turns a screen delta into a ground-plane offset. The first version rotated the delta BY
+the yaw. That is wrong: the camera's ground-plane axes are screen-right `(cos yaw, -sin yaw)` and
+screen-up `-sin(pitch) * (sin yaw, cos yaw)`, so turning a SCREEN delta back into a WORLD one is
+solving against those — **R transposed, not R**.
+
+R and Rᵀ agree at yaw 0 and at yaw 180 and nowhere else. So the wrong version worked perfectly at
+the orientation the board opens on, and at the one orientation a developer is most likely to test
+at, and slid the board sideways under the hand at every other angle. It was caught on the first run
+of **PICKTEST leg (B)**, which drags at four yaws (0, 60, -120, 210) and asserts the contract
+directly: *the tile under a pixel before the drag is the tile under pixel+delta after it.* That is
+the pan contract stated as a round trip, and it is the only form of it a machine can check.
+
+This is the same lesson P32's round-trip test taught, one level down: **the failure that matters is
+invisible at one angle and obvious at another.** The fixed-angle legs would all have passed.
+
+PICKTEST now runs 1,584 tile round-trips over eight camera states — the four original angles plus
+zoomed-centred, zoomed-and-panned, all-three-at-once, and a shallow 22-degree tilt past the pitch
+the board opens on — plus the pan leg, a clamp leg, and a reset leg. The reset leg exists because
+`ResetCamera` has to return all FOUR terms; one that forgets zoom or pan strands the player looking
+at a corner with no way back, and nothing else would notice.
+
+### The pan bounds are derived, not chosen
+
+At zoom z the camera sees 1/z of the fitted extent, so the target can range over
+`span * 0.5 * (1 - 1/z)` per axis. At zoom 1 that collapses to zero, which is **correct rather than
+a special case**: the whole board is already on screen and there is nowhere to pan to. This is
+`Game.ClampPan` (P29)'s model, ported — the same reason it is right there is the reason it is right
+here, and the clamp leg pins both ends of it.
+
+### A chip that says nothing at rest
+
+Orbit costs the player north, and once the board is turned there is nothing ON the board to
+re-anchor to. `View3D.DrawCameraChip` names the terms that have moved and the reset key — and only
+the terms that have moved; a camera at its opening framing has nothing to report, and a line that
+is always there is a line nobody reads. It is drawn in the CHROME pass, not with the board, so it
+contributes nothing to the bloom.
+
+It does not print a degree sign. The baked atlases carry ASCII plus nine punctuation codepoints and
+U+00B0 is not one of them, so it paints as `?` — which the first verification screenshot showed as
+`YAW 45?`. Adding the codepoint would repack both atlases and move every glyph in the game for one
+cosmetic character, so the chip says `DEG`.
+
+### Two documentation holes closed on the way past
+
+`I` shipped in P32 with **no `Hud.KeyTable` row**, so both the in-game FIELD MANUAL and the
+generated README block told a player this game had one view of the board. P33's three keys are in
+that table with it, and `SIGHTLINE_KEYTABLEGATE` passes against the regenerated README block. This
+is the third time that table has been found a wave behind the bindings (P12's `[TAB]` faction
+cycler, P13's AUDIO CHECK scroll) — **the gate catches a STALE README, not a MISSING row**, because
+it compares the README against the table, and both are wrong together when a wave forgets the row.
+
+`SIGHTLINE_VIEW3DCAM=pitch:yaw:zoom[:panX:panY]` stages the projected camera before the first
+frame, so `SIGHTLINE_SHOT` can photograph a state that otherwise needs a hand on the keyboard. It
+parses-or-leaves-alone rather than parses-or-defaults: a silently defaulted camera photographs the
+wrong thing and looks right.

@@ -1468,6 +1468,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         ("CAMERA", "Wheel", "zoom"),
         ("CAMERA", "Middle-drag", "pan"),
         ("CAMERA", "C", "reset the camera (AUTO-CAM on the pause card follows the action on its own)"),
+        // P33: I shipped in P32 with no row here, so the FIELD MANUAL and the generated README
+        // both told a player the game had one view. The three that follow only do anything in
+        // the projected view, and the row says so rather than listing them as dead keys.
+        ("CAMERA", "I", "switch between the FLAT and PROJECTED views of the board"),
+        ("CAMERA", "[ / ]", "PROJECTED VIEW: orbit the board 15 degrees"),
+        ("CAMERA", ", / .", "PROJECTED VIEW: tilt the camera down / up"),
         ("IN A MISSION", "T", "write a custom tag on the selected soldier (Enter confirms, Backspace edits, Esc cancels)"),
         ("IN A MISSION", "V", "show every verb while the onboarding is still staging the action bar"),
         ("IN A MISSION", "P", "restart the drill (TRAINING OP only)"),

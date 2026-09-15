@@ -230,6 +230,27 @@ public static class Program
         // board through a bypass path and exits), this sets the same flag the I key toggles, so the
         // game runs normally: full HUD, full input, the 3D board underneath.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3D") == "1") View3D.Enabled = true;
+        // P33 — SIGHTLINE_VIEW3DCAM=pitch:yaw:zoom[:panX:panY] stages the projected camera before
+        // the first frame, so SIGHTLINE_SHOT can photograph a state that otherwise needs a hand on
+        // the keyboard. Parse-or-leave-alone: a field that does not read is skipped rather than
+        // defaulted, because a silently defaulted camera photographs the wrong thing and looks
+        // right. Verification aid only — nothing in normal play reads it.
+        string v3cam = Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3DCAM");
+        if (!string.IsNullOrEmpty(v3cam))
+        {
+            var f = v3cam.Split(':');
+            if (f.Length > 0 && float.TryParse(f[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float cp))
+                View3D.PitchDeg = Util.Clamp(cp, View3D.PitchMin, View3D.PitchMax);
+            if (f.Length > 1 && float.TryParse(f[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float cy))
+                View3D.YawDeg = Util.Wrap360(cy);
+            if (f.Length > 2 && float.TryParse(f[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float cz))
+                View3D.Zoom = Util.Clamp(cz, View3D.ZoomMin, View3D.ZoomMax);
+            float px = 0f, py = 0f;
+            if (f.Length > 3) float.TryParse(f[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out px);
+            if (f.Length > 4) float.TryParse(f[4], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out py);
+            View3D.Pan = new System.Numerics.Vector2(px, py);
+            Console.WriteLine($"VIEW3DCAM: pitch {View3D.PitchDeg:0} yaw {View3D.YawDeg:0} zoom {View3D.Zoom:0.00} pan {px:0.0},{py:0.0}");
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "0") Mission.Buildings = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "1") Mission.Buildings = true;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
