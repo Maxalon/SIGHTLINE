@@ -18565,3 +18565,63 @@ P33 put it bottom-left, where it collides with the **fifth roster card** — the
 ESCORT or RESCUE mission fills. The one objective whose asset you most need to see was the one it
 covered. It is top-right now, under the END TURN plate, in a band that is empty on every screen this
 view can be on.
+
+---
+
+## P37. THE BOARD FILLS — a bigger board is more rooms, not one stretched room
+
+**2026-09-15, base `e4f59b9`.** `docs/ROADMAP.md` had this as *the* blocker for `SIGHTLINE_BIGMAP`
+being playable, and it was right: `BuildProcedural` and its four cover archetypes were tuned for
+18x11 = 198 tiles, and every coordinate in them is a literal. At 40x28 = 1,120 tiles they produced
+the same furniture in the same place — all four motifs inside the top-left 18x11, and the other 922
+tiles an empty plain.
+
+### The choice was stretch or tile, and stretch is wrong
+
+Scaling the archetypes to the board keeps their SHAPE and loses their SCALE, and **scale is the
+whole content of a cover motif**. A screen whose gaps are six tiles wide is not a screen; it is four
+separate walls with a road between them. Every gap, lane, breach and doorway in these four
+archetypes was tuned against a soldier's six-tile move, and stretching throws exactly that away
+while looking, in a screenshot, like it worked.
+
+So: `Mission.RefW/RefH` names the reference frame the archetypes are drawn in, `Mission.CellGrid`
+divides the board into as many reference-sized cells as fit, and each cell gets its own plateaus and
+**its own archetype roll**. A large board is a patchwork of different rooms rather than one motif
+repeated — which is why the roll stays inside the loop. The frame is centred in its cell, so the
+slack a non-multiple board leaves becomes a margin around each room instead of a fringe on one side.
+
+The sprinkle scales by AREA rather than by cell count, because cells are only approximately the
+reference size and it is tiles-per-tile that a player reads as clutter.
+
+Measured at 40x28: cover density **3.6% → 14.5%**, against an 18x11 reference of 18.7%. It lands
+deliberately *under* the reference — a bigger board is meant to buy lateral choice, and one packed
+to 18x11 density at 5.7× the area is a maze, not a battlefield.
+
+### The shipped board does not move, and the test says so the hard way
+
+At 18x11 the cell grid is one cell at origin (0,0) with an area ratio of exactly 1, so the wave is a
+no-op there **by construction** rather than by tuning. `SIGHTLINE_DENSITYTEST` leg (A) asserts it
+over the whole tile+height board across 16 seeds — not over a cover count, because a count is the
+one thing a density wave could keep while moving everything else.
+
+Leg (B) has two halves and the second is the point: with the wave ON, 40x28 density must be within a
+third of the reference; with `SIGHTLINE_DENSITY=0` it must be **under half** of it. A leg that can
+only see the fix and not the defect is a leg that would pass on an empty board.
+
+Leg (C) exists because `ArchTwinCorridors` ran its spines `for (int y = 0; y < grid.H; y++)`. At
+18x11 `grid.H` and `RefH` are the same number; on a taller board they are not, and a spine run to
+`grid.H` is a wall through every room below this one. That is the bug class tiling invites, so the
+leg asserts no fully-walled column and no fully-walled row over the whole board.
+
+Leg (D) asserts ≥95% of floor tiles are reachable from a player spawn. `EnsureConnectivity`
+guarantees the named POINTS — spawns, evac, terminal, charges — are mutually reachable and says
+nothing whatever about the rest of the board; four rooms of walls is exactly the shape that could
+strand a corner nobody named.
+
+### What this does NOT fix
+
+`SIGHTLINE_BIGMAP` is still not a shipping configuration. Enemy count, mission pacing and sight range
+are all still 18x11 numbers, the 35 authored arenas are out of play at any other size (the build says
+so, loudly, once), and nothing has measured a big board — it is a LEVEL lever on every axis at once
+and severs the CRN chain completely. Those are all still open in `docs/ROADMAP.md`. What changed is
+that the board no longer reads as a plain, which was the thing stopping anyone from judging the rest.
