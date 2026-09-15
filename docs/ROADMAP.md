@@ -4019,12 +4019,29 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
 
 #### OPEN — what a bigger board still needs
 
-- [ ] **PROCEDURAL DENSITY DOES NOT SCALE, and this is the blocker for BIGMAP being playable.**
-      `BuildProcedural` and the cover archetypes were tuned for 18x11 = 198 tiles. At 40x28 = 1,120
-      tiles they produce the same amount of furniture spread over 5.7x the area, so the board reads
-      as a near-empty plain with a few islands on it. Screenshot it and the problem is obvious.
-      Either scale the archetypes with board AREA or author real boards — and authoring is what
-      the P26/P27 direction actually asked for.
+- [x] **Procedural density scales with the board.** DONE (P37). **A BIGGER BOARD IS MORE ROOMS,
+      NOT ONE STRETCHED ROOM.** Every literal coordinate in the four archetypes is in an 18x11
+      reference frame (`Mission.RefW/RefH`); `Mission.CellGrid` divides the board into as many
+      reference-sized cells as fit, and each cell gets its own plateaus and its own archetype roll,
+      so a large board is a patchwork of different rooms rather than one motif repeated.
+      **Stretching was the obvious alternative and it is the wrong one**: it keeps an archetype's
+      shape and loses its SCALE, and scale is the whole content of a cover motif — a screen whose
+      gaps are six tiles wide is not a screen, it is four separate walls. Tiling keeps every gap,
+      lane and breach at the size a soldier's six-tile move was tuned against.
+      The sprinkle scales by AREA rather than by cell count, because cells are only approximately
+      the reference size and it is tiles-per-tile that a player reads as clutter.
+      Measured at 40x28: cover density **3.6% -> 14.5%** against an 18x11 reference of 18.7%, which
+      is the intended direction (a bigger board is meant to buy lateral choice; packed to 18x11
+      density at 5.7x the area it would be a maze).
+      **On the shipped 18x11 board this is a NO-OP BY CONSTRUCTION** — one cell, origin (0,0), area
+      ratio exactly 1 — and `SIGHTLINE_DENSITYTEST` leg (A) asserts that over the whole tile+height
+      board rather than over a cover count, which is the one thing a density wave could keep while
+      moving everything else. `SIGHTLINE_DENSITY=0` is the restore flag.
+      Leg (C) exists because `ArchTwinCorridors` ran its spines `for y < grid.H`: on a taller board
+      that is a wall through every room below this one, and it is exactly the class of bug tiling
+      invites. Leg (D) asserts >=95% of floor tiles reachable from a spawn, because
+      `EnsureConnectivity` guarantees the named POINTS are mutually reachable and says nothing about
+      the rest of the board.
 - [ ] **Enemy count, mission pacing and sight range are all still 18x11 numbers.** `DESIGN.md` §3D
       already names "empty traversal = boredom"; at 40x28 with ~6-tile moves, crossing the map is
       nine turns of walking. The P27-N note's answer stands: insert NEAR the objective and let size

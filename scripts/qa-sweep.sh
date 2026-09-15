@@ -118,6 +118,7 @@ echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIO
 echo -n "BOARDSIZETEST: "; verdict "$(SIGHTLINE_BOARDSIZETEST=1 run | grep -oE "BOARDSIZETEST: (PASS|FAIL)" | head -1)"
 # P28: buildings on REAL boards -- they appear, and they never strand a tile.
 echo -n "BUILDINGTEST: "; verdict "$(SIGHTLINE_BUILDINGTEST=1 run | grep -oE "BUILDINGTEST: (PASS|FAIL)" | head -1)"
+echo -n "DENSITYTEST: "; verdict "$(SIGHTLINE_DENSITYTEST=1 run | grep -oE "DENSITYTEST: (PASS|FAIL)" | head -1)"
 echo -n "SAVETEST   : "; verdict "$(SIGHTLINE_SAVETEST=1 run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1)"
 echo -n "AITEST     : "; verdict "$(SIGHTLINE_AITEST=1 run | grep -oE "AITEST: (PASS|FAIL)" | head -1)"
 echo -n "DECLINETEST: "; verdict "$(SIGHTLINE_DECLINETEST=1 run | grep -oE "DECLINETEST: (PASS|FAIL)" | head -1)"

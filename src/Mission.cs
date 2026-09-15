@@ -677,6 +677,121 @@ public static class Mission
     /// the edge queries switched off — so the comparison is one board, not two, and cannot be
     /// confounded by the RNG. It forces `Buildings` on itself, so it still tests the stamper
     /// while the shipped default is off.
+    // ══ P37 — SIGHTLINE_DENSITYTEST ═════════════════════════════════════════════════════════
+    /// What this pins:
+    ///
+    /// (A) THE SHIPPED BOARD DOES NOT MOVE. At 18x11 the cell grid is one cell at origin (0,0) with
+    ///     an area ratio of exactly 1, so `DensityScaling` is a no-op there BY CONSTRUCTION. The leg
+    ///     asserts it over the whole tile+height board rather than over a cover count, because a
+    ///     count is the one thing a density wave could keep while moving everything else.
+    /// (B) THE BIG BOARD FILLS, and the leg is not vacuous. Cover density at 40x28 with the wave ON
+    ///     must be within a quarter of the reference board's; with it OFF it must be under HALF of
+    ///     it. The second half is what makes the first mean something: the defect this wave fixes
+    ///     has to be visible in the same instrument that shows the fix.
+    /// (C) A ROOM STAYS IN ITS ROOM. The archetypes promise "no column is fully walled", and the
+    ///     spine archetype used to run `for y < grid.H` — which on a taller board is a wall through
+    ///     every room below this one. Asserted on columns AND rows.
+    /// (D) NO POCKETS. At least 95% of floor tiles are reachable from a player spawn.
+    ///     `EnsureConnectivity` guarantees the named POINTS are mutually reachable and says nothing
+    ///     about the rest of the board; four rooms of walls is exactly the shape that could strand a
+    ///     corner nobody named.
+    public static string DensitySelfTest(int seeds = 16)
+    {
+        var fails = new List<string>();
+        bool savedD = DensityScaling;
+        int savedW = Cfg.GridW, savedH = Cfg.GridH, savedT = Cfg.Tile;
+
+        // A cover fraction over the WHOLE board, which is what a player reads as clutter.
+        double CoverFrac(Grid g)
+        {
+            int cov = 0;
+            for (int x = 0; x < g.W; x++)
+                for (int y = 0; y < g.H; y++)
+                    if (g.Tiles[x, y] == TileType.LowCover || g.Tiles[x, y] == TileType.HighCover) cov++;
+            return (double)cov / (g.W * g.H);
+        }
+
+        Grid BuildOne(int seed, bool scaled)
+        {
+            DensityScaling = scaled;
+            Util.Reseed(77000 + seed);
+            var g = new Grid(); var sq = TrainingSquad(); var fo = new List<Unit>();
+            Build(g, sq, fo, 3);
+            return g;
+        }
+
+        // ── (A) the shipped board, both ways.
+        Cfg.SetBoard(Maps.TemplateW, Maps.TemplateH);
+        double refFrac = 0;
+        for (int s = 0; s < seeds; s++)
+        {
+            var on = BuildOne(s, true);
+            var off = BuildOne(s, false);
+            refFrac += CoverFrac(on);
+            for (int x = 0; x < on.W; x++)
+                for (int y = 0; y < on.H; y++)
+                    if (on.Tiles[x, y] != off.Tiles[x, y] || on.Height[x, y] != off.Height[x, y])
+                    { fails.Add($"(A) seed{s}: the shipped 18x11 board moved at {x},{y}"); s = seeds; break; }
+        }
+        refFrac /= seeds;
+
+        // ── (B)(C)(D) a board that is four reference rooms across.
+        Cfg.SetBoard(40, 28);
+        double onFrac = 0, offFrac = 0;
+        int worstColumn = 0, worstRow = 0; double worstReach = 1.0;
+        for (int s = 0; s < seeds; s++)
+        {
+            var on = BuildOne(s, true);
+            onFrac += CoverFrac(on);
+            offFrac += CoverFrac(BuildOne(s, false));
+
+            for (int x = 0; x < on.W; x++)
+            {
+                int run = 0;
+                for (int y = 0; y < on.H; y++) if (!on.IsFloor(x, y)) run++;
+                worstColumn = Math.Max(worstColumn, run);
+            }
+            for (int y = 0; y < on.H; y++)
+            {
+                int run = 0;
+                for (int x = 0; x < on.W; x++) if (!on.IsFloor(x, y)) run++;
+                worstRow = Math.Max(worstRow, run);
+            }
+
+            Util.Reseed(77000 + s);
+            var sq = TrainingSquad(); var fo = new List<Unit>();
+            DensityScaling = true;
+            var g2 = new Grid(); Build(g2, sq, fo, 3);
+            var cost = g2.CostMap(sq[0].X, sq[0].Y, null, out _, 99999);
+            int floor = 0, seen = 0;
+            for (int x = 0; x < g2.W; x++)
+                for (int y = 0; y < g2.H; y++)
+                    if (g2.IsFloor(x, y)) { floor++; if (cost[x, y] >= 0) seen++; }
+            if (floor > 0) worstReach = Math.Min(worstReach, (double)seen / floor);
+        }
+        onFrac /= seeds; offFrac /= seeds;
+
+        // A THIRD EITHER WAY, not equality. The reference frame is 198 tiles and a cell on this
+        // board is 280, so a motif fills ~70% of its room and the sprinkle covers the rest; the
+        // result sits a little UNDER the reference, which is the intended direction — a bigger
+        // board is meant to buy lateral choice, and a board packed to 18x11 density at five times
+        // the area is a maze, not a battlefield. What the leg is for is "the same ORDER of
+        // density", which is exactly what the unscaled 3.6% is not.
+        if (onFrac < refFrac * 0.70 || onFrac > refFrac * 1.30)
+            fails.Add($"(B) 40x28 cover density {onFrac:P1} against the 18x11 reference {refFrac:P1}");
+        if (offFrac >= refFrac * 0.5)
+            fails.Add($"(B) SIGHTLINE_DENSITY=0 gives {offFrac:P1} at 40x28 — the leg cannot see the defect it exists for");
+        if (worstColumn >= 28) fails.Add($"(C) a column is fully walled ({worstColumn} of 28)");
+        if (worstRow >= 40) fails.Add($"(C) a row is fully walled ({worstRow} of 40)");
+        if (worstReach < 0.95) fails.Add($"(D) only {worstReach:P1} of floor tiles reachable from a spawn");
+
+        DensityScaling = savedD;
+        Cfg.SetBoard(savedW, savedH, savedT);
+        return fails.Count == 0
+            ? $"DENSITYTEST: PASS (18x11 byte-identical both ways over {seeds} seeds; 40x28 fills to {onFrac:P1} against a {refFrac:P1} reference and {offFrac:P1} unscaled; longest walled column {worstColumn}/28, row {worstRow}/40; {worstReach:P1} of floor reachable)"
+            : "DENSITYTEST: FAIL\n  " + string.Join("\n  ", fails);
+    }
+
     public static string BuildingSelfTest(int seeds = 24)
     {
         var fails = new List<string>();
@@ -754,34 +869,81 @@ public static class Mission
     // (run by Build afterwards) is the final net should sprinkles/protective cover ever
     // pinch a path. Spawn columns (0-3) and enemy columns (14-17) are left clear.
 
+    // ══ P37: THE BOARD FILLS ════════════════════════════════════════════════════════════════
+    /// The reference board the four archetypes were authored on. Every literal coordinate in
+    /// `ArchScreen` / `ArchRedoubt` / `ArchTwinCorridors` / `ArchDiagonalWall` is in THIS frame,
+    /// and was until P37 stamped straight onto the grid — so on a 40x28 board all four motifs
+    /// landed inside the top-left 18x11 and the other 922 tiles were an empty plain.
+    public const int RefW = 18, RefH = 11;
+
+    /// SIGHTLINE_DENSITY=0 restores the pre-P37 build: ONE archetype, ONE set of plateaus and the
+    /// flat sprinkle count, wherever the board's corner happens to be. It is the arm for pricing
+    /// this wave, and on the shipped 18x11 board it is a NO-OP BY CONSTRUCTION — one cell, at
+    /// origin (0,0), with an area ratio of exactly 1 — which is what DENSITYTEST leg (A) asserts
+    /// against the whole board signature rather than against a cover count.
+    public static bool DensityScaling = true;
+
+    /// How many reference-sized cells this board is, and where each one starts. A bigger board is
+    /// MORE ROOMS, not one stretched room: stretching an archetype keeps its shape and loses its
+    /// SCALE, and scale is the whole content of a cover motif — a screen whose gaps are six tiles
+    /// wide is not a screen, it is four separate walls. Tiling keeps every gap, lane and breach at
+    /// the size a soldier's six-tile move was tuned against, and gives a big board local structure
+    /// instead of distant structure.
+    ///
+    /// Each cell gets its OWN archetype roll, so a large board is a patchwork of different rooms
+    /// rather than the same motif repeated — which is also why the roll stays inside the loop and
+    /// not above it.
+    static void CellGrid(Grid grid, out int cx, out int cy, out int cw, out int ch)
+    {
+        cx = DensityScaling ? Math.Max(1, grid.W / RefW) : 1;
+        cy = DensityScaling ? Math.Max(1, grid.H / RefH) : 1;
+        cw = grid.W / cx;
+        ch = grid.H / cy;
+    }
+
     static void BuildProcedural(Grid grid, HashSet<(int, int)> occupied,
                                 HashSet<(int, int)> evac, int missionNum)
     {
-        // contested high ground: raised plateaus in the mid-field (more on later missions).
-        // Shared by all archetypes so elevation play is always present.
-        RaisePlateau(grid, evac, 7, 3, 2, 2);
-        RaisePlateau(grid, evac, 11, 7, 2, 2);
-        if (missionNum >= 3) RaisePlateau(grid, evac, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
-        // a commanding tier-2 redoubt appears on later missions (sees over high cover)
-        if (missionNum >= 4) RaisePlateau(grid, evac, Util.RandInt(7, 10), Util.RandInt(3, 6), 2, 2, 2);
+        CellGrid(grid, out int cx, out int cy, out int cw, out int ch);
+        for (int j = 0; j < cy; j++)
+            for (int i = 0; i < cx; i++)
+            {
+                // Centre the reference frame in its cell, so the slack a non-multiple board leaves
+                // becomes a margin around each room rather than a fringe on one side. At 18x11 the
+                // cell IS the frame and the offset is (0,0).
+                int ox = i * cw + (cw - RefW) / 2, oy = j * ch + (ch - RefH) / 2;
 
-        // pick a mid-field cover archetype (variety); each leaves an open lane + no walled column
-        switch (Util.RandInt(0, 3))
-        {
-            case 0:  ArchScreen(grid, occupied);        break;   // the 4.2 staggered screen
-            case 1:  ArchRedoubt(grid, occupied);       break;   // a central bunker, flank lanes
-            case 2:  ArchTwinCorridors(grid, occupied); break;   // two cover spines, a centre gap
-            default: ArchDiagonalWall(grid, occupied);  break;   // a slanted wall with a breach
-        }
+                // contested high ground: raised plateaus in the mid-field (more on later missions).
+                // Shared by all archetypes so elevation play is always present.
+                RaisePlateau(grid, evac, ox + 7, oy + 3, 2, 2);
+                RaisePlateau(grid, evac, ox + 11, oy + 7, 2, 2);
+                if (missionNum >= 3) RaisePlateau(grid, evac, ox + Util.RandInt(6, 11), oy + Util.RandInt(1, 8), 2, 2);
+                // a commanding tier-2 redoubt appears on later missions (sees over high cover)
+                if (missionNum >= 4) RaisePlateau(grid, evac, ox + Util.RandInt(7, 10), oy + Util.RandInt(3, 6), 2, 2, 2);
 
-        // random crates (a touch more clutter on later missions; biased toward LoS-blocking high cover)
-        Sprinkle(grid, occupied, 14 + Math.Min(6, missionNum));
+                // pick a mid-field cover archetype (variety); each leaves an open lane + no walled column
+                switch (Util.RandInt(0, 3))
+                {
+                    case 0:  ArchScreen(grid, occupied, ox, oy);        break;   // the 4.2 staggered screen
+                    case 1:  ArchRedoubt(grid, occupied, ox, oy);       break;   // a central bunker, flank lanes
+                    case 2:  ArchTwinCorridors(grid, occupied, ox, oy); break;   // two cover spines, a centre gap
+                    default: ArchDiagonalWall(grid, occupied, ox, oy);  break;   // a slanted wall with a breach
+                }
+            }
+
+        // random crates (a touch more clutter on later missions; biased toward LoS-blocking high
+        // cover). Scaled by AREA, not by cell count: the cells are only approximately the reference
+        // size, and it is tiles-per-tile that a player reads as clutter. Exactly the old count at
+        // 18x11, because the ratio is exactly 1 there.
+        int sprinkle = 14 + Math.Min(6, missionNum);
+        if (DensityScaling) sprinkle = (int)Math.Round(sprinkle * (double)(grid.W * grid.H) / (RefW * RefH));
+        Sprinkle(grid, occupied, sprinkle);
     }
 
     /// Archetype 0 — the original 4.2 staggered mid-field SCREEN of high cover: breaks the
     /// long cross-board sightlines so the squad can advance into the midfield under cover
     /// before tripping a pod. No column is fully walled; row 5 is the one open risky lane.
-    static void ArchScreen(Grid grid, HashSet<(int, int)> occupied)
+    static void ArchScreen(Grid grid, HashSet<(int, int)> occupied, int ox, int oy)
     {
         var screen = new (int x, int y)[]
         {
@@ -789,16 +951,16 @@ public static class Mission
             (9, 0), (9, 1), (9, 9), (9, 10),   (10, 3), (10, 4), (10, 7), (10, 8),
             (11, 1), (11, 2),
         };
-        foreach (var (sx, sy) in screen) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        foreach (var (sx, sy) in screen) PlaceCover(grid, occupied, ox + sx, oy + sy, TileType.HighCover);
         // low cover flanking the open central lane, for cover-fighting on the direct route
-        PlaceCover(grid, occupied, 6, 5, TileType.LowCover);
-        PlaceCover(grid, occupied, 12, 5, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 6, oy + 5, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 12, oy + 5, TileType.LowCover);
     }
 
     /// Archetype 1 — a central REDOUBT: a compact high-cover bunker mid-board with a low-cover
     /// apron, leaving wide flanking lanes top and bottom. Rewards a flank rather than a frontal
     /// push; the bunker breaks the central sightline while the rims stay open.
-    static void ArchRedoubt(Grid grid, HashSet<(int, int)> occupied)
+    static void ArchRedoubt(Grid grid, HashSet<(int, int)> occupied, int ox, int oy)
     {
         // high-cover ring of a hollow bunker around the mid-field (rows 3-7, cols 8-10).
         // The WEST face at row 5 is left open as a doorway, so the interior (and a centre
@@ -812,35 +974,38 @@ public static class Mission
             (8, 6),                 (10, 6),
             (8, 7), (9, 7), (10, 7),
         };
-        foreach (var (sx, sy) in ring) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        foreach (var (sx, sy) in ring) PlaceCover(grid, occupied, ox + sx, oy + sy, TileType.HighCover);
         // low-cover apron on the approaches (covered fighting positions outside the bunker)
-        PlaceCover(grid, occupied, 6, 4, TileType.LowCover);
-        PlaceCover(grid, occupied, 6, 6, TileType.LowCover);
-        PlaceCover(grid, occupied, 12, 4, TileType.LowCover);
-        PlaceCover(grid, occupied, 12, 6, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 6, oy + 4, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 6, oy + 6, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 12, oy + 4, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 12, oy + 6, TileType.LowCover);
         // top/bottom flanking lanes (rows 0-1 and 9-10) are deliberately left open.
     }
 
     /// Archetype 2 — TWIN CORRIDORS: two vertical high-cover spines (a forward and a rear
     /// staggered wall), each gapped so a soldier can slip through, with an open central seam
     /// between them. Creates layered cover and channels movement into the gaps.
-    static void ArchTwinCorridors(Grid grid, HashSet<(int, int)> occupied)
+    static void ArchTwinCorridors(Grid grid, HashSet<(int, int)> occupied, int ox, int oy)
     {
+        // The spines run the height of the REFERENCE FRAME, not of the grid. At 18x11 those are the
+        // same number; on a taller board they are not, and a spine run to grid.H would be a wall
+        // through every room below this one.
         // forward spine at col 7, gap at rows 4-5 (the open seam)
-        for (int y = 0; y < grid.H; y++)
-            if (y < 4 || y > 5) PlaceCover(grid, occupied, 7, y, TileType.HighCover);
+        for (int y = 0; y < RefH; y++)
+            if (y < 4 || y > 5) PlaceCover(grid, occupied, ox + 7, oy + y, TileType.HighCover);
         // rear spine at col 11, gap at rows 5-6 (offset from the forward gap -> staggered)
-        for (int y = 0; y < grid.H; y++)
-            if (y < 5 || y > 6) PlaceCover(grid, occupied, 11, y, TileType.HighCover);
+        for (int y = 0; y < RefH; y++)
+            if (y < 5 || y > 6) PlaceCover(grid, occupied, ox + 11, oy + y, TileType.HighCover);
         // low cover bracketing the central seam (cover-fight in the gap between the spines)
-        PlaceCover(grid, occupied, 9, 4, TileType.LowCover);
-        PlaceCover(grid, occupied, 9, 6, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 9, oy + 4, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 9, oy + 6, TileType.LowCover);
     }
 
     /// Archetype 3 — a DIAGONAL WALL of high cover slashing across the mid-field with a single
     /// breach gap, plus a low-cover counter-diagonal. Strong sightline break on a slant; the
     /// breach is the contested crossing, and the wall's ends leave the rims open.
-    static void ArchDiagonalWall(Grid grid, HashSet<(int, int)> occupied)
+    static void ArchDiagonalWall(Grid grid, HashSet<(int, int)> occupied, int ox, int oy)
     {
         // a slanted high-cover wall from upper-mid to lower-mid, with a one-tile breach
         var wall = new (int x, int y)[]
@@ -851,11 +1016,11 @@ public static class Mission
             (10, 7), (10, 8),
             (11, 9),
         };
-        foreach (var (sx, sy) in wall) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        foreach (var (sx, sy) in wall) PlaceCover(grid, occupied, ox + sx, oy + sy, TileType.HighCover);
         // a short low-cover counter-diagonal giving the attacker covered footing to the breach
-        PlaceCover(grid, occupied, 6, 6, TileType.LowCover);
-        PlaceCover(grid, occupied, 9, 6, TileType.LowCover);   // flanks the breach, doesn't seal it
-        PlaceCover(grid, occupied, 12, 6, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 6, oy + 6, TileType.LowCover);
+        PlaceCover(grid, occupied, ox + 9, oy + 6, TileType.LowCover);   // flanks the breach, doesn't seal it
+        PlaceCover(grid, occupied, ox + 12, oy + 6, TileType.LowCover);
     }
 
     /// Place a cover tile only on an unreserved, currently-empty floor tile (and mark it

@@ -251,6 +251,10 @@ public static class Program
             View3D.Pan = new System.Numerics.Vector2(px, py);
             Console.WriteLine($"VIEW3DCAM: pitch {View3D.PitchDeg:0} yaw {View3D.YawDeg:0} zoom {View3D.Zoom:0.00} pan {px:0.0},{py:0.0}");
         }
+        // P37 THE BOARD FILLS — SIGHTLINE_DENSITY=0 restores the pre-P37 procedural build (one
+        // archetype, one set of plateaus, the flat sprinkle count) wherever the board's corner is.
+        // A NO-OP on the shipped 18x11 board by construction; the arm exists for SIGHTLINE_BIGMAP.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DENSITY") == "0") Mission.DensityScaling = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "0") Mission.Buildings = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "1") Mission.Buildings = true;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
@@ -908,6 +912,13 @@ public static class Program
             LoadGameFonts();   // leg (E) measures GLYPH INK; without the real atlases it measures nothing
             Console.WriteLine(View3D.FxBridgeSelfTest());
             Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_DENSITYTEST=1 : P37 — the procedural build scales with the board. Pure grid
+        // logic over two board sizes, no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DENSITYTEST") == "1")
+        {
+            Console.WriteLine(Mission.DensitySelfTest());
             return;
         }
         // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary
