@@ -18625,3 +18625,51 @@ are all still 18x11 numbers, the 35 authored arenas are out of play at any other
 so, loudly, once), and nothing has measured a big board — it is a LEVEL lever on every axis at once
 and severs the CRN chain completely. Those are all still open in `docs/ROADMAP.md`. What changed is
 that the board no longer reads as a plain, which was the thing stopping anyone from judging the rest.
+
+---
+
+## SESSION HANDOFF — after P37 (2026-09-15)
+
+`main` is at the P37 merge, builds 0 warn / 0 err, and `bash scripts/qa-sweep.sh --full` is green:
+**96 self-tests exist, 96 ran, all PASS, no COVERAGE GAP, autoplay 3/3, SWEEP-EXIT 0.**
+
+### What this session did
+
+It started as "can you do 3D modelling" and became the projected view. In order: a Blender-as-a-
+module asset pipeline and prop kit (P28/P31), edge walls (P28), a runtime board SIZE (P29), the
+discovery layer (P30), the projected view becoming PLAYABLE (P32), and then this stretch —
+
+| wave | what |
+|---|---|
+| **P33** | The projected camera moves: zoom, pan, orbit (`[` / `]`, 15° steps), tilt (`,` / `.`), `C` resets. `DragPan`'s rotation is the INVERSE of the yaw, not the yaw — right at yaw 0 and 180 and wrong everywhere else, caught by the leg that drags at four yaws. |
+| **P34** | The whole `Fx` layer crosses into 3D through ONE rlgl matrix, because an orthographic camera makes board-pixel -> screen AFFINE. `Fx.cs` gained two lines. |
+| **P35** | The board's ground overlays follow it (27 `Renderer` methods, unchanged), and the text escape moves to `Cfg.Text`/`Measure` — the funnel every string already goes through. |
+| **P36** | Per-biome cover species (ARID rock, MAGMA slag, NEON sign), a double-drawn barrel P35 had written up as a limitation, and "no post-FX in 3D" found false since P32. |
+| **P37** | Procedural density scales: a bigger board is MORE ROOMS, not one stretched room. 3.6% -> 14.5% cover at 40x28; a no-op at 18x11 by construction. |
+
+### The next concrete step
+
+`docs/ROADMAP.md`, "OPEN — what a bigger board still needs", the **enemy count / mission pacing /
+sight range** item. **Its design is already worked out and written into that entry** — read it
+before starting; it is one transform (DEPTH stays at the reference, LATERAL goes to the whole
+board), the four seams it touches are named, and so is the tension that decides its shape.
+
+It was not started here on purpose: it changes objective placement, both forces' seating and pod
+bearings at once, on a configuration nothing has ever measured, and the no-op-at-18x11 claim has to
+hold across 96 self-tests. That deserves a session's full attention rather than the tail of a long
+one.
+
+### Two gotchas this session paid for, so nobody pays again
+
+**Regenerating the prop kit** needs `numpy < 2` under Python 3.11, and the container's system numpy
+is built for a different Python — `import numpy` then fails with a misleading "you should not try to
+import numpy from its source directory". `python3.11 -m pip install --user --ignore-installed
+numpy==1.26.4`; `--ignore-installed` is the part that matters, because pip sees the broken copy and
+otherwise skips. And the Cycles AO bake is **not byte-reproducible**, so a regeneration rewrites
+`.glb` files whose geometry has not changed — compare the printed tri counts, not the bytes.
+
+**A leg that can only see the fix is not a leg.** Twice this session a new assertion passed with its
+own feature deleted: P35's text-escape ink leg (it checked WHERE the glyph was, and the pushed matrix
+takes an un-escaped glyph to the same place — it had to measure the ink's SHAPE), and P37's density
+leg (it needed the `SIGHTLINE_DENSITY=0` half to prove the instrument can see the defect at all).
+Both were found by deliberately breaking the feature and re-running. Do that.

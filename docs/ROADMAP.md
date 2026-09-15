@@ -4046,6 +4046,32 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       already names "empty traversal = boredom"; at 40x28 with ~6-tile moves, crossing the map is
       nine turns of walking. The P27-N note's answer stands: insert NEAR the objective and let size
       buy lateral choice, not distance.
+      **THE DESIGN IS WORKED OUT — read this before starting, it is the next wave (P38).** The
+      coherent rule is one transform, not four fixes: **DEPTH stays at the reference, LATERAL goes
+      to the whole board.** Everything the mission is about lives in an INSERTION FRAME that is
+      `Mission.RefW` columns wide (centred on the board) and the board's FULL height. So:
+      `x` is a reference column offset into the frame, and `y` scales from `RefH` to `Cfg.GridH`.
+      **At 18x11 it is the identity** (`ox = 0`, `H == RefH`), which is the same
+      no-op-by-construction property P37 has and the same thing its leg (A) should assert — over the
+      whole board AND force signature, not over a distance.
+      Four seams, all of them already parameterised and none of them far apart:
+        1. `Mission.SpawnTableFor`'s two tables are authored in the reference frame -> map through.
+        2. `Mission.PodAnchor` already takes `(gw, gh)` -> pass the FRAME's size and offset the
+           result. Its `row` jitter only matters for the three non-ENVELOP shapes, and those keep
+           the full board height, so no row remapping is needed at all (ENVELOP ignores `row`).
+        3. `Game.SetupMission`'s evac block (`Grid.W - 2`, rows 0..3) and terminal
+           (`Grid.W / 2 + 1`) -> frame-relative. Sabotage is already board-relative and TIGHT
+           (`W/2 - 4 .. W/2 + 4`), so it may need nothing.
+        4. `Mission.TryApplyLayout` validates SABOTAGE against the hard-coded triple
+           `(5,3) (10,5) (13,7)`, which is `Game.SetupMission`'s expression EVALUATED AT 18x11.
+           The two agree there and diverge at every other size, so the arena validator would check
+           tiles the build will not use. Latent today (arenas are 18x11-only) — fix it to the
+           expression while you are in there, and do not let it become a second source of truth.
+      **The tension to decide first, because it decides the shape:** spreading objective sites to a
+      big board and capping deployment depth are in direct conflict — a SABOTAGE charge at column 30
+      cannot be inside an 18-column frame. The frame rule resolves it by putting the SITES in the
+      frame too, which is the "lateral choice, not distance" answer taken seriously. If a future
+      wave wants genuinely distant objectives it is choosing a different game, and should say so.
 - [ ] **Nothing has measured a big board.** It is a LEVEL lever on every axis at once and severs
       the CRN chain completely. `SIGHTLINE_BIGMAP` unset is the arm.
 - [ ] **Sector patrols.** 2-4 posts per group; group moves at its slowest member's speed; arrives
