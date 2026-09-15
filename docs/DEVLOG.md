@@ -18330,3 +18330,88 @@ it compares the README against the table, and both are wrong together when a wav
 frame, so `SIGHTLINE_SHOT` can photograph a state that otherwise needs a hand on the keyboard. It
 parses-or-leaves-alone rather than parses-or-defaults: a silently defaulted camera photographs the
 wrong thing and looks right.
+
+---
+
+## P34. THE FEEDBACK LAYER CROSSES OVER — one matrix, and pillar 2 is back
+
+**2026-09-15, base `611c84a`.** The projected view had no tracers, no muzzle flare, no impact
+rings, no particles, no floating damage numbers, no dust, no screen shake and no hit-stop zoom
+punch. That is not a missing feature; that is **pillar 2 switched off**. Every one of those lives
+in `Fx.cs` and `Anim.cs` in BOARD-PIXEL space — the 2D coordinates `Util.TileCenter` produces,
+drawn inside `BeginMode2D` — and the roadmap's honest scope for porting them was "each needs a
+ground-plane or projected-screen equivalent; none is hard", which is thousands of lines of *none
+is hard*.
+
+### It needed no porting, because the map is affine
+
+The projected camera is **orthographic**. That one fact collapses the whole problem:
+
+- board pixel → tile is a scale and an offset;
+- tile → screen is a fixed 2×2 (the camera's two ground axes, sheared by yaw and squashed by
+  pitch) plus an offset, with **no perspective divide**;
+- compose them and the entire 2D layer is *one matrix* away from being correct in 3D.
+
+So `Fx` and the anims are drawn **completely unchanged**, with that matrix pushed on rlgl's stack —
+the same mechanism `BeginMode2D` itself uses. A tracer between two tiles lands between those two
+tiles. An impact ring lies on the ground and is squashed by the pitch exactly as the ground is.
+Dust drifts along the board rather than up the screen. `View3D.cs` gained about seventy lines;
+`Fx.cs` gained two.
+
+**The one thing that must not go through it is text.** A floating damage number sheared by yaw and
+squashed by pitch is an unreadable parallelogram. `Fx.ProjectText` takes the projection as a
+FUNCTION on the anchor and draws the glyphs upright, at `Fx.ProjectTextScale` — the square root of
+the map's AREA scale, which is the only isotropic answer that keeps a number the same visual weight
+as the board it floats over at every pitch. Both are null/1 in the flat view, so the 2D path is the
+identity and is untouched.
+
+### Shake has nowhere to live on a 3D camera
+
+`Camera2D` has an `Offset` and a `Zoom`, and the flat view gets both feedback terms free. A
+`Camera3D` has neither, so `View3D.ApplyShake` folds them into the camera itself: the punch divides
+the orthographic extent, and the shake slides **both** position and target along the camera's own
+screen-right and screen-up axes — the only offset that moves the image without turning the camera.
+
+The bridge matrix is then built **from the shaken camera**, deliberately. Built from the unshaken
+one, the board would shake and every tracer over it would stand perfectly still — a bug that is
+invisible in a still frame and reads as "the shake feels broken" in motion. Leg (D) pins it.
+
+### The leg that draws a pixel and reads it back
+
+`Rlgl.MultMatrixf` wants the **transpose** of the `System.Numerics.Matrix4x4` layout — translation
+in M14/M24, not M41/M42 — and nothing in the type system says so. Passed the wrong way it does not
+throw and does not warn: the entire Fx layer simply draws in the board's top-left corner, which is
+a plausible-looking bug to chase for an hour. This is precisely the class CLAUDE.md's Raylib gotchas
+list is made of, so it was settled the way that list says to settle things: **measured, in a
+throwaway probe, before a line of the wave was written** (translate-only matrix, both conventions,
+read the framebuffer; the row-major one leaves the rect at the origin).
+
+`SIGHTLINE_FXBRIDGETEST` leg (A) then pins it *through the real stack* — it pushes the real matrix,
+draws a rect, loads the screen and checks the pixel is lit at the projected point — rather than
+asserting arithmetic that would happily agree with itself either way. Verified falsifiable:
+transposing the matrix turns leg (A) red and nothing else.
+
+Legs (B), (C) and (D) cover the rest: the affine shortcut against Raylib's own `GetWorldToScreen`
+on 990 tiles over five camera states (within 0.05 px); shake moving the image by exactly the offset
+asked for; and the bridge moving with it.
+
+### A harness hook that photographs a layer made of motion
+
+None of this could be *seen*. The Fx layer is transient by definition, and every `*SHOT` hook in
+this project stages its subject at setup and then runs 760 frames — by which time every particle
+has been dead for eleven seconds. The first version of `SIGHTLINE_FXSHOT` did exactly that and
+photographed an empty board, which is how the hook found its own bug.
+
+It stages **inside the loop, six frames before the capture**: the tracer wake still travelling, the
+numbers past their pop and into their rise, the shake near amplitude. Paired with and without
+`SIGHTLINE_VIEW3D=1` it is the before/after of the whole wave, and it is the first instrument in
+this repository that can photograph pillar 2 at all.
+
+### What this buys next, which is more than it cost
+
+Threat and overwatch zones, the aim reticle, objective markers, evac zones, blast previews, scorch,
+fire and smoke are **all** `Renderer` methods drawing board-pixel shapes at tile positions — which
+is to say the bridge already carries them correctly. What stops `Renderer.DrawBoard` being called
+wholesale is only the half of it the 3D view draws itself (floor, faux-3D cover, units, their
+chrome). So the remaining "feature parity" item is **curating a subset**, not writing geometry.
+That is the next wave, and it is in `docs/ROADMAP.md` in those terms.

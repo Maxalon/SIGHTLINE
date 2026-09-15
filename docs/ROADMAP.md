@@ -3937,11 +3937,38 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       "centre on the selected soldier" the way `Game.FrameCameraOnSquad` (P29) opens the flat view.
       At zoom 1 it does not matter — the board is entirely on screen — so this only bites once
       BIGMAP is playable, and it is one line against `Pan` when it does.
-- [ ] **Only three overlays are ported.** Move range, path preview and hover. The 2D board also has
-      threat/overwatch zones, the aim reticle, objective markers, evac zones, grenade blast radius,
-      scorch decals and the whole `Fx` layer (tracers, floating numbers, particles). Each needs a
-      ground-plane or projected-screen equivalent; none is hard, and the list is the honest scope of
-      "feature parity".
+- [x] **The whole `Fx` layer is in.** DONE (P34). Tracers, muzzle flare, impact rings, particles,
+      floating damage numbers, dust, screen shake and the hit-stop zoom punch — pillar 2's entire
+      output, which the projected view shipped without.
+      **It needed no porting, because the map is AFFINE.** The projected camera is orthographic, so
+      board pixel -> tile is a scale and an offset and tile -> screen is a fixed 2x2 plus an offset;
+      compose them and the whole 2D layer is one matrix away from correct. `View3D.BoardPxMatrix` is
+      pushed on rlgl's stack — the same mechanism `BeginMode2D` itself uses — and `Fx` and the anims
+      draw completely unchanged. A tracer lands between the two tiles it was fired between; an
+      impact ring lies on the ground and is squashed by the pitch exactly as the ground is.
+      TEXT IS THE ONE THING THAT MUST NOT GO THROUGH IT (sheared by yaw, squashed by pitch, a damage
+      number is an unreadable parallelogram), so `Fx.ProjectText` takes the projection as a function
+      on the ANCHOR and draws the glyphs upright at an isotropic scale.
+      Shake and the zoom punch have no `Camera2D` to live on, so they fold into the 3D camera
+      itself: the punch scales the orthographic extent, the shake slides position and target along
+      the camera's own screen axes. The bridge is built FROM the shaken camera, so the board and
+      everything over it shake together instead of sliding apart.
+      `SIGHTLINE_FXBRIDGETEST` pins four things, and leg (A) draws a pixel through the real rlgl
+      stack and reads the framebuffer back rather than asserting arithmetic — `Rlgl.MultMatrixf`
+      wants the TRANSPOSE of the System.Numerics layout, nothing in the type system says so, and
+      passed the wrong way it silently draws the entire Fx layer in the board's top-left corner.
+      `SIGHTLINE_FXSHOT=1` stages the layer six frames before the capture (staged at setup like
+      every other `*SHOT` hook, it photographs nothing: at frame 760 every particle has been dead
+      for eleven seconds). Pair it with and without `SIGHTLINE_VIEW3D=1` for the wave's before/after.
+- [ ] **THE SAME BRIDGE CARRIES THE STATIC OVERLAYS, AND THIS IS THE NEXT WAVE.** Threat and
+      overwatch zones, the aim reticle, objective markers, evac zones, grenade/item/shove blast
+      previews, scorch decals, fire and smoke are all `Renderer` methods drawing board-pixel shapes
+      at tile positions — exactly what P34's matrix already carries correctly. What stops
+      `Renderer.DrawBoard` being called wholesale is the half of it the 3D view draws itself (floor,
+      faux-3D cover, units, their chrome), so the work is **curating the subset**, not writing
+      geometry: a `Renderer` entry point that runs the ground-plane decal draws and nothing else.
+      Unit-attached chrome (HP pips, status glyphs, silhouettes) must NOT go through it for the same
+      reason text does not.
 - [ ] **No post-FX in 3D.** The 3D path draws straight to the framebuffer; `Display.RenderFrame`'s
       render target, bloom and colour grade are bypassed, so the two views do not match in grade.
 - [ ] **Discovery does not affect the RULES.** It decides what is drawn. True fog of war — the AI

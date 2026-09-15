@@ -638,6 +638,17 @@ public class Fx
         }
     }
 
+    /// P34 — THE PROJECTED VIEW'S TEXT ANCHOR. Everything else in this class is drawn through an
+    /// rlgl matrix that maps board pixels onto the projected ground plane (View3D.BoardPxMatrix),
+    /// which is exactly right for a tracer, a ring or a dust mote and exactly WRONG for a glyph:
+    /// sheared by yaw and squashed by pitch, a damage number becomes an unreadable parallelogram.
+    ///
+    /// So text opts out of the matrix and takes the projection as a FUNCTION on its anchor instead,
+    /// plus an isotropic size scale so a number keeps the same visual weight as the board it floats
+    /// over. Null (and 1) in the flat view, which is the identity — the 2D path is untouched.
+    public static System.Func<Vector2, Vector2> ProjectText;
+    public static float ProjectTextScale = 1f;
+
     public void DrawText()
     {
         foreach (var t in Texts)
@@ -648,10 +659,12 @@ public class Fx
             float popDur = 0.12f + 0.10f * t.Pop;
             float pop = t.Life > t.MaxLife - popDur ? Util.EaseOutBack((t.MaxLife - t.Life) / popDur) : 1f;
             float minScale = 0.6f - 0.25f * t.Pop;      // bigger hits start tinier -> harder punch
-            int fs = (int)(t.Size * (minScale + (1f - minScale) * pop));
+            int fs = (int)(t.Size * (minScale + (1f - minScale) * pop) * ProjectTextScale);
+            if (fs < 1) fs = 1;
             int w = (int)Cfg.Measure(t.Text, fs, 1f).X;
-            int x = (int)(t.Pos.X - w / 2f);
-            int y = (int)t.Pos.Y;
+            var anchor = ProjectText != null ? ProjectText(t.Pos) : t.Pos;
+            int x = (int)(anchor.X - w / 2f);
+            int y = (int)anchor.Y;
             Cfg.Text(t.Text, new Vector2(x + 2, y + 2), fs, 1f, Raylib.Fade(Pal.RGBA(0, 0, 0), k * 0.6f));
             // 1-frame spawn brightness flash on big numbers: blow the colour toward white for the
             // first couple frames of life (front-loaded, decays instantly) so the hit "flashes".
