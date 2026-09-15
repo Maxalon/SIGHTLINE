@@ -3894,9 +3894,13 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
 - [ ] **The car mesh is unused, because the game has no multi-tile obstacle.** `car.glb` spans two
       tiles and `Grid` has no concept of one object occupying several. That is a DATA-MODEL gap,
       not an art one — see P28's notes on tile obstacles vs edge walls.
-- [ ] **Only VERDANT gets a species.** Every other biome alternates crate and block. ARID wants
-      rocks, MAGMA wants slag, NEON wants signage — each is a `props.py` entry and one line in
-      `View3D.CoverProp`, so this is cheap flavour whenever somebody wants it.
+- [x] **Four biomes have a species.** DONE (P36). `rock.glb` (ARID), `slag.glb` (MAGMA) and
+      `sign.glb` (NEON) join VERDANT's tree; `View3D.BiomeSpecies` routes them. STEEL, ASH, TUNDRA
+      and VOID keep the crate on purpose — a depot, a burn scar, a snowfield and a chasm are rooms
+      where a crate is the right answer. **A species is a change of MATERIAL, not of what the tile
+      does**: all three are built to the crate's envelope and swapped in on the same scale factors,
+      so the silhouette a player reads as "waist-high thing I can shoot over" is the same in every
+      room, and nothing here is read by `Grid`, `Ai` or `Combat`.
 - [ ] **The RAY/coverage render is not in the game.** `Vision` is per-face binary. The
       angular-footprint coverage masks in `prototypes/lidar` give PARTIAL knowledge of a surface
       and a confidence gradient, and need a texture atlas to decouple material grain from mask
@@ -3985,17 +3989,30 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       the escape buys is that the glyph is UPRIGHT, so the assertion is on the ink bounding box: at
       yaw 62 / pitch 44 a four-glyph run is ~50x20 drawn upright and ~49x45 sheared. The width
       barely moves; the height is the discriminator.
-- [ ] **Barrels are a decal, not an object.** `DrawBarrels` rides the bridge, so an explosive drum
-      is a flat card lying on the ground in the projected view. It reads (you can see where it is
-      and that it is a drum) but it is the one entry in the subset that visibly wants geometry —
-      `crate.glb` is already in the prop kit and a barrel is one more `props.py` entry.
+- [x] **Barrels were DOUBLE-DRAWN, and that is what the "decal" note actually was.** DONE (P36).
+      `View3D.DrawTerrain` has built a barrel as a SOLID since P30; P35 then put `DrawBarrels` in
+      the curated subset, so the flat card landed on top of its own geometry and the P35 roadmap
+      entry described that as a limitation rather than as the bug it was. Removed from the subset.
+      **P35 mis-applied its own rule** — "does the 3D view already own this?" is the test, and the
+      3D view owns barrels.
+- [ ] **The barrel is still a plain gold-topped block.** It is geometry and it is single-drawn, but
+      it is not a DRUM: no ribs, no rim, no lid. One more `props.py` entry whenever somebody wants
+      it, on the same envelope as the block it replaces.
 - [ ] **`Fx.DrawAmbient` is drawn OVER the board in 3D, under it in 2D.** There is nowhere else to
       put it: these are screen-space primitives with no depth and the ground plane is opaque, so
       "under the board" means "invisible". It reads as atmosphere between the operator and the
       hologram, which suits the premise — but it is a difference between the two views, not a
       choice anybody made.
-- [ ] **No post-FX in 3D.** The 3D path draws straight to the framebuffer; `Display.RenderFrame`'s
-      render target, bloom and colour grade are bypassed, so the two views do not match in grade.
+- [x] **"No post-FX in 3D" WAS FALSE — checked, not assumed (P36).** The claim was inherited from
+      P27's prototype and never re-checked after P32 made the view playable. `Game.DrawBoardLayer`
+      is a CALLBACK INTO `Display.RenderFrame`, so the projected board renders into `_target` like
+      any other frame and takes the bloom, the biome grade, the vignette, brightness and gamma with
+      it. Measured: `SIGHTLINE_POSTFX=1 SIGHTLINE_VIEW3D=1 SIGHTLINE_SHOT=760` puts visible bloom on
+      the barrels and the biome grade over the whole board. What IS post-FX-free is
+      `SIGHTLINE_VIEW3DSHOT` — P27's prototype sweep, which bypasses `RenderFrame` deliberately so
+      there are as few layers as possible between the geometry and the PNG. The ordinary screenshot
+      harness keeps post-FX off in BOTH views (that is what makes shots comparable), which is why
+      every shot in this program looked ungraded and nobody re-read the claim.
 - [ ] **Discovery does not affect the RULES.** It decides what is drawn. True fog of war — the AI
       and targeting honouring it — is a separate decision with real balance consequences, and the
       peek-LoS trap in P28's notes applies to it too.

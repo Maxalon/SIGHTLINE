@@ -987,7 +987,11 @@ public static class Renderer
         DrawTerminal(g);
         DrawSabotage(g);
         DrawIntelCache(g);
-        DrawBarrels(g);
+        // NOT DrawBarrels: `View3D.DrawTerrain` already builds a barrel as a SOLID, so the flat
+        // card lands on top of its own geometry. P35 shipped it in this list by mis-reading its own
+        // rule — "does the 3D view already own this?" is the test, and the 3D view owns barrels.
+        // P36 took it out, and the screenshot that proves it is the one with the glowing card
+        // floating over the drum.
         DrawEnemyIntent(g);
         DrawScorch(g);
         DrawFire(g);

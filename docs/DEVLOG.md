@@ -18494,3 +18494,74 @@ and under it in 2D**, because these are screen-space primitives with no depth an
 is opaque — "under the board" means "invisible". Over reads as atmosphere between the operator and
 the hologram, which suits the premise, but it is a difference nobody chose. Both are in
 `docs/ROADMAP.md`.
+
+---
+
+## P36. THE ROOM'S OWN FURNITURE — and two claims that were checked instead of quoted
+
+**2026-09-15, base `4f3bd74`.** Three things: a species per biome, a bug P35 shipped and described
+as a limitation, and a roadmap item that had been false for four waves.
+
+### "No post-FX in 3D" was not true, and had not been true since P32
+
+The roadmap carried it from P27, when the projected view was a prototype that photographed itself.
+`Game.DrawBoardLayer` is a **callback into** `Display.RenderFrame`, so once P32 made the view
+playable the projected board rendered into `_target` like any other frame and took the bloom, the
+biome grade, the vignette, brightness and gamma with it. Measured rather than argued:
+`SIGHTLINE_POSTFX=1 SIGHTLINE_VIEW3D=1 SIGHTLINE_SHOT=760` puts visible bloom on the barrels and the
+grade over the whole board.
+
+What *is* post-FX-free is `SIGHTLINE_VIEW3DSHOT`, P27's prototype sweep, which bypasses
+`RenderFrame` deliberately — the fewer layers between the geometry and the PNG, the more honestly it
+answers the question it was built for. And the reason nobody noticed: **the ordinary screenshot
+harness keeps post-FX off in both views**, which is exactly what makes shots comparable, so every
+picture in this program looked ungraded and the claim was never re-read against a graded one.
+
+### Barrels were double-drawn, and P35 wrote it down as a limitation
+
+`View3D.DrawTerrain` has built a barrel as a solid since P30. P35 put `DrawBarrels` in the curated
+ground-overlay subset, so the flat card landed on top of its own geometry — and then P35's own
+roadmap entry described the result as "barrels are a decal, not an object", which reads as a scoping
+note and is actually a bug report about a defect that wave had just introduced.
+
+**P35 mis-applied its own rule.** The test it states for the subset is "does the 3D view already own
+this?", and the 3D view owns barrels. The screenshot that proves it is the one with the glowing card
+floating over the drum.
+
+### A species is a change of material, not of what the tile does
+
+C4 and P16 made five biomes mechanical and P31 gave them a ground layer, but every biome's COVER was
+the same crate: **the room recoloured and the things in it did not**, which is RESONANCE V3's "forty-
+five grey widgets in a coloured room" wearing a different hat.
+
+`rock.glb` (ARID: a boulder and its chip), `slag.glb` (MAGMA: a cooled spatter heap, three chunks
+tipped off-axis — the tilts are what make it read as something that *fell* rather than something
+placed) and `sign.glb` (NEON: a hoarding on a post; deliberately thin, so an edge-on silhouette is
+one nothing else in the kit has). STEEL, ASH, TUNDRA and VOID keep the crate on purpose: a depot, a
+burn scar, a snowfield and a chasm are rooms where a crate is the right answer.
+
+All three are built to the crate's envelope and swapped in on the same scale factors, so the
+silhouette a player reads as "waist-high thing I can shoot over" is identical in every room. Nothing
+here is read by `Grid`, `Ai` or `Combat` — `Grid.CoverSeed`, which picks the variant, is documented
+as purely visual and ignored by every rule. `SIGHTLINE_BIOMETEST`'s claim that STEEL/ASH/NEON are
+"paint" is about MECHANICS and remains true.
+
+### Two things about regenerating the kit
+
+`bpy` needs **numpy < 2** and the container's system numpy is built for a different Python, so
+`import numpy` fails with a misleading "you should not try to import numpy from its source
+directory". `python3.11 -m pip install --user --ignore-installed numpy==1.26.4` fixes it —
+`--ignore-installed` matters, because pip sees the broken copy and otherwise skips.
+
+**The bake is not byte-reproducible.** Cycles' AO pass is stochastic at 48 samples, so regenerating
+rewrites files whose geometry has not changed. The printed tri counts are the thing to compare and
+they are stable; four unrelated `.glb` files came back modified with identical counts and were
+reverted. That is now written in `assets/props/CREDITS.txt`, whose "NOT YET WIRED INTO THE GAME"
+paragraph was also five waves stale.
+
+### And the camera chip moved
+
+P33 put it bottom-left, where it collides with the **fifth roster card** — the VIP / CAPTIVE slot an
+ESCORT or RESCUE mission fills. The one objective whose asset you most need to see was the one it
+covered. It is top-right now, under the END TURN plate, in a band that is empty on every screen this
+view can be on.
