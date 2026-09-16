@@ -4188,13 +4188,27 @@ bugs already found and fixed, all of the same class, so they are not re-found.
       **Scoped to the SAPPER on purpose.** `DamageEdge` is public so grenades and stray fire can be
       wired later, but making every explosion a wall-breach is a far larger tactical change than
       the blocker needed, and it would want its own priced round.
-- [ ] **Buildings are STILL default-off, and the reason has changed.** P28's blocker is gone. What
-      remains is that the same AICOVTEST census says buildings change the FIGHT, not just the
-      board: hunker **16.05% -> 26.76%**, terminal-hunker 0.11% -> 2.81%, idle 28.60% -> 21.72%,
-      shoot 40.84% -> 34.26%. That is a different game, and a default flip is a LEVEL lever on
-      every mission — it wants a measured round against the ladder of record, not a flip because a
-      gate went green. The margin is thin too (0.12% against a 0.10% floor), which is a second
-      reason to price it deliberately. `SIGHTLINE_BUILDINGS=0` is the free arm.
+- [x] **Buildings PRICED, and they stay default-off.** DONE (P42) — base `8c75492`, heat pinned,
+      3 rungs x 16 CRN slot bases x 2 arms, 96 chunks / 1,920 campaigns / 960 pairs, zero BAD,
+      `ARM CHECK` and `LEAK-CHECK` both PASS. Raw round: `docs/measurements/p42/`.
+      **Win rate: NOT RESOLVED** — h0 −5.3, h4 −2.2, h8 −0.3, pooled **−2.60 (n_disc 257, MDE 4.68,
+      z −1.56)**. But 26.8% of paired campaigns take a different course, so this is a BOUNDED effect
+      rather than an absent one. The OFF arm reproduces the ladder of record (51.9 / 25.6 / 5.9
+      against P24's 49.5 / 26.1 / 4.8), which is what licenses reading the ON arm against the band —
+      and it puts **h0 at 46.6 against a 47 floor**.
+      **DECISION RICHNESS IS THE FINDING, AND IT IS DOWN AT EVERY RUNG**: `meaningfulChoicesPerTurn`
+      3.32 -> 2.68, 3.22 -> 2.93, 1.81 -> 1.36. That agrees with P40's AICOVTEST census on the same
+      lever (hunker 16.05% -> 26.76%). **Walls give you somewhere to sit, and sitting is not a
+      decision.** Skill expression is flat (greedy-minus-sloppy edge moves −6.2->−5.6, +0.0->+1.9,
+      +5.6->+3.8 — no direction), which matters because P26 measured skill at +0.2 points overall
+      and a lever that raised it would have been worth paying win rate for.
+      **A lever that costs choices and buys nothing measurable does not earn a default.**
+- [ ] **What P42 did NOT price: an AUTHORED building.** The round measured `StampBuildings`'
+      procedural rectangles — walls dropped where they fit. A rectangle gives cover without giving a
+      REASON TO GO IN, so it buys hunkering; that is the whole result. A building with an objective
+      inside it, a roof worth holding, a door worth breaching is a different object and this round
+      says nothing about it. **That is where the edge layer earns its keep**, and it wants the
+      double-resolution authored template format below rather than another default flip.
 - [x] **A damaged wall looks damaged.** DONE (P41), in BOTH renderers, and NOT the same way in
       each — which is the point. The flat board gets **fissures on the wall's lit cap**, the same
       near-black zigzag a chipped cover block has carried since 3.6, keyed on the same predicate
