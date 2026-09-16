@@ -443,8 +443,15 @@ public static partial class View3D
     static void DrawEdgePass(Grid g, bool wantWire)
     {
         float T = 0.16f;
-        void Slab(Vector3 baseCentre, float w, float h, float d, Color c) =>
-            Solid(baseCentre with { Y = baseCentre.Y + h * 0.5f }, w, h, d, c, c);
+        // P48 — A WALL GETS A SIDE COLOUR AND A TOP COLOUR, like every other solid on this board.
+        // It was drawn with `CoverHiTop` on BOTH — the bright CAP colour on its flanks as well —
+        // so a wall had no shading at all and read as a pale translucent pane rather than as
+        // masonry. Nobody saw it because until this wave no shipped board declared an edge; the
+        // first authored room made it obvious in one screenshot. Same trick the terrain has used
+        // since P30, and the palette was already built for it (every cover colour ships as a
+        // SIDE/TOP pair).
+        void Slab(Vector3 baseCentre, float w, float h, float d, Color side, Color top) =>
+            Solid(baseCentre with { Y = baseCentre.Y + h * 0.5f }, w, h, d, side, top);
 
         // P41 — the projected view's version of the flat board's fissures. A chipped wall is drawn
         // SHORTER and darker rather than cracked: at this scale a crack on a 0.16-wide slab is a
@@ -480,12 +487,12 @@ public static partial class View3D
                 _wireDim = _wire ? Vision.ConfidenceV(x, y) : vf;
                 if (k == EdgeKind.Door)
                 {
-                    Slab(at with { Z = y + 0.18f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHiTop), vf));
-                    Slab(at with { Z = y + 0.82f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHiTop), vf));
-                    Slab(at with { Y = HighH * 0.78f }, th, HighH * 0.22f, 1f, Known(Biomed(Pal.CoverHiTop), vf));
+                    Slab(at with { Z = y + 0.18f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
+                    Slab(at with { Z = y + 0.82f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
+                    Slab(at with { Y = HighH * 0.78f }, th, HighH * 0.22f, 1f, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
                 }
                 else Slab(at, th, (k == EdgeKind.High ? HighH : LowH) * Hurt(g.EdgeVHp, x, y, k),
-                          1f, Known(Biomed(Pal.CoverHiTop), vf));
+                          1f, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
                 _wire = false; _wireDim = 1f;
             }
         for (int x = 0; x < g.W; x++)
@@ -504,12 +511,12 @@ public static partial class View3D
                 _wireDim = _wire ? Vision.ConfidenceH(x, y) : vf;
                 if (k == EdgeKind.Door)
                 {
-                    Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHiTop), vf));
-                    Slab(at with { X = x + 0.82f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHiTop), vf));
-                    Slab(at with { Y = HighH * 0.78f }, 1f, HighH * 0.22f, th, Known(Biomed(Pal.CoverHiTop), vf));
+                    Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
+                    Slab(at with { X = x + 0.82f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
+                    Slab(at with { Y = HighH * 0.78f }, 1f, HighH * 0.22f, th, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
                 }
                 else Slab(at, 1f, (k == EdgeKind.High ? HighH : LowH) * Hurt(g.EdgeHHp, x, y, k),
-                          th, Known(Biomed(Pal.CoverHiTop), vf));
+                          th, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
                 _wire = false; _wireDim = 1f;
             }
     }

@@ -58,22 +58,64 @@ public static partial class Maps
             // match. The day a template goes double-res this leg fails, and it should — that is
             // the commit that severs the stream and it must not slip in quietly.
             {
+                // P48 REDREW EXACTLY ONE ARENA, and this leg is the ledger for that number. It was
+                // written in P47 asserting ZERO, and it was meant to fail the day content arrived:
+                // that commit is the one that severs the CRN stream. It now asserts ONE, by name,
+                // so the NEXT one is just as loud.
+                const int ExpectedEdged = 1;
                 int withEdges = 0, notSame = 0;
+                var edged = new List<int>();
                 for (int i = 0; i < Layouts.Length; i++)
                 {
                     // TryParse rather than ArenaAt: ArenaAt THROWS on a malformed template, which
                     // aborts this method with no verdict line at all. A gate that dies is a gate
                     // that says nothing, and this repository has been bitten by exactly that.
-                    if (!TryParse(Layouts[i], out Arena a, out string tplWhy))
-                    { fails.Add($"(A) Layouts[{i}] is malformed: {tplWhy}"); continue; }
-                    if (a.HasEdges) withEdges++;
-                    if (!ReferenceEquals(a.Tiles, Layouts[i])) notSame++;
+                    if (!TryParse(Source(i), out Arena a, out string tplWhy))
+                    { fails.Add($"(A) arena {i} is malformed: {tplWhy}"); continue; }
+                    if (a.HasEdges) { withEdges++; edged.Add(i); }
+                    else if (!ReferenceEquals(a.Tiles, Layouts[i])) notSame++;
                 }
-                detail.Append($"{Layouts.Length} shipped templates, {withEdges} with edges; ");
-                if (withEdges != 0)
-                    fails.Add($"(A) {withEdges} shipped templates declare edges — this wave is no longer inert and wants a measured round");
-                if (AnyEdgeTemplates) fails.Add("(A) AnyEdgeTemplates is true with no edge template");
+                detail.Append($"{Layouts.Length} arenas, {withEdges} with edges {{{string.Join(",", edged)}}}; ");
+                if (withEdges != ExpectedEdged)
+                    fails.Add($"(A) {withEdges} arenas declare edges, expected {ExpectedEdged} — a board change this size wants a measured round and a note here");
+                if (edged.Count > 0 && edged[0] != CitadelIndex)
+                    fails.Add($"(A) the edged arena is index {edged[0]}, expected CITADEL at {CitadelIndex}");
+                if (!AnyEdgeTemplates) fails.Add("(A) AnyEdgeTemplates is false with an edge template present");
                 if (notSame != 0) fails.Add($"(A) {notSame} single-res templates were copied rather than passed through");
+
+                // THE RESTORE FLAG IS AN EXACT RESTORE, not an approximate one: with it off,
+                // ArenaAt hands back the very array it always handed back.
+                EdgeArenas = false;
+                var legacy = ArenaAt(CitadelIndex);
+                EdgeArenas = true;
+                if (legacy.HasEdges) fails.Add("(A) SIGHTLINE_EDGEARENAS=0 still returned an edged arena");
+                if (!ReferenceEquals(legacy.Tiles, Layouts[CitadelIndex]))
+                    fails.Add("(A) the restored CITADEL is not Layouts[CitadelIndex] itself");
+                if (!Layouts[CitadelIndex].Contains(CitadelSignature))
+                    fails.Add($"(A) Layouts[{CitadelIndex}] is not CITADEL any more — Layouts was reordered");
+
+                // AND THE ROOM IS A ROOM. The fourteen tiles the old walls ate are floor now, and
+                // the inside is reachable only through the door.
+                var cit = ArenaAt(CitadelIndex);
+                if (!cit.HasEdges) fails.Add("(A) the redrawn CITADEL parsed with no edges");
+                else
+                {
+                    int cover = cit.Tiles.Sum(r => r.Count(c => c == '#' || c == 'o'));
+                    if (cover != 0) fails.Add($"(A) the redrawn CITADEL still spends {cover} tiles on cover — the walls did not move to the boundaries");
+                    var cg = new Grid();
+                    for (int x = 0; x < cg.W; x++) for (int y = 0; y < cg.H; y++) cg.Tiles[x, y] = TileType.Floor;
+                    cg.ClearEdges();
+                    for (int y = 0; y < cg.H; y++) for (int x = 0; x <= cg.W; x++) cg.SetEdgeV(x, y, cit.EdgeV[x, y]);
+                    for (int y = 0; y <= cg.H; y++) for (int x = 0; x < cg.W; x++) cg.SetEdgeH(x, y, cit.EdgeH[x, y]);
+                    var cc = cg.CostMap(0, 0, (x, y) => false, out _, 9999);
+                    if (cc[7, 4] < 0) fails.Add("(A) the CITADEL room's interior is unreachable — the door does not open");
+                    cg.SetEdgeV(6, 5, EdgeKind.High);          // seal the one door
+                    var cs = cg.CostMap(0, 0, (x, y) => false, out _, 9999);
+                    int leak = 0;
+                    for (int x = 6; x <= 9; x++) for (int y = 3; y <= 6; y++) if (cs[x, y] >= 0) leak++;
+                    if (leak != 0) fails.Add($"(A) {leak} of 16 CITADEL interior tiles stay reachable with its door sealed — the walls leak");
+                    detail.Append($"CITADEL: {cover} cover tiles, sealed leak {leak}; ");
+                }
             }
 
             // ── (B) THE FIXTURE PARSES TO THE ROOM IT DRAWS ───────────────────────────────────
@@ -188,8 +230,10 @@ public static partial class Maps
         finally { Edges.Enabled = savedEdges; }
 
         return fails.Count == 0
-            ? "ARENAEDGETEST: PASS (every shipped template is single-resolution and passed through by reference, so "
-              + "the board and the CRN stream are untouched; the hand-drawn fixture parses to exactly 18 walls and 1 "
+            ? "ARENAEDGETEST: PASS (exactly one arena is double-resolution (CITADEL) and every other is passed "
+              + "through by reference; SIGHTLINE_EDGEARENAS=0 hands back the original array itself; the redrawn "
+              + "CITADEL spends no tile on cover and its interior is sealed without its door; the hand-drawn "
+              + "fixture parses to exactly 18 walls and 1 "
               + "door with nothing stray; five malformed forms are each refused with a reason; on a real board the "
               + "interior is reachable through the door and unreachable without it, and sight stops at a wall and "
               + "passes through the door; the |/- aliases are aliases) [" + detail + "]"

@@ -7,6 +7,29 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P48 "THE FIRST ROOM" (2026-09-16)
+
+P48 redrew CITADEL on the edge layer — walls on the boundaries, an interior, a firing platform, one
+door — and priced it on a FORCED-ARENA instrument. `SIGHTLINE_EDGEARENAS=0` restores the block.
+
+- [ ] **1. PUT SOMETHING IN THE ROOM. This is the top item and it is the other half of P42's
+      question.** The room has a firing platform and no objective, so there is still no *reason* to
+      go in. P26's site glyphs (`T`/`X`/`E`/`C`) have never been used by any template; a HACK
+      terminal or a captive inside a room with one door is the whole argument. Deliberately a
+      SEPARATE lever from P48's — L7's lesson is that two measured together do not resolve.
+      Price it on the forced instrument (`SIGHTLINE_MAP=4`), not the shipped distribution.
+- [ ] **2. A SINGLE ARENA CANNOT BE PRICED AT THE CAMPAIGN LEVEL — do not re-derive this.** P48's
+      free round produced NINE discordant campaigns in 960 and 52 missions on the board under test.
+      One arena of thirty-five is ~1.7% of missions; resolving ±5 points needs order 47,000 missions.
+      Use `SIGHTLINE_MAP=<i>` to force the arena, and never read a forced round's win rate against
+      the heat band — a campaign played entirely on one arena is a different game (P48's OFF arm:
+      43.4 / 10.3 / 1.2 against the ladder's 51.9 / 25.6 / 5.9 on the same tree).
+- [ ] **3. Thirty-four arenas are still single-resolution.** The forced instrument means each can now
+      be priced on its own, and P48 measured that a room trades POSITION choices for TARGET choices.
+      Which arenas want that trade is a design question per arena — and at ~20 minutes a round,
+      converting all of them is a program, not a wave.
+
+
 ## OPEN — left by PARALLAX P47 "THE DOUBLE-RESOLUTION TEMPLATE" (2026-09-16)
 
 P47 gave the template format a notation for EDGES — walls on the boundaries between tiles, with
