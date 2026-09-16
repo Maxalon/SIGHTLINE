@@ -117,6 +117,8 @@ echo -n "FXBRIDGETEST: "; verdict "$(SIGHTLINE_FXBRIDGETEST=1 run | grep -oE "FX
 echo -n "SURFACETEST: "; verdict "$(SIGHTLINE_SURFACETEST=1 run | grep -oE "SURFACETEST: (PASS|FAIL)" | head -1)"
 # P44: the board's REGION feedback as paint on the floor. Reads the framebuffer on every leg.
 echo -n "DECALTEST  : "; verdict "$(SIGHTLINE_DECALTEST=1 run | grep -oE "DECALTEST: (PASS|FAIL)" | head -1)"
+# P45: the projected view's pieces move on the TWEEN, not on the tile index. No window.
+echo -n "WALKTEST   : "; verdict "$(SIGHTLINE_WALKTEST=1 run | grep -oE "WALKTEST: (PASS|FAIL)" | head -1)"
 # P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
 echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"
 # P29: the board is a runtime size -- the shipped default must not drift and the camera pan

@@ -19239,3 +19239,65 @@ flip → (B), (C) and (D) together; depth mask left on → (H).
   difference from the flat renderer.
 * The air half is still bridged and still has no depth. That is correct for most of it; SMOKE is the
   one member that would read better as volume.
+
+## P45. THE PIECE WALKS — the tween FEELTEST proves smooth was invisible in the view that is the game
+
+`View3D` drew every piece at `(u.X + 0.5, u.Y + 0.5)` — the TILE INDEX. `Unit.Pos` is the tweened
+board-pixel centre W1's THE STRIDE writes, and the flat renderer has always drawn from it. So in the
+projected view **a six-tile walk was six teleports**, and the entire stride — the thing FEELTEST
+spends eighty lines pinning as one constant speed with no stall, no back-step and one lean kick —
+never reached the screen.
+
+Measured, on the same staging FEELTEST uses: **48 frames of walk, 48 of them moving, largest
+single-frame step 0.136 tiles** against the pre-P45 arm's **6 moved frames and a largest step of
+exactly 1.000 tiles.** That is the defect and its size, in one line.
+
+### The conversion, and the two transients that make it non-trivial
+
+`View3D.ChipWorld(Grid, Unit)` is the inverse of `Util.TileCenter`, so a resting piece lands on the
+world point the old code computed **to the float** — leg (A) asserts that at several tiles and
+elevations rather than trusting it, because the whole wave is a coordinate change and the first
+thing to prove about one is where it is the identity.
+
+Two transients have to be unpicked, because the flat view fakes verticality inside a 2D vector and
+this view has a real third axis:
+
+* **`Unit.HopLift`.** A vault's lift is SUBTRACTED from `Pos.Y` by `MoveStepAnim`, and `Pos.Y` maps
+  to world **Z**. Converted naively, a leap over a wall becomes **a slide northward** — and it looks
+  almost right, which is the worst kind of wrong. `HopLift` is added back on the ground plane and
+  spent on world Y instead, which is what a leap is. With the unpick removed, leg (C) reads *"the
+  vault slid 0.406 tiles NORTH — the fake vertical leaked onto the ground plane"*, which is both the
+  failure and the diagnosis.
+* **`Unit.Recoil`** is a real ground-plane displacement (knockback, muzzle kick), so it stays there.
+  Leg (D) asserts a half-tile recoil moves the piece half a tile horizontally and **zero**
+  vertically.
+
+Elevation is sampled at the tile the piece is currently OVER, so a step onto a plateau pops at the
+tile boundary exactly as the flat view's `ElevLift` does. That is a deliberate match, not a
+limitation nobody noticed.
+
+`ChipWorld` is used by all four places that positioned a piece: the ghost pass, the solid pass, the
+chip MESH, and `DrawMarkers` (both its depth sort and its glyph anchor), so the initial over a
+soldier's head walks with the soldier.
+
+### SIGHTLINE_WALKTEST
+
+Four legs, and leg (B) carries its own control: the pre-P45 arm (`ChipTween = false`) must FAIL the
+same continuity measurement, or the leg proves nothing. It does — 6 moved frames, 1.000-tile steps —
+and the test says so in its own failure text if it ever stops.
+
+Verified red-before/green-after by deleting the `HopLift` unpick: three of leg (C)'s four assertions
+go red together and name the exact geometry.
+
+`SIGHTLINE_CHIPTWEEN=0` restores the pre-P45 tile-centre placement.
+
+### Open
+
+* A piece crossing an elevation change still POPS at the tile boundary. That matches the flat view
+  and is not obviously wrong, but in 3D a real ramp is now expressible and a pop is a choice rather
+  than a constraint.
+* The drone HOVER and the idle BOB are still 2D fakes computed at draw time in `Renderer`, so the
+  projected view does not show them. They would be one more world-Y term.
+* Unit STATE — HP, ammo, status chips — is drawn at the unit in the flat view and **nowhere** in the
+  projected one; players get it from the roster strip and enemies get nothing at all. That is the
+  next real gap in this view and it is a bigger one than either of the above.

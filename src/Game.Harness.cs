@@ -10845,6 +10845,180 @@ public partial class Game
     ///       in OPPOSITE directions.
     /// PRESENTATION ONLY: it reads Unit.Pos and Fx.Texts, never the sim; it consumes no Util.Rng
     /// beyond its own reseed.
+    // ─── P45 THE PIECE WALKS — SIGHTLINE_WALKTEST ─────────────────────────────────────────────
+    /// The projected view drew every piece at its TILE INDEX, so W1's stride — the tween FEELTEST
+    /// spends eighty lines proving smooth — was invisible in the view that is now the game: a
+    /// six-tile walk was six teleports. This is the same staging FeelSelfTest uses (a bare board, a
+    /// hand-made soldier, one Update per frame at 1/60), sampling `View3D.ChipWorld` instead of
+    /// `Unit.Pos`, because the claim is about what the 3D view DRAWS.
+    ///
+    /// The leg that matters most is (C). The flat renderer fakes a vault's height by SUBTRACTING it
+    /// from `Pos.Y`, and `Pos.Y` maps to world Z — so the naive conversion turns a leap over a wall
+    /// into a slide northward, and it looks almost right, which is the worst kind of wrong. `HopLift`
+    /// is the term that unpicks it and this leg is the only thing that can see it.
+    public string WalkSelfTest()
+    {
+        Util.Reseed(70045);
+        NoPersist = true;
+        var fails = new List<string>();
+        var detail = new System.Text.StringBuilder();
+        bool savedTween = View3D.ChipTween;
+
+        void Stage()
+        {
+            Grid = new Grid();
+            Players = new List<Unit>(); Enemies = new List<Unit>();
+            Vip = null; CaptiveLocked = false; Objective = Objective.Eliminate; EvacZone.Clear();
+            Fx = new Fx(); _anims.Clear(); DragMode = VaultMode = false;
+        }
+        Unit MkP(int x, int y)
+        {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        int Pump(Unit u, List<Vector3> trace)
+        {
+            int frames = 0;
+            while (_anims.Count > 0 && frames < 600)
+            {
+                var a = _anims[0];
+                if (!a.Started) { a.Started = true; a.OnStart(this); }
+                bool done = a.Update(this, 1f / 60f);
+                if (done && _anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+                trace.Add(View3D.ChipWorld(Grid, u));
+                frames++;
+            }
+            return frames;
+        }
+
+        try
+        {
+            View3D.ChipTween = true;
+
+            // ---- (A) A STATIONARY PIECE DOES NOT MOVE ----------------------------------------
+            // The whole wave is a coordinate change, so the first thing to prove is that it is the
+            // IDENTITY where it has to be: the world point a resting unit occupies must be the one
+            // the pre-P45 code computed, to the float, at several tiles and elevations.
+            Stage();
+            {
+                float worst = 0f; string wtag = "";
+                for (int x = 0; x < Grid.W; x += 3)
+                    for (int y = 0; y < Grid.H; y += 2)
+                    {
+                        Grid.Height[x, y] = (x + y) % 3;
+                        var u = MkP(x, y);
+                        var got = View3D.ChipWorld(Grid, u);
+                        var want = new Vector3(x + 0.5f, View3D.TierHPublic * Grid.Height[x, y], y + 0.5f);
+                        float d = Vector3.Distance(got, want);
+                        if (d > worst) { worst = d; wtag = $"{x},{y}"; }
+                    }
+                if (worst > 0.0005f) fails.Add($"(A) a resting piece moved by {worst:0.0000} world units at tile {wtag}");
+            }
+
+            // ---- (B) THE WALK IS CONTINUOUS --------------------------------------------------
+            Stage();
+            const int N = 6;
+            var w = MkP(3, 5); Players.Add(w); Selected = w;
+            var path = new List<(int x, int y)>();
+            for (int i = 1; i <= N; i++) path.Add((3 + i, 5));
+            EnqueuePath(w, path, Team.Player);
+            var trace = new List<Vector3> { View3D.ChipWorld(Grid, w) };
+            int frames = Pump(w, trace);
+
+            if (w.X != 3 + N) fails.Add($"(B) the walk did not land ({w.X},{w.Y})");
+            float biggest = 0f; int back = 0; int distinct = 0;
+            for (int i = 1; i < trace.Count; i++)
+            {
+                float step = trace[i].X - trace[i - 1].X;
+                if (step < -1e-4f) back++;
+                if (MathF.Abs(step) > 1e-4f) distinct++;
+                biggest = MathF.Max(biggest, MathF.Abs(step));
+                if (MathF.Abs(trace[i].Z - trace[0].Z) > 1e-3f)
+                { fails.Add($"(B) the walk drifted off its row by {trace[i].Z - trace[0].Z:0.000}"); break; }
+            }
+            detail.Append($"walk: {frames} frames, {distinct} moved, largest single-frame step {biggest:0.000} tiles");
+            // A TELEPORTING piece takes N steps of exactly 1.0 tile and stands still in between.
+            // A walking one moves on nearly every frame and never by a whole tile at once.
+            if (biggest > 0.35f) fails.Add($"(B) a single frame moved the piece {biggest:0.00} tiles — it is still jumping tile to tile");
+            if (distinct < frames - 4) fails.Add($"(B) the piece was stationary on {frames - distinct} of {frames} frames");
+            if (back > 0) fails.Add($"(B) {back} frames moved the piece backwards");
+
+            // and the pre-P45 arm must FAIL that same measurement, or the leg proves nothing.
+            {
+                View3D.ChipTween = false;
+                Stage();
+                var w2 = MkP(3, 5); Players.Add(w2); Selected = w2;
+                var p2 = new List<(int x, int y)>();
+                for (int i = 1; i <= N; i++) p2.Add((3 + i, 5));
+                EnqueuePath(w2, p2, Team.Player);
+                var t2 = new List<Vector3> { View3D.ChipWorld(Grid, w2) };
+                Pump(w2, t2);
+                float big2 = 0f; int moved2 = 0;
+                for (int i = 1; i < t2.Count; i++)
+                {
+                    float st = MathF.Abs(t2[i].X - t2[i - 1].X);
+                    if (st > 1e-4f) moved2++;
+                    big2 = MathF.Max(big2, st);
+                }
+                detail.Append($"; pre-P45 arm: {moved2} moved frames, largest step {big2:0.000} tiles");
+                if (big2 < 0.9f || moved2 > N + 1)
+                    fails.Add($"(B) the CONTROL did not teleport (largest step {big2:0.00}, {moved2} moved frames) — this leg cannot discriminate");
+                View3D.ChipTween = true;
+            }
+
+            // ---- (C) A VAULT GOES UP, NOT NORTH ----------------------------------------------
+            Stage();
+            var v = MkP(5, 5); Players.Add(v); Selected = v;
+            Grid.Tiles[6, 5] = TileType.HighCover; Grid.SetCoverHp(6, 5);
+            if (!VaultTargetOk(v, 7, 5)) fails.Add("(C) the vault could not be staged");
+            else
+            {
+                IssueVault(7, 5);
+                var vt = new List<Vector3> { View3D.ChipWorld(Grid, v) };
+                int vf = Pump(v, vt);
+                float z0 = vt[0].Z;
+                float lift = 0f, zDrift = 0f; int peak = 0;
+                for (int i = 0; i < vt.Count; i++)
+                {
+                    if (vt[i].Y > lift) { lift = vt[i].Y; peak = i; }
+                    zDrift = MathF.Max(zDrift, MathF.Abs(vt[i].Z - z0));
+                }
+                detail.Append($"; vault: {vf} frames, peak world Y {lift:0.000} at x={vt[peak].X:0.00}, worst Z drift {zDrift:0.000}");
+                if (lift < 0.15f)
+                    fails.Add($"(C) the vault's peak world height was {lift:0.000} — the lift never reached the third axis");
+                if (zDrift > 0.01f)
+                    fails.Add($"(C) the vault slid {zDrift:0.000} tiles NORTH — the fake vertical leaked onto the ground plane");
+                if (vt[peak].X < 6f || vt[peak].X > 7f)
+                    fails.Add($"(C) the vault peaked at x={vt[peak].X:0.00}, not over the cover at 6..7");
+                if (MathF.Abs(vt[^1].Y) > 1e-3f)
+                    fails.Add($"(C) the piece landed {vt[^1].Y:0.000} above the floor");
+            }
+
+            // ---- (D) RECOIL IS A GROUND-PLANE DISPLACEMENT -----------------------------------
+            Stage();
+            {
+                var r = MkP(4, 4); Players.Add(r);
+                var rest = View3D.ChipWorld(Grid, r);
+                r.Recoil = new Vector2(Cfg.Tile * 0.5f, Cfg.Tile * 0.25f);
+                var kicked = View3D.ChipWorld(Grid, r);
+                var moved = kicked - rest;
+                if (MathF.Abs(moved.X - 0.5f) > 0.001f || MathF.Abs(moved.Z - 0.25f) > 0.001f)
+                    fails.Add($"(D) a half-tile recoil moved the piece {moved.X:0.000},{moved.Z:0.000} on the ground plane");
+                if (MathF.Abs(moved.Y) > 0.001f)
+                    fails.Add($"(D) recoil moved the piece {moved.Y:0.000} VERTICALLY");
+            }
+        }
+        finally { View3D.ChipTween = savedTween; }
+
+        return fails.Count == 0
+            ? "WALKTEST: PASS (a resting piece lands on the pre-P45 world point exactly; a six-tile walk moves on "
+              + "every frame, never a whole tile at once and never backwards, while the pre-P45 control teleports; "
+              + "a vault's lift reaches world Y with no northward drift and lands on the floor; recoil stays on the "
+              + "ground plane) [" + detail + "]"
+            : "WALKTEST: FAIL (" + string.Join(" | ", fails.Distinct()) + ") [" + detail + "]";
+    }
+
     public string FeelSelfTest()
     {
         Util.Reseed(70031);

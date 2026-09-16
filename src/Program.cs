@@ -282,6 +282,11 @@ public static class Program
         // through the affine bridge in one pass AFTER the 3D draw, so a region decal paints over
         // the wall in front of it and rides at chip height instead of on the floor.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DECALLAYER") == "0") View3D.DecalLayer = false;
+
+        // P45 — SIGHTLINE_CHIPTWEEN=0 puts every piece in the projected view back on its TILE
+        // CENTRE, i.e. the pre-P45 behaviour in which the whole movement tween was invisible and a
+        // six-tile walk was six teleports. Presentation only.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CHIPTWEEN") == "0") View3D.ChipTween = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FORCECEILING"), out int xceil) && xceil >= 3)
             Mission.ForceCeiling = xceil;
@@ -937,6 +942,13 @@ public static class Program
             LoadGameFonts();   // leg (E) measures GLYPH INK; without the real atlases it measures nothing
             Console.WriteLine(View3D.FxBridgeSelfTest());
             Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_WALKTEST=1 : P45 — the projected view's pieces move on the TWEEN, not on the
+        // tile index. Pure arithmetic over a driven animation; no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_WALKTEST") == "1")
+        {
+            Console.WriteLine(new Game { NoPersist = true }.WalkSelfTest());
             return;
         }
         // SIGHTLINE_DECALTEST=1 : P44 — the board's REGION feedback as paint on the floor. Reads
