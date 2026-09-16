@@ -921,6 +921,16 @@ public static class Program
             Console.WriteLine(Mission.DensitySelfTest());
             return;
         }
+        // SIGHTLINE_WIRETEST=1 : P38 — the hard-edge extractor behind the REMEMBERED tier. Needs a
+        // window (GenMeshCube and LoadModel both upload to the GPU).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_WIRETEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "wiretest");
+            Console.WriteLine(Wire.SelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_EDGETEST=1 : P28 — the EDGE layer's contract (a wall lives on the boundary
         // between two tiles, consumes no floor, and is directional). Pure grid logic, no window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGETEST") == "1")
@@ -1820,6 +1830,10 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VERB2") == "1") game.DebugVerbs();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_COVER") == "1") game.DebugCover();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
+        // P38: the REMEMBERED tier, staged. Walks the squad forward, looks, walks it back — pair
+        // with SIGHTLINE_VIEW3D=1 to photograph the wireframe. Turns discovery on itself, so one
+        // variable gives the picture.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WIRESHOT") == "1") game.DebugWireShot();
         // P34: SIGHTLINE_FXSHOT is staged INSIDE the loop, a few frames before the capture — see
         // the fxShot branch below. Staging it here (as every other *SHOT hook does) photographs
         // nothing at all: this layer is transient by definition, and at SIGHTLINE_SHOT=760 every

@@ -174,6 +174,12 @@ public static class View3D
     /// compatibility and are deliberately unused.
     static void Solid(Vector3 centre, float w, float h, float d, Color side, Color top, float capA = 1f)
     {
+        // P38 — the remembered tier. A cover block's hard-edge set would include its BEVEL (each
+        // chamfer face sits ~45 degrees off its neighbours), which draws every silhouette twice
+        // and reads as a doubled line rather than a scanned box. The box's twelve edges are what a
+        // scan of a box actually tells you, so this primitive states them directly instead of
+        // extracting them from a mesh whose chamfer is a lighting device.
+        if (_wire) { Wire.Box(centre, w, h, d, WireTint(_wireDim)); return; }
         // The bake only ever darkens, so tint with a LIFT: the lit top face then lands where the
         // old flat cap sat instead of a third under it.
         var tint = Pal.RGBA(Math.Min(255, top.R * 5 / 4), Math.Min(255, top.G * 5 / 4),
@@ -190,6 +196,32 @@ public static class View3D
     /// to mean something else later.
     static Color Known(Color c, float f) =>
         Pal.RGBA((int)(c.R * f), (int)(c.G * f), (int)(c.B * f), c.A);
+
+    // ── P38: THE REMEMBERED TIER, AS ONE FLAG ────────────────────────────────────────────────
+    /// Set for the duration of one object's draw; every solid primitive below reads it and lands
+    /// as LINES instead of a lit body. ONE SEAM rather than a branch at each call site, for the
+    /// same reason `Game.PickTile` is one seam: a second draw site added later gets the tier free
+    /// and cannot forget it.
+    static bool _wire;
+    /// The tier's own brightness, carried beside the flag. `Solid` cannot derive it: `Known()`
+    /// scales a colour's RGB and leaves its ALPHA alone, so the alpha a primitive receives says
+    /// nothing about how well the surface is known. Reading it from there happens to work today
+    /// only because `_wire` is set for exactly one tier — which is the kind of accident that comes
+    /// apart the moment a second one wants lines.
+    static float _wireDim = 1f;
+
+    /// A remembered surface does not take the biome's material — it never had one, because nobody
+    /// has light on it. It takes the SCAN's colour: the room's own edge hue pulled most of the way
+    /// to a cold instrument blue, so a remembered board still reads as that place while reading as
+    /// a reconstruction of it rather than a view of it.
+    static Color WireTint(float dim) =>
+        Fade(Pal.Mix(Scene.Edge, Pal.RGBA(150, 214, 240), 0.72f), 0.42f + 0.72f * dim);
+
+    /// THE DISCIPLINE, since this is a mutable flag read by a primitive: every site that SETS it
+    /// clears it on the same straight line, with no `return` or `continue` between the two. The
+    /// obvious alternative — a scope helper taking a lambda — allocates a closure per TILE per
+    /// FRAME (1,120 of them on a big board, 67k a second at 60fps) in the hottest loop the renderer
+    /// has, to buy safety against a shape this code does not contain.
 
     /// Cover and plateaus take the room's hue, with the same 0.55 pull and shade mix
     /// Renderer.DrawCover uses — one number honoured by two renderers, so the board looks like the
@@ -243,6 +275,22 @@ public static class View3D
     /// reads as "waist-high thing I can shoot over" is the same in every room. Nothing here is read
     /// by `Grid`, `Ai` or `Combat`; `Grid.CoverSeed`, which picks the variant, is documented as
     /// purely visual and is ignored by every rule.
+    /// The `Wire` cache key for whatever `BiomeSpecies` + the crate fallback just chose. It must
+    /// track that routing exactly: two different meshes under one key would hand the second one the
+    /// first one's edges, and the result — a boulder drawn with a tree's silhouette — is a bug that
+    /// looks like a style.
+    static string SpeciesKey(bool high)
+    {
+        switch (Scene?.Name)
+        {
+            case "VERDANT": return high ? "tree" : "crate";
+            case "ARID":    return "rock";
+            case "MAGMA":   return "slag";
+            case "NEON":    return "sign";
+            default:        return "crate";
+        }
+    }
+
     static Model BiomeSpecies(bool high, out float scale)
     {
         scale = high ? 1.45f : 0.95f;
@@ -287,6 +335,15 @@ public static class View3D
             else if ((v & 1) == 0) { m = _crate; sc = high ? 1.45f : 0.95f; }
             else { Solid(TileWorld(x, y, baseY + (high ? HighH : LowH) * 0.5f),
                          high ? 0.92f : 0.86f, high ? HighH : LowH, high ? 0.92f : 0.86f, tint, tint); return; }
+            if (_wire)
+            {
+                // THIS is where the extractor earns its keep: a tree, a boulder, a slag heap and a
+                // hoarding are all arbitrary meshes, and none of them was authored with a wireframe
+                // in mind. `Wire.For` turns any of them into a line set once, on first sight.
+                Wire.Draw(SpeciesKey(high), m, TileWorld(x, y, baseY), Vector3.UnitY,
+                          (v * 37) % 360, Vector3.One * sc, WireTint(_wireDim));
+                return;
+            }
             Rlgl.DrawRenderBatchActive();
             Raylib.DrawModelEx(m, TileWorld(x, y, baseY), Vector3.UnitY, (v * 37) % 360,
                                Vector3.One * sc, propTint);
@@ -340,6 +397,10 @@ public static class View3D
                           : (w0 != Vision.Unseen ? -T * 0.25f : T * 0.25f);
                 float vf = Vision.Dim(Math.Max(w0, w1));
                 var at = new Vector3(x + off, 0f, y + 0.5f);
+                // A wall is remembered only if NEITHER face is in sight now; one live face means
+                // you are looking at the wall, and the far side's staleness is already carried by
+                // the half-thickness above.
+                _wire = Math.Max(w0, w1) == Vision.Remembered; _wireDim = vf;
                 if (k == EdgeKind.Door)
                 {
                     Slab(at with { Z = y + 0.18f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHiTop), vf));
@@ -347,6 +408,7 @@ public static class View3D
                     Slab(at with { Y = HighH * 0.78f }, th, HighH * 0.22f, 1f, Known(Biomed(Pal.CoverHiTop), vf));
                 }
                 else Slab(at, th, k == EdgeKind.High ? HighH : LowH, 1f, Known(Biomed(Pal.CoverHiTop), vf));
+                _wire = false; _wireDim = 1f;
             }
         for (int x = 0; x < g.W; x++)
             for (int y = 0; y <= g.H; y++)
@@ -359,6 +421,7 @@ public static class View3D
                           : (n0 != Vision.Unseen ? -T * 0.25f : T * 0.25f);
                 float vf = Vision.Dim(Math.Max(n0, n1));
                 var at = new Vector3(x + 0.5f, 0f, y + off);
+                _wire = Math.Max(n0, n1) == Vision.Remembered; _wireDim = vf;
                 if (k == EdgeKind.Door)
                 {
                     Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHiTop), vf));
@@ -366,6 +429,7 @@ public static class View3D
                     Slab(at with { Y = HighH * 0.78f }, 1f, HighH * 0.22f, th, Known(Biomed(Pal.CoverHiTop), vf));
                 }
                 else Slab(at, 1f, k == EdgeKind.High ? HighH : LowH, th, Known(Biomed(Pal.CoverHiTop), vf));
+                _wire = false; _wireDim = 1f;
             }
     }
 
@@ -416,8 +480,14 @@ public static class View3D
                     continue;
                 }
 
-                if (Vision.At(x, y) == Vision.Unseen) continue;   // P30: not known, not drawn
-                float vf = Vision.Dim(Vision.At(x, y));
+                byte tier = Vision.At(x, y);
+                if (tier == Vision.Unseen) continue;             // P30: not known, not drawn
+                float vf = Vision.Dim(tier);
+                // P38 — the object tier. THE FLOOR STAYS A SLAB whichever tier it is on, and that
+                // is deliberate: ground you have walked is ground you KNOW, and outlining it too
+                // would make a remembered board read as an unseen one. What memory costs you is
+                // the THINGS on it, so the things are what go to lines.
+                _wire = tier == Vision.Remembered; _wireDim = vf;
                 int h = g.Height[x, y];
                 float baseY = 0f;
                 if (h > 0)
@@ -435,6 +505,7 @@ public static class View3D
                 if (g.Barrel[x, y])
                     Solid(TileWorld(x, y, baseY + 0.32f), 0.52f, 0.64f, 0.52f,
                           Known(Pal.RGBA(110, 82, 24), vf), Known(Pal.VipGold, vf));
+                _wire = false; _wireDim = 1f;
             }
 
         DrawEdges(g);      // P30: the walls P28 put between tiles, finally visible in 3D
