@@ -296,6 +296,15 @@ public static class Mission
     // able to.
     public static bool ArenaAnchors = true;
 
+    /// P50 — the order an anchored pod fills outward from its tile. Fixed and draw-free on purpose:
+    /// a garrison must be reproducible slot for slot or it cannot be measured against anything.
+    /// Eight-neighbours first (a pod that holds a room should be IN the room), then the next ring.
+    static readonly (int x, int y)[] GarrisonRing =
+    {
+        (0, -1), (1, 0), (0, 1), (-1, 0), (1, -1), (1, 1), (-1, 1), (-1, -1),
+        (0, -2), (2, 0), (0, 2), (-2, 0), (2, -2), (2, 2), (-2, 2), (-2, -2),
+    };
+
     // Telemetry mirroring AppliedLayout: which site categories the LAST build actually took from
     // the arena. Read by SIGHTLINE_ARENASITETEST; never by gameplay.
     public static SitePlan LastPlan;
@@ -439,7 +448,8 @@ public static class Mission
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
         SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep, shape,
-                     rosterTier, midBossSlot, eliteNode, finalApproach, heatStat);
+                     rosterTier, midBossSlot, eliteNode, finalApproach, heatStat,
+                     ArenaAnchors && plan.Anchors != null && plan.Anchors.Length > 0 ? plan.Anchors : null);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -1371,7 +1381,8 @@ public static class Mission
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
                              int dmgDelta = 0, bool defend = false, int defendKeep = 0,
                              int shape = DeployFrontal, int rosterTier = -1, bool midBossSlot = false,
-                             bool eliteNode = false, bool finalApproach = false, int heatStat = 0)
+                             bool eliteNode = false, bool finalApproach = false, int heatStat = 0,
+                             (int x, int y)[] garrison = null)
     {
         // THE MODES GET THE BESTIARY — ROSTER DEPTH is its own axis. `n` has always carried two
         // jobs: the NUMERIC ramp (headcount, the (n-1) stat bump, the opener trim, W9's heat
@@ -1587,7 +1598,34 @@ public static class Mission
             // conditional draw source, exactly as before.
             var lead = PodAnchor(shape, podId, rows[i % rows.Count], grid.W, grid.H);
             int x, y;
-            if (podsOf3 && member > 0 && shape == DeployEnvelop)
+            // ══ P50 — THE GARRISON: THE 'A' GLYPH FINALLY DOES SOMETHING ════════════════════
+            // P26 shipped the anchor glyph, its parser, its cardinality rule AND its restore flag
+            // — and NOTHING that reads `plan.Anchors`. `Mission.ArenaAnchors` had no consumer for
+            // three programs: a dial on a feature that did not exist, which is exactly the
+            // "a flag on a change nobody can measure is decoration" case CLAUDE.md warns about.
+            //
+            // An anchored pod takes its LEAD's tile from the arena instead of from the deployment
+            // shape, and its members fill outward from that tile on a fixed ring. The ring walk is
+            // deterministic and draws NO RNG, so a board with no anchors is byte-identical and the
+            // collision-relocate loop below (the only conditional draw source in this method)
+            // still never fires for an anchored body, because the ring only ever returns a free
+            // tile. P49's whole finding is that a room with the prize in it and nobody home
+            // removes the fight; this is the thing that puts somebody home.
+            bool anchored = garrison != null && podId < garrison.Length;
+            if (anchored)
+            {
+                var a0 = garrison[podId];
+                x = a0.x; y = a0.y;
+                if (podMember != 0 || (podsOf3 && member != 0))
+                    foreach (var (rx, ry) in GarrisonRing)
+                    {
+                        int nx = a0.x + rx, ny = a0.y + ry;
+                        if (!grid.InBounds(nx, ny)) continue;
+                        if (used.Contains((nx, ny)) || evac.Contains((nx, ny))) continue;
+                        x = nx; y = ny; break;
+                    }
+            }
+            else if (podsOf3 && member > 0 && shape == DeployEnvelop)
             {
                 // ENVELOP's rim pods stack ALONG their own edge (a north-rim pod marching straight
                 // down into the squad's lap would un-surround the opening), off the lead's FINAL

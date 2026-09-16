@@ -123,14 +123,18 @@ public static partial class Maps
                     // to it. Both sites must be interior tiles, and both must go dark when the
                     // one door is sealed — the same measurement as the room itself, aimed at the
                     // thing the mission converges on.
+                    // P50 widened this from the OBJECTIVE glyphs to ALL of them: the arena now also
+                    // declares an enemy-pod ANCHOR, and an anchor that is not inside the room is a
+                    // garrison standing in the street.
                     var sites = new List<(char g, int x, int y)>();
                     for (int y = 0; y < TemplateH; y++)
                         for (int x = 0; x < TemplateW; x++)
-                            if (cit.Tiles[y][x] is 'T' or 'C' or 'X' or 'E') sites.Add((cit.Tiles[y][x], x, y));
-                    detail.Append($"CITADEL: {cover} cover tiles, sealed leak {leak}, sites {sites.Count}; ");
+                            if (cit.Tiles[y][x] is 'T' or 'C' or 'X' or 'E' or 'P' or 'A') sites.Add((cit.Tiles[y][x], x, y));
+                    detail.Append($"CITADEL: {cover} cover tiles, sealed leak {leak}, glyphs {sites.Count}; ");
                     if (SiteGlyphs)
                     {
-                        if (sites.Count != 2) fails.Add($"(A) the redrawn CITADEL declares {sites.Count} sites, expected 2 (T and C)");
+                        var kinds = string.Concat(sites.Select(z => z.g).OrderBy(c => c));
+                        if (kinds != "ACT") fails.Add($"(A) the redrawn CITADEL declares '{kinds}', expected ACT (anchor, captive, terminal)");
                         foreach (var (g2, sx, sy) in sites)
                         {
                             if (sx < 6 || sx > 9 || sy < 3 || sy > 6)
@@ -138,7 +142,7 @@ public static partial class Maps
                             if (cs[sx, sy] >= 0)
                                 fails.Add($"(A) site '{g2}' at {sx},{sy} is still reachable with the door sealed");
                         }
-                        if (!AnySiteTemplates) fails.Add("(A) AnySiteTemplates is false with two glyphs declared");
+                        if (!AnySiteTemplates) fails.Add("(A) AnySiteTemplates is false with glyphs declared");
                     }
 
                     // ── P49: THE GLYPH STRIP IS EXACT. `CitadelEdgedNoSites` is DERIVED rather
@@ -267,6 +271,48 @@ public static partial class Maps
                 detail.Append($"sightThroughWall {throughWall}, sightThroughDoor {throughDoor}");
             }
 
+            // ── (F) THE GARRISON ACTUALLY GARRISONS ──────────────────────────────────────────
+            // P26 shipped the 'A' glyph, its parser, its cardinality rule AND `SIGHTLINE_ARENAANCHORS`
+            // — and nothing that READ `plan.Anchors`. The dial had no consumer for three programs.
+            // This leg is what makes it real: build the arena for a real mission and assert a
+            // hostile stands on the anchor tile, and that the restore flag puts it back outside.
+            {
+                bool anchWas = Mission.ArenaAnchors, glyphWas = SiteGlyphs;
+                int layoutWas = Mission.ForcedLayout;
+                var anchorTile = (x: -1, y: -1);
+                var citA = ArenaAt(CitadelIndex);
+                for (int y = 0; y < TemplateH; y++)
+                    for (int x = 0; x < TemplateW; x++)
+                        if (citA.Tiles[y][x] == 'A') anchorTile = (x, y);
+                if (anchorTile.x < 0) fails.Add("(F) the redrawn CITADEL declares no enemy anchor");
+                else
+                {
+                    int Inside(bool anchorsOn)
+                    {
+                        Mission.ArenaAnchors = anchorsOn; SiteGlyphs = true;
+                        Mission.ForcedLayout = CitadelIndex;
+                        int inRoom = 0;
+                        for (int seed = 0; seed < 8; seed++)
+                        {
+                            Util.Reseed(4400 + seed);
+                            var g2 = new Game { NoPersist = true, ForcedObjective = Objective.Hack };
+                            g2.StartMission(1);
+                            foreach (var e in g2.Enemies)
+                                if (e.Alive && e.X >= 6 && e.X <= 9 && e.Y >= 3 && e.Y <= 6) inRoom++;
+                        }
+                        return inRoom;
+                    }
+                    int withAnchors = Inside(true);
+                    int without = Inside(false);
+                    Mission.ArenaAnchors = anchWas; SiteGlyphs = glyphWas; Mission.ForcedLayout = layoutWas;
+                    detail.Append($"garrison: {withAnchors} hostiles in the room over 8 builds, {without} with the anchors off; ");
+                    if (withAnchors < 8)
+                        fails.Add($"(F) only {withAnchors} hostiles stood inside the room over 8 builds — the anchor is not seating a pod");
+                    if (without >= withAnchors)
+                        fails.Add($"(F) SIGHTLINE_ARENAANCHORS=0 put {without} hostiles in the room against {withAnchors} — the flag is not the lever");
+                }
+            }
+
             // ── (E) THE ALIASES ARE ALIASES ──────────────────────────────────────────────────
             // `|` and `-` exist so an authored map looks like the room it describes. If they meant
             // anything of their own, the format would have two vocabularies for one state.
@@ -288,7 +334,7 @@ public static partial class Maps
             ? "ARENAEDGETEST: PASS (exactly one arena is double-resolution (CITADEL) and every other is passed "
               + "through by reference; SIGHTLINE_EDGEARENAS=0 hands back the original array itself; the redrawn "
               + "CITADEL spends no tile on cover, its interior is sealed without its door, and both of its "
-              + "objective sites are inside that room and sealed with it; the glyph strip touches exactly the "
+              + "objective sites AND its enemy anchor are inside that room and sealed with it; the glyph strip touches exactly the "
               + "site cells and takes AnySiteTemplates down with it; the hand-drawn "
               + "fixture parses to exactly 18 walls and 1 "
               + "door with nothing stray; five malformed forms are each refused with a reason; on a real board the "

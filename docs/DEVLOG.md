@@ -19639,3 +19639,75 @@ UNMERGED control reaches 3. The gate now stamps six pairs and reads the MEDIAN, 
 by a factor of four and cannot be moved again by an upstream change that re-deals the world. Its own
 header said "Pin the world"; a SEED pins a board only while nothing upstream re-deals it, which is
 W1's lesson one layer down.
+
+## P50. THE GARRISON — what a room is for
+
+P49 measured that seating the objective in a room with **nobody home** removes the fight. This seats
+a pod inside it.
+
+### The dial that had no consumer for three programs
+
+P26 shipped the `A` enemy-pod anchor glyph, its parser, its cardinality rule (`0..6`) **and**
+`SIGHTLINE_ARENAANCHORS` — and nothing that ever read `plan.Anchors`. It was parsed and discarded;
+the restore flag gated a feature that did not exist. That is precisely the case CLAUDE.md warns
+about — *a flag on a change nobody can measure is decoration* — and it sat there through three
+programs because a glyph nobody used is a code path nobody runs.
+
+`SpawnEnemies` now takes the arena's anchors: an anchored pod's LEAD takes its tile from the arena
+instead of from the deployment shape, and its members fill outward on a fixed ring
+(`Mission.GarrisonRing`). The ring walk draws **no RNG** and only ever returns a free tile, so a
+board with no anchors is byte-identical and the collision-relocate loop — the only conditional draw
+source in that method — still never fires for an anchored body.
+
+### The bridge is exact
+
+P50's OFF arm reproduces P49's ON arm on **every** field: 91.9 / 94.1 / 90.6 win rate, 4,601
+missions, 3.37 avg turns, 1,410 soldier deaths, 249 losses. Two rounds, two binaries, identical
+outcomes.
+
+### Win rate: flat at the bottom, and the APEX GETS ITS TEETH BACK
+
+    rung    n    OFF%    ON%   delta   n_disc   MDE       z
+    h0    320    91.9   94.7    +2.8       43  5.74   +1.37
+    h4    320    94.1   91.2    -2.8       43  5.74   -1.37
+    h8    320    90.6   59.7   -30.9      129  9.94   -8.72   RESOLVED
+    POOLED 960 pairs: n_disc 215, delta -10.31, McNemar z -6.75
+
+h0 and h4 do not resolve, and the reason is structural: **the garrison costs the same headcount it
+moves.** The anchored pod is pod 0 of the force the mission was already going to field, relocated
+rather than added. What changes at h8 is that those same slots are heat-8 bodies with heat-8 stats
+standing between the squad and the terminal. **The empty room made heat irrelevant (91.9 -> 90.6,
+flat across the whole ladder); the garrison restores the gradient.**
+
+### The fight comes back, and that is the finding
+
+    meaningfulChoicesPerTurn   h0 1.179 -> 6.774 (t +57.7)   h4 1.340 -> 6.601   h8 0.772 -> 3.703
+    turnsWithAShotPct          h0 36.75 -> 86.72 (t +50.9)   h4 37.16 -> 85.55   h8 28.87 -> 60.58
+    soldier deaths 1,410 -> 2,312 (+64%)   losses 249 -> 465 (+87%)   turns 3.37 -> 3.70
+
+A shot happens in **87% of turns instead of 37%**, and a soldier has **6.8 meaningful choices a turn
+instead of 1.2**. That is not a repair of P49's collapse; it is well past where the board started.
+
+### The three boards, one instrument
+
+    board                        win h0/h4/h8      choices h0/h4/h8   shots% h0   deaths  losses
+    literal sites (shipping)     66.2/40.0/18.1    4.06/3.93/2.06        54.3      5,592   1,091
+    room, prize inside, empty    91.9/94.1/90.6    1.18/1.34/0.77        36.8      1,410     249
+    room, prize inside, HELD     94.7/91.2/59.7    6.77/6.60/3.70        86.7      2,312     465
+
+Four waves have now priced four versions of one object: **P42** a procedural rectangle (cover with
+no reason to enter — buys hunkering), **P48** a room with a door and a firing platform (trades
+position choices for target choices), **P49** the same room with the prize in it and nobody home
+(removes the fight), **P50** the same room held (the fight comes back, past where it started).
+
+### Verdict
+
+The MECHANISM ships on — `ArenaAnchors` stays default true and is inert while no template declares
+an `A`. The CONTENT stays off: `SIGHTLINE_SITEGLYPHS` is still default OFF, because at h0 and h4 the
+composite board reads 94.7% and 91.2% against the shipping board's 66.2% and 40.0%.
+
+**The garrison fixes the FIGHT and does not fix the DIFFICULTY.** A HACK whose terminal sits in one
+room is a mission with one place to be, and one place to be is easy however hard the fight there is.
+The next lever is that geometry — a second site, a second door, or the room's force counted ON TOP
+of the mission's headcount rather than out of it — not the fight inside the room, which this round
+says is now good.
