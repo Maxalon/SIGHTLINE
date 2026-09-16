@@ -260,10 +260,31 @@ public static partial class Maps
     /// rung including the apex, where heat stops mattering at all. That is the signature of an
     /// UNCONTESTED objective, and it removes the fight rather than concentrating it.
     ///
-    /// The machinery is right and is kept: the format expresses the room, `PlanBoard` seats the
-    /// sites in it, and the gates hold. What is missing is a GARRISON — P26's `A` enemy-pod anchor
-    /// glyph, still unused by every template. `SIGHTLINE_SITEGLYPHS=1` turns the sites on and is
-    /// the arm that round was read on.
+    /// ── FOUR WAVES HAVE NOW MEASURED THIS ARENA ON ONE INSTRUMENT. Read the table, not one row.
+    ///
+    ///     board                          win h0/h4/h8      choices  shots%  deaths  losses
+    ///     literal sites (shipping)       66.2/40.0/18.1     4.06     54.3    5,592   1,091
+    ///     P49  room, prize IN, EMPTY     91.9/94.1/90.6     1.18     36.8    1,410     249
+    ///     P50  room, prize IN, HELD      94.7/91.2/59.7     6.77     87.0    2,312     465
+    ///     P52  room HELD, prize OUTSIDE  94.4/95.6/87.2     8.15     83.9    1,530     303
+    ///
+    /// P50 added the GARRISON and the fight came back. P51 then measured the same lever on SABOTAGE
+    /// and concluded the culprit was the SINGLETON objective, so **P52 moved `T` and `C` out of the
+    /// room and re-ran P49's own round** — and the easing did not move (+28.1 / +55.6 / +69.1
+    /// against P49's +25.6 / +54.1 / +72.5, pooled +50.9 against +50.7).
+    ///
+    /// ⚠ **SO THE RULE IS NOT SITE COUNT. IT IS WHETHER THE WIN CONDITION FORCES THE SQUAD IN.**
+    /// `Game.cs`'s SABOTAGE check is `SabotageBlown.Count >= SabotageSites.Count` — EVERY site — and
+    /// one of CITADEL's three charges is inside the room, so that mission cannot be completed
+    /// without entering. HACK needs ONE terminal; with it outside, the garrison is a threat you
+    /// shoot at across open ground and never close with, and P26 already measured that declining
+    /// the fight is optimal. **P52 is the richest board of the four on every metric — 8.15 choices
+    /// a turn, 84% of turns with a shot — and the EASIEST at the apex.** Do not read richness as
+    /// difficulty.
+    ///
+    /// The machinery is right and is kept; the format expresses the room, `PlanBoard` seats the
+    /// sites in it, and the gates hold. `SIGHTLINE_SITEGLYPHS=1` turns the sites on and is the arm
+    /// every one of those rounds was read on. Rounds: `docs/measurements/{p48,p49,p50,p51,p52}/`.
     public static bool SiteGlyphs = false;
 
     static string[] _stripped;
@@ -299,15 +320,15 @@ public static partial class Maps
         "+ + + + + + + + + + + + + + + + + + +",
         " . . . . . . . . . . . . . . X . . . ",
         "+ + + + + + +-+-+-+-+ + + + + + + + +",
-        " . . . . . .|. . X T|. . . . . . . . ",
+        " . . . . . .|. . X .|. . . . . . . . ",
         "+ + + + + + + + + + + + + + + + + + +",
         " . . . . . .|. ^ ^ .|. . . . . . . . ",
         "+ + + + + + + + + + + + + + + + + + +",
-        " . . . . . .+. ^ ^ .|. . . . . . . . ",
+        " . . . . T .+. ^ ^ .|. . . . . . . . ",
         "+ + + + + + + + + + + + + + + + + + +",
-        " . . . . . .|. A . C|. . . . . . . . ",
+        " . . . . . .|. A . .|. . . . . . . . ",
         "+ + + + + + +-+-+-+-+ + + + + + + + +",
-        " . . . . . . . . . . . . . . . . . . ",
+        " . . . . . . . . . . . . . . C . . . ",
         "+ + + + + + + + + + + + + + + + + + +",
         " . . . X . . . . . . . . . . . . . . ",
         "+ + + + + + + + + + + + + + + + + + +",
@@ -1006,4 +1027,132 @@ public static partial class Maps
     /// authored against so a future edit to one can't silently invalidate the other.
     public static readonly (int x, int y)[] TrainingDeploy = { (2, 4), (2, 6) };
     public static readonly (int x, int y)[] TrainingFoes   = { (12, 4), (12, 6), (16, 3), (16, 7) };
+
+    // ═══════════════════ P52: THE AUTHORING RULE ═══════════════════
+    /// **THE MISSION'S ONLY SITE MAY NOT SIT BEHIND ONE DOOR.**
+    ///
+    /// P49 drew the HACK terminal inside CITADEL's walled room and measured what happened: the
+    /// mission stopped being contested at every heat rung including the apex, because a squad that
+    /// must converge on ONE tile behind ONE door has no second place to be. P51 showed the room
+    /// was not the culprit — the SABOTAGE arm, whose three charges put one inside and two far
+    /// outside, did not collapse. The difference is CARDINALITY, and nothing in `src/` could see it:
+    /// `Mission.ReadSitesWellFormed` counts glyphs, and `Mission.PlanBoard`'s reachability flood
+    /// asks whether a site can be reached AT ALL — a sealed room has a door, so it always could.
+    ///
+    /// This is that check. For each objective category the template declares, seal each DOOR in
+    /// turn and ask whether every site of that category falls out of the board's largest remaining
+    /// component. If one door can do that to a whole category, the category is door-locked.
+    ///
+    /// A category with several sites may keep one behind a door — that is P51's shape and it is the
+    /// good one. A category with exactly one site may not, because for that objective the door is
+    /// the mission.
+    ///
+    /// **IT IS AN AUTHORING GATE, NOT A RUNTIME REJECTION**, and that is deliberate. A runtime
+    /// reject falls back to the procedural board silently (`Mission.PlanBoard` returns `spent`), so
+    /// a door-locked arena would ship as an arena nobody ever plays and no line would say so.
+    /// `SIGHTLINE_ARENAEDGETEST` runs it over every shipped template and prints the verdict.
+    ///
+    /// Only 'T'/'C'/'X'/'E' are judged. 'A' is an enemy-pod anchor — a GARRISON behind a door is the
+    /// point of a garrison — and 'P' is the squad's own deployment.
+    public static bool SitesDoorLocked(Arena a, out string why)
+    {
+        why = "";
+        if (a.Tiles == null || !a.HasEdges) return false;
+
+        // THE GATE FORCES THE EDGE LAYER ON. It is an authoring rule about the template a person
+        // DREW, not about the dial the session happens to be running under — and with
+        // `Edges.Enabled` false every edge query answers `None`, so every flood below would run on
+        // an open board and NOTHING would ever be door-locked. That is this repository's signature
+        // failure mode (a gate that goes quiet rather than loud), so it is closed here rather than
+        // left to every caller to remember.
+        bool edgesWere = Edges.Enabled;
+        Edges.Enabled = true;
+        try { return SitesDoorLockedCore(a, out why); }
+        finally { Edges.Enabled = edgesWere; }
+    }
+
+    static bool SitesDoorLockedCore(Arena a, out string why)
+    {
+        why = "";
+        var cats = new (char g, string name)[] { ('T', "terminal"), ('C', "captive"), ('X', "sabotage"), ('E', "evac") };
+        var sites = new System.Collections.Generic.Dictionary<char, System.Collections.Generic.List<(int x, int y)>>();
+        foreach (var c in cats) sites[c.g] = new System.Collections.Generic.List<(int x, int y)>();
+        for (int y = 0; y < TemplateH && y < a.Tiles.Length; y++)
+            for (int x = 0; x < TemplateW && x < a.Tiles[y].Length; x++)
+                if (sites.ContainsKey(a.Tiles[y][x])) sites[a.Tiles[y][x]].Add((x, y));
+        bool any = false;
+        foreach (var c in cats) if (sites[c.g].Count > 0) any = true;
+        if (!any) return false;
+
+        // every DOOR, one at a time. A Low/High boundary is already shut, so sealing it changes
+        // nothing; a door is the only edge whose closure is a NEW cut.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool vertical = pass == 0;
+            int xs = vertical ? TemplateW + 1 : TemplateW;
+            int ys = vertical ? TemplateH : TemplateH + 1;
+            for (int dx = 0; dx < xs; dx++)
+                for (int dy = 0; dy < ys; dy++)
+                {
+                    if ((vertical ? a.EdgeV[dx, dy] : a.EdgeH[dx, dy]) != EdgeKind.Door) continue;
+                    var g = SealedGrid(a, vertical, dx, dy);
+                    var comp = Components(g, out int biggest);
+                    if (biggest < 0) continue;
+                    foreach (var c in cats)
+                    {
+                        var list = sites[c.g];
+                        if (list.Count == 0) continue;
+                        bool reachable = false;
+                        foreach (var (sx, sy) in list) if (comp[sx, sy] == biggest) reachable = true;
+                        if (reachable) continue;
+                        why = $"sealing the {(vertical ? "vertical" : "horizontal")} door at {dx},{dy} cuts off ALL {list.Count} "
+                            + $"{c.name} site(s) — that door IS the mission";
+                        return true;
+                    }
+                }
+        }
+        return false;
+    }
+
+    /// The arena as a real `Grid`, with one boundary forced shut. A real Grid rather than a
+    /// hand-rolled flood on purpose: `Grid.CostMap` is the movement model both teams already read,
+    /// and a gate that invents a second one measures a board nobody plays.
+    static Grid SealedGrid(Arena a, bool vertical, int ex, int ey)
+    {
+        var g = new Grid();
+        for (int y = 0; y < g.H; y++)
+            for (int x = 0; x < g.W; x++)
+            {
+                char c = y < a.Tiles.Length && x < a.Tiles[y].Length ? a.Tiles[y][x] : '.';
+                g.Tiles[x, y] = c == '#' || c == 'B' ? TileType.HighCover : c == 'o' ? TileType.LowCover : TileType.Floor;
+            }
+        g.ClearEdges();
+        for (int y = 0; y < g.H; y++) for (int x = 0; x <= g.W; x++) g.SetEdgeV(x, y, a.EdgeV[x, y]);
+        for (int y = 0; y <= g.H; y++) for (int x = 0; x < g.W; x++) g.SetEdgeH(x, y, a.EdgeH[x, y]);
+        if (vertical) g.SetEdgeV(ex, ey, EdgeKind.High); else g.SetEdgeH(ex, ey, EdgeKind.High);
+        return g;
+    }
+
+    /// Label every walkable tile with its connected component, through `Grid.CostMap` so the
+    /// no-corner-cutting and edge rules are the ones the game plays by. `biggest` is the label of
+    /// the largest component, or -1 if the board has no walkable tile at all.
+    static int[,] Components(Grid g, out int biggest)
+    {
+        var comp = new int[g.W, g.H];
+        for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) comp[x, y] = -1;
+        int next = 0, bestSize = 0; biggest = -1;
+        for (int y = 0; y < g.H; y++)
+            for (int x = 0; x < g.W; x++)
+            {
+                if (comp[x, y] >= 0 || !g.IsFloor(x, y)) continue;
+                var cost = g.CostMap(x, y, null, out _, 9999);
+                int size = 0;
+                for (int qy = 0; qy < g.H; qy++)
+                    for (int qx = 0; qx < g.W; qx++)
+                        if (cost[qx, qy] >= 0 && comp[qx, qy] < 0) { comp[qx, qy] = next; size++; }
+                if (size > bestSize) { bestSize = size; biggest = next; }
+                next++;
+            }
+        return comp;
+    }
 }
