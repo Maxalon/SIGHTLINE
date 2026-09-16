@@ -19,10 +19,30 @@ NPC death was largely a SYMPTOM. Shipped ON as a defect repair. Round: `docs/mea
       heat arrives is not an objective, and P55 moved neither by a single point there (by
       construction: `Heat.StatDelta(4)` is 1). **This is a DESIGN question, not a tuning one** — the
       escort/rescue mission has no failure mode at low heat because the asset is never meaningfully
-      threatened. Candidate directions, none priced: give the asset a job that can fail
-      independently of its HP (a leash it must keep, a timer); make the objective require the asset
-      to ARRIVE rather than merely survive; or accept these two as "easy objectives" by design and
-      say so in `docs/DESIGN.md` instead of leaving it as an unlabelled hole.
+      threatened.
+
+      **⚠ TWO CORRECTIONS TO THIS ITEM, BOTH FROM READING THE CODE RATHER THAN GUESSING:**
+
+      **(a) "Make the objective require the asset to ARRIVE" ALREADY EXISTS and was a wrong
+      candidate.** `Game.cs`'s win checks are `EvacZone.Contains((Vip.X, Vip.Y))` for Escort and
+      `!CaptiveLocked && EvacZone.Contains(...)` for Rescue — both already require the walk, and the
+      evac zone is the far corner, so it is a cross-board escort. The mission is not too easy because
+      arrival is unrequired; it is too easy because **arrival is unopposed**.
+
+      **(b) THE REAL HOLE IS THAT NEITHER OBJECTIVE HAS A CLOCK.** `DefendTurns` is the only
+      per-mission turn cap in the game. Measured on P55's own archive, Escort averages **9.31 turns
+      at h0** — the longest objective in the game apart from Defend — and wins 95%. Rescue averages
+      5.76. **A squad can advance one tile a turn behind full cover indefinitely and nothing
+      punishes it**, so P26's finding (declining the fight is optimal) applies here with no
+      counter-pressure at all. That is why heat is the only thing that ever makes these missions
+      hard: heat is the only source of pressure they have.
+
+      So the design question is narrower than this item first stated: **what supplies
+      counter-pressure that is not difficulty?** A mission clock is the obvious candidate and is
+      consistent with the "stakes that bite" pillar; a leash, a pursuing force, or accepting these
+      as easy-by-design in `docs/DESIGN.md` are the alternatives. **None is priced, and the choice
+      changes what the mission IS rather than how hard it is — it is a design call, not a tuning
+      one.**
 - [ ] **2. THE 22 CAMPAIGNS THAT KEPT THE ASSET ALIVE AND LOST ANYWAY are the apex's real content.**
       P55 converted NPC deaths into other losses almost one-for-one. That says the apex's difficulty
       is not located in any single labelled cause, and it is the strongest evidence yet for P54 item
