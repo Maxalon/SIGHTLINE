@@ -315,6 +315,14 @@ public static class Program
         if (siteGlyphEnv == "1") Maps.SiteGlyphs = true;
         if (siteGlyphEnv == "0") Maps.SiteGlyphs = false;
 
+        // P55 — the protected asset's HEAT term. `=0` restores the pre-P55 asset exactly: a pure
+        // function of mission depth, with heat reaching it nowhere. P54 measured that at h8, 26.8%
+        // of campaign losses are that asset dying (0.38% at h0), and that Rescue/Escort are the two
+        // flattest objectives on the ladder before falling off a cliff (97.9/96.2/40.0 and
+        // 95.3/91.5/42.8). Provably inert at h0 and RECRUIT by construction — see
+        // Mission.VipHeatBonus.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VIPHEAT") == "0") Mission.VipHeat = false;
+
         // P53 — THE FALSIFICATION ARM for P52's rule. `=0` moves SABOTAGE's INTERIOR charge out of
         // the held room and changes nothing else, so the same objective on the same board is
         // measured with and without a REQUIRED site inside. P52's rule ("a held room changes the
@@ -1006,6 +1014,14 @@ public static class Program
             LoadGameFonts();
             Console.WriteLine(View3D.UnitStateSelfTest());
             Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_VIPHEATTEST=1 : P55 — the protected asset (Escort VIP / Rescue captive, one
+        // funnel) answers HEAT and not only mission depth. Pure arithmetic over Mission.MakeVip;
+        // no window. Its leg (E) uses the restore flag as a RED CONTROL.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VIPHEATTEST") == "1")
+        {
+            Console.WriteLine(Mission.VipHeatSelfTest());
             return;
         }
         // SIGHTLINE_ARENAEDGETEST=1 : P47 — the double-resolution template format (walls on the

@@ -19712,6 +19712,77 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P55. THE ASSET ANSWERS HEAT — the lever works, and the campaign dies anyway
+
+P54's top item, built and priced. `Mission.VipHeatBonus` adds `Heat.StatDelta` to the protected
+asset's HP and `Heat.DmgDelta` to its armor, both clamped at zero; the dose is the ladder's own
+published number rather than a searched one, and the clamp makes h0 and RECRUIT provable no-ops.
+**128 chunks, 2,560 campaigns, 1,280 CRN pairs, zero BAD, ARM CHECK PASS.** NOT forced — the shipped
+distribution, so the band reading is licensed.
+
+### Campaign win rate barely moves
+
+    rung    OFF%    ON%   delta   n_disc   MDE       z
+    h0      52.2   52.2    +0.0        0    —        —     IDENTICAL (the clamp, working)
+    h4      26.2   26.6    +0.3        1  0.88   +1.00
+    h6      12.2   13.4    +1.2        4  1.75   +2.00
+    h8       5.9    7.5    +1.6        7  2.32   +1.89
+    POOLED +0.78, n_disc 12 of 1,280, MDE 0.76, z +2.89
+
+Monotone in heat, which is the shape the dose predicts — but **twelve discordant campaigns is very
+little resolving power** and no per-rung contrast resolves.
+
+### It is surgical, and large where it aims
+
+    objective      h4               h6                h8
+    Escort      88.9 -> 88.9    50.7 -> 60.6     41.8 -> 61.2    +19.4
+    Rescue      97.4 -> 97.4    58.5 -> 69.7     35.2 -> 50.5    +15.3
+    every other objective moves by at most 1.3 points at any rung
+
+**h4 does not move for either**, which was flagged IN ADVANCE as data rather than a control:
+`Heat.StatDelta(4)` is 1, and +1 HP against a 97% win rate is nothing.
+
+### The finding — the NPC death was largely a SYMPTOM
+
+    rung   total losses       NPC-cause losses    kept the NPC alive and LOST ANYWAY
+    h6      281 -> 277 (-4)      67 -> 49 (-18)              14 of 18
+    h8      301 -> 296 (-5)      83 -> 56 (-27)              22 of 27
+
+**Twenty-seven fewer NPC deaths at h8 bought five fewer lost campaigns.** A squad that cannot screen
+the asset is usually a squad already losing; preventing the death RE-LABELS the loss rather than
+converting it to a win.
+
+> **That is a measured limit on P54's own method.** A loss-cause cross-tab says where losses are
+> LABELLED, and the label can be downstream of the cause. P54 introduced the method and P55 is its
+> ceiling — quote the two together.
+
+### The ladder, and a by-product worth naming
+
+Both arms **4 of 4 IN BAND, monotone at every step**. P24 had to publish h6 and h8 as sitting ON
+their floors (0.11 / 0.18 cluster SE); this lifts exactly those two — h6 to 0.68 cluster SE of
+clearance, h8 to 1.94 — **while h0 is bit-identical and h4 is unmoved.** A margin improvement at the
+two marginal rungs as a by-product of a defect repair.
+**The OFF arm is NOT a bridge to P24** (P48 ships the edged CITADEL by default, so the tree has
+moved); the closeness is reassurance, not a chain.
+
+### Verdict — SHIPPED ON, and what it does not fix
+
+`Mission.VipHeat` defaults true: an asset that does not answer the difficulty dial at all is not
+defensible at any dose, and P14 had already fixed the identical shape in the identical function on
+the mode axis. **It does not fix Rescue 97.4% / Escort 88.9% at h4, or 96-98% at h0** — a heat term
+cannot reach an objective that is free before heat arrives. P54's second defect is still open.
+
+### And the gate I wrote wrong first
+
+`SIGHTLINE_VIPHEATTEST`'s first five legs test `Mission.MakeVip` — **and P54's defect was never in
+`MakeVip`.** The function was correct; it was never ASKED, because `Game.SetupMission` built the
+asset sixteen lines before it read `_run.HeatLevel`. A gate that stopped at the function would have
+been green through the whole defect. Leg (F) runs the real setup path and reads what the game seats
+(22 -> 26 HP, both objectives). The fix also HOISTS that read above the two branches, so the
+omission is un-writable rather than un-noticed. And the gate's red was SEEN: the feature was
+sabotaged to `(0,0)`, the gate failed naming the rungs, and the sabotage was reverted with a
+verified-clean diff.
+
 ## P54. THE APEX FAILS DIFFERENTLY — and three waves measured the wrong subsystem
 
 P53 left the pattern as the top roadmap item: h8 had declined to respond to hostile accuracy (P24),

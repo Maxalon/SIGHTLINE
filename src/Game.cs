@@ -2171,24 +2171,33 @@ public partial class Game
                 SabotageSites.Add((Grid.W / 2 + 4, my + 2));
             }
         }
+        // P55 — THE READ IS HOISTED, AND THE HOIST IS THE STRUCTURAL HALF OF THE FIX.
+        // This was declared SIXTEEN LINES BELOW, under the comment that begins "Heat folds into the
+        // SAME difficulty params...". The two protected-asset branches directly beneath therefore
+        // built the one unit the objective is ABOUT with heat not even in scope — which is how
+        // `Mission.MakeVip` came to be a pure function of mission depth and stayed that way through
+        // P14, which audited the very same function on the MODE axis. P48's lesson one level in: a
+        // value read after the thing it should govern has already been built is a value that does
+        // not govern it. Declaring it here makes the omission un-writable rather than un-noticed.
+        // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
+        // signature change): extra bodies + an extra stat bump as the ladder climbs.
+        int heat = _run.HeatLevel;
+
         if (Objective == Objective.Escort)
         {
-            Vip = Mission.MakeVip(n);      // VIP durability scales with mission depth
+            Vip = Mission.MakeVip(n, heat); // durability scales with mission depth AND heat (P55)
             Vip.X = 2; Vip.Y = 5;          // valid pre-build tile (spawn table refines it)
             Players.Add(Vip);
         }
         if (Objective == Objective.Rescue)
         {
-            Vip = Mission.MakeVip(n);
+            Vip = Mission.MakeVip(n, heat);
             Vip.Name = "CAPTIVE";
             Vip.X = 2; Vip.Y = 5;          // pre-build placeholder; re-seated at centre below
             Players.Add(Vip);
             CaptiveLocked = true;
         }
 
-        // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
-        // signature change): extra bodies + an extra stat bump as the ladder climbs.
-        int heat = _run.HeatLevel;
         // W6b — publish the AI coordination tier UNCONDITIONALLY every mission (0 at heats 0-5,
         // so DAILY/SKIRMISH/harness stay byte-stable by default AND a stale NO QUARTER tier can
         // never leak into the next fight through this shared DEPLOY/SKIRMISH/DAILY setup path;

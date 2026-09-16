@@ -1565,6 +1565,7 @@ public static class Stats
                 // in P49's own round, and a separate dial from `edgeArenas` on purpose.
                 siteGlyphs = Maps.SiteGlyphs,
                 roomSite   = Maps.RoomSite,
+                vipHeat    = Sightline.Mission.VipHeat,
                 // P50: whether the arena's 'A' anchors seat a pod. The lever under test in P50's
                 // own round, and until P50 it was a flag with no consumer at all.
                 arenaAnchors = Sightline.Mission.ArenaAnchors,

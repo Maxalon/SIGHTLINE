@@ -7,6 +7,33 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P55 "THE ASSET ANSWERS HEAT" (2026-09-16)
+
+P55 built and priced P54's lever. It is **surgical and large where it aims** (Escort h8 41.8 -> 61.2,
+Rescue h8 35.2 -> 50.5, every other objective ≤1.3) and **near-inert on campaigns** (+0.0/+0.3/+1.2/
++1.6, 12 discordant in 1,280). At h8, **27 fewer NPC deaths bought 5 fewer lost campaigns** — so the
+NPC death was largely a SYMPTOM. Shipped ON as a defect repair. Round: `docs/measurements/p55/`.
+
+- [ ] **1. P54's SECOND DEFECT IS THE ONE LEFT, AND A HEAT TERM CANNOT REACH IT. Top item.**
+      Rescue **97.4%** and Escort **88.9%** at h4, 96-98% at h0. An objective that is free before
+      heat arrives is not an objective, and P55 moved neither by a single point there (by
+      construction: `Heat.StatDelta(4)` is 1). **This is a DESIGN question, not a tuning one** — the
+      escort/rescue mission has no failure mode at low heat because the asset is never meaningfully
+      threatened. Candidate directions, none priced: give the asset a job that can fail
+      independently of its HP (a leash it must keep, a timer); make the objective require the asset
+      to ARRIVE rather than merely survive; or accept these two as "easy objectives" by design and
+      say so in `docs/DESIGN.md` instead of leaving it as an unlabelled hole.
+- [ ] **2. THE 22 CAMPAIGNS THAT KEPT THE ASSET ALIVE AND LOST ANYWAY are the apex's real content.**
+      P55 converted NPC deaths into other losses almost one-for-one. That says the apex's difficulty
+      is not located in any single labelled cause, and it is the strongest evidence yet for P54 item
+      3's conclusion that the remaining question needs **instrumentation, not analysis**: a per-turn
+      record of when the squad fell behind. Nothing in the archive can answer it.
+- [ ] **3. A MEASURED LIMIT ON THE LOSS-CAUSE METHOD, to be quoted with it.** P54 introduced
+      cross-tabbing `lossCause` by rung and it found a real defect. P55 shows the ceiling: **a
+      loss-cause cross-tab says where losses are LABELLED, and the label can be downstream of the
+      cause.** Any future wave reasoning from `lossCauses` should cite both.
+
+
 ## OPEN — left by PARALLAX P54 "THE APEX FAILS DIFFERENTLY" (2026-09-16)
 
 P54 answered P53's top item from the existing archive with no new compute. **At h8, 26.8% of
@@ -16,7 +43,14 @@ is where the FEWEST campaigns end at h8** (16%). So all three apex levers were a
 Cause: `Mission.MakeVip` is `hp = 14 + 2*depth`, `armor = depth/2` — **no heat term** — while heat 8
 gives the force ~+4 bodies, ~+4 stat, +1 dmg, AI tier 2. Full analysis: `docs/measurements/p54/`.
 
-- [ ] **1. GIVE THE PROTECTED ASSET A HEAT TERM, AND PRICE IT. This is the top item.** One constant
+- [x] **1. GIVE THE PROTECTED ASSET A HEAT TERM, AND PRICE IT. DONE — P55, shipped ON.** The dose
+      was the argued one (`Heat.StatDelta` HP / `Heat.DmgDelta` armor, clamped at 0) and the clamp
+      delivered what it promised: h0 came back **0 discordant in 320**. Surgical (Escort h8
+      41.8 -> 61.2, Rescue h8 35.2 -> 50.5, all others ≤1.3) and near-inert on campaigns. Both arms
+      4 of 4 in band, and it lifts the two rungs P24 published as sitting ON their floors. The h4
+      caution written into this item was correct — Rescue/Escort did not move there at all.
+      Original text:
+- [x] **1. (done) GIVE THE PROTECTED ASSET A HEAT TERM, AND PRICE IT.** One constant
       in one funnel covers both objectives (the captive is a renamed VIP). **The dose should be
       ARGUED, not searched** — the obvious principled pair is `Heat.StatDelta` for HP (the same +1
       per rung the force gets) and `Heat.DmgDelta` for armor (exactly cancels heat's damage bump),
