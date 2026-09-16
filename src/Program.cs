@@ -1857,6 +1857,9 @@ public static class Program
         // with SIGHTLINE_VIEW3D=1 to photograph the wireframe. Turns discovery on itself, so one
         // variable gives the picture.
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WIRESHOT") == "1") game.DebugWireShot();
+        // P41: a building with half its High walls chipped — intact and damaged side by side, which
+        // is the only comparison that says whether the cue reads. Works in both views.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WALLDMG") == "1") game.DebugWallDamage();
         // P34: SIGHTLINE_FXSHOT is staged INSIDE the loop, a few frames before the capture — see
         // the fxShot branch below. Staging it here (as every other *SHOT hook does) photographs
         // nothing at all: this layer is transient by definition, and at SIGHTLINE_SHOT=760 every

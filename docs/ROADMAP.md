@@ -4195,11 +4195,16 @@ bugs already found and fixed, all of the same class, so they are not re-found.
       every mission — it wants a measured round against the ladder of record, not a flip because a
       gate went green. The margin is thin too (0.12% against a 0.10% floor), which is a second
       reason to price it deliberately. `SIGHTLINE_BUILDINGS=0` is the free arm.
-- [ ] **A damaged wall looks exactly like an intact one.** `DamageEdge` chips HP with no visual
-      until the kind changes, so the first hit on a High wall is invisible and the second appears
-      to halve it from nowhere. Cover blocks have the same problem and solved it with
-      `Grid.CoverHp`-driven cracks (`Renderer.DrawCrackGlyph`); the edge layer wants the
-      equivalent in both renderers.
+- [x] **A damaged wall looks damaged.** DONE (P41), in BOTH renderers, and NOT the same way in
+      each — which is the point. The flat board gets **fissures on the wall's lit cap**, the same
+      near-black zigzag a chipped cover block has carried since 3.6, keyed on the same predicate
+      (`0 < hp < max`) so a player learns one vocabulary for "this is about to go". The projected
+      view gets a **shorter, sagging slab** instead: at that scale a crack on a 0.16-wide slab is a
+      couple of pixels and says nothing, while a wall visibly dropping toward its next tier reads
+      from any camera angle. Same FACT, carried the way each projection can carry it.
+      `SIGHTLINE_WALLDMG=1` chips every OTHER High segment so a shot shows intact and damaged walls
+      of the same kind side by side — the only comparison that says whether the cue reads — and
+      EDGETEST pins the predicate both renderers key on, because that is the part a test can hold.
 - [ ] **Wall readability is a first pass, not a finished look.** They read as a building outline
       and they are distinct from cover blocks, but they are thin beside the chunky faux-3D cover
       volumes. `Renderer.DrawEdges`' `HiW`/`HiLift` constants are the dials. Judge it against
