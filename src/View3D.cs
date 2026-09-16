@@ -408,6 +408,18 @@ public static class View3D
         void Slab(Vector3 baseCentre, float w, float h, float d, Color c) =>
             Solid(baseCentre with { Y = baseCentre.Y + h * 0.5f }, w, h, d, c, c);
 
+        // P41 — the projected view's version of the flat board's fissures. A chipped wall is drawn
+        // SHORTER and darker rather than cracked: at this scale a crack on a 0.16-wide slab is a
+        // couple of pixels and says nothing, while a wall visibly sagging toward its next tier is
+        // legible from any camera angle. Same FACT, read the way this projection can carry it.
+        float Hurt(int[,] hp, int ex, int ey, EdgeKind k)
+        {
+            if (hp == null || k == EdgeKind.Door) return 1f;
+            int max = g.MaxEdgeHp(k);
+            if (max <= 0 || hp[ex, ey] <= 0 || hp[ex, ey] >= max) return 1f;
+            return 0.72f;                       // hurt but standing
+        }
+
         for (int x = 0; x <= g.W; x++)
             for (int y = 0; y < g.H; y++)
             {
@@ -434,7 +446,8 @@ public static class View3D
                     Slab(at with { Z = y + 0.82f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHiTop), vf));
                     Slab(at with { Y = HighH * 0.78f }, th, HighH * 0.22f, 1f, Known(Biomed(Pal.CoverHiTop), vf));
                 }
-                else Slab(at, th, k == EdgeKind.High ? HighH : LowH, 1f, Known(Biomed(Pal.CoverHiTop), vf));
+                else Slab(at, th, (k == EdgeKind.High ? HighH : LowH) * Hurt(g.EdgeVHp, x, y, k),
+                          1f, Known(Biomed(Pal.CoverHiTop), vf));
                 _wire = false; _wireDim = 1f;
             }
         for (int x = 0; x < g.W; x++)
@@ -457,7 +470,8 @@ public static class View3D
                     Slab(at with { X = x + 0.82f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHiTop), vf));
                     Slab(at with { Y = HighH * 0.78f }, 1f, HighH * 0.22f, th, Known(Biomed(Pal.CoverHiTop), vf));
                 }
-                else Slab(at, 1f, k == EdgeKind.High ? HighH : LowH, th, Known(Biomed(Pal.CoverHiTop), vf));
+                else Slab(at, 1f, (k == EdgeKind.High ? HighH : LowH) * Hurt(g.EdgeHHp, x, y, k),
+                          th, Known(Biomed(Pal.CoverHiTop), vf));
                 _wire = false; _wireDim = 1f;
             }
     }

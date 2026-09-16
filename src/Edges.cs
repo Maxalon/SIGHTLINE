@@ -192,7 +192,13 @@ public static class Edges
 
             var hi = new Grid.EdgeRef(true, 5, 5);
             Is(g.DamageEdge(hi, 1) == Grid.CoverHit.Chipped && g.EdgeVAt(5, 5) == EdgeKind.High,
-               "P40: a High wall did not chip");
+               "P41: a High wall did not chip");
+            // P41 — THE PREDICATE BOTH RENDERERS KEY THEIR DAMAGE CUE ON. A chipped wall must be
+            // distinguishable from an intact one in the DATA (0 < hp < max), or the fissures in
+            // Renderer.DrawEdges and the shortened slab in View3D have nothing to read and a High
+            // wall's first hit is invisible — which is exactly what P40 shipped.
+            Is(g.EdgeVHp[5, 5] > 0 && g.EdgeVHp[5, 5] < g.MaxEdgeHp(EdgeKind.High),
+               "P41: a chipped wall is indistinguishable from an intact one");
             Is(g.DamageEdge(hi, 1) == Grid.CoverHit.Downgraded && g.EdgeVAt(5, 5) == EdgeKind.Low,
                "P40: a High wall did not fall to Low");
             Is(g.DamageEdge(hi, 1) == Grid.CoverHit.Destroyed && g.EdgeVAt(5, 5) == EdgeKind.None,

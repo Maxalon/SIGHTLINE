@@ -2303,6 +2303,36 @@ public static class Renderer
             Raylib.DrawRectangleRec(new Rectangle(px, py - lift, w, h), high ? hiTop : loTop);
         }
 
+        // P41 — A CHIPPED WALL MUST LOOK CHIPPED. P40 made walls destructible and a High wall takes
+        // two hits, so the FIRST one changed nothing on screen and the second appeared to halve the
+        // wall out of nowhere. A cover BLOCK has said this since 3.6 (fissures on its lit cap while
+        // `CoverHp` is below max); a wall says it the same way, on its own cap, in the same near-
+        // black. Same cue, same meaning, both layers — a player should not have to learn a second
+        // vocabulary for "this is about to go".
+        void Fissure(float px, float py, float w, float h, bool vertical, float lift)
+        {
+            Color crack = Pal.RGBA(14, 17, 23);
+            float cy = py - lift;
+            if (vertical)
+            {
+                float mx = px + w * 0.5f;
+                Raylib.DrawLineEx(new Vector2(mx, cy + h * 0.12f), new Vector2(px + w, cy + h * 0.40f), 1.5f, crack);
+                Raylib.DrawLineEx(new Vector2(px + w, cy + h * 0.40f), new Vector2(px, cy + h * 0.62f), 1.5f, crack);
+                Raylib.DrawLineEx(new Vector2(px, cy + h * 0.62f), new Vector2(mx, cy + h * 0.88f), 1.3f, crack);
+            }
+            else
+            {
+                float my = cy + h * 0.5f;
+                Raylib.DrawLineEx(new Vector2(px + w * 0.12f, my), new Vector2(px + w * 0.40f, cy + h), 1.5f, crack);
+                Raylib.DrawLineEx(new Vector2(px + w * 0.40f, cy + h), new Vector2(px + w * 0.62f, cy), 1.5f, crack);
+                Raylib.DrawLineEx(new Vector2(px + w * 0.62f, cy), new Vector2(px + w * 0.88f, my), 1.3f, crack);
+            }
+        }
+
+        // Is this boundary hurt but still standing? Mirrors the block's test exactly.
+        bool Hurt(int[,] hp, int ex, int ey, EdgeKind k) =>
+            hp != null && k != EdgeKind.Door && hp[ex, ey] > 0 && hp[ex, ey] < grid.MaxEdgeHp(k);
+
         // A door: two short jambs, the middle deliberately empty. Drawn at LOW profile so an
         // opening never reads as taller than the wall it interrupts.
         void Door(float px, float py, float w, float h, bool vertical)
@@ -2320,7 +2350,12 @@ public static class Renderer
                 float px = Cfg.OriginX + x * Cfg.Tile - w * 0.5f;
                 float py = Cfg.OriginY + y * Cfg.Tile;
                 if (k == EdgeKind.Door) Door(px, py, w, Cfg.Tile, true);
-                else Seg(px, py, w, Cfg.Tile, k);
+                else
+                {
+                    Seg(px, py, w, Cfg.Tile, k);
+                    if (Hurt(grid.EdgeVHp, x, y, k))
+                        Fissure(px, py, w, Cfg.Tile, true, k == EdgeKind.High ? HiLift : LoLift);
+                }
             }
         for (int x = 0; x < grid.W; x++)
             for (int y = 0; y <= grid.H; y++)
@@ -2330,7 +2365,12 @@ public static class Renderer
                 float px = Cfg.OriginX + x * Cfg.Tile;
                 float py = Cfg.OriginY + y * Cfg.Tile - h * 0.5f;
                 if (k == EdgeKind.Door) Door(px, py, Cfg.Tile, h, false);
-                else Seg(px, py, Cfg.Tile, h, k);
+                else
+                {
+                    Seg(px, py, Cfg.Tile, h, k);
+                    if (Hurt(grid.EdgeHHp, x, y, k))
+                        Fissure(px, py, Cfg.Tile, h, false, k == EdgeKind.High ? HiLift : LoLift);
+                }
             }
     }
 

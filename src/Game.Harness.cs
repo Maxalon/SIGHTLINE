@@ -1823,6 +1823,32 @@ public partial class Game
         AddZoomPunch(0.05f);
     }
 
+    /// P41 harness hook (screenshot only): a building with HALF ITS WALLS CHIPPED.
+    ///
+    /// Same reason P38 needed one for the remembered tier: a damage state cannot appear on frame
+    /// one, so no ordinary shot can photograph it, and a cue nobody can photograph is a cue nobody
+    /// checks. Chips every OTHER standing wall segment by one hit — below the threshold that would
+    /// degrade it — so the shot shows intact and damaged walls of the SAME kind side by side, which
+    /// is the only comparison that says whether the cue reads.
+    public void DebugWallDamage()
+    {
+        Mission.Buildings = true;
+        Edges.Enabled = true;
+        if (!Grid.AnyEdges) Mission.StampBuildings(Grid, Players, Enemies);
+        Grid.ResetEdgeHp();
+
+        int n = 0;
+        for (int x = 0; x <= Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+                if (Grid.EdgeV[x, y] == EdgeKind.High && (n++ & 1) == 0)
+                    Grid.DamageEdge(new Grid.EdgeRef(true, x, y), 1);
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y <= Grid.H; y++)
+                if (Grid.EdgeH[x, y] == EdgeKind.High && (n++ & 1) == 0)
+                    Grid.DamageEdge(new Grid.EdgeRef(false, x, y), 1);
+        Console.WriteLine($"WALLDMG: chipped {n / 2} of {n} High segments");
+    }
+
     /// P38 harness hook (screenshot only): STAGE THE REMEMBERED TIER.
     ///
     /// The wireframe tier is invisible on frame one by definition — nothing has been seen and lost

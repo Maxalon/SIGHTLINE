@@ -18922,3 +18922,34 @@ size — the same un-scaled 18×11 number class P37 fixed for cover. It now scal
 grid, so a building belongs to a ROOM rather than being sprinkled over an expanse, and the attempt
 budget scales with the ask (otherwise a big board requests six and gives up after fourteen tries).
 Exactly 1–2 at 18×11, so the shipped board is untouched.
+
+---
+
+## P41. A DAMAGED WALL LOOKS DAMAGED — the loose end P40 tied while making it
+
+**2026-09-16, base `0097793`.** P40 made walls destructible and a High wall takes two hits. So the
+first hit changed nothing on screen and the second appeared to halve the wall out of nowhere. That
+is the cover block's 3.6 problem, on a layer that had not inherited its answer.
+
+### Two renderers, two cues, one fact
+
+The flat board gets **fissures on the wall's lit cap** — the same near-black zigzag a chipped block
+has carried since 3.6, keyed on the same predicate (`0 < hp < max`). A player should not have to
+learn a second vocabulary for "this is about to go", so the cue is the block's cue, in the block's
+colour, on the wall's own cap.
+
+The projected view gets a **shorter, sagging slab**. At that scale a crack on a 0.16-wide slab is a
+couple of pixels and says nothing; a wall visibly dropping toward its next tier reads from any
+camera angle, which is the whole problem a free camera creates. Same fact, carried the way each
+projection can actually carry it — copying the 2D cue into 3D would have been consistent and
+invisible.
+
+### The hook exists because the state cannot happen on frame one
+
+Same shape as P38's `WIRESHOT`. `SIGHTLINE_WALLDMG=1` chips every OTHER standing High segment by one
+hit — below the threshold that would degrade it — so a shot shows intact and damaged walls of the
+**same kind, side by side**. That comparison is the only one that answers whether the cue reads; a
+picture of damaged walls alone says nothing, because you cannot see what they would have looked like.
+
+EDGETEST pins the predicate rather than the pixels: `0 < hp < max` must be reachable and
+distinguishable, because that is the part a test can hold and it is exactly what P40 shipped without.
