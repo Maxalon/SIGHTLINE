@@ -19712,6 +19712,129 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P52. THE SINGLETON COMES OUT — and the mission walks past the fight
+
+P51 ended on a claim and named the lever that would test it, so this round spent it. **The claim did
+not survive**, and what replaced it is a better rule.
+
+### The lever
+
+`Maps.CitadelEdged` redrawn: the two SINGLETON objectives leave the walled room — the HACK terminal
+from inside to **(4,5)**, two tiles west of the room's one door, and the RESCUE captive to **(14,7)**,
+far east. The room keeps the GARRISON and one of the three sabotage charges, so P51's good object is
+intact and only the singletons move. Instrument unchanged from P49 so the archive is readable against
+it: `SIGHTLINE_MAP=4 SIGHTLINE_OBJ=hack`, 96 chunks, 960 CRN pairs, zero BAD, ARM CHECK PASS,
+LEAK-CHECK PASS on both arms, zero procedural fallbacks.
+
+**The bridge is exact: P52's OFF arm reproduces P49's OFF arm on 960 of 960 paired campaigns, zero
+discordant.** Two binaries four waves apart. The cross-round table below is licensed, not assumed.
+
+### Result — the easing does not move
+
+    rung    n    OFF%    ON%   delta    b    c  n_disc   MDE       z
+    h0    320    66.2   94.4   +28.1   12  102     114  9.34   +8.43
+    h4    320    40.0   95.6   +55.6    3  181     184 11.87  +13.12
+    h8    320    18.1   87.2   +69.1    1  222     223 13.07  +14.80
+    POOLED 960 pairs: n_disc = 521, delta +50.94, MDE 6.66, z = +21.42
+
+P49 read +25.6 / +54.1 / +72.5, pooled +50.7. **Moving the singleton out changed nothing this round
+can resolve.** The ladder is still flat and the apex is still 87%.
+
+### The four boards, and the row that is the finding
+
+    board                          win h0/h4/h8      choices  shots%  deaths  losses
+    literal sites (shipping)       66.2/40.0/18.1     4.06     54.3    5,592   1,091
+    P49  room, prize IN, EMPTY     91.9/94.1/90.6     1.18     36.8    1,410     249
+    P50  room, prize IN, HELD      94.7/91.2/59.7     6.77     87.0    2,312     465
+    P52  room HELD, prize OUTSIDE  94.4/95.6/87.2     8.15     83.9    1,530     303
+
+P52 is the **RICHEST board of the four** — 8.15 meaningful choices per turn, the highest measured in
+this project, every richness metric resolved (choices +4.10/+4.49/+3.02, turnsWithAShot +29.5,
+positionChoices +0.96 at h8) — **and the apex went 59.7 -> 87.2 while attrition fell 2,312 -> 1,530
+deaths.** More choices, more shooting, fewer dead soldiers, easier mission.
+
+### The mechanism, and it is one line of code
+
+    src/Game.cs:4470   if (SabotageBlown.Count >= SabotageSites.Count) EnterBarracks();
+
+**SABOTAGE requires EVERY site.** One of CITADEL's three charges is inside the held room, so that
+mission cannot be completed without entering it — the room is on the critical path *by the
+objective's own win condition*. HACK requires ONE terminal, and with it outside the room the garrison
+becomes a threat you shoot at across open ground and never close with.
+
+So P51's finding is restated rather than kept:
+
+> **A held room changes the mission only when the WIN CONDITION forces the squad into it.** Site
+> count is a proxy for that and not the thing itself — three sites mattered because all three are
+> REQUIRED and one of them is inside.
+
+That is P26's archive result arriving from another direction: declining the fight is optimal (skill
+is worth +0.2 points; 23.3% of the deployed force is ever killed). Give the player a fight they may
+decline and they decline it, while the instruments record a rich, noisy, shot-filled board.
+**This is the sharpest counter-example this project has to reading richness as difficulty.**
+
+### What shipped
+
+`Maps.SitesDoorLocked` — P51's roadmap item 3, as an authoring gate. It seals each `Door` edge in
+turn and refuses a template where one door cuts off EVERY site of some objective category; a
+multi-site category may keep one behind a door (P51's shape), a singleton may not. It runs over all
+35 shipped arenas in `ARENAEDGETEST` leg (G), **and leg (G) proves it bites**: it must refuse
+`Maps.CitadelP49` — P49's own placement, kept verbatim as a red control — naming the door, must
+refuse a board whose only charge is the interior one, and must stay red with `SIGHTLINE_EDGES=0`
+(with the edge layer off every edge query answers `None`, so a gate honouring that dial would flood
+an open board and clear every template silently; `SitesDoorLocked` forces the layer on for its own
+duration).
+
+**It is an AUTHORING gate, not a runtime rejection, on purpose**: a runtime reject falls back to the
+procedural board silently, so a door-locked arena would ship as an arena nobody ever plays and
+nothing would say so.
+
+**Note what the gate does NOT say**, because that is this round's result: it cannot tell you whether
+the mission is FORCED through the room, only that it is not SEALED inside it. Different properties;
+only the first is gated.
+
+### And the RESCUE leg, which was supposed to be a formality
+
+P51's roadmap item 2 said RESCUE "has the same shape as HACK" and asked for it to be moved out with
+`T` **or measured**. P52 did both, and the assumption was wrong — about the SHIPPING board, not just
+the arm (96 chunks, 960 pairs, ARM CHECK and LEAK-CHECK PASS, `byObjective == {Rescue}`):
+
+    objective   OFF (shipping literals)   OFF choices/turn      ON
+    HACK        66.2 / 40.0 / 18.1        4.06 / 3.93 / 2.06    94.4 / 95.6 / 87.2
+    RESCUE      92.2 / 93.4 / 12.8        9.29 / 10.74 / 1.03   99.4 / 99.4 / 28.1
+
+The shipping RESCUE board on this arena is **already at the ceiling at h0/h4 and falls off a cliff at
+h8** — a two-state mission, not a ladder — carrying 9-11 meaningful choices a turn at the low rungs
+and 1.03 at the apex. The easing reads +7.2 / +5.9 / +15.3 (pooled +9.5, n_disc 159, z +7.22), and
+the small h0/h4 numbers are a FLOOR EFFECT, not gentleness: at the only rung with room to move the
+content more than doubles win rate (12.8 -> 28.1, resolved).
+
+**Three assumptions about objective behaviour have now failed in four waves** — P49's (the room is
+the object), P51's (site count is), and this one (two singleton objectives on one board behave
+alike). C3 split the eight objectives into two classes and that was worth 43 points; **nothing has
+established that the six task objectives behave alike WITHIN their class, and two of them measurably
+do not.**
+
+### Verdict
+
+`SIGHTLINE_SITEGLYPHS` stays default OFF and the reason has moved a third time — not "the prize is
+uncontested" (P49), not "one place to be" (P50/P51), but that on this board the objective is not on
+the critical path through the contested space in either placement tried. The content is the best of
+the four on every richness metric; a board 87% winnable at the apex is still not shippable. **No
+further glyph-shuffling before the next lever is chosen by the restated rule rather than by site
+count.**
+
+### Two process notes
+
+**The round was run twice.** The first attempt had two driver instances concurrently writing the same
+chunk tags — a detached launcher survived a step it was assumed not to. Caught on an arithmetic tell
+(121 status lines for 96 chunks), every byte discarded, re-run from a fresh snapshot with an `flock`
+on the driver. The tell was a COUNT, not a gate, and no gate existed that would have caught it.
+
+**`l5/cluster.py` takes a PREFIX, not a directory.** Given a directory it matches zero chunks and
+prints `LEAK-CHECK: PASS (all 0 chunks pinned)` — a vacuous pass indistinguishable from a real one.
+PARALLAX's thesis again, in the measurement layer this time.
+
 ## P51. THE SPLIT — it was the singleton, not the room
 
 P50 ended on a claim, and a claim is something you can test:

@@ -7,26 +7,69 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
-## OPEN — left by PARALLAX P51 "THE SPLIT" (2026-09-16)
+## OPEN — left by PARALLAX P52 "THE SINGLETON COMES OUT" (2026-09-16)
+
+P52 tested P51's published claim directly and **the claim did not survive**: moving the singleton
+objectives out of CITADEL's held room left the easing unchanged (+28.1/+55.6/+69.1 against P49's
++25.6/+54.1/+72.5). The rule that replaced it: **a held room changes the mission only when the WIN
+CONDITION forces the squad into it.** `Game.cs:4470` requires EVERY sabotage site, and one is inside
+the room; HACK requires one terminal, and outside the room the garrison is a fight you may decline.
+Full round: `docs/measurements/p52/`, DEVLOG §P52.
+
+- [ ] **1. THE NEXT LEVER IS THE WIN CONDITION, NOT THE GEOMETRY. This is the top item.** Every board
+      tried so far moves where the site SITS. The restated rule says to move what the mission
+      REQUIRES. Two candidates, both measurable on P52's own instrument against its ON arm:
+      a **HACK that needs two terminals** (one inside the held room, one outside — SABOTAGE's shape
+      transplanted onto a one-site objective, which isolates "all sites required" from "three
+      sites"); or an **extraction leg** — hack, then leave from a zone the garrison covers — which
+      puts the room on the critical path without touching site count at all.
+      **Do not spend another round shuffling one glyph.** P49, P52 and this item are the same
+      geometry lever three times; only the first two were worth running.
+- [ ] **2. THE GATE COVERS THE WRONG HALF, AND THAT IS NOW KNOWN.** `Maps.SitesDoorLocked` refuses a
+      template whose objective category is SEALED behind one door. P52 shows the property that
+      actually matters is whether the mission is FORCED THROUGH the contested space, which is a
+      joint property of the template AND the objective's win condition — so it cannot live in
+      `Maps` alone. The gate is correct and is kept; the second check would need `Run.IsKillObjective`'s
+      neighbourhood (what does this objective require?) crossed with the template's rooms.
+      Cheap version: assert that for each objective a template declares, at least one REQUIRED site
+      is inside a room that has a garrison.
+- [ ] **3. THE SHIPPING RESCUE BOARD ON THIS ARENA IS ITS OWN PROBLEM, and it predates all five
+      waves.** 92.2% at h0 and h4, then 12.8% at h8, with `meaningfulChoicesPerTurn` 10.74 at h4 and
+      **1.03** at h8. No content lever touched this — it is the OFF arm. It is one forced arena so
+      it is not a band claim, but a two-state objective is worth a look on the free instrument.
+      Related and bigger: **C3 split the eight objectives into two classes, and nothing has ever
+      established that the six TASK objectives behave alike within their class** — two of them
+      measurably do not.
+- [ ] **4. RICHNESS IS NOT DIFFICULTY, and this project now has the counter-example to prove it.**
+      P52 is the richest board ever measured here (8.15 meaningful choices/turn, 84% of turns with a
+      shot, every metric resolved) and the easiest at the apex (87.2%). Any future wave that argues
+      for a default flip from `meaningfulChoicesPerTurn` alone should be pointed at this row first.
+
+
+## CLOSED by PARALLAX P52 "THE SINGLETON COMES OUT" (2026-09-16)
 
 P51 re-ran P49's lever on an objective with THREE sites instead of one and found the easing shrinks
 with heat (+18.8 / +12.8 / +7.2) instead of exploding (+25.6 / +54.1 / +72.5), with decision richness
-UP 2.2/turn and attrition kept. **P49's collapse was the singleton objective, not the room.**
+UP 2.2/turn and attrition kept. **P49's collapse was the singleton objective, not the room.** All
+three items below are P52's; see `docs/measurements/p52/` and DEVLOG §P52.
 
-- [ ] **1. MOVE `T` OUT OF THE ROOM, THEN RE-RUN P49's HACK ROUND. This is the top item and it is
-      one glyph.** CITADEL's terminal is the mission's ONLY site and it is inside the room; the
-      other four site kinds it declares are fine. Move it outside (the room keeps the captive, the
-      garrison and one of the three charges) and re-run `SIGHTLINE_MAP=4 SIGHTLINE_OBJ=hack`
-      against `docs/measurements/p49/`. If the HACK easing comes down to SABOTAGE's shape, the
-      content earns its default and `SIGHTLINE_SITEGLYPHS` can flip.
-- [ ] **2. RESCUE has the same shape as HACK and has never been measured.** `C` is exactly 0 or 1
-      per template and CITADEL's captive is inside the room — a singleton objective behind one
-      door, which is precisely the configuration P49 measured as a collapse. Either move it out
-      with `T`, or measure it (`SIGHTLINE_OBJ=rescue`) before defaulting anything on.
-- [ ] **3. The general rule this leaves for every future authored arena.** A site inside a held room
-      is good; **the mission's only site inside a held room is not.** Nothing in `src/` enforces
-      that — `ReadSitesWellFormed` checks cardinality, not whether a singleton objective is sealed
-      behind one door. That check is cheap and would have caught P49 before the round did.
+- [x] **1. MOVE `T` OUT OF THE ROOM, THEN RE-RUN P49's HACK ROUND. DONE.** CITADEL's terminal now
+      sits at (4,5), two tiles west of the room's one door, so the garrison covers its approach
+      through the doorway instead of standing on top of it. The room keeps the GARRISON and one of
+      the three charges. Re-measured on P49's own instrument.
+- [x] **2. RESCUE. DONE — moved AND measured, and the premise was wrong.** `C` moved to (14,7), and
+      the round was run on `SIGHTLINE_OBJ=rescue` rather than assuming the two objectives behave
+      alike. **They do not, in either arm.** Shipping RESCUE on CITADEL reads **92.2 / 93.4 / 12.8**
+      against HACK's 66.2 / 40.0 / 18.1, at 9-11 meaningful choices a turn against 4.06 — a
+      two-state mission, not a ladder. Easing +7.2 / +5.9 / +15.3 (pooled +9.5), small at h0/h4 only
+      because that baseline is already at the ceiling. `docs/measurements/p52/rescue/`.
+- [x] **3. The general rule is a GATE now.** `Maps.SitesDoorLocked` seals each `Door` edge in turn
+      and refuses a template where one door cuts off EVERY site of some objective category. It runs
+      over all 35 shipped arenas in `SIGHTLINE_ARENAEDGETEST` leg (G), and — because a gate whose
+      red nobody has seen is a comment — leg (G) also asserts it REFUSES P49's own placement, kept
+      verbatim as `Maps.CitadelP49`, and refuses a board whose only charge is the interior one.
+      **It is an AUTHORING gate on purpose**: a runtime rejection falls back to the procedural board
+      silently, so a door-locked arena would ship as an arena nobody plays and nothing would say so.
 
 
 ## OPEN — left by PARALLAX P50 "THE GARRISON" (2026-09-16)

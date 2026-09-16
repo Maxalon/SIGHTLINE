@@ -260,10 +260,31 @@ public static partial class Maps
     /// rung including the apex, where heat stops mattering at all. That is the signature of an
     /// UNCONTESTED objective, and it removes the fight rather than concentrating it.
     ///
-    /// The machinery is right and is kept: the format expresses the room, `PlanBoard` seats the
-    /// sites in it, and the gates hold. What is missing is a GARRISON — P26's `A` enemy-pod anchor
-    /// glyph, still unused by every template. `SIGHTLINE_SITEGLYPHS=1` turns the sites on and is
-    /// the arm that round was read on.
+    /// ── FOUR WAVES HAVE NOW MEASURED THIS ARENA ON ONE INSTRUMENT. Read the table, not one row.
+    ///
+    ///     board                          win h0/h4/h8      choices  shots%  deaths  losses
+    ///     literal sites (shipping)       66.2/40.0/18.1     4.06     54.3    5,592   1,091
+    ///     P49  room, prize IN, EMPTY     91.9/94.1/90.6     1.18     36.8    1,410     249
+    ///     P50  room, prize IN, HELD      94.7/91.2/59.7     6.77     87.0    2,312     465
+    ///     P52  room HELD, prize OUTSIDE  94.4/95.6/87.2     8.15     83.9    1,530     303
+    ///
+    /// P50 added the GARRISON and the fight came back. P51 then measured the same lever on SABOTAGE
+    /// and concluded the culprit was the SINGLETON objective, so **P52 moved `T` and `C` out of the
+    /// room and re-ran P49's own round** — and the easing did not move (+28.1 / +55.6 / +69.1
+    /// against P49's +25.6 / +54.1 / +72.5, pooled +50.9 against +50.7).
+    ///
+    /// ⚠ **SO THE RULE IS NOT SITE COUNT. IT IS WHETHER THE WIN CONDITION FORCES THE SQUAD IN.**
+    /// `Game.cs`'s SABOTAGE check is `SabotageBlown.Count >= SabotageSites.Count` — EVERY site — and
+    /// one of CITADEL's three charges is inside the room, so that mission cannot be completed
+    /// without entering. HACK needs ONE terminal; with it outside, the garrison is a threat you
+    /// shoot at across open ground and never close with, and P26 already measured that declining
+    /// the fight is optimal. **P52 is the richest board of the four on every metric — 8.15 choices
+    /// a turn, 84% of turns with a shot — and the EASIEST at the apex.** Do not read richness as
+    /// difficulty.
+    ///
+    /// The machinery is right and is kept; the format expresses the room, `PlanBoard` seats the
+    /// sites in it, and the gates hold. `SIGHTLINE_SITEGLYPHS=1` turns the sites on and is the arm
+    /// every one of those rounds was read on. Rounds: `docs/measurements/{p48,p49,p50,p51,p52}/`.
     public static bool SiteGlyphs = false;
 
     static string[] _stripped;
