@@ -121,6 +121,8 @@ echo -n "DECALTEST  : "; verdict "$(SIGHTLINE_DECALTEST=1 run | grep -oE "DECALT
 echo -n "WALKTEST   : "; verdict "$(SIGHTLINE_WALKTEST=1 run | grep -oE "WALKTEST: (PASS|FAIL)" | head -1)"
 # P46: a unit's own state, at the unit, in the projected view. Framebuffer differential; window.
 echo -n "UNITSTATETEST: "; verdict "$(SIGHTLINE_UNITSTATETEST=1 run | grep -oE "UNITSTATETEST: (PASS|FAIL)" | head -1)"
+# P47: the double-resolution template format -- walls on tile boundaries. Pure parsing, no window.
+echo -n "ARENAEDGETEST: "; verdict "$(SIGHTLINE_ARENAEDGETEST=1 run | grep -oE "ARENAEDGETEST: (PASS|FAIL)" | head -1)"
 # P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
 echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"
 # P29: the board is a runtime size -- the shipped default must not drift and the camera pan
