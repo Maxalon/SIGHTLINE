@@ -410,6 +410,17 @@ src/
   Audio.cs      procedural SFX + music (device-free-safe)
   Audio.CueMap.cs    THE CUE MAP: the injective event->cue table (one meaning, one sound)
   Audio.Analysis.cs  the measured numbers (peak/RMS/length) the AUDIO CHECK screen prints
+  Surface.cs    P43: WHERE A UI PANEL LIVES. P34's affine bridge generalised from the ground
+                plane to any `Panel {Origin,U,V}` (world position of local (0,0) + world delta per
+                ONE LOCAL PIXEL), so a 2D panel drawn in screen units lands on a plane in the room
+                with no call site rewritten, and `Unproject` — the same matrix's inverse — turns a
+                pointer back into that panel's coordinates, which is the operation a VR controller
+                ray performs. `Console()` is the table: the board's OWN floor plane continued
+                toward the operator, horizontal in the WORLD (so it foreshortens with the camera)
+                and anchored to the SCREEN at the pivot row (so the verbs stay under the hand).
+                It REFUSES below `MinSquash` rather than degrade. Two seams only: `Hud.Mouse()`
+                and `Game`'s click handler. `SIGHTLINE_UISURFACE=table`.
+  Surface.SelfTest.cs  SIGHTLINE_SURFACETEST
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings. P17: the
                 FIRST-LAUNCH WINDOW FIT (Display.FitLaunchSize — pure, only ever SHRINKS; persisted
                 as WinW/WinH). Gated on `Display.AllowLaunchFit`, which defaults to FALSE and is
@@ -815,6 +826,7 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P42** BUILDINGS, PRICED | A lever that changes the board a lot can move win rate barely and still be wrong. Procedural buildings: win rate NOT RESOLVED (−2.6 pooled, n_disc 257 of 960 — a BOUNDED effect, not an absent one), but **`meaningfulChoicesPerTurn` falls at every rung** (3.32→2.68 / 3.22→2.93 / 1.81→1.36) and skill expression is flat. **Walls give you somewhere to sit, and sitting is not a decision.** A rectangle gives cover without giving a reason to go IN — an AUTHORED building is a different object and is unpriced. | §P42 |
 | **P40** DESTRUCTIBLE EDGES | P28's blocker is gone (sap 9 -> 12 acts, AICOVTEST green) but **buildings are still default-off for a different reason**: the same census says they change the FIGHT — hunker 16.05% -> 26.76% — and a default flip is a LEVEL lever that wants a priced round, not a flip because a gate went green. | §P40 |
 | **P37** THE BOARD FILLS | A bigger board is **more rooms, not one stretched room**: stretching an archetype keeps its shape and loses its SCALE, and scale is the whole content of a cover motif. `SIGHTLINE_DENSITY=0`; a no-op at 18x11 by construction. | §P37 |
+| **P43** THE SURFACE | **Raylib-cs 8.0's VR surface is STEREO RENDERING ONLY** — `BeginVrStereoMode`/`LoadVrStereoConfig`/`VrDeviceInfo`, no OpenXR, no head pose, no controller input. Do not plan VR around it; it needs an external binding. What IS reusable: the affine bridge is affine because the camera is ORTHOGRAPHIC, so it works for **any plane**, and `UiButton` is already data — so "a 2D panel on a surface you point at" costs two seams, not a UI rewrite. | §P43 |
 | **P24** THE TOP OF THE LADDER | P23's cost, corrected with **one lever chosen by argument**: `Mission.HostileAimTrim` 0 -> 5 (`SIGHTLINE_AIMTRIM=0` restores), five flat points off every hostile's aim in the single `MakeHostile` funnel. **THE ARGUMENT IS THE DURABLE HALF, and it corrects an inherited claim.** The miss was a LEVEL, not a shape: every heat rung sat under its band CENTRE by a mean of −7.6. **`Heat.Active(0)` is EMPTY, so no arrangement of `Heat.Mods` can move h0 by any amount** — that half of C1/L4's inherited claim is provable in one line. **The other half is FALSE and should stop being repeated**: an apex-neutral redistribution CAN raise h6 alone (C1's `bit 4`, +4.7 ±2.7) — it was rejected because it cannot reach h0 and because it buys h6 by spending rung 6, one of only three steps L7 resolved. The dose is X2's, not a searched one: X2 built this dial, measured 5 and 10, and rejected 10 on TEXTURE. **Result (best n): RECRUIT 76.6 / h0 49.5 / h2 40.0 / h4 26.1 / h6 11.9 / h8 4.8**, four in band with h6 and h8 sitting ON their floors (−0.1, −0.2 = 0.11 / 0.18 cluster SE). **Resolved only POOLED (+3.49 z +3.40; +2.15 z +2.62 at double n) — not one per-rung contrast resolves.** Two findings that outlast the delta: **the APEX does not respond to accuracy** (h8 −0.6 / +0.3 / −0.2, MDE 2.87, the round's tightest), so the next lever must come from bodies/stat/damage/coordination; and **h0's +7.5 did not replicate** (0.0 on 16 new sets, b=45 c=45 — fifth sighting). `FORCETEST` leg (H) asserts the trim reaches every body in full and moves nothing else (three aim clamps sit downstream of it and none binds *today*). The balance JSON now carries `levers{}` so a chunk records its own ARM. | §P24 |
 
 **Every gameplay lever above has a restore-the-old-behaviour flag**, because a wave that cannot be

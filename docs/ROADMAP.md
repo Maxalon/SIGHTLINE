@@ -7,6 +7,37 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P43 "THE SURFACE" (2026-09-16)
+
+P43 made UI PLACEMENT a policy: `Surface.Panel` generalises P34's affine bridge to any plane, and
+`SIGHTLINE_UISURFACE=table` puts the action bar on a holo-console — a horizontal world plane in
+front of the projection — with pointing done by the same matrix's inverse. It is the UI half of a
+future VR mode, built so the flat game pays for it and uses it.
+
+- [ ] **1. THE MODAL SCREENS HAVE NO PLACEMENT STORY.** Barracks, campaign map, shop, field manual,
+      pause, war room — all full-screen, all written against `Cfg.ScreenW/ScreenH` (73 references in
+      `Hud.cs` alone). A surface is 1280x800 of local pixels, so they would *work* on one unchanged;
+      what is missing is the argument for WHICH surface a modal belongs on, and whether "modal"
+      even means anything when the board is a physical object you can look away from. **This is the
+      hard part and P43 deliberately did not touch it.**
+- [ ] **2. `Slot.Chrome` is one bucket and wants to be several.** Roster chips, the unit card and the
+      combat log each have a different natural home. The unit card especially: it is UNIT-space
+      information (this soldier, their ammo, their wound) sitting in a screen corner because that is
+      where screens have corners. Attached to the chip it would need no corner at all.
+- [ ] **3. The console is camera-anchored on screen.** A world-locked rim you orbit around — walk to
+      the other side of the table and the controls are where you left them — is one function
+      (`Surface.Console`) and touches no call site. It is a better object and a worse HUD; the
+      trade needs a decision, not a patch.
+- [ ] **4. OPENXR IS A DEPENDENCY DECISION, NOT A WAVE.** Raylib-cs 8.0 ships stereo rendering and
+      barrel distortion only — no head pose, no controller input. Real VR needs an external binding
+      (Silk.NET.OpenXR or similar) added to `Sightline.csproj`. **Do not plan VR work around
+      raylib's VR functions.** When a pose and a ray do arrive, they enter through
+      `Surface.Unproject` and every placed panel is already pointable.
+- [ ] **5. The `Game.cs` click seam is untested.** SURFACETEST asserts `Surface.PointerIn` gives the
+      right answer and that `Hud.Mouse()` routes through it; nothing asserts that `Game.Update`'s
+      action-bar loop calls it. A second placeable slot would make that gap bite.
+
+
 - [x] **1. Procedural audio.** DONE. `src/Audio.cs` synthesises 16-bit PCM WAVs
       in memory (`LoadWaveFromMemory(".wav", bytes)` → `LoadSoundFromWave`) for
       select/move/shoot/hit/crit/miss/overwatch/death/hunker/reload/turn/win/lose.

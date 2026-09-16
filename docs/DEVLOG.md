@@ -19025,3 +19025,110 @@ double-resolution authored template format, not another default flip.
 cluster contrast, provided the chunk tags are `<arm>-h<H>-b<B>`. Naming the chunks that way from the
 start cost nothing and saved writing an analysis script; the first attempt used `h0-b0-off` and had
 to be restarted.
+
+## P43. THE SURFACE — where a UI panel lives is a policy, not a hardcode
+
+Triggered by a question from the owner, not by the backlog: *"we are now working towards a hybrid
+system of classical game and VR, we need to think about the different UI placements. in vr you don't
+have a 2d mouse on a screen you can point at a gui rendered on top of what the camera sees... either
+floating 3d objects that are interactable to click the actions, or a table with buttons on it."*
+
+### First, three facts that decide the shape of the answer
+
+**1. Raylib-cs 8.0's VR surface is STEREO RENDERING ONLY.** The whole of it is `BeginVrStereoMode`,
+`EndVrStereoMode`, `LoadVrStereoConfig`, `UnloadVrStereoConfig`, `VrDeviceInfo`, and the rlgl stereo
+matrix helpers. **There is no OpenXR binding, no head pose and no controller input anywhere in it** —
+it is the Cardboard-era lens-distortion API. A real headset mode therefore needs an external binding
+(Silk.NET.OpenXR or equivalent) and that is a DEPENDENCY DECISION for the owner, not a wave. Do not
+plan VR work around raylib's VR functions; they render a stereo pair and nothing else.
+
+**2. The UI is already data.** `Hud.UiButton` is `{ Rect, Id, Label, Key, Enabled, Selected, Accent }`,
+cached into `Hud.ActionButtons` by its own draw and hit-tested a frame later by `Game`, with
+`Hud.ProbeActionBar(Game)` already handing the array to the harness. The 23 action verbs are not
+painted pixels, they are rectangles with names. That is most of what a pointable UI needs.
+
+**3. P34's bridge was never about the ground.** The affine map exists because the camera is
+ORTHOGRAPHIC, and an ortho projection restricted to ANY plane is affine — the ground plane was just
+the first plane anybody wanted. So "a 2D panel drawn onto a surface in the room" and "the 2D Fx layer
+drawn onto the board" are the same problem, and the inverse of the same matrix is what turns a
+pointer back into panel coordinates, which is exactly what a controller ray does.
+
+### The recommendation: a console, and the reason is not aesthetic
+
+Floating panels and a table are not equally good guesses. **The premise already chose.** This game's
+projected view is a hologram an operator reads at HQ; a hologram has something under it. Beyond the
+fiction, three arguments:
+
+* A surface has a **fixed spatial relationship to the board**, so a verb has a location you can learn.
+  Floating panels have to be re-placed every time the camera moves, and a panel that follows you is a
+  HUD wearing a costume.
+* A surface is **one plane**, so it is one matrix. Floating panels are N planes with N placements,
+  N occlusion questions, and no natural resting pose.
+* In a headset a surface is **where your hands already are.** You reach down, not out.
+
+### What shipped
+
+`src/Surface.cs` — P34's bridge generalised from "the ground plane" to `Panel { Origin, U, V }`, the
+world position of local (0,0) plus the world delta of ONE LOCAL PIXEL along each local axis. Axes
+per-pixel rather than unit-vectors-plus-scale is what keeps a panel's units identical to the screen
+units all ~6,900 lines of `Hud.cs` are already written in, so **not one layout call site changed.**
+
+* `Axes/Matrix/Project` — the forward map (drawing). `Unproject` — the 2x2 inverse (pointing).
+* `Console(cam, pivotY)` — the table: **the board's own floor plane, continued toward the operator.**
+  Horizontal in the WORLD (so its foreshortening is the board's foreshortening and moves when the
+  camera tilts — a camera-facing panel would be pixel-identical at every pitch), and ANCHORED TO THE
+  SCREEN at the pivot row (so the verbs stay under the hand that already knows where they are). It
+  REFUSES rather than degrades: straight-down cameras, rays that never reach the plane, and any pitch
+  whose `sin` falls below `MinSquash = 0.45`, because an edge-on control panel is worse than a flat one.
+* `Slot` / `PlacementOf` / `Begin` / `End` / `PointerIn` — the policy. Today `ActionBar` is the only
+  placeable slot and `SIGHTLINE_UISURFACE=table` is the only thing that moves it.
+
+The two seams are one line each: `Hud.Mouse()` is now `Surface.MapPointer(RawMouse())`, and `Game`'s
+click handler converts once before the unchanged `CheckCollisionPointRec` loop. Everything else — 30
+hover sites, the tutorial dim, the fixed slot map, the tooltip — works on a world surface without
+knowing there is one.
+
+### The self-test, and the leg that passed with the feature deleted
+
+`SIGHTLINE_SURFACETEST`, eight legs. (A) the screen placement is the IDENTITY in three configurations
+— asserted, not assumed, because the dangerous failure here is a silent fallback plus a test that
+then measures the screen and reports PASS. (B) affinity against `GetWorldToScreen` at 6 camera states.
+(C) round trip. (D) the affine inverse against a real **ray/plane intersection** — they agree only
+because the camera is orthographic, so this is the leg that goes red the day anyone tries a
+perspective camera, which is exactly when someone needs to be told. (E) the pivot row is pinned and
+local +y is foreshortened by exactly `sin(pitch)`. (F) the squash floor decides differently 3 degrees
+either side of its crossing. (G) the rlgl transpose, read off the framebuffer. (H) end to end on the
+bar the game really built.
+
+**Leg (H)'s first version passed with `Hud.Mouse()` reverted to the raw pointer.** It pinned the
+pointer at a verb's *projected* centre and asked whether the answer landed in that verb's rect — and
+an unmapped pointer lands there too, because the console's squash moves a point 20 px below the pivot
+by ~4 px and the rect is 30 px tall. **A test whose discriminator is smaller than its tolerance is not
+a test** (P35's ink leg, exactly). Rewritten to assert the ROUTE — `Hud.Mouse()` equals what the
+surface says, not what the OS says — plus that the two answers actually DIFFER, which is what makes
+the first assertion mean anything. Verified RED with the seam removed and GREEN with it back.
+
+### One measured thing worth keeping
+
+`GetWorldToScreen` returns single-precision pixels of magnitude ~1e3, so each carries ~1e-4 px of
+representation error. Differencing two of them ONE LOCAL PIXEL apart divides that by 1, and the map
+then multiplies it by the panel's width: measured **0.141 px of error at the far corner of a 1280-px
+panel**. Sampling the axis 512 px away divides the same error by 512. Same map, three orders of
+magnitude less noise — `Surface.AxisBaseline`. P34's board bridge does not have this problem because
+its lever arm is 18 tiles, not 1,280 pixels.
+
+### What this is NOT, and what is open
+
+It is not VR, and it does not pretend to be. What it is: the UI half of VR, done in a way that the
+flat game pays for and uses. When a pose and a ray arrive they come in through `Unproject`, and every
+placed panel already knows how to be somewhere.
+
+Open, in the order they matter:
+1. **The modal screens** (barracks, campaign map, shop, field manual) are full-screen and have no
+   placement story at all. They are the hard part and this wave deliberately did not touch them.
+2. `Slot.Chrome` is one bucket. The roster, the unit card and the log each want their own answer —
+   the unit card in particular is *unit-space* information sitting in a screen corner.
+3. The console is camera-anchored on screen. A world-locked rim you orbit around is one function
+   (`Surface.Console`) and no call site.
+4. The `Game.cs` click seam is the one thing SURFACETEST cannot reach: it asserts `PointerIn` is
+   right, not that `Game` calls it.

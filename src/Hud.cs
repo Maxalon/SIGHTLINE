@@ -198,7 +198,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // pointer delta under Xvfb, timing-dependent) handed the keyboard cursor back to the mouse
     // and un-staged TOOLTIP-HOVER on ~1 run in 6 (`screenNotStaged ... identical frame to
     // TOOLTIP-AIM`). Real play: MousePin is NaN, so both read the live pointer exactly as before.
-    public static Vector2 Mouse() => float.IsNaN(MousePin.X) ? Raylib.GetMousePosition() : MousePin;
+    // P43 THE SURFACE: the pointer is reported in the coordinates of whatever UI SURFACE is bound.
+    // Outside a bind — every chrome draw site, and the whole flat game — `Surface.MapPointer` is
+    // the identity and this line is exactly what it always was. Inside one (the action bar on the
+    // console) it is the panel's own coordinates, which is the space `UiButton.Rect` is in, so
+    // every hover test below works on a surface without knowing there is one.
+    public static Vector2 Mouse() => Surface.MapPointer(RawMouse());
+    /// The pointer in SCREEN pixels, whatever is bound — for the few things that are about the
+    /// physical pointer rather than about a panel (the keyboard-cursor handoff, board picking).
+    public static Vector2 RawMouse() => float.IsNaN(MousePin.X) ? Raylib.GetMousePosition() : MousePin;
     /// A pinned pointer does not move: no delta, so the keyboard cursor keeps control under a pin.
     public static Vector2 MouseDelta() => float.IsNaN(MousePin.X) ? Raylib.GetMouseDelta() : Vector2.Zero;
 
@@ -1354,11 +1362,22 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleGradientV(0, Cfg.ScreenH - 150, Cfg.ScreenW, 150,
                                       Pal.RGBA(8, 12, 17, 0), Pal.RGBA(8, 12, 17, 238));
 
+        // P43 THE SURFACE — the action bar's PLACEMENT is a policy. By default this is the flat
+        // strip it has always been (`Begin` returns false and pushes nothing); with the console
+        // placement the same draw lands on a horizontal world plane in front of the hologram.
+        // The pivot is the PREVIOUS frame's `_barTop`, which is what `ActionButtons` itself is
+        // hit-tested from, so the surface and the rects are always from the same frame.
+        bool onSurface = Surface.Begin(Surface.Slot.ActionBar,
+                                       View3D.MakeCamera(g.Grid, (float)Cfg.ScreenW / Cfg.ScreenH), _barTop);
+        DrawActionButtons(g, barY);
+        if (onSurface) Surface.End();
+
+        // The unit card is `Slot.Chrome` — it stays on the screen — so it is drawn AFTER the bar,
+        // or the console's full-width slab covers it. On the flat placement the two never overlap,
+        // so the reorder changes nothing there.
         var u = g.Selected;
         if (u != null && u.Team == Team.Player)
             DrawUnitCard(u, 20, barY);
-
-        DrawActionButtons(g, barY);
 
         // hint — pinned to the strip BELOW the bar's bottom row (the bar grows upward, so this
         // baseline never collides with buttons at any row count)
@@ -1746,6 +1765,25 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // instrument panel. Low alpha and behind everything, so the board still shows through and
         // the per-button occlusion dim below still does its job.
         {
+            // P43: on the console the plate is the CONSOLE TOP, so it is opaque and it runs on past
+            // the bottom of the frame — under the surface's foreshortening that overhang comes back
+            // up into view as the apron the verbs sit on. On the screen it is the quiet backing it
+            // has always been.
+            if (Surface.Active)
+            {
+                // The console spans the whole station and runs off both sides and past the near
+                // edge of the frame — a surface with four visible corners is a card lying on the
+                // floor, not a table you are standing at. The BACK LIP is the one bright line: it
+                // is where the console stops and the hologram begins, and it is the edge that tells
+                // the eye this plane is horizontal and the board is sitting on it.
+                int x0 = -80, w = Cfg.ScreenW + 160;
+                int y0 = (int)(barRect.Y - 26), h = (int)barRect.Height + 300;
+                Raylib.DrawRectangleGradientV(x0, y0, w, h, Pal.RGBA(16, 23, 32, 252), Pal.RGBA(4, 6, 9, 255));
+                for (int i = 1; i <= 3; i++)                           // machined rules across the top
+                    Raylib.DrawRectangle(x0, y0 + 14 * i, w, 1, Raylib.Fade(Pal.PanelBd, 0.16f));
+                Raylib.DrawRectangle(x0, y0 - 2, w, 2, Raylib.Fade(Pal.PanelBd, 0.85f));
+                Raylib.DrawRectangle(x0, y0 - 5, w, 2, Raylib.Fade(Pal.Accent, 0.30f));
+            }
             var plate = new Rectangle(barRect.X - 8, barRect.Y - 8, barRect.Width + 16, barRect.Height + 14);
             Raylib.DrawRectangleRounded(plate, 0.10f, 8, Raylib.Fade(Pal.RGBA(8, 12, 17), mouseOnBar ? 0.80f : 0.62f));
             Raylib.DrawRectangleLinesEx(plate, 1f, Raylib.Fade(Pal.PanelBd, 0.45f));
@@ -1760,7 +1798,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         bool tutDimAll = tut == Game.TutStepConceal || tut == Game.TutStepMove;
         foreach (var b in ActionButtons)
         {
-            float dim = !mouseOnBar && ChipOccluded(g, b.Rect, true) ? 0.45f : 1f;
+            // W11's de-occlusion asks whether a unit stands under the bar's SCREEN pixels. On the
+            // console the bar is a surface in front of the hologram, not a strip over it, and
+            // `b.Rect` is in the panel's coordinates — so the question has no meaning there and
+            // answering it would dim the verbs against a board they are not covering.
+            float dim = !mouseOnBar && !Surface.Active && ChipOccluded(g, b.Rect, true) ? 0.45f : 1f;
             if (!mouseOnBar && (tutDimAll || (lessonVerb != null && b.Id != lessonVerb)))
                 dim = Math.Min(dim, 0.45f);
             DrawActionButton(b, dim);

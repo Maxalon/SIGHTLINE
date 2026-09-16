@@ -113,6 +113,8 @@ echo -n "PICKTEST   : "; verdict "$(SIGHTLINE_PICKTEST=1 run | grep -oE "PICKTES
 echo -n "WIRETEST   : "; verdict "$(SIGHTLINE_WIRETEST=1 run | grep -oE "WIRETEST: (PASS|FAIL)" | head -1)"
 echo -n "CONFTEST   : "; verdict "$(SIGHTLINE_CONFTEST=1 run | grep -oE "CONFTEST: (PASS|FAIL)" | head -1)"
 echo -n "FXBRIDGETEST: "; verdict "$(SIGHTLINE_FXBRIDGETEST=1 run | grep -oE "FXBRIDGETEST: (PASS|FAIL)" | head -1)"
+# P43: the UI SURFACE seam -- where a panel LIVES is a policy. Needs a window and one read-back.
+echo -n "SURFACETEST: "; verdict "$(SIGHTLINE_SURFACETEST=1 run | grep -oE "SURFACETEST: (PASS|FAIL)" | head -1)"
 # P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
 echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"
 # P29: the board is a runtime size -- the shipped default must not drift and the camera pan
