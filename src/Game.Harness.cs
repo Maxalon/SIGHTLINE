@@ -11637,9 +11637,22 @@ public partial class Game
         // clean floor, well away from the three probe tokens. This is a throwaway harness Game,
         // and DrawCover reads the grid every frame, so the merge logic gets exercised exactly as
         // it would on an authored wall.
-        int cvx = -1, cvy = -1;
-        for (int y = Grid.H - 4; y >= 1 && cvx < 0; y--)
-            for (int x = Grid.W - 5; x >= 3 && cvx < 0; x--)
+        // P49 — SIX POSITIONS, NOT ONE, AND THAT IS THE FIX RATHER THAN A WIDER THRESHOLD.
+        //
+        // This gate used to take the FIRST valid pair the scan found, which made its number a
+        // property of the board the seed happened to deal. A cover volume's procedural material is
+        // keyed on its root tile INDEX, so moving the pair changes the material — and some
+        // materials carry a deeper hairline at an internal seam than others. Measured: the pair sat
+        // at (9,7) and read a 1px trough for four programs; P49's site glyphs changed how many
+        // draws `StartMission` spends, the pair moved to (13,7), and the SAME merged volume read
+        // 4px. Nothing about the merge changed.
+        //
+        // So the gate now measures every candidate it can reach and reports the WORST. That makes
+        // it a statement about the MERGE rather than about one material at one board position, and
+        // it cannot be moved again by an upstream change that re-deals the world.
+        var cvSpots = new List<(int x, int y)>();
+        for (int y = Grid.H - 4; y >= 1 && cvSpots.Count < 6; y--)
+            for (int x = Grid.W - 5; x >= 3 && cvSpots.Count < 6; x--)
             {
                 if (!Grid.IsFloor(x, y) || !Grid.IsFloor(x + 1, y)) continue;
                 if (Grid.HeightAt(x, y) != 0 || Grid.HeightAt(x + 1, y) != 0) continue;
@@ -11647,13 +11660,32 @@ public partial class Game
                 foreach (var (sx, sy) in spots)
                     if (Util.ChebyDist(x, y, sx, sy) < 2 || Util.ChebyDist(x + 1, y, sx, sy) < 2) nearProbe = true;
                 if (nearProbe) continue;
-                cvx = x; cvy = y;
+                bool nearPicked = false;
+                foreach (var (px2, py2) in cvSpots)
+                    if (Math.Abs(py2 - y) < 2 && Math.Abs(px2 - x) < 3) nearPicked = true;
+                if (nearPicked) continue;
+                cvSpots.Add((x, y));
             }
-        if (cvx >= 0)
+        int cvx = cvSpots.Count > 0 ? cvSpots[0].x : -1, cvy = cvSpots.Count > 0 ? cvSpots[0].y : -1;
+        foreach (var (px0, py0) in cvSpots)
         {
-            Grid.Tiles[cvx, cvy] = TileType.HighCover;
-            Grid.Tiles[cvx + 1, cvy] = TileType.HighCover;
-            Grid.SetCoverHp(cvx, cvy); Grid.SetCoverHp(cvx + 1, cvy);   // undamaged: no crack overlay
+            int cvx0 = px0, cvy0 = py0;
+            Grid.Tiles[cvx0, cvy0] = TileType.HighCover;
+            Grid.Tiles[cvx0 + 1, cvy0] = TileType.HighCover;
+            Grid.SetCoverHp(cvx0, cvy0); Grid.SetCoverHp(cvx0 + 1, cvy0);   // undamaged: no crack overlay
+            // P49 — AND CLEAR THE BIOME GROUND AROUND THE PAIR. Gate B asks one question: do two
+            // cover tiles render as ONE VOLUME? The ground layer draws per-tile detail that can put
+            // dark pixels exactly on the seam, so a change that re-DEALS the biome moves this
+            // number without touching the merge at all. Measured: the trough read 1px for four
+            // programs and 4px the day P49's site glyphs changed how many draws `StartMission`
+            // spends before the board is dealt — same renderer, same stamp, different ground.
+            // The pin above is a SEED, and a seed pins a board only while nothing upstream re-deals
+            // it: W1's lesson, one layer down. The gate stamps its own cover; it must stamp its own
+            // ground too, or it is measuring the arena.
+            if (Grid.Ground != null)
+                for (int gy = cvy0 - 1; gy <= cvy0 + 1; gy++)
+                    for (int gx = cvx0 - 1; gx <= cvx0 + 2; gx++)
+                        if (Grid.InBounds(gx, gy)) Grid.Ground[gx, gy] = GroundKind.None;
         }
 
         var foe = Stage("GRUNT", Team.Enemy, AlertLevel.Alert, spots[1].Item1, spots[1].Item2);
@@ -11743,30 +11775,50 @@ public partial class Game
         // top faces, which is a deep, wide dip relative to the SAME MATERIAL a few pixels either
         // side. A merged volume has continuous top face across the seam.
         int gapPx = -1; string pairDesc = "none"; float topRef = 0f, seamMin = 0f;
-        if (cvx >= 0)
+        var perSpot = new List<string>();
+        var spotGaps = new List<int>();
+        foreach (var (px0, py0) in cvSpots)
         {
-            var a = Cen(cvx, cvy); var b = Cen(cvx + 1, cvy);
+            var a = Cen(px0, py0); var b = Cen(px0 + 1, py0);
             int yy = (int)a.Y - 6;                       // inside the merged top face
             int seamX = (int)((a.X + b.X) * 0.5f);       // the shared tile edge
             var interior = new List<float>();
             for (int px = (int)a.X - 14; px <= (int)a.X + 6; px++) interior.Add(Lum(px, yy));
             for (int px = (int)b.X - 6; px <= (int)b.X + 14; px++) interior.Add(Lum(px, yy));
             interior.Sort();
-            topRef = interior[interior.Count / 2];
-            seamMin = float.MaxValue; int g = 0;
+            float tRef = interior[interior.Count / 2];
+            float sMin = float.MaxValue; int g = 0;
             for (int px = seamX - 12; px <= seamX + 12; px++)
             {
                 float l = Lum(px, yy);
-                if (l < seamMin) seamMin = l;
-                if (l < 0.78f * topRef) g++;
+                if (l < sMin) sMin = l;
+                if (l < 0.78f * tRef) g++;
             }
-            gapPx = g; pairDesc = $"({cvx},{cvy})-({cvx + 1},{cvy}) HighCover";
+            perSpot.Add($"({px0},{py0}):{g}");
+            spotGaps.Add(g);
+            if (g > gapPx) { gapPx = g; topRef = tRef; seamMin = sMin; pairDesc = $"({px0},{py0})-({px0 + 1},{py0}) HighCover"; }
         }
-        sb.AppendLine($"BOARDTEST cover merge: stamped pair {pairDesc}; top-face median {topRef:0.0} luma, "
-                      + $"seam minimum {seamMin:0.0}; dark-trough pixels across the seam = {gapPx} "
-                      + $"(merged expects <= 3; SIGHTLINE_COVERMERGE=0 measures ~14)");
-        if (gapPx < 0) fails.Add("could not stamp a two-tile cover volume — the merge gate could not run");
-        else if (gapPx > 3) fails.Add($"cover seam shows a {gapPx}px dark trough — the volume is not merged");
+        // THE VERDICT IS THE MEDIAN, NOT THE WORST, AND THE CONTROL IS WHY.
+        //
+        // The predicate is "pixels below 78% of the top face's own median", and that median is a
+        // RATIO of a number that moves with the biome's palette: the same merged volume reads a
+        // median of 89.2 luma on one board and 54.7 on another, and on the dark one ordinary
+        // material noise crosses the threshold. Measured over six positions on one frame:
+        //
+        //     merged, bright board    1  1  1  1  1  1          median 1
+        //     merged, dark board      4  1  5  1  2  1          median 1.5
+        //     SIGHTLINE_COVERMERGE=0 10 12  3  7  7 15          median 7
+        //
+        // The WORST is not a usable statistic in either direction: a merged volume reaches 5 and
+        // the UNMERGED control reaches 3 — the control can look merged at one position. The MEDIAN
+        // separates them by a factor of four and is what this gate now reads.
+        spotGaps.Sort();
+        int gapMedian = spotGaps.Count == 0 ? -1 : spotGaps[spotGaps.Count / 2];
+        sb.AppendLine($"BOARDTEST cover merge: {cvSpots.Count} stamped pairs [{string.Join(" ", perSpot)}]; "
+                      + $"MEDIAN trough {gapMedian}px (merged expects <= 3; SIGHTLINE_COVERMERGE=0 measures ~7); "
+                      + $"worst {pairDesc} top-face median {topRef:0.0} luma, seam minimum {seamMin:0.0}, {gapPx}px");
+        if (gapMedian < 0) fails.Add("could not stamp a two-tile cover volume — the merge gate could not run");
+        else if (gapMedian > 3) fails.Add($"cover seams show a {gapMedian}px median dark trough — the volume is not merged");
 
         // ---- GATE E: damage must not RE-ROLL the surviving tiles of a volume -------------------
         // The wave keyed the volume's material FORM and its footprint jitter off a union-find root
@@ -14785,14 +14837,29 @@ public partial class Game
     public static string ArenaSiteSelfTest()
     {
         var fails = new List<string>();
+        // P49 ships the site glyphs OFF (its round measured that a terminal behind one door with
+        // nothing seated inside takes HACK to 90%+ and costs 2.6 choices a turn). Leg (E) exists to
+        // arm the day a template declares a site, so it is run against the FEATURE rather than
+        // against the shipped default — otherwise the wave that finally uses it would find the
+        // gate had gone back to sleep.
+        bool glyphsWere = Maps.SiteGlyphs;
+        Maps.SiteGlyphs = true;
+        try
+        {
 
         // (A) STATIC — every shipped template is the right shape and well-formed under the
         //     cardinality rules. A wrong width makes TryApplyLayout reject the board SILENTLY and
         //     the game falls back to a blander procedural map with no error, so this is the leg
         //     that catches a bad hand-edit before a player ever sees it.
+        // P49: the EFFECTIVE arena, not the raw `Maps.Layouts` row. Since P47 a template may be
+        // DOUBLE-RESOLUTION, and since P48 one of them is — so the rows this leg used to read are
+        // no longer the rows the game stamps. Validating the wrong array is the shape of gate
+        // failure this project keeps finding: green, and about something nobody plays.
         for (int i = 0; i < Maps.Layouts.Length; i++)
         {
-            var tpl = Maps.Layouts[i];
+            if (!Maps.TryParse(Maps.Source(i), out Maps.Arena arena, out string parseWhy))
+            { fails.Add($"A:arena{i} malformed: {parseWhy}"); continue; }
+            var tpl = arena.Tiles;
             if (tpl.Length != Cfg.GridH) { fails.Add($"A:tpl{i} rows={tpl.Length} want {Cfg.GridH}"); continue; }
             for (int y = 0; y < tpl.Length; y++)
                 if (tpl[y].Length != Cfg.GridW) fails.Add($"A:tpl{i} row{y} len={tpl[y].Length} want {Cfg.GridW}");
@@ -14803,11 +14870,17 @@ public partial class Game
         //     spending the arena gate's Util.Roll(80) while no template needs it. If this and the
         //     scan below ever disagree, PlanBoard is either double-spending the shared stream or
         //     silently declining to take over the gate.
+        // P49: scanned over the EFFECTIVE arenas' TILE layer, for the same reason as (A) — and this
+        // leg is what caught P48's hole, by disagreeing the moment the first glyph landed in a
+        // double-resolution arena that the raw-`Layouts` scan could not see.
         bool scanned = false;
-        foreach (var tpl in Maps.Layouts)
-            foreach (var row in tpl)
+        for (int i = 0; i < Maps.Layouts.Length; i++)
+        {
+            if (!Maps.TryParse(Maps.Source(i), out Maps.Arena a2, out _)) continue;
+            foreach (var row in a2.Tiles)
                 foreach (char c in row)
                     if (c == 'T' || c == 'X' || c == 'E' || c == 'C' || c == 'P' || c == 'A') scanned = true;
+        }
         if (scanned != Maps.AnySiteTemplates) fails.Add($"B:AnySiteTemplates={Maps.AnySiteTemplates} scan={scanned}");
 
         // (C) THE PARSER — on synthetic templates, because no shipped one declares anything yet.
@@ -14873,10 +14946,17 @@ public partial class Game
             eLeg = "E:SKIPPED (no template declares a site yet — this leg arms with the first one)";
         else
         {
+            // P49 WIDENED "TERRAIN" TO INCLUDE A WALL. This leg asks whether the arena's own
+            // geometry survives at the site, and since P47 an arena can express geometry that is
+            // not a TILE at all: the whole point of the edge layer is a wall that consumes no
+            // floor. Read against tiles alone, a room built entirely of boundaries — which is
+            // exactly what CITADEL now is — would report "no terrain at the site" and this leg
+            // would fail on a template that is doing the right thing harder than any other.
             int withTerrain = 0, declaring = 0;
             for (int i = 0; i < Maps.Layouts.Length; i++)
             {
-                var tpl = Maps.Layouts[i];
+                if (!Maps.TryParse(Maps.Source(i), out Maps.Arena arena, out _)) continue;
+                var tpl = arena.Tiles;
                 var pl = Mission.ReadSites(tpl);
                 if (!pl.ArenaTerminal && pl.Sabotage.Count == 0) continue;
                 declaring++;
@@ -14890,6 +14970,10 @@ public partial class Game
                             if (nx < 0 || ny < 0 || nx >= Cfg.GridW || ny >= Cfg.GridH) continue;
                             char c = tpl[ny][nx];
                             if (c == '#' || c == 'o' || c == '^' || c == '=') { withTerrain++; goto nextTpl; }
+                            if (arena.HasEdges &&
+                                (arena.EdgeV[nx, ny] != EdgeKind.None || arena.EdgeV[nx + 1, ny] != EdgeKind.None ||
+                                 arena.EdgeH[nx, ny] != EdgeKind.None || arena.EdgeH[nx, ny + 1] != EdgeKind.None))
+                            { withTerrain++; goto nextTpl; }
                         }
                 nextTpl: ;
             }
@@ -14900,7 +14984,10 @@ public partial class Game
 
         if (fails.Count > 0) return "ARENASITETEST: FAIL " + string.Join(" | ", fails);
         return $"ARENASITETEST: PASS ({Maps.Layouts.Length} templates well-formed; parser + cardinality + "
-             + $"seal-detection hold; AnySiteTemplates={Maps.AnySiteTemplates}; {eLeg})";
+             + $"seal-detection hold; AnySiteTemplates={Maps.AnySiteTemplates} with the glyphs forced ON "
+             + $"(shipped default is OFF — see docs/measurements/p49/); {eLeg})";
+        }
+        finally { Maps.SiteGlyphs = glyphsWere; }
     }
 
 }

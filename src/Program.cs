@@ -305,6 +305,16 @@ public static class Program
         // **A GAMEPLAY FLAG READ AFTER THE BATCH ENTRY POINT IS A FLAG THAT DOES NOT EXIST.**
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGEARENAS") == "0") Maps.EdgeArenas = false;
 
+        // P49 — the redrawn CITADEL's objective SITES, DEFAULT OFF because the round said so:
+        // a terminal behind one door with nothing seated inside takes HACK to 90%+ at every rung
+        // and costs ~2.6 meaningful choices per turn. `=1` turns them on and is the arm that round
+        // was read on; `=0` is the shipped default, stated explicitly. A different dial from
+        // SIGHTLINE_EDGEARENAS on purpose: that one removes the ROOM as well, which would price
+        // P48 and P49 together (L7's lesson).
+        string siteGlyphEnv = Environment.GetEnvironmentVariable("SIGHTLINE_SITEGLYPHS");
+        if (siteGlyphEnv == "1") Maps.SiteGlyphs = true;
+        if (siteGlyphEnv == "0") Maps.SiteGlyphs = false;
+
         // P48 — SIGHTLINE_MAP now reaches the BALANCE BATCH as well as the shot/autoplay paths.
         //
         // It is here because P48's own round could not see its own lever: one arena in thirty-five,

@@ -47,10 +47,14 @@ public static partial class Maps
         var fails = new List<string>();
         var detail = new System.Text.StringBuilder();
         bool savedEdges = Edges.Enabled;
+        bool savedGlyphs = SiteGlyphs;
 
         try
         {
             Edges.Enabled = true;
+            // P49 ships the site glyphs OFF (the round said so), so the legs below turn them ON
+            // explicitly: a gate that only ever sees the shipped default cannot see the feature.
+            SiteGlyphs = true;
 
             // ── (A) INERTNESS, ASSERTED. Every shipped template is single-resolution, so no board
             // changes and the CRN stream is untouched. The reference-identity check is the strong
@@ -114,7 +118,58 @@ public static partial class Maps
                     int leak = 0;
                     for (int x = 6; x <= 9; x++) for (int y = 3; y <= 6; y++) if (cs[x, y] >= 0) leak++;
                     if (leak != 0) fails.Add($"(A) {leak} of 16 CITADEL interior tiles stay reachable with its door sealed — the walls leak");
-                    detail.Append($"CITADEL: {cover} cover tiles, sealed leak {leak}; ");
+                    // ── P49: THE SITES ARE INSIDE THE ROOM, AND THAT IS THE WHOLE CLAIM ────
+                    // A terminal in a room is only a reason to go in if the room is the only way
+                    // to it. Both sites must be interior tiles, and both must go dark when the
+                    // one door is sealed — the same measurement as the room itself, aimed at the
+                    // thing the mission converges on.
+                    var sites = new List<(char g, int x, int y)>();
+                    for (int y = 0; y < TemplateH; y++)
+                        for (int x = 0; x < TemplateW; x++)
+                            if (cit.Tiles[y][x] is 'T' or 'C' or 'X' or 'E') sites.Add((cit.Tiles[y][x], x, y));
+                    detail.Append($"CITADEL: {cover} cover tiles, sealed leak {leak}, sites {sites.Count}; ");
+                    if (SiteGlyphs)
+                    {
+                        if (sites.Count != 2) fails.Add($"(A) the redrawn CITADEL declares {sites.Count} sites, expected 2 (T and C)");
+                        foreach (var (g2, sx, sy) in sites)
+                        {
+                            if (sx < 6 || sx > 9 || sy < 3 || sy > 6)
+                                fails.Add($"(A) site '{g2}' at {sx},{sy} is OUTSIDE the room — it is not a reason to go in");
+                            if (cs[sx, sy] >= 0)
+                                fails.Add($"(A) site '{g2}' at {sx},{sy} is still reachable with the door sealed");
+                        }
+                        if (!AnySiteTemplates) fails.Add("(A) AnySiteTemplates is false with two glyphs declared");
+                    }
+
+                    // ── P49: THE GLYPH STRIP IS EXACT. `CitadelEdgedNoSites` is DERIVED rather
+                    // than hand-written precisely so it cannot drift — and this is what proves the
+                    // derivation touches the site cells and nothing else, so `SIGHTLINE_SITEGLYPHS=0`
+                    // is the pre-P49 room and not a subtly different board.
+                    {
+                        var a = CitadelEdged; var b = CitadelEdgedNoSites;
+                        if (a.Length != b.Length) fails.Add("(A) the stripped CITADEL has a different row count");
+                        else
+                        {
+                            int diffs = 0, wrong = 0;
+                            for (int i = 0; i < a.Length; i++)
+                                for (int c = 0; c < a[i].Length; c++)
+                                    if (a[i][c] != b[i][c])
+                                    {
+                                        diffs++;
+                                        if (!(a[i][c] is 'T' or 'X' or 'E' or 'C' or 'P' or 'A') || b[i][c] != '.') wrong++;
+                                    }
+                            if (diffs != sites.Count) fails.Add($"(A) the strip changed {diffs} cells for {sites.Count} sites");
+                            if (wrong != 0) fails.Add($"(A) the strip changed {wrong} cells that are not a site glyph -> floor");
+                        }
+                        // and with the dial off, the arena really has no sites and the gate follows
+                        SiteGlyphs = false;
+                        bool anyOff = AnySiteTemplates;
+                        var stripped = ArenaAt(CitadelIndex);
+                        SiteGlyphs = true;
+                        int leftOver = stripped.Tiles.Sum(r => r.Count(c => c is 'T' or 'C' or 'X' or 'E' or 'P' or 'A'));
+                        if (leftOver != 0) fails.Add($"(A) SIGHTLINE_SITEGLYPHS=0 left {leftOver} glyphs in the arena");
+                        if (anyOff) fails.Add("(A) AnySiteTemplates stayed true with the glyphs stripped — PlanBoard would still spend the gate roll");
+                    }
                 }
             }
 
@@ -227,12 +282,14 @@ public static partial class Maps
                 }
             }
         }
-        finally { Edges.Enabled = savedEdges; }
+        finally { Edges.Enabled = savedEdges; SiteGlyphs = savedGlyphs; }
 
         return fails.Count == 0
             ? "ARENAEDGETEST: PASS (exactly one arena is double-resolution (CITADEL) and every other is passed "
               + "through by reference; SIGHTLINE_EDGEARENAS=0 hands back the original array itself; the redrawn "
-              + "CITADEL spends no tile on cover and its interior is sealed without its door; the hand-drawn "
+              + "CITADEL spends no tile on cover, its interior is sealed without its door, and both of its "
+              + "objective sites are inside that room and sealed with it; the glyph strip touches exactly the "
+              + "site cells and takes AnySiteTemplates down with it; the hand-drawn "
               + "fixture parses to exactly 18 walls and 1 "
               + "door with nothing stray; five malformed forms are each refused with a reason; on a real board the "
               + "interior is reachable through the door and unreachable without it, and sight stops at a wall and "

@@ -2705,7 +2705,19 @@ public static class Mission
         else return spent;                                  // procedural: literal sites, gate spent
         if (cand < 0 || cand >= Maps.Layouts.Length) return spent;
 
-        var tpl = Maps.Layouts[cand];
+        // P49 — THE EFFECTIVE ARENA, NOT THE RAW TEMPLATE ROW.
+        //
+        // This read was `Maps.Layouts[cand]`, and it was correct until P47 made a template able to
+        // be DOUBLE-RESOLUTION and P48 made one of them so. After that it handed the site planner
+        // the LEGACY 11-row CITADEL — which declares nothing — so `plan.AnyArena` came back false
+        // and the arena-owned path silently declined on the one arena that had sites to offer. It
+        // was invisible in P48 (no template declared a glyph yet) and armed the moment P49 did: a
+        // forced-CITADEL HACK mission built a PROCEDURAL board with a literal terminal on it, which
+        // is exactly the failure P26 was written to end. The screenshot found it; nothing else
+        // could have, because every assertion in the tree was about the templates rather than
+        // about what `Build` stamps.
+        if (!Maps.TryParse(Maps.Source(cand), out Maps.Arena arena, out _)) return spent;
+        var tpl = arena.Tiles;
         if (tpl.Length != Cfg.GridH) return spent;
         for (int y = 0; y < tpl.Length; y++) if (tpl[y].Length != Cfg.GridW) return spent;
         if (!ReadSitesWellFormed(tpl, out _)) return spent;

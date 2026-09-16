@@ -19557,3 +19557,85 @@ for.
   is deliberately separate.
 * Thirty-four arenas are still single-resolution. The forced instrument means each one can now be
   priced on its own — but at ~20 minutes a round, pricing all of them is a program, not a wave.
+
+## P49. SOMETHING WORTH GOING IN FOR — measured, and the answer was no
+
+P48 gave CITADEL an inside. This puts the objective in it: `T` seats the HACK terminal in the
+interior's far corner from the room's one door, `C` seats the RESCUE captive in the other. It is the
+commit that finally ARMS P26, three programs after P26 shipped — `Maps.AnySiteTemplates` flips true,
+`Mission.PlanBoard` starts taking over the arena gate, and `ARENASITETEST` leg (E), written
+specifically to stay SKIPPED until this day, arms.
+
+### The instrument: doubly forced
+
+P48 established that a single arena cannot be priced through the shipped distribution. This lever is
+narrower still — it only bites on the objectives the arena declares — so the instrument forces BOTH
+axes: `SIGHTLINE_MAP=4 SIGHTLINE_OBJ=hack`, every mission a HACK on CITADEL. The `ARM CHECK` asserts
+the double force on the artifact itself (`byArena == {4}`, `byObjective == {Hack}`, all 96 chunks),
+because P48 was bitten twice by a forcing flag that silently did nothing.
+
+### Resolved at every rung, and it is a disaster
+
+    rung    n    OFF%    ON%   delta   n_disc   MDE       z
+    h0    320    66.2   91.9   +25.6      118  9.50   +7.55
+    h4    320    40.0   94.1   +54.1      179 11.71  +12.93
+    h8    320    18.1   90.6   +72.5      234 13.38  +15.17
+    POOLED 960 pairs: n_disc = 531, delta +50.7, McNemar z = +21.13
+
+**Ninety per cent at every rung, including the apex.** h8 goes 18.1 -> 90.6: heat stops mattering,
+which is on its own diagnostic — a rung that buys nothing is a mission difficulty cannot reach.
+
+Decision richness collapses, resolved at every rung on every metric:
+
+    meaningfulChoicesPerTurn   h0 4.059 -> 1.179 (t -51.5)   h4 3.932 -> 1.340   h8 2.059 -> 0.772
+    turnsWithAShotPct          h0 54.31 -> 36.75 (t -19.2)   h4 50.41 -> 37.16
+    soldier deaths 5,592 -> 1,410 (-75%)   losses 1,091 -> 249   mission 4.11 -> 3.37 turns
+
+### The finding, which is the durable half
+
+**A terminal behind one door with nothing seated inside is not a reason to go in. It is a place the
+fight cannot follow you into.** The squad walks in, hacks, and wins; almost nobody dies; the mission
+ends in three turns; the player makes one meaningful choice a turn instead of four.
+
+Three waves have now measured three versions of the same object and they line up:
+
+* **P42** — a procedural rectangle of wall: cover with no reason to enter. Buys HUNKERING, costs
+  0.3-0.6 choices/turn.
+* **P48** — a room with a door and a firing platform: trades POSITION choices for TARGET choices;
+  win rate bounded and slightly positive.
+* **P49** — the same room with the objective inside and nothing contesting it: **removes the fight.**
+
+**Default OFF**, as `Mission.Buildings` has been since P42. The machinery is right and is kept. What
+is missing is a GARRISON — P26 shipped an `A` enemy-pod anchor glyph and no template has ever used
+it. A room you must FIGHT your way into is a different object again, and it is the next lever.
+
+### The defect this round found, which nothing else could have
+
+`Mission.PlanBoard` read `Maps.Layouts[cand]` — the RAW template row — and P47 had made a template
+able to be double-resolution while P48 made one of them so. The site planner was handed the LEGACY
+11-row CITADEL, saw no glyphs, and silently declined the arena-owned path on the one arena that had
+sites to offer: a forced-CITADEL HACK mission built a PROCEDURAL board with a literal terminal on
+it. Invisible in P48 (no glyph existed), armed the instant P49 added one.
+
+**A screenshot found it.** Every assertion in the tree was about the TEMPLATES; nothing asked what
+`Build` actually stamped. `ARENASITETEST` legs (A), (B) and (E) now read the effective arena through
+`Maps.Source`, and (E) counts an EDGE as terrain at a site — without which a room built entirely of
+boundaries reports "no terrain at the site" and the gate fails the one template doing it right.
+
+### And a gate that was never as pinned as it claimed
+
+`SIGHTLINE_BOARDTEST`'s cover-merge gate picked its probe pair from whatever board the seed dealt,
+and a volume's procedural material is keyed on its root tile INDEX — so P49's extra RNG draws moved
+the pair from (9,7) to (13,7), changed the material, and the SAME merged volume read a 4px trough
+against a `<= 3` threshold. The predicate is also a RATIO of the top face's own median, which moves
+with the biome palette (89.2 luma on one board, 54.7 on another). Measured over six positions:
+
+    merged, bright board    1  1  1  1  1  1          median 1
+    merged, dark board      4  1  5  1  2  1          median 1.5
+    SIGHTLINE_COVERMERGE=0 10 12  3  7  7 15          median 7
+
+**The WORST is not a usable statistic in either direction** — a merged volume reaches 5 and the
+UNMERGED control reaches 3. The gate now stamps six pairs and reads the MEDIAN, which separates them
+by a factor of four and cannot be moved again by an upstream change that re-deals the world. Its own
+header said "Pin the world"; a SEED pins a board only while nothing upstream re-deals it, which is
+W1's lesson one layer down.
