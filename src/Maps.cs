@@ -49,9 +49,22 @@ public static partial class Maps
     /// field initializers in declaration order, so an eager `= ComputeAnySiteTemplates()` would
     /// read a null Layouts and throw at type init.
     static int _anySite = -1;
+    static bool _anySiteFor, _anySiteGlyphs;
     public static bool AnySiteTemplates
     {
-        get { if (_anySite < 0) _anySite = ComputeAnySiteTemplates() ? 1 : 0; return _anySite == 1; }
+        get
+        {
+            // P49: the cache must follow BOTH dials. It was a one-shot latch, which is correct while
+            // nothing can change the answer — and the moment a template declares a glyph behind a
+            // switch, a latched `true` makes `SIGHTLINE_SITEGLYPHS=0` a HALF restore: PlanBoard
+            // would keep spending the arena gate's roll on a tree with no sites in it.
+            if (_anySite < 0 || _anySiteFor != EdgeArenas || _anySiteGlyphs != SiteGlyphs)
+            {
+                _anySiteFor = EdgeArenas; _anySiteGlyphs = SiteGlyphs;
+                _anySite = ComputeAnySiteTemplates() ? 1 : 0;
+            }
+            return _anySite == 1;
+        }
     }
 
     static bool ComputeAnySiteTemplates()
@@ -217,39 +230,101 @@ public static partial class Maps
 
     public static bool EdgeArenas = true;
 
+    // ══ P49 — SOMETHING WORTH GOING IN FOR ══════════════════════════════════════════════════
+    /// P48 gave CITADEL an inside. This puts something in it.
+    ///
+    /// P42's finding was that a rectangle of wall buys HUNKERING, because it gives cover without
+    /// giving a REASON to go in; P48's forced round then measured that the room trades POSITION
+    /// choices for TARGET choices, which is a different trade but still not a reason. The reason is
+    /// the objective: `T` seats the HACK terminal in the interior's far corner from the door, and
+    /// `C` seats the RESCUE captive in the other. On those two objectives the fight now converges
+    /// inside a room with one way in — which is the thing thirty-five arenas could never say,
+    /// because before P26 every site was a LITERAL tile with a bare 3x3 punched around it.
+    ///
+    /// THIS IS THE COMMIT THAT ARMS P26, three programs after P26 shipped. `Maps.AnySiteTemplates`
+    /// flips true here, `Mission.PlanBoard` starts taking over the arena gate, and
+    /// `ARENASITETEST` leg (E) — written in P26 specifically to stay SKIPPED until this day —
+    /// arms. It is a separate lever from P48's room on purpose (L7: two measured together do not
+    /// resolve), and it has its own dial.
+    ///
+    /// ⚠ **IT DEFAULTS OFF, AND THE MEASUREMENT IS WHY.** Priced on the doubly-forced instrument
+    /// (`SIGHTLINE_MAP=4 SIGHTLINE_OBJ=hack`, so every mission is a HACK on this arena), 960 CRN
+    /// pairs per rung, `docs/measurements/p49/`:
+    ///
+    ///     win rate   h0 66.2 -> 91.9   h4 40.0 -> 94.1   h8 18.1 -> 90.6   pooled +50.7, z +21.1
+    ///     choices    h0 4.06 -> 1.18   h4 3.93 -> 1.34   h8 2.06 -> 0.77   every rung RESOLVED
+    ///     shots      turnsWithAShot 54.3% -> 36.8%;  soldier deaths 5,592 -> 1,410;  turns 4.1 -> 3.4
+    ///
+    /// A terminal behind one door with NOTHING SEATED INSIDE is not a reason to go in — it is a
+    /// place the fight cannot follow you into. The squad walks in, hacks, and wins at 90%+ at every
+    /// rung including the apex, where heat stops mattering at all. That is the signature of an
+    /// UNCONTESTED objective, and it removes the fight rather than concentrating it.
+    ///
+    /// The machinery is right and is kept: the format expresses the room, `PlanBoard` seats the
+    /// sites in it, and the gates hold. What is missing is a GARRISON — P26's `A` enemy-pod anchor
+    /// glyph, still unused by every template. `SIGHTLINE_SITEGLYPHS=1` turns the sites on and is
+    /// the arm that round was read on.
+    public static bool SiteGlyphs = false;
+
+    static string[] _stripped;
+
+    /// The glyph-free form of `CitadelEdged`: every site glyph replaced by open floor. Derived, not
+    /// a second copy — a hand-maintained twin of a 23-row template is a transcription error waiting
+    /// to happen, and `EdgeSelfTest` asserts the two differ ONLY in the glyph cells.
+    public static string[] CitadelEdgedNoSites
+    {
+        get
+        {
+            if (_stripped == null)
+            {
+                _stripped = new string[CitadelEdged.Length];
+                for (int i = 0; i < CitadelEdged.Length; i++)
+                {
+                    var row = CitadelEdged[i].ToCharArray();
+                    for (int c = 0; c < row.Length; c++)
+                        if (row[c] is 'T' or 'X' or 'E' or 'C' or 'P' or 'A') row[c] = '.';
+                    _stripped[i] = new string(row);
+                }
+            }
+            return _stripped;
+        }
+    }
+
     public static readonly string[] CitadelEdged =
     {
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . . . . . . . . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . . . . . . . . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . . . . . . . . . . . . . . ",
-            "+ + + + + + +-+-+-+-+ + + + + + + + +",
-            " . . . . . .|. . . .|. . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . .|. ^ ^ .|. . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . .+. ^ ^ .|. . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . .|. . . .|. . . . . . . . ",
-            "+ + + + + + +-+-+-+-+ + + + + + + + +",
-            " . . . . . . . . . . . . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . . . . . . . . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . . . . . . . . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
-            " . . . . . . . . . . . . . . . . . . ",
-            "+ + + + + + + + + + + + + + + + + + +",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + +-+-+-+-+ + + + + + + + +",
+        " . . . . . .|. . . T|. . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . .|. ^ ^ .|. . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . .+. ^ ^ .|. . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . .|. . . C|. . . . . . . . ",
+        "+ + + + + + +-+-+-+-+ + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
     };
 
     /// The SOURCE rows for `Layouts[i]` — the redrawn form where one exists and the flag is on.
     public static string[] Source(int i)
-        => EdgeArenas && i == CitadelIndex ? CitadelEdged : Layouts[i];
+        => EdgeArenas && i == CitadelIndex
+             ? (SiteGlyphs ? CitadelEdged : CitadelEdgedNoSites)
+             : Layouts[i];
 
     static Arena[] _arenas;
-    static bool _arenasFor;      // which arm `_arenas` was parsed for
+    static bool _arenasFor, _arenasGlyphs;   // which arms `_arenas` was parsed for
 
 
     /// The parsed form of `Layouts[i]`, cached. Parsing is pure and the templates are `const`-ish,
@@ -257,10 +332,10 @@ public static partial class Maps
     /// is declared below and C# runs static initializers in declaration order.
     public static Arena ArenaAt(int i)
     {
-        if (_arenas == null || _arenasFor != EdgeArenas)
+        if (_arenas == null || _arenasFor != EdgeArenas || _arenasGlyphs != SiteGlyphs)
         {
             _arenas = new Arena[Layouts.Length];
-            _arenasFor = EdgeArenas;
+            _arenasFor = EdgeArenas; _arenasGlyphs = SiteGlyphs;
             for (int k = 0; k < Layouts.Length; k++)
                 if (!TryParse(Source(k), out _arenas[k], out string why))
                     throw new InvalidOperationException($"Maps arena {k} is malformed: {why}");

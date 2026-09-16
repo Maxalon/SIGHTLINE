@@ -7,6 +7,26 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P49 "SOMETHING WORTH GOING IN FOR" (2026-09-16)
+
+P49 put the HACK terminal and the RESCUE captive inside P48's room, priced it on a doubly-forced
+instrument, and **shipped it OFF**: an uncontested objective behind one door takes HACK to 90%+ at
+every rung and costs 2.6 meaningful choices a turn. `SIGHTLINE_SITEGLYPHS=1` turns it on.
+
+- [ ] **1. GARRISON THE ROOM. This is the top item, and P49 is the argument for it.** P26 shipped an
+      `A` ENEMY-POD ANCHOR glyph and no template has ever used it. A room you must fight your way
+      into is a different object from a room with the prize already in it — and P49 measured exactly
+      how bad the second one is (soldier deaths −75%, missions 4.1 → 3.4 turns, the apex rung
+      buying nothing). Seat a pod inside, re-run P49's own round with the sites ON in both arms so
+      the garrison is the only lever, and read it against `docs/measurements/p49/`.
+- [ ] **2. Only then reconsider the default.** The sites stay off until a room is worth entering.
+      Three waves have now priced three versions of this object (P42 a rectangle, P48 a room, P49 a
+      room with the prize in it); the fourth is the one that might earn a default.
+- [ ] **3. A second door is the cheaper alternative and is untested.** A single choke is what lets
+      the squad hold the room for free; two entrances make holding it a CHOICE. It costs one glyph
+      change and one round, and it does not need the AI to do anything new.
+
+
 ## OPEN — left by PARALLAX P48 "THE FIRST ROOM" (2026-09-16)
 
 P48 redrew CITADEL on the edge layer — walls on the boundaries, an interior, a firing platform, one
