@@ -19712,6 +19712,104 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P54. THE APEX FAILS DIFFERENTLY — and three waves measured the wrong subsystem
+
+P53 left the pattern as the top roadmap item: h8 had declined to respond to hostile accuracy (P24),
+finale bodies and stats (L7/P23), and room geometry (P53). The item said the first question was
+answerable from the existing archive with **no new compute**, and it was — every chunk since THE
+HEAT PIN carries `campaigns[]` with `lossCause`, `endMission` and `endObjective`, and **nothing in
+this project had ever cross-tabbed them by rung.**
+
+### The answer, replicated on four independent unforced rounds
+
+    round    h0 npc-death %   h4      h8     h8 losses ending at the FINALE
+    l6            0.4%       1.5%   26.4%            14.7%
+    l7            0.0%       2.1%   26.4%            16.5%
+    p23           0.0%       2.2%   27.1%            15.8%
+    p24           0.9%       2.9%   27.0%            16.1%
+
+**At heat 8, 26.8% of campaign losses are the PROTECTED NPC DYING — not a squad wipe. At heat 0 it
+is 0.38%.** Pooled over 5,365 h8 losses: RUN OVER 72.1%, CAPTIVE LOST 16.6%, VIP LOST 10.3%,
+CAPTIVE ABANDONED 0.2%, STALEMATE 0.9%. Rescue 63% / Escort 37% of the NPC deaths; they land on
+m3/m4/m5 (92%) and **never on m6**, because the finale is never a Rescue or an Escort.
+
+### Why all three levers missed
+
+**The finale is where the FEWEST campaigns end at h8** — 16%, down from ~30% at h4 — and it carries
+**0%** of the NPC deaths. L7/P23's finale lever could reach at most a sixth of the apex's losses and
+none of the bucket that grew. **And a quarter of the apex's losses are one fragile unit being
+focused down**, which is not a shot-exchange problem: P24's five points off every hostile's aim is a
+small correction to the 72% and close to nothing for an asset under concentrated fire.
+
+> **The apex is not unresponsive. Three waves measured the 73%, and the thing that grew from 0.4%
+> to 27% was never measured at all.**
+
+### The cause is one function and it has no heat term
+
+`Mission.MakeVip` — the single funnel for BOTH assets, since `Game.SetupMission` builds the RESCUE
+captive from it (`Vip = Mission.MakeVip(n); Vip.Name = "CAPTIVE";`):
+
+    int depth = Math.Max(1, DepthFor(missionNum));
+    int hp = 14 + 2 * depth;            // m2~18, m4~22, m6~26
+    u.Armor = depth / 2;                // m2~1,  m4~2,  m6~3
+
+**A pure function of mission depth. Heat does not appear.** Heat 8 gives the force around it ~+4
+bodies, ~+4 stat (force-wide +1 HP and +1 Aim per rung), +1 weapon damage from mission 3, and AI
+tier 2. The asset the objective is ABOUT is the one thing on the board whose survivability is
+constant in heat.
+
+### And the same defect was already found once, on the other axis
+
+`MakeVip`'s own comment records P14 fixing this exact shape for the MODES — *"the escort asset
+pinned at 16 HP / 0 armor on every rung"* — because SKIRMISH and DAILY passed a literal `1` for
+depth. **The campaign has the identical structure against HEAT, in the same function, and nobody
+noticed, because the campaign's `DepthFor(n) == n` made the depth axis look handled.** Two axes
+exist; one is wired. This is C1's defect class again (a table that is right and a consumer that does
+not read it), and L7's (the cumulative vector is correct and the BUILD does not honour it).
+
+### Item 2, run immediately: the per-objective win rates, and they are a CLIFF
+
+The first half reports LOSS-CAUSE shares, which is not a win rate (W8's rule). `objective_rungs.py`
+recomputes the thing actually at stake from `byObjectiveByMission`, n-weighted, same four rounds:
+
+    objective      h0      h4      h8    h4->h8        MID-RUN (m3-m5)
+    Rescue       97.9    96.2    40.0    -56.2      97.3 / 96.2 / 30.4
+    Escort       95.3    91.5    42.8    -48.7      95.6 / 91.3 / 36.2
+    Sabotage     75.0    66.7    43.6    -23.1
+    Evac         90.8    83.6    64.0    -19.6
+    Decapitate   55.8    35.8    18.4    -17.4
+    Hack         73.6    64.6    52.0    -12.6
+    Eliminate    83.1    78.6    76.4     -2.2
+    Defend       70.3    59.9    71.1    +11.2
+
+**The two objectives that go through `Mission.MakeVip` are the two flattest on the ladder and then
+fall off a cliff.** Every other objective degrades gradually. Rescue and Escort are essentially FREE
+for two-thirds of the ladder — 96-98% is not an objective — and then a wall. That is precisely the
+signature of an asset whose survivability is constant in heat.
+
+It also **reproduces W8's artifact as a control on the method**: `Eliminate` reads 83.1/78.6/76.4
+pooled and **44.8/21.7/6.0** on mid-run cells alone — the pooled row is mission-1s. And **`Defend`
+is NON-MONOTONE** (70.3/59.9/71.1 on n>3,000 per cell), which is its own unexplained anomaly and not
+this wave's.
+
+### ⚠ The obvious lever fixes ONE end, and must not be sold as fixing both
+
+"Give the asset a heat term" addresses the cliff and does **nothing** about the 96-98%. The
+principled dose (`Heat.StatDelta` for HP, `Heat.DmgDelta` for armor, both clamped at 0) happens to
+be nearly harmless at the low rungs — StatDelta is 0 at h0 and +1 at h4, and +1 HP against 96.2% is
+not a change — but **that is a property to VERIFY in the round, not to assume.**
+
+**These are TWO defects.** The asset does not scale with heat (the cliff), and the objective is
+uncontested at low heat (the 96-98%). A heat term is a candidate for the first only.
+
+### What this does NOT establish
+
+It is **not a priced lever** — nothing here says what a heat term on the asset would buy, only where
+the losses are. The 73% remains the majority and is not explained. And these are LOSS-CAUSE shares,
+not per-objective win rates; W8's rule against conflating those still applies.
+
+Raw + the script: `docs/measurements/p54/`.
+
 ## P53. THE CONTROL — the same lever on two objectives moves opposite ends of the ladder
 
 P52 published a rule this morning and the roadmap's next item was to BUILD its prediction. **That

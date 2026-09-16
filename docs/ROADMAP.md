@@ -7,6 +7,46 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P54 "THE APEX FAILS DIFFERENTLY" (2026-09-16)
+
+P54 answered P53's top item from the existing archive with no new compute. **At h8, 26.8% of
+campaign losses are the protected NPC dying; at h0 it is 0.38%** — replicated on four unforced
+rounds, 5,365 pooled h8 losses. Rescue 63% / Escort 37%, landing m3/m4/m5 and never m6. **The finale
+is where the FEWEST campaigns end at h8** (16%). So all three apex levers were aimed at the 73%.
+Cause: `Mission.MakeVip` is `hp = 14 + 2*depth`, `armor = depth/2` — **no heat term** — while heat 8
+gives the force ~+4 bodies, ~+4 stat, +1 dmg, AI tier 2. Full analysis: `docs/measurements/p54/`.
+
+- [ ] **1. GIVE THE PROTECTED ASSET A HEAT TERM, AND PRICE IT. This is the top item.** One constant
+      in one funnel covers both objectives (the captive is a renamed VIP). **The dose should be
+      ARGUED, not searched** — the obvious principled pair is `Heat.StatDelta` for HP (the same +1
+      per rung the force gets) and `Heat.DmgDelta` for armor (exactly cancels heat's damage bump),
+      both clamped at 0 so that **h0 AND RECRUIT are provably inert** (`Heat.Active(0)` is empty,
+      and RECRUIT's StatDelta is −1 which must not shrink the asset). That clamp is worth having for
+      its own sake: it makes two rungs into inertness controls for the round.
+      Ship it with `SIGHTLINE_VIPHEAT=0` and price it on the FREE instrument (not a forced arena) at
+      h4/h6/h8. **Item 2 revised what the low rungs mean here**: h0 is a provable inertness control,
+      but h4 is NOT — Rescue/Escort sit at 96.2%/91.5% there, so the round must report h4 as data
+      and show the +1 HP did not make an already-free objective freer.
+- [x] **2. RECOMPUTE THE RESCUE AND ESCORT WIN RATES BY RUNG. DONE — `objective_rungs.py`, and it
+      changed item 1.** Rescue **97.9 / 96.2 / 40.0**, Escort **95.3 / 91.5 / 42.8** (mid-run
+      97.3/96.2/**30.4** and 95.6/91.3/**36.2**). The two `MakeVip` objectives are the two FLATTEST
+      on the ladder and then fall off a cliff; every other objective degrades gradually. **So they
+      are broken at BOTH ends and that is TWO defects** — the asset does not scale with heat (the
+      cliff) AND the objective is uncontested below it (96-98% is not an objective). A heat term is
+      a candidate for the first only and must not be written up as fixing both.
+      Method controls in the same run: W8's artifact reproduces (`Eliminate` 83.1 pooled vs 44.8
+      mid-run), and **`Defend` is NON-MONOTONE** (70.3 / 59.9 / 71.1, n>3,000 per cell) — its own
+      unexplained anomaly, and a candidate for its own wave.
+- [ ] **3. THE OTHER 73% IS STILL UNEXPLAINED.** RUN OVER is the majority at every rung and P54 says
+      nothing about why it grows. `soldierDeathsByEnemy`, `shotGap` and `actionMix` are in the
+      archive and have never been cross-tabbed by rung either. Same method, no new compute.
+- [ ] **4. AUDIT THE OTHER DEPTH-ONLY CONSUMERS.** `MakeVip` was found because a loss cross-tab
+      pointed at it. P14's own comment lists FOUR consumers of "how deep is this fight" and fixed
+      them on the MODE axis; **the HEAT axis was never checked for any of them.** `Combat.HvtHpBonus`
+      (the Decapitate HVT) has exactly the same shape and Decapitate is a finale objective. Grep for
+      `DepthFor` and ask, per call site, whether heat belongs there too.
+
+
 ## OPEN — left by PARALLAX P53 "THE CONTROL" (2026-09-16)
 
 P53 ran the control P52's rule never had and **the rule is withdrawn as an explanation**. Removing
@@ -21,7 +61,10 @@ the room's required site, CRN-paired on one instrument:
 
 Full round: `docs/measurements/p53/`, DEVLOG §P53.
 
-- [ ] **1. THE APEX IS THE PROBLEM, AND IT IS BIGGER THAN THIS ARENA. This is the top item.**
+- [x] **1. THE APEX IS THE PROBLEM, AND IT IS BIGGER THAN THIS ARENA. ANSWERED BY P54** — see its
+      list above; the pattern was three levers aimed at the 73% while a different failure mode grew
+      from 0.4% to 27%. Original text:
+- [x] **1. (answered) THE APEX IS THE PROBLEM, AND IT IS BIGGER THAN THIS ARENA.**
       The h8 rung has now declined to respond to **hostile accuracy** (P24: −0.6 / +0.3 / −0.2, the
       round's tightest MDE), to **finale bodies and stats** (L7/P23: the ceiling defect was real,
       fixed, and bought −1.9), and now to **room geometry** (this round, both objectives). Three
