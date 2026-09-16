@@ -40,7 +40,14 @@ gives the force ~+4 bodies, ~+4 stat, +1 dmg, AI tier 2. Full analysis: `docs/me
 - [ ] **3. THE OTHER 73% IS STILL UNEXPLAINED.** RUN OVER is the majority at every rung and P54 says
       nothing about why it grows. `soldierDeathsByEnemy`, `shotGap` and `actionMix` are in the
       archive and have never been cross-tabbed by rung either. Same method, no new compute.
-- [ ] **4. AUDIT THE OTHER DEPTH-ONLY CONSUMERS.** `MakeVip` was found because a loss cross-tab
+- [x] **4. AUDIT THE OTHER DEPTH-ONLY CONSUMERS. DONE — one of four, and it is `MakeVip`.**
+      `OpenerTrim` is fine (a grace that subtracts bodies; heat reaches the count it trims from).
+      `Combat.HvtHpBonus` is defensible (heat reaches the BODY through `Mission.MakeHostile`; only
+      the target premium is depth-scaled, and W8 made its three constants pinnable). DEFEND waves
+      read `Heat.StatDelta` explicitly. **The hunt is closed; do not re-audit this list.** Also
+      recorded: in `Game.SetupMission` the asset is built sixteen lines BEFORE `int heat =
+      _run.HeatLevel` is even read — P48's shape one level in. Original text:
+- [x] **4. (done) AUDIT THE OTHER DEPTH-ONLY CONSUMERS.** `MakeVip` was found because a loss cross-tab
       pointed at it. P14's own comment lists FOUR consumers of "how deep is this fight" and fixed
       them on the MODE axis; **the HEAT axis was never checked for any of them.** `Combat.HvtHpBonus`
       (the Decapitate HVT) has exactly the same shape and Decapitate is a finale objective. Grep for

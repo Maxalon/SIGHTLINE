@@ -126,6 +126,35 @@ rate is not a change — but that is a property to VERIFY in the round, not to a
 objective is uncontested at low heat (the 96-98%). A heat term is a candidate for the first only,
 and a round that ships it must report the low rungs as data rather than waving at them.
 
+## ITEM 4: THE AUDIT OF THE OTHER DEPTH-ONLY CONSUMERS — one of four, and it is this one
+
+`MakeVip` was found because a loss cross-tab pointed at it, which is not a method. P14's own comment
+lists FOUR consumers of "how deep is this fight" and fixed them all on the MODE axis; **the HEAT axis
+had never been checked for any of them.** Checked now, by reading each call site rather than the
+comment above it:
+
+| consumer | depth | heat | verdict |
+|---|---|---|---|
+| `Mission.OpenerTrim` | `DepthFor(n)` | reaches it via the count it trims FROM | **fine** — it is a mission-1/2 grace that SUBTRACTS bodies; X2 gave the base force its ramp separately |
+| `Mission.MakeVip` | `14 + 2*depth`, `armor depth/2` | **NOWHERE** | **THE DEFECT** |
+| `Combat.HvtHpBonus` | `6 + 1*depth` | reaches the BODY via `Mission.MakeHostile`'s StatDelta | **defensible** — only the "this one is the target" premium is depth-scaled, and W8 made all three constants pinnable for exactly this question |
+| `Game.SpawnReinforcements` / `SpawnDefendWave` | `DepthFor(_run.Mission)` | reads `Heat.StatDelta(_run.HeatLevel)` explicitly | **wired** |
+
+**One of four is genuinely unwired, and it is the one the loss cross-tab found.** That closes the
+hunt rather than opening it — a future session does not need to re-audit this list.
+
+### And the ORDERING is why it was easy to miss
+
+In `Game.SetupMission` the asset is built at the Escort/Rescue branches, and
+
+    int heat = _run.HeatLevel;
+
+is read **sixteen lines later**, under the comment *"Heat folds into the SAME difficulty params the
+deployment cards use."* The heat the asset should answer is not even in scope where the asset is
+constructed. That is P48's shape one level in — **a value read after the thing it should govern has
+already been built is a value that does not govern it** — and it is the second time this session
+that ordering, not logic, carried the defect.
+
 ## What this does NOT establish
 
 - **It is not a priced lever.** Nothing here says how much a heat term on the asset would buy, or

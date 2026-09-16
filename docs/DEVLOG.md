@@ -19802,6 +19802,26 @@ not a change — but **that is a property to VERIFY in the round, not to assume.
 **These are TWO defects.** The asset does not scale with heat (the cliff), and the objective is
 uncontested at low heat (the 96-98%). A heat term is a candidate for the first only.
 
+### Item 4: the audit of the other depth-only consumers — one of four
+
+`MakeVip` was found because a loss cross-tab pointed at it, which is not a method, so P14's list of
+four "how deep is this fight" consumers was checked on the HEAT axis (P14 had fixed all four on the
+MODE axis and nobody had asked the other question). Read at the call site, not from the comment:
+
+    Mission.OpenerTrim          heat reaches the count it trims FROM        fine (a m1/m2 grace)
+    Mission.MakeVip             heat reaches it NOWHERE                     THE DEFECT
+    Combat.HvtHpBonus           heat reaches the BODY via MakeHostile       defensible (target premium)
+    Game.SpawnReinforcements /  reads Heat.StatDelta explicitly             wired
+    Game.SpawnDefendWave
+
+**One of four, and it is the one the cross-tab found.** That closes the hunt rather than opening it.
+
+**And the ORDERING is why it was easy to miss**: in `Game.SetupMission` the asset is built at the
+Escort/Rescue branches and `int heat = _run.HeatLevel;` is read SIXTEEN LINES LATER. The heat the
+asset should answer is not in scope where the asset is constructed — P48's shape one level in, and
+the second time in this session that ordering rather than logic carried the defect (the first was
+`Maps`' two-dial cache against a three-dial `Source`).
+
 ### What this does NOT establish
 
 It is **not a priced lever** — nothing here says what a heat term on the asset would buy, only where
