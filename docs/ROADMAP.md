@@ -7,6 +7,28 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P51 "THE SPLIT" (2026-09-16)
+
+P51 re-ran P49's lever on an objective with THREE sites instead of one and found the easing shrinks
+with heat (+18.8 / +12.8 / +7.2) instead of exploding (+25.6 / +54.1 / +72.5), with decision richness
+UP 2.2/turn and attrition kept. **P49's collapse was the singleton objective, not the room.**
+
+- [ ] **1. MOVE `T` OUT OF THE ROOM, THEN RE-RUN P49's HACK ROUND. This is the top item and it is
+      one glyph.** CITADEL's terminal is the mission's ONLY site and it is inside the room; the
+      other four site kinds it declares are fine. Move it outside (the room keeps the captive, the
+      garrison and one of the three charges) and re-run `SIGHTLINE_MAP=4 SIGHTLINE_OBJ=hack`
+      against `docs/measurements/p49/`. If the HACK easing comes down to SABOTAGE's shape, the
+      content earns its default and `SIGHTLINE_SITEGLYPHS` can flip.
+- [ ] **2. RESCUE has the same shape as HACK and has never been measured.** `C` is exactly 0 or 1
+      per template and CITADEL's captive is inside the room — a singleton objective behind one
+      door, which is precisely the configuration P49 measured as a collapse. Either move it out
+      with `T`, or measure it (`SIGHTLINE_OBJ=rescue`) before defaulting anything on.
+- [ ] **3. The general rule this leaves for every future authored arena.** A site inside a held room
+      is good; **the mission's only site inside a held room is not.** Nothing in `src/` enforces
+      that — `ReadSitesWellFormed` checks cardinality, not whether a singleton objective is sealed
+      behind one door. That check is cheap and would have caught P49 before the round did.
+
+
 ## OPEN — left by PARALLAX P50 "THE GARRISON" (2026-09-16)
 
 P50 made P26's `A` enemy-pod anchor glyph actually seat a pod (it had been parsed and discarded for
