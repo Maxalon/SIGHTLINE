@@ -42,6 +42,38 @@ public static partial class Maps
         "+ + + + + + + + + + + + + + + + + + +",
     };
 
+    /// P49's CITADEL, kept VERBATIM as the red control for P52's authoring gate. The terminal and
+    /// the captive both sit inside the walled room, behind its single door — the placement P49
+    /// measured as an uncontested mission at every heat rung and P51 diagnosed as CARDINALITY
+    /// rather than architecture. It is not reachable from any shipping path; leg (G) is its only
+    /// caller, and its only job is to be REFUSED.
+    public static readonly string[] CitadelP49 =
+    {
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . X . . . ",
+        "+ + + + + + +-+-+-+-+ + + + + + + + +",
+        " . . . . . .|. . X T|. . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . .|. ^ ^ .|. . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . .+. ^ ^ .|. . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . .|. A . C|. . . . . . . . ",
+        "+ + + + + + +-+-+-+-+ + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . X . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+        " . . . . . . . . . . . . . . . . . . ",
+        "+ + + + + + + + + + + + + + + + + + +",
+    };
+
     public static string EdgeSelfTest()
     {
         var fails = new List<string>();
@@ -138,24 +170,43 @@ public static partial class Maps
                         // outside. The point of the round is that a SINGLETON objective in a room is
                         // what P49 measured as a collapse; a three-site objective is the control.
                         if (kinds != "ACTXXX") fails.Add($"(A) the redrawn CITADEL declares '{kinds}', expected ACTXXX (anchor, captive, terminal, 3 charges)");
-                        // P51 SPLIT THE ASSERTION WITH THE DESIGN. The terminal, the captive and the
-                        // garrison belong INSIDE the room. The three sabotage charges deliberately do
-                        // NOT — exactly one of them is inside and the other two are far outside, which
-                        // is the whole lever: a mission with three places to be instead of one.
-                        int inRoom = 0, outRoom = 0;
-                        foreach (var (g2, sx, sy) in sites)
+                        // ── P52: THE SINGLETONS CAME OUT OF THE ROOM ──────────────────────────
+                        // P51 named the culprit and this is the repair. The room keeps the GARRISON
+                        // and ONE charge — a defended place worth taking, which is what a room is
+                        // for. The TERMINAL and the CAPTIVE are the two SINGLETON objectives, and a
+                        // singleton behind one door is the exact shape P49 measured as a collapse,
+                        // so both now stand outside it: `T` on the western approach to its door,
+                        // `C` far east. The assertion is the design, tile by tile, because a glyph
+                        // that drifts one column is a different mission and nothing else would say.
+                        var want = new Dictionary<char, (int x, int y, bool inside)[]>
                         {
-                            bool inside = sx >= 6 && sx <= 9 && sy >= 3 && sy <= 6;
-                            if (g2 == 'X') { if (inside) inRoom++; else outRoom++; continue; }
-                            if (!inside)
-                                fails.Add($"(A) site '{g2}' at {sx},{sy} is OUTSIDE the room — it is not a reason to go in");
-                            if (cs[sx, sy] >= 0)
-                                fails.Add($"(A) site '{g2}' at {sx},{sy} is still reachable with the door sealed");
+                            ['A'] = new[] { (7, 6, true) },
+                            ['T'] = new[] { (4, 5, false) },
+                            ['C'] = new[] { (14, 7, false) },
+                            ['X'] = new[] { (8, 3, true), (14, 2, false), (3, 8, false) },
+                        };
+                        bool Inside(int sx, int sy) => sx >= 6 && sx <= 9 && sy >= 3 && sy <= 6;
+                        foreach (var kv in want)
+                        {
+                            var got = sites.Where(z => z.g == kv.Key).Select(z => (z.x, z.y)).OrderBy(z => z.x).ThenBy(z => z.y).ToList();
+                            var exp = kv.Value.Select(z => (z.x, z.y)).OrderBy(z => z.x).ThenBy(z => z.y).ToList();
+                            if (!got.SequenceEqual(exp))
+                                fails.Add($"(A) '{kv.Key}' sits at {string.Join("/", got.Select(z => $"{z.Item1},{z.Item2}"))}, expected {string.Join("/", exp.Select(z => $"{z.Item1},{z.Item2}"))}");
                         }
-                        if (inRoom != 1 || outRoom != 2)
-                            fails.Add($"(A) the sabotage charges are {inRoom} in / {outRoom} out, expected 1 in / 2 out");
-                        // and the two outside ones must be FAR apart, or "split the squad" is a word
-                        var outs = sites.Where(z => z.g == 'X' && !(z.x >= 6 && z.x <= 9 && z.y >= 3 && z.y <= 6)).ToList();
+                        foreach (var kv in want)
+                            foreach (var (wx, wy, wIn) in kv.Value)
+                            {
+                                if (!sites.Any(z => z.g == kv.Key && z.x == wx && z.y == wy)) continue;  // reported above
+                                if (Inside(wx, wy) != wIn)
+                                    fails.Add($"(A) site '{kv.Key}' at {wx},{wy} is {(wIn ? "OUTSIDE" : "INSIDE")} the room — the design says the other");
+                                // and the room really is what makes the difference: an interior glyph
+                                // goes dark with the one door sealed, an exterior one does not.
+                                bool dark = cs[wx, wy] < 0;
+                                if (dark != wIn)
+                                    fails.Add($"(A) site '{kv.Key}' at {wx},{wy} is {(dark ? "cut off" : "still reachable")} with the door sealed — that contradicts its placement");
+                            }
+                        // the two outside charges must be FAR apart, or "split the squad" is a word
+                        var outs = sites.Where(z => z.g == 'X' && !Inside(z.x, z.y)).ToList();
                         if (outs.Count == 2 && Util.ChebyDist(outs[0].x, outs[0].y, outs[1].x, outs[1].y) < 8)
                             fails.Add($"(A) the two outside charges are only {Util.ChebyDist(outs[0].x, outs[0].y, outs[1].x, outs[1].y)} tiles apart");
                         if (!AnySiteTemplates) fails.Add("(A) AnySiteTemplates is false with glyphs declared");
@@ -329,6 +380,58 @@ public static partial class Maps
                 }
             }
 
+            // ── (G) P52: THE AUTHORING GATE, AND IT IS SHOWN TO BITE ─────────────────────────
+            // `Maps.SitesDoorLocked` is the rule P49's round cost a measured round to discover.
+            // This leg does the two things a gate in this repository has to do: run over the shipped
+            // content, and FAIL against the shape it exists to refuse. The second half is the one
+            // that matters — PARALLAX's thesis is that the checks here fail QUIET, and a gate whose
+            // red has never been seen is a comment.
+            {
+                int locked = 0;
+                for (int i = 0; i < Layouts.Length; i++)
+                {
+                    if (!TryParse(Source(i), out Arena ar, out _)) continue;
+                    if (SitesDoorLocked(ar, out string lockWhy))
+                    { locked++; fails.Add($"(G) shipped arena {i} is door-locked: {lockWhy}"); }
+                }
+                // THE RED CONTROL. `CitadelP49` is the placement P49 shipped and P51 diagnosed —
+                // the terminal and the captive both inside the room, behind the one door. The gate
+                // must refuse it, and it must name the door.
+                if (!TryParse(CitadelP49, out Arena bad, out string badWhy))
+                    fails.Add($"(G) the P49 control did not parse: {badWhy}");
+                else if (!SitesDoorLocked(bad, out string ctlWhy))
+                    fails.Add("(G) the gate ACCEPTED P49's placement — a singleton objective sealed behind one door is exactly what it exists to refuse");
+                else detail.Append($"gate: {locked} shipped arenas door-locked, P49 control refused ({ctlWhy}); ");
+
+                // AND IT DOES NOT DEPEND ON THE SESSION'S DIAL. With `Edges.Enabled` false every
+                // edge query answers None, so a gate that honoured the dial would flood an open
+                // board and clear every template silently. It forces the layer on; this asserts it.
+                {
+                    bool was = Edges.Enabled;
+                    Edges.Enabled = false;
+                    bool stillRed = TryParse(CitadelP49, out Arena b2, out _) && SitesDoorLocked(b2, out _);
+                    Edges.Enabled = was;
+                    if (!stillRed) fails.Add("(G) the gate went QUIET with SIGHTLINE_EDGES=0 — it is honouring a runtime dial instead of reading the drawn template");
+                    if (!Edges.Enabled) fails.Add("(G) the gate did not restore Edges.Enabled");
+                }
+
+                // and the rule is CARDINALITY, not the room: the same board with the terminal moved
+                // out but the three charges left as they are must PASS, and a board whose ONLY
+                // charge is the interior one must not. Built by editing the shipped template, so
+                // the two differ in one glyph and nothing else.
+                var citRows = (string[])CitadelEdged.Clone();
+                if (TryParse(citRows, out Arena shipped, out _) && SitesDoorLocked(shipped, out string sw))
+                    fails.Add($"(G) the SHIPPED CITADEL is door-locked: {sw}");
+                // strip the two OUTSIDE charges, leaving the interior one alone in its category
+                var soloRows = citRows.Select(r => r).ToArray();
+                soloRows[5]  = soloRows[5].Replace('X', '.');
+                soloRows[17] = soloRows[17].Replace('X', '.');
+                if (!TryParse(soloRows, out Arena solo, out string sowhy))
+                    fails.Add($"(G) the solo-charge control did not parse: {sowhy}");
+                else if (!SitesDoorLocked(solo, out _))
+                    fails.Add("(G) the gate ACCEPTED a sabotage objective whose only charge is behind the door — it is counting rooms, not sites");
+            }
+
             // ── (E) THE ALIASES ARE ALIASES ──────────────────────────────────────────────────
             // `|` and `-` exist so an authored map looks like the room it describes. If they meant
             // anything of their own, the format would have two vocabularies for one state.
@@ -349,9 +452,10 @@ public static partial class Maps
         return fails.Count == 0
             ? "ARENAEDGETEST: PASS (exactly one arena is double-resolution (CITADEL) and every other is passed "
               + "through by reference; SIGHTLINE_EDGEARENAS=0 hands back the original array itself; the redrawn "
-              + "CITADEL spends no tile on cover, its interior is sealed without its door, and both of its "
-              + "terminal, captive and enemy anchor are inside that room and sealed with it while its three "
-              + "sabotage charges are 1 in / 2 far outside; the glyph strip touches exactly the "
+              + "CITADEL spends no tile on cover, its interior is sealed without its door, its GARRISON and one "
+              + "sabotage charge are inside that room and sealed with it while its terminal, its captive and its "
+              + "other two charges stand outside and stay reachable; no shipped arena is door-locked and the gate "
+              + "refuses P49's placement and a lone interior charge; the glyph strip touches exactly the "
               + "site cells and takes AnySiteTemplates down with it; the hand-drawn "
               + "fixture parses to exactly 18 walls and 1 "
               + "door with nothing stray; five malformed forms are each refused with a reason; on a real board the "
