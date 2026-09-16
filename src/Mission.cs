@@ -5,7 +5,7 @@ namespace Sightline;
 
 /// Builds battlefields and squads. The player squad persists across a run
 /// (see Run); each mission regenerates the map + a scaled hostile force.
-public static class Mission
+public static partial class Mission
 {
     // Staggered deployment footprint: four soldiers across cols 0-3 in a loose wedge
     // (upper-forward / back-left / lower-forward / back-right), plus a 5th slot for the
@@ -2078,7 +2078,41 @@ public static class Mission
 
     /// The escort asset: fragile, poor aim, carries only a panicky sidearm.
     /// Lives in the player roster for one mission and never joins the persistent squad.
-    public static Unit MakeVip(int missionNum = 1)
+    // ══ P55 — THE ASSET ANSWERS HEAT ══════════════════════════════════════════════════════════
+    /// **`SIGHTLINE_VIPHEAT=0` restores the pre-P55 asset exactly** — a pure function of mission
+    /// depth, with heat reaching it nowhere.
+    ///
+    /// P54 found this by cross-tabbing `campaigns[]` out of the existing archive: **at heat 8,
+    /// 26.8% of campaign losses are the protected NPC dying; at heat 0 it is 0.38%** (four unforced
+    /// rounds, 5,365 pooled h8 losses, Rescue 63% / Escort 37%). And the per-objective win rates are
+    /// a CLIFF rather than a ladder — Rescue 97.9 / 96.2 / **40.0**, Escort 95.3 / 91.5 / **42.8**,
+    /// the two flattest objectives in the game and then a wall. That is the signature of an asset
+    /// whose survivability is constant in heat while the force around it gains ~4 bodies, ~4 stat,
+    /// +1 weapon damage and AI tier 2.
+    ///
+    /// ⚠ **THIS FIXES ONE OF TWO DEFECTS AND MUST NOT BE WRITTEN UP AS FIXING BOTH.** The other is
+    /// that 96-98% at h0/h4 is not an objective at all, and a heat term cannot touch it.
+    public static bool VipHeat = true;
+
+    /// The asset's heat surcharge, as a pair, so the self-test can assert it without rebuilding a
+    /// unit. **THE DOSE IS ARGUED, NOT SEARCHED**: HP mirrors `Heat.StatDelta` — the same +1 per
+    /// rung the ladder hands every hostile — and ARMOR mirrors `Heat.DmgDelta`, which exactly
+    /// cancels heat's +1 weapon damage. Both are CLAMPED AT ZERO, which buys two things: RECRUIT
+    /// (StatDelta −1) can never SHRINK the asset, and h0 is a provable no-op because
+    /// `Heat.Active(0)` is empty. Those two rungs are therefore inertness controls for the round.
+    ///
+    /// It is deliberately CONSERVATIVE and under-compensates on purpose: the force gained four
+    /// bodies as well as four stat points, and this answers only the stat. The claim being tested is
+    /// "the asset should answer heat AT ALL", not "restore parity". X2's precedent — build the dial,
+    /// measure the argued dose, escalate only if the round says to.
+    ///
+    /// NOTE ON THE ASSIST, because it looks like a coupling and is not: hostiles take
+    /// `statDelta - Run.AssistStatRelief`, but `Run.AssistLevel` is **zero whenever heat > 0**, so
+    /// the assist and this surcharge can never both be non-zero. No interaction exists to price.
+    public static (int hp, int armor) VipHeatBonus(int heat)
+        => VipHeat ? (Math.Max(0, Heat.StatDelta(heat)), Math.Max(0, Heat.DmgDelta(heat))) : (0, 0);
+
+    public static Unit MakeVip(int missionNum = 1, int heat = 0)
     {
         // HP 6 -> 14 (Wave A.5) -> now scales with mission depth: balance data showed Escort still
         // gating runs (~55%, many "VIP LOST") because the fragile asset carries ZERO persistent
@@ -2091,7 +2125,8 @@ public static class Mission
         // while the force around it grew by four bodies and four stat points (measured, pre-fix:
         // SIGHTLINE_MODEFORCEPROBE `VIP hp=16 armor=0` on all five rungs). Campaign-inert.
         int depth = Math.Max(1, DepthFor(missionNum));
-        int hp = 14 + 2 * depth;
+        var heatBonus = VipHeatBonus(heat);            // P55 — see VipHeatBonus for the argument
+        int hp = 14 + 2 * depth + heatBonus.hp;
         var u = new Unit
         {
             Name = "VIP", Cls = "VIP", Team = Team.Player,
@@ -2104,7 +2139,8 @@ public static class Mission
         // bought plating doesn't help the VIP, so it carries its own): every incoming hit -armor,
         // floored at 1. Paired with the HP scaling + the reduced anti-VIP AI finish-frenzy, this
         // stops the fragile asset getting deleted in one focus-fire volley over a long escort.
-        u.Armor = depth / 2;   // m2~1, m4~2, m6~3 (depth == the mission number outside the modes)
+        u.Armor = depth / 2 + heatBonus.armor;   // m2~1, m4~2, m6~3 (depth == the mission number
+                                                 // outside the modes) + P55's heat surcharge
         return u;
     }
 
