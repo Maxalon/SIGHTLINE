@@ -80,6 +80,7 @@ public static partial class Maps
         var detail = new System.Text.StringBuilder();
         bool savedEdges = Edges.Enabled;
         bool savedGlyphs = SiteGlyphs;
+        bool savedRoomSite = RoomSite;
 
         try
         {
@@ -432,6 +433,66 @@ public static partial class Maps
                     fails.Add("(G) the gate ACCEPTED a sabotage objective whose only charge is behind the door — it is counting rooms, not sites");
             }
 
+            // ── (H) P53: THE FALSIFICATION ARM IS EXACTLY ONE MOVED CHARGE ───────────────────
+            // `CitadelEdgedNoRoomSite` is DERIVED so it cannot drift from the shipped template, and
+            // this is what proves the derivation moves ONE glyph and nothing else. An arm that
+            // quietly changed a second thing would price two levers at once, which is the mistake
+            // L7 made and P23 had to unpick.
+            {
+                var a = CitadelEdged; var b = CitadelEdgedNoRoomSite;
+                if (a.Length != b.Length) fails.Add("(H) the no-room-site CITADEL has a different row count");
+                else
+                {
+                    var moved = new List<(int r, int c, char from, char to)>();
+                    for (int i = 0; i < a.Length; i++)
+                        for (int c = 0; c < a[i].Length; c++)
+                            if (a[i][c] != b[i][c]) moved.Add((i, c, a[i][c], b[i][c]));
+                    if (moved.Count != 2)
+                        fails.Add($"(H) the arm changes {moved.Count} cells, expected exactly 2 (the charge leaves, the charge lands)");
+                    int rOut = RoomChargeAt.y * 2 + 1, cOut = RoomChargeAt.x * 2 + 1;
+                    int rIn  = RoomChargeOut.y * 2 + 1, cIn = RoomChargeOut.x * 2 + 1;
+                    if (!moved.Any(m => m.r == rOut && m.c == cOut && m.from == 'X' && m.to == '.'))
+                        fails.Add($"(H) the interior charge at {RoomChargeAt.x},{RoomChargeAt.y} did not leave");
+                    if (!moved.Any(m => m.r == rIn && m.c == cIn && m.from == '.' && m.to == 'X'))
+                        fails.Add($"(H) no charge landed at {RoomChargeOut.x},{RoomChargeOut.y}");
+                }
+
+                // THE CHARGE COUNT IS THE WHOLE POINT: three either way, or this prices
+                // "how many sites" instead of "where the required one is".
+                RoomSite = false;
+                var armA = ArenaAt(CitadelIndex);
+                RoomSite = true;
+                var shipA = ArenaAt(CitadelIndex);
+                int nArm = armA.Tiles.Sum(r => r.Count(c => c == 'X'));
+                int nShip = shipA.Tiles.Sum(r => r.Count(c => c == 'X'));
+                if (nArm != 3 || nShip != 3)
+                    fails.Add($"(H) charge counts are arm {nArm} / shipped {nShip}, both must be 3");
+                if (!Mission.ReadSitesWellFormed(armA.Tiles, out string awhy))
+                    fails.Add($"(H) the arm's template is not well-formed: {awhy}");
+
+                // AND THE ARM REALLY HAS NOTHING REQUIRED IN THE ROOM — which is the hypothesis.
+                bool Inside(int x, int y) => x >= 6 && x <= 9 && y >= 3 && y <= 6;
+                int armInside = 0, shipInside = 0;
+                for (int y = 0; y < TemplateH; y++)
+                    for (int x = 0; x < TemplateW; x++)
+                    {
+                        if (armA.Tiles[y][x] == 'X' && Inside(x, y)) armInside++;
+                        if (shipA.Tiles[y][x] == 'X' && Inside(x, y)) shipInside++;
+                    }
+                if (armInside != 0) fails.Add($"(H) SIGHTLINE_ROOMSITE=0 still leaves {armInside} charges in the room");
+                if (shipInside != 1) fails.Add($"(H) the shipped board has {shipInside} charges in the room, expected 1");
+
+                // THE CACHES FOLLOW THE DIAL. A cache keyed on two of three dials makes the arm
+                // silently not take — P48 lost 39 chunks to that exact shape, so it is asserted
+                // rather than inspected.
+                if (ReferenceEquals(armA.Tiles, shipA.Tiles))
+                    fails.Add("(H) ArenaAt handed back the same rows for both arms — its cache does not follow RoomSite");
+                detail.Append($"arm: 3 charges either way, room holds {shipInside} shipped / {armInside} in arm; ");
+
+                // and the authoring gate still passes on the arm (no category sealed behind a door)
+                if (SitesDoorLocked(armA, out string alk)) fails.Add($"(H) the falsification arm is door-locked: {alk}");
+            }
+
             // ── (E) THE ALIASES ARE ALIASES ──────────────────────────────────────────────────
             // `|` and `-` exist so an authored map looks like the room it describes. If they meant
             // anything of their own, the format would have two vocabularies for one state.
@@ -447,7 +508,7 @@ public static partial class Maps
                 }
             }
         }
-        finally { Edges.Enabled = savedEdges; SiteGlyphs = savedGlyphs; }
+        finally { Edges.Enabled = savedEdges; SiteGlyphs = savedGlyphs; RoomSite = savedRoomSite; }
 
         return fails.Count == 0
             ? "ARENAEDGETEST: PASS (exactly one arena is double-resolution (CITADEL) and every other is passed "
@@ -458,6 +519,8 @@ public static partial class Maps
               + "refuses P49's placement and a lone interior charge; the glyph strip touches exactly the "
               + "site cells and takes AnySiteTemplates down with it; the hand-drawn "
               + "fixture parses to exactly 18 walls and 1 "
+              + "door with nothing stray; SIGHTLINE_ROOMSITE=0 moves exactly one charge out of the room and "
+              + "leaves three on the board, and both caches follow that dial; "
               + "door with nothing stray; five malformed forms are each refused with a reason; on a real board the "
               + "interior is reachable through the door and unreachable without it, and sight stops at a wall and "
               + "passes through the door; the |/- aliases are aliases) [" + detail + "]"

@@ -49,7 +49,7 @@ public static partial class Maps
     /// field initializers in declaration order, so an eager `= ComputeAnySiteTemplates()` would
     /// read a null Layouts and throw at type init.
     static int _anySite = -1;
-    static bool _anySiteFor, _anySiteGlyphs;
+    static bool _anySiteFor, _anySiteGlyphs, _anySiteRoomSite;
     public static bool AnySiteTemplates
     {
         get
@@ -58,9 +58,10 @@ public static partial class Maps
             // nothing can change the answer — and the moment a template declares a glyph behind a
             // switch, a latched `true` makes `SIGHTLINE_SITEGLYPHS=0` a HALF restore: PlanBoard
             // would keep spending the arena gate's roll on a tree with no sites in it.
-            if (_anySite < 0 || _anySiteFor != EdgeArenas || _anySiteGlyphs != SiteGlyphs)
+            if (_anySite < 0 || _anySiteFor != EdgeArenas || _anySiteGlyphs != SiteGlyphs
+                || _anySiteRoomSite != RoomSite)
             {
-                _anySiteFor = EdgeArenas; _anySiteGlyphs = SiteGlyphs;
+                _anySiteFor = EdgeArenas; _anySiteGlyphs = SiteGlyphs; _anySiteRoomSite = RoomSite;
                 _anySite = ComputeAnySiteTemplates() ? 1 : 0;
             }
             return _anySite == 1;
@@ -287,6 +288,54 @@ public static partial class Maps
     /// every one of those rounds was read on. Rounds: `docs/measurements/{p48,p49,p50,p51,p52}/`.
     public static bool SiteGlyphs = false;
 
+    // ══ P53 — THE FALSIFICATION ARM ══════════════════════════════════════════════════════════
+    /// **P52's rule was derived from an OBSERVATIONAL comparison and this is the control it never
+    /// had.** The rule says: *a held room changes the mission only when the WIN CONDITION forces
+    /// the squad into it.* It was read off SABOTAGE (all three charges required, one inside the
+    /// room — good) against HACK (one terminal, outside — easy), which is two objectives at once.
+    ///
+    /// This dial moves SABOTAGE's INTERIOR charge outside and changes nothing else, so the same
+    /// objective on the same board is measured with and without a required site in the room. If the
+    /// rule holds, `SIGHTLINE_ROOMSITE=0` should read like P52's HACK — easy, flat ladder. If it
+    /// does not, the rule is wrong and the next lever is not the win condition.
+    ///
+    /// **It is a MEASUREMENT ARM, never a shipping configuration** — the same status as
+    /// `SIGHTLINE_STALEGROUND=1`.
+    public static bool RoomSite = true;
+
+    /// The interior charge's tile, and where it goes in the falsification arm. Named rather than
+    /// inlined because `EdgeSelfTest` asserts the derivation moves exactly these two cells.
+    public static readonly (int x, int y) RoomChargeAt = (8, 3);
+    public static readonly (int x, int y) RoomChargeOut = (10, 9);
+
+    static string[] _noRoomSite;
+
+    /// `CitadelEdged` with the room's charge moved outside. DERIVED, like `CitadelEdgedNoSites` and
+    /// for the same reason: a hand-maintained twin of a 23-row template is a transcription error
+    /// waiting to happen, and the gate asserts the two differ in exactly two cells.
+    public static string[] CitadelEdgedNoRoomSite
+    {
+        get
+        {
+            if (_noRoomSite == null)
+            {
+                var rows = new string[CitadelEdged.Length];
+                for (int i = 0; i < CitadelEdged.Length; i++) rows[i] = CitadelEdged[i];
+                void Put((int x, int y) t, char c)
+                {
+                    int r = t.y * 2 + 1, col = t.x * 2 + 1;
+                    var chars = rows[r].ToCharArray();
+                    chars[col] = c;
+                    rows[r] = new string(chars);
+                }
+                Put(RoomChargeAt, '.');
+                Put(RoomChargeOut, 'X');
+                _noRoomSite = rows;
+            }
+            return _noRoomSite;
+        }
+    }
+
     static string[] _stripped;
 
     /// The glyph-free form of `CitadelEdged`: every site glyph replaced by open floor. Derived, not
@@ -341,11 +390,15 @@ public static partial class Maps
     /// The SOURCE rows for `Layouts[i]` — the redrawn form where one exists and the flag is on.
     public static string[] Source(int i)
         => EdgeArenas && i == CitadelIndex
-             ? (SiteGlyphs ? CitadelEdged : CitadelEdgedNoSites)
+             ? (SiteGlyphs ? (RoomSite ? CitadelEdged : CitadelEdgedNoRoomSite) : CitadelEdgedNoSites)
              : Layouts[i];
 
     static Arena[] _arenas;
-    static bool _arenasFor, _arenasGlyphs;   // which arms `_arenas` was parsed for
+    // which arms `_arenas` was parsed for. P53 ADDED THE THIRD: a cache keyed on two of three dials
+    // is this repository's signature quiet failure — the arm would simply not take, and the round
+    // would report both arms as the same board with nothing saying so (P48 lost 39 chunks to
+    // exactly that shape). If you add a dial to `Source`, add it here and to `AnySiteTemplates`.
+    static bool _arenasFor, _arenasGlyphs, _arenasRoomSite;
 
 
     /// The parsed form of `Layouts[i]`, cached. Parsing is pure and the templates are `const`-ish,
@@ -353,10 +406,11 @@ public static partial class Maps
     /// is declared below and C# runs static initializers in declaration order.
     public static Arena ArenaAt(int i)
     {
-        if (_arenas == null || _arenasFor != EdgeArenas || _arenasGlyphs != SiteGlyphs)
+        if (_arenas == null || _arenasFor != EdgeArenas || _arenasGlyphs != SiteGlyphs
+            || _arenasRoomSite != RoomSite)
         {
             _arenas = new Arena[Layouts.Length];
-            _arenasFor = EdgeArenas; _arenasGlyphs = SiteGlyphs;
+            _arenasFor = EdgeArenas; _arenasGlyphs = SiteGlyphs; _arenasRoomSite = RoomSite;
             for (int k = 0; k < Layouts.Length; k++)
                 if (!TryParse(Source(k), out _arenas[k], out string why))
                     throw new InvalidOperationException($"Maps arena {k} is malformed: {why}");
