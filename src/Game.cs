@@ -5270,8 +5270,12 @@ public partial class Game
             var m = Raylib.GetMousePosition();
             // HUD first (screen space — not affected by the board camera)
             if (Raylib.CheckCollisionPointRec(m, Hud.EndTurnRect)) { RequestEndTurn(); return; }
+            // P43 THE SURFACE: the bar's rects are in its PANEL's coordinates, which are screen
+            // coordinates for the flat placement and console coordinates for the table one. One
+            // call converts; the hit-test below is unchanged and does not know which it got.
+            var mBar = Surface.PointerIn(Surface.Slot.ActionBar, m);
             foreach (var b in Hud.ActionButtons)
-                if (b.Enabled && Raylib.CheckCollisionPointRec(m, b.Rect)) { DoAction(b.Id); return; }
+                if (b.Enabled && Raylib.CheckCollisionPointRec(mBar, b.Rect)) { DoAction(b.Id); return; }
             foreach (var c in Hud.RosterChips)
                 if (Raylib.CheckCollisionPointRec(m, c.rect)) { SelectUnit(c.unit); return; }
 

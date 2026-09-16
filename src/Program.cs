@@ -270,6 +270,13 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DENSITY") == "0") Mission.DensityScaling = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "0") Mission.Buildings = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BUILDINGS") == "1") Mission.Buildings = true;
+
+        // P43 THE SURFACE — SIGHTLINE_UISURFACE=table puts the ACTION BAR on the holo-console: a
+        // horizontal world plane in front of the projection, instead of a strip of screen pixels.
+        // Presentation only (it changes no gameplay state and spends no RNG draw), and it applies
+        // only in the projected view, which is why it is a placement POLICY rather than a lever.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_UISURFACE") == "table")
+            Surface.ActionBarPlacement = Surface.Kind.Table;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FORCECEILING"), out int xceil) && xceil >= 3)
             Mission.ForceCeiling = xceil;
@@ -924,6 +931,18 @@ public static class Program
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fxbridgetest");
             LoadGameFonts();   // leg (E) measures GLYPH INK; without the real atlases it measures nothing
             Console.WriteLine(View3D.FxBridgeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_SURFACETEST=1 : P43 — the UI SURFACE seam. Where a panel lives is a policy;
+        // this is the proof that the default policy is the identity and that the table policy is a
+        // real world plane you can point at. Needs a window (GetWorldToScreen and one read-back).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SURFACETEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "surfacetest");
+            LoadGameFonts();   // leg (H) builds the REAL bar, which is sized to measured label text
+            Console.WriteLine(Surface.SelfTest());
             Raylib.CloseWindow();
             return;
         }
