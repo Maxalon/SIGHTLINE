@@ -18844,3 +18844,81 @@ ignores `glLineWidth > 1` on most drivers anyway. A line that does not thin at d
 quad-expanded geometry — two triangles per edge, billboarded in a vertex shader — which is a real
 change to what `Wire.Draw` emits. Left open, and worth doing only if the 1px line ever actually
 reads as too faint.
+
+---
+
+## P40. DESTRUCTIBLE EDGES — the fix P28 named, two years of waves later
+
+**2026-09-16, base `c52331a`.** P28 shipped buildings behind a flag and wrote down exactly why, in
+the code, with numbers. This wave did what that note said to do.
+
+### The diagnosis was already correct, and it was not a tuning problem
+
+`SIGHTLINE_AICOVTEST` guards C1's dead-row class: no AI branch may fall under 0.10% of acts, or it
+is effectively dead and nobody notices. With buildings on, the SAPPER branch fell from 19 acts
+(0.21%) to 9 (0.09%) and the gate went red.
+
+The cause: `Ai`'s sap branch destroys a **cover TILE**. `Grid.CoverHp` is a per-tile array and
+`DamageCover` takes tile coordinates. So a soldier sheltering behind a building **wall** could not
+be sapped at all — cover had moved from tiles to edges in P28 and the opponent's cover-destruction
+branch could not follow it. **Buildings did not make the opponent dumber by accident; they removed
+one of its options.**
+
+### Built to the existing shape, deliberately
+
+`Grid.EdgeVHp` / `EdgeHHp` are the edge half of `CoverHp`, on the same two constants, charged by
+`ResetCoverHp` so a mission's walls and its blocks charge by one call and neither can be forgotten
+independently. `Grid.DamageEdge` degrades High → Low → None and returns the same `CoverHit`
+vocabulary, so a caller that already knows how to react to a chipped or downgraded block needs no
+new branch for a wall. `Grid.CoverEdge` mirrors `CoverTile`'s dominant-side pick on the same sides,
+so the sapper breaches the boundary the shooter is actually stopped by rather than the nearest wall.
+
+`EnemyPlan.SapEdge` sits beside `SapTile`, and **`SapTile` stays a TILE either way** — it is where
+the sapper must *stand*, and for an edge target it is the tile on the sapper's side of the wall.
+That keeps the planner's movement scoring completely untouched; only "what do I destroy" differs. A
+tile wins when there is one, because a block is the thing a target is actually standing behind.
+
+A DOOR takes no damage. It is already a hole, and a door that could be "destroyed" would silently
+become a wall-shaped nothing.
+
+### Red before, green after, on a gate that already existed
+
+AICOVTEST=6, deterministic, ~9,800 enemy acts per arm:
+
+| arm | sap | |
+|---|---|---|
+| buildings OFF | 19 (0.21%) | PASS — reproduces P28's baseline |
+| buildings ON + destructible edges | **12 (0.12%)** | **PASS** |
+| buildings ON + `SIGHTLINE_DESTRUCTEDGE=0` | 9 (0.09%) | FAIL — reproduces P28's failure exactly |
+
+The third row is the point. The restore flag is not decoration: it reproduces the recorded defect,
+which is what makes the middle row a fix rather than a coincidence.
+
+### A breach changes the shape of the map
+
+This is the only damage call on this board that does. `CostMap` and `HasLineOfSight` both read the
+edge layer, so a hole is a hole for **both teams** by construction — there is no second model to
+drift. EDGETEST asserts it directly: a wall across the board divides it, two hits clear one segment,
+and the route opens.
+
+Scoped to the SAPPER on purpose. `DamageEdge` is public so grenades and stray fire can be wired
+later, but making every explosion a wall-breach is a far larger tactical change than the blocker
+needed and would want its own priced round.
+
+### The default is still OFF, and the reason has changed
+
+This is the part worth not getting wrong. P28's blocker is gone — and that was never the only
+question. The same AICOVTEST census says buildings change the **fight**, not just the board:
+
+    hunker 16.05% -> 26.76%   terminal-hunker 0.11% -> 2.81%
+    idle   28.60% -> 21.72%   shoot           40.84% -> 34.26%
+
+That is a different game. A default flip is a LEVEL lever on every mission and wants a measured
+round against the ladder of record, not a flip because a gate went green. The margin is thin too
+(0.12% against a 0.10% floor), which is a second reason to price it deliberately.
+
+Also fixed while here: `StampBuildings` asked for `Util.RandInt(1, 2)` buildings regardless of board
+size — the same un-scaled 18×11 number class P37 fixed for cover. It now scales on P37's own cell
+grid, so a building belongs to a ROOM rather than being sprinkled over an expanse, and the attempt
+budget scales with the ask (otherwise a big board requests six and gives up after fourteen tries).
+Exactly 1–2 at 18×11, so the shipped board is untouched.

@@ -43,6 +43,12 @@ public static class Edges
     /// `Grid.AnyEdges` is false on every board and every predicate below short-circuits.
     public static bool Enabled = true;
 
+    /// P40 — can a wall be knocked down? `SIGHTLINE_DESTRUCTEDGE=0` restores the pre-P40 board, in
+    /// which a boundary is permanent. It exists because this is a GAMEPLAY lever and the house rule
+    /// is that one which moves the CRN stream must be switchable so it can be attributed, and
+    /// because it is the arm the AICOVTEST measurement below is read against.
+    public static bool Destructible = true;
+
     /// Height in world units, for the 3D view. Mirrors View3D's own LowH/HighH so the projected
     /// board and the rules cannot disagree about what "high" means.
     public const float LowH = 0.55f, HighH = 1.9f;
@@ -171,6 +177,61 @@ public static class Edges
         }
 
         Enabled = savedEnabled;
+        // ── P40: DESTRUCTIBLE EDGES. Cover moved from tiles to edges in P28 and the damage model
+        // did not follow it, which is the whole reason buildings shipped behind a flag: a soldier
+        // behind a building wall could not be sapped, so the AI's cover-destruction branch fell
+        // under AICOVTEST's dead-row floor and stayed there.
+        {
+            bool savedD = Destructible;
+            Destructible = true;
+            var g = Fresh();
+            g.SetEdgeV(5, 5, EdgeKind.High);
+            g.SetEdgeH(7, 7, EdgeKind.Low);
+            g.SetEdgeV(9, 5, EdgeKind.Door);
+            g.ResetEdgeHp();
+
+            var hi = new Grid.EdgeRef(true, 5, 5);
+            Is(g.DamageEdge(hi, 1) == Grid.CoverHit.Chipped && g.EdgeVAt(5, 5) == EdgeKind.High,
+               "P40: a High wall did not chip");
+            Is(g.DamageEdge(hi, 1) == Grid.CoverHit.Downgraded && g.EdgeVAt(5, 5) == EdgeKind.Low,
+               "P40: a High wall did not fall to Low");
+            Is(g.DamageEdge(hi, 1) == Grid.CoverHit.Destroyed && g.EdgeVAt(5, 5) == EdgeKind.None,
+               "P40: a Low wall did not clear");
+            Is(g.DamageEdge(hi, 9) == Grid.CoverHit.None, "P40: an absent wall still took damage");
+
+            // a full level in one blow, the way the sapper delivers it
+            Is(g.DamageEdge(new Grid.EdgeRef(false, 7, 7), Grid.HighCoverHp) == Grid.CoverHit.Destroyed,
+               "P40: a Low wall did not clear to a full-level hit");
+
+            // A DOOR is already a hole. Breaching it is not an action worth an enemy's turn, and a
+            // door that could be "destroyed" would silently become a wall-shaped nothing.
+            Is(g.DamageEdge(new Grid.EdgeRef(true, 9, 5), 99) == Grid.CoverHit.None
+               && g.EdgeVAt(9, 5) == EdgeKind.Door, "P40: a door took damage");
+
+            // THE BREACH OPENS A ROUTE. This is the one damage call on this board that changes the
+            // SHAPE of the map rather than the cost of standing somewhere, and CostMap is the model
+            // both teams read — so the hole is a hole for everybody, by construction.
+            var g2 = Fresh();
+            for (int y = 0; y < g2.H; y++) g2.SetEdgeV(9, y, EdgeKind.High);   // a wall clean across
+            g2.ResetEdgeHp();
+            var before = g2.CostMap(2, 5, null, out _, 9999);
+            Is(before[12, 5] < 0, "P40: the test wall did not divide the board");
+            g2.DamageEdge(new Grid.EdgeRef(true, 9, 5), 99);
+            g2.DamageEdge(new Grid.EdgeRef(true, 9, 5), 99);
+            Is(g2.EdgeVAt(9, 5) == EdgeKind.None, "P40: two full hits did not clear a High wall");
+            var after = g2.CostMap(2, 5, null, out _, 9999);
+            Is(after[12, 5] >= 0, "P40: the breach did not open a route");
+
+            // the restore flag, and it must be free rather than merely faithful
+            Destructible = false;
+            var g3 = Fresh();
+            g3.SetEdgeV(5, 5, EdgeKind.High);
+            g3.ResetEdgeHp();
+            Is(g3.DamageEdge(new Grid.EdgeRef(true, 5, 5), 99) == Grid.CoverHit.None
+               && g3.EdgeVAt(5, 5) == EdgeKind.High, "P40: DESTRUCTEDGE=0 still knocked a wall down");
+            Destructible = savedD;
+        }
+
         return fails.Count == 0
             ? "EDGETEST: PASS"
             : "EDGETEST: FAIL\n  " + string.Join("\n  ", fails);

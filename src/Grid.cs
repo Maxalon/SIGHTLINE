@@ -201,6 +201,7 @@ public class Grid
     {
         for (int x = 0; x < W; x++)
             for (int y = 0; y < H; y++) CoverHp[x, y] = MaxCoverHp(x, y);
+        ResetEdgeHp();          // P40: walls charge with the blocks, by the same call
         ClearCoverSeeds();
         SeedCoverVolumes();
     }
@@ -263,6 +264,105 @@ public class Grid
         if (dx == 0 && dy ==  1) return EdgeHAt(x0, y1);   // north face of the tile we ENTER
         if (dx == 0 && dy == -1) return EdgeHAt(x0, y0);   // north face of the tile we LEAVE
         return EdgeKind.None;
+    }
+
+    /// WHICH boundary lies between two adjacent tiles, as an addressable thing rather than as a
+    /// kind. `EdgeBetween` answers "what is there"; a sapper needs "what do I hit", and those are
+    /// different questions the moment anything can damage a wall.
+    public readonly struct EdgeRef
+    {
+        public readonly bool Vertical;
+        public readonly int X, Y;
+        public EdgeRef(bool vertical, int x, int y) { Vertical = vertical; X = x; Y = y; }
+    }
+
+    public EdgeRef? EdgeRefBetween(int x0, int y0, int x1, int y1)
+    {
+        int dx = x1 - x0, dy = y1 - y0;
+        if (dy == 0 && dx ==  1) return new EdgeRef(true, x1, y0);
+        if (dy == 0 && dx == -1) return new EdgeRef(true, x0, y0);
+        if (dx == 0 && dy ==  1) return new EdgeRef(false, x0, y1);
+        if (dx == 0 && dy == -1) return new EdgeRef(false, x0, y0);
+        return null;
+    }
+
+    public EdgeKind KindOf(EdgeRef e) => e.Vertical ? EdgeVAt(e.X, e.Y) : EdgeHAt(e.X, e.Y);
+
+    // ══ P40: DESTRUCTIBLE EDGES ══════════════════════════════════════════════════════════════
+    // Cover moved from TILES to EDGES in P28 and the damage model did not follow it, which is the
+    // whole reason buildings shipped behind a flag: `Ai`'s sapper destroys a cover TILE, and a
+    // soldier sheltering behind a building wall could not be sapped at all. These arrays are the
+    // edge half of `CoverHp`, deliberately built to the same shape and the same two constants, so
+    // a wall degrades exactly the way a block does — High -> Low -> gone.
+    public int[,] EdgeVHp, EdgeHHp;
+
+    /// Full HP for an edge's CURRENT kind. A DOOR has none: it is already a hole, and "breaching a
+    /// doorway" is not a thing a sapper needs to spend an action on.
+    public int MaxEdgeHp(EdgeKind k) =>
+        k == EdgeKind.High ? HighCoverHp : (k == EdgeKind.Low ? LowCoverHp : 0);
+
+    /// (Re)charge every edge. Called from ResetCoverHp, so a mission's walls and its blocks are
+    /// charged by the same call and neither can be forgotten independently of the other.
+    public void ResetEdgeHp()
+    {
+        if (EdgeVHp == null) { EdgeVHp = new int[W + 1, H]; EdgeHHp = new int[W, H + 1]; }
+        for (int x = 0; x <= W; x++) for (int y = 0; y < H; y++) EdgeVHp[x, y] = MaxEdgeHp(EdgeV[x, y]);
+        for (int x = 0; x < W; x++) for (int y = 0; y <= H; y++) EdgeHHp[x, y] = MaxEdgeHp(EdgeH[x, y]);
+    }
+
+    /// Apply `dmg` to one boundary, degrading High -> Low -> None. Returns what happened, in the
+    /// same vocabulary `DamageCover` uses, so a caller that already knows how to react to a chipped
+    /// or downgraded block needs no new branch for a wall.
+    ///
+    /// **A DESTROYED WALL OPENS A ROUTE.** `Grid.CostMap` and `HasLineOfSight` both read the edge
+    /// layer, so this is the one damage call on this board that changes the shape of the map
+    /// rather than the cost of standing somewhere. That is the point of a breach — and it is why
+    /// `Edges.Destructible` exists to switch it off whole.
+    public CoverHit DamageEdge(EdgeRef e, int dmg)
+    {
+        if (!Edges.Enabled || !Edges.Destructible || dmg <= 0) return CoverHit.None;
+        if (EdgeVHp == null) ResetEdgeHp();
+        bool v = e.Vertical;
+        if (v ? (e.X < 0 || e.X > W || e.Y < 0 || e.Y >= H) : (e.X < 0 || e.X >= W || e.Y < 0 || e.Y > H))
+            return CoverHit.None;
+
+        EdgeKind k = v ? EdgeV[e.X, e.Y] : EdgeH[e.X, e.Y];
+        if (k != EdgeKind.High && k != EdgeKind.Low) return CoverHit.None;   // None and Door take none
+
+        int hp = (v ? EdgeVHp[e.X, e.Y] : EdgeHHp[e.X, e.Y]) - dmg;
+        if (hp > 0) { if (v) EdgeVHp[e.X, e.Y] = hp; else EdgeHHp[e.X, e.Y] = hp; return CoverHit.Chipped; }
+
+        if (k == EdgeKind.High)
+        {
+            if (v) { EdgeV[e.X, e.Y] = EdgeKind.Low; EdgeVHp[e.X, e.Y] = LowCoverHp; }
+            else   { EdgeH[e.X, e.Y] = EdgeKind.Low; EdgeHHp[e.X, e.Y] = LowCoverHp; }
+            return CoverHit.Downgraded;
+        }
+        if (v) { EdgeV[e.X, e.Y] = EdgeKind.None; EdgeVHp[e.X, e.Y] = 0; }
+        else   { EdgeH[e.X, e.Y] = EdgeKind.None; EdgeHHp[e.X, e.Y] = 0; }
+        return CoverHit.Destroyed;
+    }
+
+    /// The EDGE shielding (tx,ty) from fire at (fx,fy), or null. Deliberately the same
+    /// dominant-side pick as `CoverTile`, on the same sides, so the sapper breaches the boundary
+    /// the shooter is actually being stopped by rather than the nearest wall.
+    public EdgeRef? CoverEdge(int tx, int ty, int fx, int fy)
+    {
+        int dx = fx - tx, dy = fy - ty;
+        bool diagonal = dx != 0 && dy != 0 && Math.Abs(dx) == Math.Abs(dy);
+        EdgeRef? pick = null; int best = 0;
+        void Consider(int sx, int sy)
+        {
+            var er = EdgeRefBetween(tx, ty, tx + sx, ty + sy);
+            if (er == null) return;
+            var k = KindOf(er.Value);
+            int lv = Edges.CoverLevel(k);
+            if (lv > best) { best = lv; pick = er; }
+        }
+        if (diagonal) { Consider(Util.Sign(dx), 0); Consider(0, Util.Sign(dy)); }
+        else if (Math.Abs(dx) >= Math.Abs(dy) && dx != 0) Consider(Util.Sign(dx), 0);
+        else if (dy != 0) Consider(0, Util.Sign(dy));
+        return pick;
     }
 
     public bool EdgeStopsMove(int x0, int y0, int x1, int y1) => Edges.BlocksMove(EdgeBetween(x0, y0, x1, y1));

@@ -225,6 +225,10 @@ public static class Program
             }
         }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGES") == "0") Edges.Enabled = false;
+        // P40 — SIGHTLINE_DESTRUCTEDGE=0 restores the pre-P40 board, in which a wall is permanent
+        // and the sapper can only ever demolish a cover TILE. It is the arm AICOVTEST's
+        // buildings-on measurement is read against.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DESTRUCTEDGE") == "0") Edges.Destructible = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DISCOVERY") == "1") Vision.Enabled = true;
         // P39 — the confidence shader. =0 draws the same lines with no program bound, which is also
         // the path a driver that refuses the program falls back to. SIGHTLINE_WIREGAIN=<0..1> dials
