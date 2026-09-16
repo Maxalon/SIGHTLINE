@@ -19712,6 +19712,70 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P53. THE CONTROL — the same lever on two objectives moves opposite ends of the ladder
+
+P52 published a rule this morning and the roadmap's next item was to BUILD its prediction. **That
+would have been building on an unfalsified claim**, because the rule was read off SABOTAGE against
+HACK — two objectives at once. This round is the control, and it cost one derived template and a
+dial instead of a new win condition.
+
+`SIGHTLINE_ROOMSITE=0` moves SABOTAGE's INTERIOR charge outside and changes nothing else. Both arms
+keep three charges and both run the glyphs on, so it prices *where the required site is*, not *how
+many*. Instrument as P51/P52: `SIGHTLINE_MAP=4 SIGHTLINE_OBJ=sabotage`, 96 chunks, 960 pairs, zero
+BAD, ARM CHECK and LEAK-CHECK PASS. **Prediction stated in the commit before the round: if the rule
+holds, the arm reads like P52's HACK — easy, flat.**
+
+**The bridge is exact** — P53's IN arm reproduces P51's ON arm on 960 of 960 paired campaigns, which
+also proves P52's relocation of `T` and `C` is inert for SABOTAGE.
+
+### Result — the prediction failed
+
+    rung    n     IN%   OUT%   delta    b    c  n_disc   MDE       z
+    h0    320    59.4   71.6   +12.2   31   70     101  8.79   +3.88   RESOLVED
+    h4    320    37.5   50.6   +13.1   47   89     136 10.20   +3.60   RESOLVED
+    h8    320    12.2    9.7    -2.5   32   24      56  6.55   -1.07   NOT RESOLVED
+    POOLED +7.60, n_disc 293, MDE 4.99, z +4.26
+
+The direction is right and resolved at two rungs. But the arm reads **71.6 / 50.6 / 9.7** — still
+monotone, apex still ~10%, **nothing like P52's 94.4 / 95.6 / 87.2**. The effect is 12-13 points
+where the gap it was invented to explain is 35 / 58 / 75.
+
+### The finding — opposite ends of the ladder
+
+    removing the room's required site      room holds      h0      h4       h8
+    HACK      (P50 ON -> P52 ON)           1 of 1        -0.3    +4.4   +27.5  RESOLVED
+    SABOTAGE  (P53 in -> out)              1 of 3       +12.2   +13.1    -2.5  ns
+
+*(HACK n_disc 33/42/114, MDE 5.0/5.7/9.3; SABOTAGE n_disc 101/136/56, MDE 8.8/10.2/6.6. The two
+"ns" cells are absences of evidence at those n, not measured zeros.)*
+
+**Room holds the ONLY required site → emptying it matters at the APEX and nowhere else** (at h0/h4
+the squad wins either way; at h8 the room IS the mission). **Room holds one of three → it matters at
+the LOW rungs and not at the apex** (at h8 the other two charges already dominate).
+
+> **A mission's difficulty is carried by how much REQUIRED WORK it has, and by what share of that
+> work sits in contested space. Cardinality sets the floor — a three-site mission keeps a ladder
+> whatever you do with the room. The room's SHARE of the required work decides which RUNG responds.**
+
+P51's cardinality claim and P52's win-condition claim are two faces of that, and **each was measured
+on a board where the other was held constant, which is why each looked like the whole answer.**
+
+### What it costs the plan
+
+P52's roadmap item 1 — "build a HACK that needs two terminals" — **is a worse bet than it looked**.
+On this evidence it would buy the SABOTAGE shape at the low rungs and little at the apex, and the
+apex is exactly where the HACK board is broken (87.2%). A lever aimed at that board has to ADD
+required work, not relocate it. **And the apex has now declined to respond to accuracy (P24), to
+bodies at the finale (L7/P23), and to room geometry (this round).** That list is starting to look
+like the finding.
+
+### The method note
+
+The round cost one derived template, one dial and ~12 minutes of compute, and it overturned a claim
+that was one commit old and had already been written into CLAUDE.md, the DEVLOG and the roadmap.
+**Running the control before the construction is what made that cheap** — the alternative was
+changing the HACK win condition across every arena first and discovering it there.
+
 ## P52. THE SINGLETON COMES OUT — and the mission walks past the fight
 
 P51 ended on a claim and named the lever that would test it, so this round spent it. **The claim did
@@ -19767,6 +19831,13 @@ So P51's finding is restated rather than kept:
 > **A held room changes the mission only when the WIN CONDITION forces the squad into it.** Site
 > count is a proxy for that and not the thing itself — three sites mattered because all three are
 > REQUIRED and one of them is inside.
+
+> ### ⚠ P53 RAN THE CONTROL AND THIS RULE IS WITHDRAWN AS AN EXPLANATION.
+> It was inferred by comparing SABOTAGE with HACK — two objectives at once. P53 moved SABOTAGE's
+> required interior charge OUT and changed nothing else: **+12.2 / +13.1 / −2.5**, and the arm still
+> reads 71.6 / 50.6 / 9.7, a ladder, not P52's flat 94.4 / 95.6 / 87.2. **The win condition accounts
+> for 12-13 points of a 35-75 point gap and NONE of the apex.** The rule survives as a DIRECTION
+> only; see §P53 for the statement that replaced it.
 
 That is P26's archive result arriving from another direction: declining the fight is optimal (skill
 is worth +0.2 points; 23.3% of the deployed force is ever killed). Give the player a fight they may

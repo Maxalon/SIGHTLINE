@@ -7,6 +7,40 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P53 "THE CONTROL" (2026-09-16)
+
+P53 ran the control P52's rule never had and **the rule is withdrawn as an explanation**. Removing
+the room's required site, CRN-paired on one instrument:
+
+    room holds         h0      h4       h8
+    HACK      1 of 1   -0.3    +4.4   +27.5   RESOLVED at the apex only
+    SABOTAGE  1 of 3  +12.2   +13.1    -2.5   RESOLVED at the low rungs only
+
+> **Difficulty is carried by how much REQUIRED WORK a mission has, and by what SHARE of that work
+> sits in contested space. Cardinality sets the floor; the room's share decides which RUNG responds.**
+
+Full round: `docs/measurements/p53/`, DEVLOG §P53.
+
+- [ ] **1. THE APEX IS THE PROBLEM, AND IT IS BIGGER THAN THIS ARENA. This is the top item.**
+      The h8 rung has now declined to respond to **hostile accuracy** (P24: −0.6 / +0.3 / −0.2, the
+      round's tightest MDE), to **finale bodies and stats** (L7/P23: the ceiling defect was real,
+      fixed, and bought −1.9), and now to **room geometry** (this round, both objectives). Three
+      structurally unrelated levers, three non-responses. **That pattern is a finding about the
+      model, not about any of the three levers**, and it deserves a wave aimed at it directly rather
+      than another content round that discovers it again. First question to answer: at h8, what
+      actually ends a campaign? `lossCauses` and `byMission` across the existing archive would say,
+      and no new compute is needed to look.
+- [ ] **2. DO NOT BUILD THE TWO-TERMINAL HACK on P52's reasoning.** It was roadmap item 1 an hour
+      ago. On P53's evidence it would buy the SABOTAGE shape at the low rungs and little at the
+      apex — and the apex (87.2%) is where that board is broken. **A lever aimed at it has to ADD
+      required work, not relocate it.** If it is built, it should be built as an ADDITION (hack two
+      terminals, both required, one in the room) and priced against P52's ON arm, with the
+      expectation set by item 1 above rather than by P52's withdrawn rule.
+- [ ] **3. `SIGHTLINE_ROOMSITE` is a measurement arm and must never ship on.** Same status as
+      `SIGHTLINE_STALEGROUND=1`. It exists so a future round can re-isolate "where the required site
+      is" from "how many there are"; `ARENAEDGETEST` leg (H) is its gate.
+
+
 ## OPEN — left by PARALLAX P52 "THE SINGLETON COMES OUT" (2026-09-16)
 
 P52 tested P51's published claim directly and **the claim did not survive**: moving the singleton
@@ -16,7 +50,10 @@ CONDITION forces the squad into it.** `Game.cs:4470` requires EVERY sabotage sit
 the room; HACK requires one terminal, and outside the room the garrison is a fight you may decline.
 Full round: `docs/measurements/p52/`, DEVLOG §P52.
 
-- [ ] **1. THE NEXT LEVER IS THE WIN CONDITION, NOT THE GEOMETRY. This is the top item.** Every board
+- [ ] ~~**1. THE NEXT LEVER IS THE WIN CONDITION, NOT THE GEOMETRY.**~~ **SUPERSEDED BY P53** —
+      the rule this rested on was withdrawn as an explanation one wave later. Kept for provenance;
+      act on P53's list above instead. Original text:
+- [ ] **1. (superseded) THE NEXT LEVER IS THE WIN CONDITION, NOT THE GEOMETRY.** Every board
       tried so far moves where the site SITS. The restated rule says to move what the mission
       REQUIRES. Two candidates, both measurable on P52's own instrument against its ON arm:
       a **HACK that needs two terminals** (one inside the held room, one outside — SABOTAGE's shape
