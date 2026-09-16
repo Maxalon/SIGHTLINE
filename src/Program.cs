@@ -1016,6 +1016,13 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BOARDNEUTRALTEST=1 : P56 — board size is NOT a difficulty lever. Builds real
+        // missions at three board sizes across three (mission, heat) cells; no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BOARDNEUTRALTEST") == "1")
+        {
+            Console.WriteLine(Mission.BoardNeutralSelfTest());
+            return;
+        }
         // SIGHTLINE_VIPHEATTEST=1 : P55 — the protected asset (Escort VIP / Rescue captive, one
         // funnel) answers HEAT and not only mission depth. Pure arithmetic over Mission.MakeVip;
         // no window. Its leg (E) uses the restore flag as a RED CONTROL.

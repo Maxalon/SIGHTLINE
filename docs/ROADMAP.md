@@ -7,6 +7,70 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## ⚑ OWNER DIRECTION (2026-09-16) — THE BOARD IS THE COMMITMENT. This supersedes the insertion-frame plan.
+
+**Rationale: `docs/DESIGN.md` §6.5. Read it before touching any item here.** The owner overrode the
+standing "bigger *and denser*, **not raw size**" clause. Raw size IS the point: on 18x11 with ~6-tile
+moves and two actions, every tile is reachable from every tile in about a turn, so **positioning
+costs nothing and is therefore not a choice.** The dilemma a big board buys is: spend one or two FULL
+turns relocating to better ground and be unable to fight while you do, or stay put with worse cover
+and keep the action points.
+
+**"Empty traversal = boredom" is not the counter-argument it looks like.** The fix is not SHORT
+traversal, it is **CONTESTED** traversal — and the mechanism is given below.
+
+**This retires `P38`'s insertion-frame rule** ("DEPTH stays at the reference, LATERAL goes to the
+whole board"; "insert NEAR the objective and let size buy lateral choice, not distance"). That plan
+was coherent and is kept below for provenance, but it was built to AVOID distance and distance is now
+the goal. Its four seams still need parameterising — the transform they need is just the other one.
+
+### The order of work, and why this order
+
+- [x] **0. BOARD SIZE IS NOT A DIFFICULTY LEVER — ASSERTED, and learned the hard way.**
+      *"We need a difficulty curve very clearly, and map size doesn't do that alone."* The squad does
+      not grow with the board so the opposition must not either. **An attempt to scale the force by
+      board area was reverted whole**: it lost autoplay on mission 1 in fifteen turns (16 hostiles
+      vs 4 soldiers), i.e. it turned the board into a difficulty dial. `SIGHTLINE_BOARDNEUTRALTEST`
+      now asserts the force requested and seated is identical at 18x11 / 24x15 / 36x22 across the
+      opener, a mid-run node and the apex, and that the deploy cap does not vary. **The sparse
+      feeling is real; the fix is items 2 and 1 below (contested traversal, fixed sight), never more
+      starting bodies.**
+- [ ] **1. MAKE A BIG BOARD A FAIR TEST BEFORE MEASURING ONE. Top item.** Nothing has ever measured
+      a big board, but measuring one today measures a BROKEN configuration: enemy count, mission
+      pacing and sight range are all still 18x11 numbers, and the 35 authored arenas are out of play
+      at any other size. **Note what item 0 removed from this item**: "enemy count" is NOT on the
+      list any more — a constant force across board sizes is CORRECT and is now gated. What remains
+      is mission pacing (turn budgets), the arenas, and sight range. Sight range is the one that
+      changes the game most (9 tiles on an 18-wide board is half of it; on a 30-wide board the same
+      number is 30% — that is also the fog-of-war prerequisite, already noted below).
+- [ ] **2. THE EXTRACTION MODEL — and it is the answer P54/P55 went looking for.**
+      **ESCORT must not start with the asset in the squad** ("why did you enter a combat zone with
+      them in the first place?"). The asset is REACHED; only then does extraction begin; the exit is
+      far enough that it takes multiple turns; and **reinforcements spawn one or two at a time from
+      the half of the board the extraction point is in**, so the withdrawal is opposed and worsens
+      the longer it takes.
+      **This is what P55 could not buy with a constant.** P55 gave the asset a heat term: surgical
+      where it aimed (Escort h8 41.8 -> 61.2) and almost no campaign win rate, because the asset's
+      survivability was never the missing pressure — **the free, unopposed walk was.** It also
+      reaches P55's declared-open half (Rescue 97.4 / Escort 88.9 at h4), which no heat term can.
+      **It depends on item 1**: "far enough to take multiple turns" is not expressible on 18x11.
+- [ ] **3. MISSION SHAPES a big board makes possible.** Enter one side, objective in the middle,
+      extract on the other. A shorter variant that sends you to the far end and back to the start.
+      And **bosses / longer challenges — raid a bunker or a bastion.**
+- [ ] **4. THE ARENAS.** 35 hand-authored 18x11 templates go out of play at any other size. Decide
+      between re-authoring at the new reference, tiling them as ROOMS inside a bigger board (P37's
+      "more rooms, not one stretched room" applies directly), or accepting procedural-only on big
+      boards for now. **P47's double-resolution format and P26's site glyphs are both ready for
+      whichever is chosen.**
+
+### The cost, stated up front so no round is surprised by it
+
+**A big board severs the CRN chain on every axis at once.** `SIGHTLINE_BIGMAP` unset is the restore
+arm. **Every number in CLAUDE.md's ladder of record is an 18x11 number and stays one** — a big board
+is a different game and needs its own baseline, never a comparison against that ladder. (P48's rule
+for a forced arena, one level up.)
+
+
 ## OPEN — left by PARALLAX P55 "THE ASSET ANSWERS HEAT" (2026-09-16)
 
 P55 built and priced P54's lever. It is **surgical and large where it aims** (Escort h8 41.8 -> 61.2,
