@@ -19453,3 +19453,107 @@ nothing**, and this repository has been bitten by exactly that.
 Author the first double-resolution arenas — a building with an objective inside it, a door worth
 breaching, a roof worth holding. That commit severs the CRN stream and wants a measured round
 against `SIGHTLINE_EDGES=0`; this one does not and did not.
+
+## P48. THE FIRST ROOM — and the round that could not see it
+
+P47 built the notation; this is the first arena that uses it, and the measured round that prices it.
+
+**CITADEL, redrawn.** The original is the exact object P42 measured and P47 named: "a fortified
+high-cover bunker with a plateau and a doorway" built out of **fourteen `#` tiles**, which is a solid
+block with no inside. You could stand behind it. You could not go in. On the edge layer the same 4x4
+footprint becomes a ROOM — walls on the boundaries, consuming no floor, so the fourteen tiles they
+used to eat are its interior: open ground and a tier-1 firing platform behind one door on the west
+wall, where the original's doorway gap was. Same silhouette, same one way in, and an inside that
+exists.
+
+Edges only. **No site glyphs** — P26's `T`/`C`/`E` machinery stays inert for one more wave, because
+L7's lesson is that two levers measured together give a number that does not resolve, and "a room"
+and "an objective inside the room" are two levers.
+
+### THE FIRST ROUND COULD NOT SEE ITS OWN LEVER, AND THAT IS THE FINDING TO KEEP
+
+96 chunks, 960 CRN pairs, shipped distribution:
+
+    rung    n    OFF%    ON%   delta   n_disc   MDE      z
+    h0    320    51.9   52.2    +0.3        3  1.52   +0.58
+    h4    320    25.6   26.2    +0.6        4  1.75   +1.00
+    h8    320     5.9    5.9    +0.0        2  1.24    0.00
+    POOLED 960 pairs: n_disc = 9, delta +0.31, MDE 0.88
+
+**Nine discordant campaigns in 960.** By C2's rule that is an absence of evidence, not a measured
+zero — and no n this project can afford fixes it. One arena of thirty-five, on ~80% of builds, is
+~1.7% of missions: the whole round produced **52 and 51 missions that played the board under test**.
+Resolving ±5 points on one arena through the shipped distribution needs order **47,000 missions**.
+**A SINGLE ARENA CANNOT BE PRICED AT THE CAMPAIGN LEVEL.** Do not run that round again.
+
+### The instrument that works: force the arena
+
+`SIGHTLINE_MAP` now reaches the balance batch, so every mission plays the board under test and the
+same 960 pairs become 960 readings of that arena instead of 16. Verifiably forced: **7,955 missions,
+every one on arena 4, zero procedural fallbacks.**
+
+    rung    n   fOFF%   fON%   delta   n_disc   MDE      z
+    h0    320    43.4   44.7    +1.2      128  9.90   +0.35
+    h4    320    10.3   13.8    +3.4       67  7.16   +1.34
+    h8    320     1.2    2.8    +1.6       11  2.90   +1.51
+    POOLED 960 pairs: n_disc = 206 (21.5%), delta +2.08, MDE 4.19
+
+Nothing resolves, but at 21.5% discordance this is a BOUNDED effect rather than an absent one, and
+the direction is positive at all three rungs. **These win rates may NOT be read against the band**:
+a campaign played entirely on one arena is a different game, and the OFF arm reads 43.4 / 10.3 / 1.2
+against the ladder's 51.9 / 25.6 / 5.9 on the same tree. The forced round prices the ARENA.
+
+### The answer to P42, and it has two halves
+
+Paired over the 16 CRN slot sets, cluster t on 15 df:
+
+    meaningfulChoicesPerTurn            h0  3.394 -> 3.584  +0.189  t +1.45
+                                        h4  3.408 -> 3.664  +0.256  t +1.27
+                                        h8  1.472 -> 1.242  -0.231  t -7.06  RESOLVED
+    positionChoicesPerArmedSoldierTurn  h0  1.788 -> 1.719  -0.069  t -2.42  RESOLVED
+                                        h8  1.755 -> 1.507  -0.249  t -9.25  RESOLVED
+    targetChoicesPerArmedSoldierTurn    h4  0.640 -> 0.769  +0.128  t +1.79
+    turnsWithAShotPct                   h0 58.881 ->60.350  +1.469  t +1.92
+
+**THE ROOM TRADES POSITIONING FOR SHOOTING.** Position choices fall at every rung; target choices
+and turns-with-a-shot rise at every rung. That is what removing fourteen cover TILES and replacing
+them with four WALLS does — fewer places worth standing, more lines worth taking.
+
+Against P42's procedural buildings (`meaningfulChoicesPerTurn` −0.64 / −0.29 / −0.45): **the room
+reverses the sign at h0 and h4** (+0.19, +0.26, neither clearing its cluster SE) **and reproduces it
+at h8, which is the round's only resolved richness number** (−0.231, t −7.06). *A rectangle costs
+choices; a room does not — except at the apex, where it costs them clearly.* The h8 cost is
+published, not tuned: P23's precedent.
+
+### TWO INSTRUMENT DEFECTS, BOTH THE SAME SHAPE, BOTH CAUGHT BY AN ASSERTION RATHER THAN A HUNCH
+
+**1. `SIGHTLINE_EDGEARENAS` was read after the batch entry point.** The first 39 chunks reported
+`levers.edgeArenas: true` on BOTH arms. The flag had been written beside its own self-test hook,
+three hundred lines below the `SIGHTLINE_BALANCE` read that runs the batch and never returns. **A
+gameplay flag read after the batch entry point is a flag that does not exist.** `ARM CHECK` caught it
+on its first run — which is precisely what P42 added the `levers{}` block for — and the round was
+discarded and re-run from scratch.
+
+**2. `SIGHTLINE_MAP` was overwritten by the batch's own reset.** Set correctly in `RealMain`, then
+cleared by `BalanceBatch`'s "keep batch-wide static state deterministic" line. The first forced batch
+came back with five DIFFERENT arenas in `byArena` and nothing complained.
+
+Both now live where they take effect, and the probe that proves each is two lines. The general rule
+is worth more than either fix: **a flag's correctness is a property of WHERE it is read, and the only
+thing that can tell you is an artifact that records what it actually ran.**
+
+### One presentation defect the first screenshot found
+
+Wall slabs were drawn with `Pal.CoverHiTop` — the bright CAP colour — on their FLANKS as well as
+their tops, so a wall had no shading at all and read as a pale translucent pane rather than as
+masonry. Nobody had seen it because until this wave no shipped board declared an edge. Walls now take
+a SIDE/TOP pair like every other solid in the projected view, which the palette was already built
+for.
+
+### Open
+
+* The room has **nothing in it**. P26's site glyphs are still unused, so there is no objective inside
+  and therefore still no *reason* to go in beyond the firing platform. That is the next lever and it
+  is deliberately separate.
+* Thirty-four arenas are still single-resolution. The forced instrument means each one can now be
+  priced on its own — but at ~20 minutes a round, pricing all of them is a program, not a wave.

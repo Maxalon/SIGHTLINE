@@ -1557,6 +1557,10 @@ public static class Stats
                 destructibleEdges = Edges.Destructible,
                 density = Sightline.Mission.DensityScaling,
                 edges = Edges.Enabled,
+                // P48: which ARENA SET this chunk played. The redrawn CITADEL is the lever under
+                // test in P48's own round, and it is exactly the case above: without this field a
+                // chunk's arm lives only in its FILE NAME.
+                edgeArenas = Maps.EdgeArenas,
             },
             // P15 THE UNVERIFIED: what this batch was ASKED for (see BatchEnv). null outside a
             // SIGHTLINE_BALANCE batch — an older archive has no `batch` key at all, which is how a

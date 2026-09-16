@@ -56,8 +56,11 @@ public static partial class Maps
 
     static bool ComputeAnySiteTemplates()
     {
-        foreach (var tpl in Layouts)
-            foreach (var row in tpl)
+        // P48: the EFFECTIVE arenas, not the raw `Layouts` — a redrawn arena is what a mission
+        // actually stamps, so it is what this gate has to read. (Today no redrawn arena declares a
+        // glyph, which is the point of doing edges and sites in separate waves.)
+        for (int i = 0; i < Layouts.Length; i++)
+            foreach (var row in Source(i))
                 foreach (char c in row)
                     if (c == 'T' || c == 'X' || c == 'E' || c == 'C' || c == 'P' || c == 'A') return true;
         return false;
@@ -187,19 +190,80 @@ public static partial class Maps
         return true;
     }
 
+    // ══ P48 — THE FIRST ROOM ═══════════════════════════════════════════════════════════════
+    /// CITADEL, REDRAWN. The original is the exact object P42 measured and P47 named: a "fortified
+    /// high-cover bunker with a plateau and a doorway" built out of FOURTEEN `#` TILES, which is a
+    /// solid block with no inside. You could stand behind it. You could not go in.
+    ///
+    /// Redrawn on the edge layer it is a ROOM: the same 4x4 footprint, but its walls live on the
+    /// boundaries and consume no floor, so the fourteen tiles they used to eat are now the room's
+    /// interior — four tiles of open ground and a tier-1 firing platform, behind a single door on
+    /// the west wall where the original's doorway gap was. Same silhouette, same one way in, and an
+    /// inside that exists.
+    ///
+    /// THIS IS THE COMMIT P47 SAID WOULD SEVER THE CRN STREAM, and it is deliberately alone: edges
+    /// only, no site glyphs. P26's `T`/`C`/`E` machinery stays inert for one more wave, because
+    /// L7's lesson is that two levers measured together give a number that does not resolve, and
+    /// "a room" and "an objective inside the room" are two levers.
+    ///
+    /// `SIGHTLINE_EDGEARENAS=0` restores `Layouts[CitadelIndex]` — the pre-P48 board exactly, by
+    /// handing back the very array it always handed back.
+    public const int CitadelIndex = 4;
+
+    /// The signature row of the legacy CITADEL. `EdgeSelfTest` asserts `Layouts[CitadelIndex]`
+    /// still contains it, so reordering `Layouts` fails loudly instead of silently redrawing some
+    /// other arena.
+    public const string CitadelSignature = ".....######.......";
+
+    public static bool EdgeArenas = true;
+
+    public static readonly string[] CitadelEdged =
+    {
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . . . . . . . . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . . . . . . . . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . . . . . . . . . . . . . . ",
+            "+ + + + + + +-+-+-+-+ + + + + + + + +",
+            " . . . . . .|. . . .|. . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . .|. ^ ^ .|. . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . .+. ^ ^ .|. . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . .|. . . .|. . . . . . . . ",
+            "+ + + + + + +-+-+-+-+ + + + + + + + +",
+            " . . . . . . . . . . . . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . . . . . . . . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . . . . . . . . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+            " . . . . . . . . . . . . . . . . . . ",
+            "+ + + + + + + + + + + + + + + + + + +",
+    };
+
+    /// The SOURCE rows for `Layouts[i]` — the redrawn form where one exists and the flag is on.
+    public static string[] Source(int i)
+        => EdgeArenas && i == CitadelIndex ? CitadelEdged : Layouts[i];
+
     static Arena[] _arenas;
+    static bool _arenasFor;      // which arm `_arenas` was parsed for
+
 
     /// The parsed form of `Layouts[i]`, cached. Parsing is pure and the templates are `const`-ish,
     /// so this is done once — but it is LAZY for the same reason `AnySiteTemplates` is: `Layouts`
     /// is declared below and C# runs static initializers in declaration order.
     public static Arena ArenaAt(int i)
     {
-        if (_arenas == null)
+        if (_arenas == null || _arenasFor != EdgeArenas)
         {
             _arenas = new Arena[Layouts.Length];
+            _arenasFor = EdgeArenas;
             for (int k = 0; k < Layouts.Length; k++)
-                if (!TryParse(Layouts[k], out _arenas[k], out string why))
-                    throw new InvalidOperationException($"Maps.Layouts[{k}] is malformed: {why}");
+                if (!TryParse(Source(k), out _arenas[k], out string why))
+                    throw new InvalidOperationException($"Maps arena {k} is malformed: {why}");
         }
         return _arenas[i];
     }

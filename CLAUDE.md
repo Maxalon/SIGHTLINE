@@ -275,6 +275,25 @@ does NOT report `runs=0` any more, and it leaves any stale JSON untouched). A fu
 non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Program.cs` for
 `SIGHTLINE_` for the authoritative set.
 
+> **P48 — TWO ADDITIONS TO THE CONTRACT, BOTH LEARNED THE EXPENSIVE WAY IN ONE WAVE.**
+> **(1) A GAMEPLAY FLAG READ AFTER THE `SIGHTLINE_BALANCE` ENTRY POINT IS A FLAG THAT DOES NOT
+> EXIST.** `RealMain` reads `SIGHTLINE_BALANCE` near its top and the batch never returns, so a lever
+> declared further down is simply never applied — P48's first 39 chunks reported `levers.edgeArenas:
+> true` on BOTH arms. Put a board lever with the others, above that read, and PROVE it with a
+> one-chunk probe before spending an hour. **(2) `BalanceBatch` resets batch-wide statics on
+> purpose** ("keep batch-wide state deterministic across matches"), so anything `RealMain` set that
+> lives in one of those fields is eaten — `SIGHTLINE_MAP` was, silently, and the first forced batch
+> came back with five different arenas and no complaint. `levers{}` plus an `ARM CHECK` over the
+> archive is what caught both; that block is not ceremony.
+>
+> **P48 — A SINGLE ARENA CANNOT BE PRICED THROUGH THE SHIPPED DISTRIBUTION.** One arena of 35 on
+> ~80% of builds is ~1.7% of missions: a full 960-pair CRN round returned **9 discordant campaigns**
+> and 52 missions on the board under test. `SIGHTLINE_MAP=<i>` now forces the arena for a whole
+> batch (7,955 missions, all on one arena, zero fallbacks) and turns the same 960 pairs into 960
+> readings of that board — 206 discordant instead of 9. **A forced round's win rate may NEVER be read
+> against the heat band**: playing one arena every mission is a different game, and P48's OFF arm
+> read 43.4 / 10.3 / 1.2 where the ladder of record reads 51.9 / 25.6 / 5.9 on the same tree.
+
 **The `SIGHTLINE_BALANCE` measurement contract (X2 — do not shortcut any of it):**
 1. `SIGHTLINE_BALANCE=<N>` **requires `xvfb-run`.** Since W1 a display-less batch REFUSES —
    it prints `BALANCE: no display - run under xvfb-run. No data written.` on stderr, writes
@@ -846,6 +865,7 @@ if a fresh session would otherwise repeat its mistake — everything else goes i
 | **P42** BUILDINGS, PRICED | A lever that changes the board a lot can move win rate barely and still be wrong. Procedural buildings: win rate NOT RESOLVED (−2.6 pooled, n_disc 257 of 960 — a BOUNDED effect, not an absent one), but **`meaningfulChoicesPerTurn` falls at every rung** (3.32→2.68 / 3.22→2.93 / 1.81→1.36) and skill expression is flat. **Walls give you somewhere to sit, and sitting is not a decision.** A rectangle gives cover without giving a reason to go IN — an AUTHORED building is a different object and is unpriced. | §P42 |
 | **P40** DESTRUCTIBLE EDGES | P28's blocker is gone (sap 9 -> 12 acts, AICOVTEST green) but **buildings are still default-off for a different reason**: the same census says they change the FIGHT — hunker 16.05% -> 26.76% — and a default flip is a LEVEL lever that wants a priced round, not a flip because a gate went green. | §P40 |
 | **P37** THE BOARD FILLS | A bigger board is **more rooms, not one stretched room**: stretching an archetype keeps its shape and loses its SCALE, and scale is the whole content of a cover motif. `SIGHTLINE_DENSITY=0`; a no-op at 18x11 by construction. | §P37 |
+| **P48** THE FIRST ROOM | **A SINGLE ARENA CANNOT BE PRICED AT THE CAMPAIGN LEVEL.** One arena of 35, on ~80% of builds, is ~1.7% of missions: a full 960-pair round gave **9 discordant campaigns** and 52 missions on the board under test. Force it (`SIGHTLINE_MAP=<i>`, which now reaches the balance batch) — and never read a forced round's win rate against the heat band, because a campaign played entirely on one arena is a different game. Also, twice in one wave: **a gameplay flag read AFTER the `SIGHTLINE_BALANCE` entry point is a flag that does not exist**, and `BalanceBatch`'s own "keep state deterministic" reset eats anything `RealMain` set. `levers{}` + `ARM CHECK` caught both. | §P48 |
 | **P47** THE DOUBLE-RESOLUTION TEMPLATE | P28's edge layer had no NOTATION: a template is one char per TILE and a boundary has no char, so the only authorable building was a ring of `#` — a solid block with no inside, which is exactly the object P42 measured as costing decision richness. A 23-row template now means "odd indices are tiles, even ones are the boundaries between them". **It ships INERT and leg (A) asserts it**: the commit that makes a template double-resolution is the one that severs the CRN stream, and it is deliberately a separate commit from the engine. | §P47 |
 | **P46** THE PIECE CARRIES ITS STATE | In the projected view a unit was a disc and one initial, so **a hostile had no HP, no ammo and no status anywhere on screen** — the roster strip is friendlies only. Fixed by EXTRACTING the flat view's badge block (`Renderer.DrawUnitBadges`) and calling it with a projected anchor: two views, one block, no second copy to drift. The self-test is a framebuffer DIFFERENTIAL with the feature-off arm as the control on every leg (0px on all eight) — and it needs `Renderer.TimePin`, `Hud.TimePin` AND `Hud.MousePin`, because half these badges pulse and several read the hover. | §P46 |
 | **P45** THE PIECE WALKS | The projected view drew every piece at its TILE INDEX, so W1's stride was invisible in it — **a six-tile walk was six teleports** (measured: 48 moved frames / 0.136-tile steps against 6 moved frames / 1.000-tile steps). `View3D.ChipWorld` drives it from `Unit.Pos` instead. **The trap is `Unit.HopLift`:** the flat view fakes a vault's height by SUBTRACTING it from `Pos.Y`, and `Pos.Y` maps to world **Z** — so the naive conversion turns a leap over a wall into a slide NORTHWARD, and it looks almost right. Any future 2D→3D port of an animated quantity must ask which of its terms are fake verticality. | §P45 |
@@ -879,7 +899,7 @@ against, and it reproduces P28's recorded failure exactly: buildings ON, sap 9/9
 wherever the board's corner is, plus the flat sprinkle count. **A NO-OP on the shipped 18x11 board by
 construction** — one reference cell at origin (0,0), area ratio exactly 1 — so it is an arm for
 `SIGHTLINE_BIGMAP` and nothing else; DENSITYTEST leg (A) asserts the no-op over the whole tile+height
-board), `SIGHTLINE_UNITSTATE=0` (**P46** — the pre-P46 projected view: a unit is a coloured disc and one initial, and its HP / ammo / stance / statuses appear nowhere. Presentation only), `SIGHTLINE_CHIPTWEEN=0` (**P45** — the pre-P45 projected view, in which a piece sits on its TILE CENTRE and the movement tween is invisible. Presentation only), `SIGHTLINE_DECALLAYER=0` (**P44** — the pre-P44 board-feedback layer: all 27 methods through the affine bridge in ONE pass AFTER the 3D draw, so a region decal paints over the wall in front of it and rides at chip height instead of on the floor. Presentation only — it spends no RNG draw and moves no CRN stream), and `SIGHTLINE_HEALFIRST=1` (P22 — THE FORK PAYS' *other* change: the SUPPLY/RECON full heal
+board), `SIGHTLINE_UNITSTATE=0` (**P46** — the pre-P46 projected view: a unit is a coloured disc and one initial, and its HP / ammo / stance / statuses appear nowhere. Presentation only), `SIGHTLINE_CHIPTWEEN=0` (**P45** — the pre-P45 projected view, in which a piece sits on its TILE CENTRE and the movement tween is invisible. Presentation only), `SIGHTLINE_EDGEARENAS=0` (**P48** — every arena back to its pre-P48 single-resolution form, i.e. CITADEL as a solid block of 14 high-cover tiles with no inside. A LEVEL lever on the ~1.7% of missions that play that arena; priced on the FORCED instrument in `docs/measurements/p48/`), `SIGHTLINE_DECALLAYER=0` (**P44** — the pre-P44 board-feedback layer: all 27 methods through the affine bridge in ONE pass AFTER the 3D draw, so a region decal paints over the wall in front of it and rides at chip height instead of on the floor. Presentation only — it spends no RNG draw and moves no CRN stream), and `SIGHTLINE_HEALFIRST=1` (P22 — THE FORK PAYS' *other* change: the SUPPLY/RECON full heal
 back BEFORE `Run.DebriefSurvivors`' fresh-wound gauge, so a SUPPLY clear cannot wound anyone who
 walks off the field. **The pair `SIGHTLINE_FORKPRICES=0 SIGHTLINE_HEALFIRST=1` is what "restore
 milestone 4" means** — two dials because the prices move the ECONOMY and the ordering moves

@@ -291,6 +291,37 @@ public static class Program
         // P46 — SIGHTLINE_UNITSTATE=0 restores the pre-P46 projected view, in which a unit is a
         // coloured disc and one initial and its HP / ammo / stance / statuses appear nowhere.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_UNITSTATE") == "0") View3D.UnitState = false;
+
+        // P48 — SIGHTLINE_EDGEARENAS=0 restores every arena to its pre-P48 single-resolution form,
+        // i.e. CITADEL back to a solid block of 14 high-cover tiles with no inside. It is the arm
+        // P48's measured round is read against.
+        //
+        // IT LIVES HERE, WITH THE OTHER BOARD LEVERS, AND THAT PLACEMENT IS THE WHOLE POINT. It was
+        // first written beside its own self-test hook, three hundred lines further down — past the
+        // `SIGHTLINE_BALANCE` read at the top of RealMain, which runs the batch and never returns.
+        // So the measurement round's OFF arm silently played the ON board: 39 chunks, every one of
+        // them reporting `levers.edgeArenas: true` on BOTH arms. The `levers{}` block caught it on
+        // the first ARM CHECK, which is exactly what P42 added it for.
+        // **A GAMEPLAY FLAG READ AFTER THE BATCH ENTRY POINT IS A FLAG THAT DOES NOT EXIST.**
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGEARENAS") == "0") Maps.EdgeArenas = false;
+
+        // P48 — SIGHTLINE_MAP now reaches the BALANCE BATCH as well as the shot/autoplay paths.
+        //
+        // It is here because P48's own round could not see its own lever: one arena in thirty-five,
+        // on ~80% of builds, is ~1.7% of missions — the whole 960-pair round produced NINE
+        // discordant campaigns and 52 missions that played the arena under test. That is not a
+        // measured zero, it is an instrument below its own floor (C2's rule), and no n this project
+        // can afford fixes it: resolving +-5 points on one arena needs ~47,000 missions.
+        //
+        // Forcing the arena is the instrument that CAN: every mission plays it, so the same 960
+        // pairs are 960 readings of that board instead of 16. What it measures is "this arena when
+        // it is the whole campaign", NOT the shipped distribution — a legitimate way to price an
+        // arena and a wrong way to read a win rate against the band. Say which one you are doing.
+        //
+        // Campaign-inert when unset: ForcedLayout stays -1 and Build rolls exactly as it always did.
+        // The read itself lives in `BalanceBatch`, after its own "keep batch state deterministic"
+        // reset — setting it here alone was eaten by that line, which is why the first forced batch
+        // came back with five DIFFERENT arenas in `byArena` and no complaint from anything.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FORCECEILING"), out int xceil) && xceil >= 3)
             Mission.ForceCeiling = xceil;
@@ -2291,7 +2322,13 @@ public static class Program
         Stats.Enabled = true;
 
         // Keep batch-wide static state deterministic across matches.
+        // P48: `SIGHTLINE_MAP` is the one exception, and it has to be re-applied AFTER this reset
+        // rather than trusted from RealMain — this line exists precisely so no earlier state leaks
+        // into a batch, and it was silently eating the forced arena. Unset, the read leaves -1 and
+        // the batch is byte-identical to every batch before it.
         Mission.ForcedLayout = -1;       // no forced arena
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAP"), out int batchMap))
+            Mission.ForcedLayout = batchMap;
         Pal.SetColorblind(false);        // default palette (irrelevant headless, set defensively)
         // TRUE BAND: SIGHTLINE_BANDPROBE=1 dumps the CHOICE-BAND score distributions alongside
         // the report (see ChoiceProbe). Read-only, default OFF, no RNG draw — the batch it runs
