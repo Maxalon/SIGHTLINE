@@ -37,10 +37,25 @@ gives the force ~+4 bodies, ~+4 stat, +1 dmg, AI tier 2. Full analysis: `docs/me
       Method controls in the same run: W8's artifact reproduces (`Eliminate` 83.1 pooled vs 44.8
       mid-run), and **`Defend` is NON-MONOTONE** (70.3 / 59.9 / 71.1, n>3,000 per cell) — its own
       unexplained anomaly, and a candidate for its own wave.
-- [ ] **3. THE OTHER 73% IS STILL UNEXPLAINED.** RUN OVER is the majority at every rung and P54 says
-      nothing about why it grows. `soldierDeathsByEnemy`, `shotGap` and `actionMix` are in the
-      archive and have never been cross-tabbed by rung either. Same method, no new compute.
-- [ ] **4. AUDIT THE OTHER DEPTH-ONLY CONSUMERS.** `MakeVip` was found because a loss cross-tab
+- [x] **3. THE OTHER 73%. ATTEMPTED AND ANSWERED "NOT FROM THESE FIELDS" — `wipe_rungs.py`.**
+      **It is not an archetype**: no archetype's share of soldier deaths grows more than +2.0 from
+      h0 to h8 (SNIPER 5.7->7.7 is the largest rise; ELITE 11.1->6.0 the largest fall). The apex
+      wipe is DIFFUSE, so a bestiary lever is not indicated. The squad's behaviour does change
+      (HUNKER 9.6->4.0, OVERWATCH 2.7->6.6, MOVE 42.1->37.6) but as a RESPONSE; and shot
+      concentration is non-monotone (soleOrDominant 38.5 / 35.1 / 46.1), most simply read as "at h8
+      the squad is smaller".
+      **STILL OPEN, but re-scoped: it needs INSTRUMENTATION, not analysis.** Every archive field is
+      a per-mission aggregate; the question is about the TRAJECTORY inside a mission — when soldiers
+      die, at what HP margin, whether the squad was ever ahead. No cross-tab of the existing chunks
+      can answer it. **Do not re-attempt it from the archive.**
+- [x] **4. AUDIT THE OTHER DEPTH-ONLY CONSUMERS. DONE — one of four, and it is `MakeVip`.**
+      `OpenerTrim` is fine (a grace that subtracts bodies; heat reaches the count it trims from).
+      `Combat.HvtHpBonus` is defensible (heat reaches the BODY through `Mission.MakeHostile`; only
+      the target premium is depth-scaled, and W8 made its three constants pinnable). DEFEND waves
+      read `Heat.StatDelta` explicitly. **The hunt is closed; do not re-audit this list.** Also
+      recorded: in `Game.SetupMission` the asset is built sixteen lines BEFORE `int heat =
+      _run.HeatLevel` is even read — P48's shape one level in. Original text:
+- [x] **4. (done) AUDIT THE OTHER DEPTH-ONLY CONSUMERS.** `MakeVip` was found because a loss cross-tab
       pointed at it. P14's own comment lists FOUR consumers of "how deep is this fight" and fixed
       them on the MODE axis; **the HEAT axis was never checked for any of them.** `Combat.HvtHpBonus`
       (the Decapitate HVT) has exactly the same shape and Decapitate is a finale objective. Grep for

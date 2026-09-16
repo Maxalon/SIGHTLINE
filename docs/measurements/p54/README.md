@@ -126,6 +126,77 @@ rate is not a change — but that is a property to VERIFY in the round, not to a
 objective is uncontested at low heat (the 96-98%). A heat term is a candidate for the first only,
 and a round that ships it must report the low rungs as data rather than waving at them.
 
+## ITEM 3: THE OTHER 73% — ANSWERED "NOT FROM THESE FIELDS", which is still an answer
+
+RUN OVER is the majority at every rung and P54's first half says nothing about why it grows.
+`wipe_rungs.py` cross-tabs the wipe side from three fields that have been in every chunk all along.
+**Nothing in them explains it**, and the shape of that non-answer is the useful part.
+
+**It is not an archetype.** Shares of all soldier deaths, normalised per rung:
+
+    SNIPER  5.7 -> 7.7 (+2.0)   the largest RISE in the whole table
+    ELITE  11.1 -> 6.0 (-5.1)   the largest FALL
+    GRUNT / BERSERKER / SHIELD   flat within 0.5
+
+No archetype's share of the killing grows by more than two points from h0 to h8. **The apex wipe is
+diffuse** — it is not a unit that becomes lethal, and a bestiary lever is therefore not indicated.
+
+**The squad's behaviour changes, but as a RESPONSE, not a cause.** Share of all actions:
+
+    HUNKER      9.6 ->  4.0  (-5.6)
+    MOVE       42.1 -> 37.6  (-4.4)
+    OVERWATCH   2.7 ->  6.6  (+3.9)
+    SHOOT      23.2 -> 25.3  (+2.2)
+
+At the apex the squad hunkers LESS and overwatches more — the opposite of what pressure would
+naively predict, and consistent with there always being a target worth shooting instead. (P40's
+census moved hunker the other way, 16.05% -> 26.76%, with buildings on; different lever, and the two
+should not be read together.)
+
+**Shot concentration rises but not monotonically**: `soleOrDominantPct` 38.5 / 35.1 / 46.1 and
+`meanGap` 0.531 / 0.498 / 0.613 — h4 is BELOW h0 on both, so this is not a clean trend and is most
+simply read as "at h8 the squad is smaller", i.e. an effect of attrition rather than a cause.
+
+### What would answer it, and why nothing here can
+
+Every field above is a per-mission or per-campaign AGGREGATE. The question "why does the squad
+lose the exchange at h8" is about the TRAJECTORY inside a mission — when soldiers die, at what HP
+margin, and whether the squad was ever ahead. **The archive does not carry that and no cross-tab of
+it will.** Answering item 3 needs new instrumentation, not new analysis, and it should be scoped as
+such rather than re-attempted from the existing chunks.
+
+**This is recorded as a negative result on purpose.** The cost of re-running it later is the same as
+the cost of running it now, and this repository has a documented habit of re-deriving things.
+
+## ITEM 4: THE AUDIT OF THE OTHER DEPTH-ONLY CONSUMERS — one of four, and it is this one
+
+`MakeVip` was found because a loss cross-tab pointed at it, which is not a method. P14's own comment
+lists FOUR consumers of "how deep is this fight" and fixed them all on the MODE axis; **the HEAT axis
+had never been checked for any of them.** Checked now, by reading each call site rather than the
+comment above it:
+
+| consumer | depth | heat | verdict |
+|---|---|---|---|
+| `Mission.OpenerTrim` | `DepthFor(n)` | reaches it via the count it trims FROM | **fine** — it is a mission-1/2 grace that SUBTRACTS bodies; X2 gave the base force its ramp separately |
+| `Mission.MakeVip` | `14 + 2*depth`, `armor depth/2` | **NOWHERE** | **THE DEFECT** |
+| `Combat.HvtHpBonus` | `6 + 1*depth` | reaches the BODY via `Mission.MakeHostile`'s StatDelta | **defensible** — only the "this one is the target" premium is depth-scaled, and W8 made all three constants pinnable for exactly this question |
+| `Game.SpawnReinforcements` / `SpawnDefendWave` | `DepthFor(_run.Mission)` | reads `Heat.StatDelta(_run.HeatLevel)` explicitly | **wired** |
+
+**One of four is genuinely unwired, and it is the one the loss cross-tab found.** That closes the
+hunt rather than opening it — a future session does not need to re-audit this list.
+
+### And the ORDERING is why it was easy to miss
+
+In `Game.SetupMission` the asset is built at the Escort/Rescue branches, and
+
+    int heat = _run.HeatLevel;
+
+is read **sixteen lines later**, under the comment *"Heat folds into the SAME difficulty params the
+deployment cards use."* The heat the asset should answer is not even in scope where the asset is
+constructed. That is P48's shape one level in — **a value read after the thing it should govern has
+already been built is a value that does not govern it** — and it is the second time this session
+that ordering, not logic, carried the defect.
+
 ## What this does NOT establish
 
 - **It is not a priced lever.** Nothing here says how much a heat term on the asset would buy, or
@@ -140,3 +211,4 @@ and a round that ships it must report the low rungs as data rather than waving a
     python3 docs/measurements/p54/apex_losses.py            # rungs 0 4 8
     python3 docs/measurements/p54/apex_losses.py 0 2 4 6 8
     python3 docs/measurements/p54/objective_rungs.py       # the per-objective cliff
+    python3 docs/measurements/p54/wipe_rungs.py            # the other 73% (negative result)

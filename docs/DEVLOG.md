@@ -19802,6 +19802,46 @@ not a change — but **that is a property to VERIFY in the round, not to assume.
 **These are TWO defects.** The asset does not scale with heat (the cliff), and the objective is
 uncontested at low heat (the 96-98%). A heat term is a candidate for the first only.
 
+### Item 3: the other 73% — answered "not from these fields", and that is still an answer
+
+`wipe_rungs.py` cross-tabs the wipe side from three fields that have been in every chunk all along.
+**Nothing in them explains the growth**, and the shape of the non-answer is the useful part.
+
+**It is not an archetype.** No archetype's share of soldier deaths grows more than +2.0 from h0 to
+h8 (SNIPER 5.7->7.7 the largest rise, ELITE 11.1->6.0 the largest fall, GRUNT/BERSERKER/SHIELD flat
+within 0.5). The apex wipe is DIFFUSE — not a unit that becomes lethal — so a bestiary lever is not
+indicated. **The squad's behaviour changes as a RESPONSE, not a cause**: HUNKER 9.6->4.0,
+OVERWATCH 2.7->6.6, MOVE 42.1->37.6, i.e. at the apex it hunkers LESS, the opposite of the naive
+prediction and consistent with always having a target worth shooting. **Shot concentration is
+non-monotone** (soleOrDominantPct 38.5 / 35.1 / 46.1; h4 below h0), most simply read as "at h8 the
+squad is smaller" — an effect of attrition, not a cause of it.
+
+**Re-scoped rather than left open:** every archive field is a per-mission or per-campaign AGGREGATE,
+and the question is about the TRAJECTORY inside a mission (when soldiers die, at what HP margin,
+whether the squad was ever ahead). The archive does not carry that and no cross-tab will produce it.
+**Item 3 needs instrumentation, not analysis** — recorded as a negative result on purpose, because
+re-running it later costs exactly what running it now cost.
+
+### Item 4: the audit of the other depth-only consumers — one of four
+
+`MakeVip` was found because a loss cross-tab pointed at it, which is not a method, so P14's list of
+four "how deep is this fight" consumers was checked on the HEAT axis (P14 had fixed all four on the
+MODE axis and nobody had asked the other question). Read at the call site, not from the comment:
+
+    Mission.OpenerTrim          heat reaches the count it trims FROM        fine (a m1/m2 grace)
+    Mission.MakeVip             heat reaches it NOWHERE                     THE DEFECT
+    Combat.HvtHpBonus           heat reaches the BODY via MakeHostile       defensible (target premium)
+    Game.SpawnReinforcements /  reads Heat.StatDelta explicitly             wired
+    Game.SpawnDefendWave
+
+**One of four, and it is the one the cross-tab found.** That closes the hunt rather than opening it.
+
+**And the ORDERING is why it was easy to miss**: in `Game.SetupMission` the asset is built at the
+Escort/Rescue branches and `int heat = _run.HeatLevel;` is read SIXTEEN LINES LATER. The heat the
+asset should answer is not in scope where the asset is constructed — P48's shape one level in, and
+the second time in this session that ordering rather than logic carried the defect (the first was
+`Maps`' two-dial cache against a three-dial `Source`).
+
 ### What this does NOT establish
 
 It is **not a priced lever** — nothing here says what a heat term on the asset would buy, only where
