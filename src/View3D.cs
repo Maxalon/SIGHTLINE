@@ -29,7 +29,7 @@ namespace Sightline;
 /// ORTHOGRAPHIC, not perspective: a tactics grid wants every tile the same size wherever it is.
 ///
 /// Nothing here runs unless View3D.Enabled is set, and only SIGHTLINE_VIEW3DSHOT sets it.
-public static class View3D
+public static partial class View3D
 {
     /// Master gate. Default FALSE and never set by normal play or by any other harness hook, so
     /// every existing screenshot, self-test and balance run is untouched by construction.
@@ -1162,6 +1162,9 @@ public static class View3D
     /// A flat quad on the ground plane. Overlays are drawn as REAL GEOMETRY rather than projected
     /// 2D, so they are depth-tested against the terrain for free — a move-range tile behind a wall
     /// is occluded by that wall without anyone writing an occlusion test.
+    /// Harness only — DECALTEST leg (H) draws the interaction layer's own primitive.
+    public static void GroundQuadPublic(int x, int y, float h, float inset, Color c) => GroundQuad(x, y, h, inset, c);
+
     static void GroundQuad(int x, int y, float h, float inset, Color c)
     {
         float a = x + inset, b = x + 1 - inset, p = y + inset, q = y + 1 - inset;
@@ -1323,14 +1326,179 @@ public static class View3D
         Vision.Refresh(g.Grid, AllUnits(g));
         var cam = MakeCamera(g.Grid, (float)Cfg.ScreenW / Cfg.ScreenH);
         ApplyShake(ref cam, g.Fx.ShakeOffset, g.CamPulse);
+        if (DecalLayer) BakeDecals(g);              // binds its own framebuffer — before BeginMode3D
         Raylib.BeginMode3D(cam);
         DrawTerrain(g.Grid);
+        if (DecalLayer) DrawDecalLayer(g.Grid);     // P44: the REGION half, as real ground geometry
         DrawOverlays(g);
         DrawChips(g.Grid, AllUnits(g));
         Raylib.EndMode3D();
         DrawMarkers(g.Grid, AllUnits(g), cam);
         DrawFxLayer(g, cam);
     }
+
+    // ── P44 THE DECAL LAYER ──────────────────────────────────────────────────────────────────
+    /// PAINT ON A FLOOR IS OCCLUDED BY WHAT STANDS ON IT.
+    ///
+    /// P35 carried all 27 of `Renderer`'s board-feedback methods into this view through one affine
+    /// bridge, drawn AFTER the 3D pass — so a threat zone painted straight over the wall standing
+    /// in front of it, and every decal rode at `FxPlaneY` (chip height), which at a low camera
+    /// reads as a disc hovering a foot off the ground. Those are one defect: half that list is not
+    /// a layer OVER the board, it is paint ON it.
+    ///
+    /// The fix is not to re-author 27 methods as 3D geometry — that would throw away their noise
+    /// textures, glyphs and labels, which is most of what they are. It is to bake the REGION half
+    /// into a board-sized texture in its own board-pixel coordinates (where it is already
+    /// written), and then draw that texture as ground geometry, ONE QUAD PER TILE AT THAT TILE'S
+    /// OWN ELEVATION. Depth-testing then comes from the depth buffer for free, the decal steps up
+    /// and down the plateaus with the floor, and not one `Renderer` call site changed.
+    ///
+    /// `Renderer.DrawGroundDecals` / `DrawAirOverlays` is where the split itself is argued.
+    /// `SIGHTLINE_DECALLAYER=0` restores the pre-P44 single bridged pass exactly.
+    public static bool DecalLayer = true;
+
+    static RenderTexture2D _decal;
+    static int _decalW, _decalH;
+
+    /// Harness only: bake a solid magenta tile INSTEAD of the real overlays, so the occlusion and
+    /// elevation claims can be measured against ink whose position and colour are known exactly
+    /// rather than against whatever a live threat zone happened to paint.
+    public static int DecalProbeX = -1, DecalProbeY = -1;
+
+    public static uint DecalTextureId => _decal.Texture.Id;
+    public static int DecalW => _decalW;
+    public static int DecalH => _decalH;
+    public static float DecalLiftPublic => DecalLift;
+
+    /// Harness only — the two halves DECALTEST drives directly, so it can measure the bake and the
+    /// draw separately instead of only through a whole frame.
+    public static void BakeDecalsPublic(Game g) => BakeDecals(g);
+    public static void DrawDecalLayerPublic(Grid g) => DrawDecalLayer(g);
+
+    static void EnsureDecalTarget(Grid g)
+    {
+        int w = g.W * Cfg.Tile, h = g.H * Cfg.Tile;
+        if (_decal.Id != 0 && _decalW == w && _decalH == h) return;
+        if (_decal.Id != 0) Raylib.UnloadRenderTexture(_decal);
+        _decal = Raylib.LoadRenderTexture(w, h);
+        // The sheet is authored at one board pixel per texel and then stretched across whatever the
+        // camera's zoom makes of a tile, so POINT filtering turns every decal into a staircase the
+        // moment anybody zooms in. Bilinear costs nothing here and the layer is soft-edged paint.
+        Raylib.SetTextureFilter(_decal.Texture, TextureFilter.Bilinear);
+        _decalW = w; _decalH = h;
+    }
+
+    /// Render the region half into `_decal`, in BOARD PIXELS with the board's screen origin
+    /// translated away — which is the coordinate system every one of those methods already draws
+    /// in, so they need no argument and no rewrite.
+    ///
+    /// The re-entry at the end is load-bearing: see `Display.TargetBound`.
+    static void BakeDecals(Game g)
+    {
+        EnsureDecalTarget(g.Grid);
+        bool nested = Display.TargetBound;
+
+        Raylib.BeginTextureMode(_decal);
+        Raylib.ClearBackground(Pal.RGBA(0, 0, 0, 0));
+        // ALPHA INTO A TRANSPARENT TARGET IS NOT THE DEFAULT BLEND, AND THE SYMPTOM IS SUBTLE.
+        // Ordinary alpha blending writes dst.a = src.a, so a 50%-alpha decal drawn onto a cleared
+        // (a=0) sheet lands as rgb*0.5 with a=0.5, and compositing THAT over the board halves it
+        // again: every decal comes out at a quarter strength and the wave reads as "the overlays
+        // got dimmer". The fix is separate factors — colour blends normally, alpha ACCUMULATES —
+        // which leaves the sheet's colour premultiplied, so the quads below composite it with
+        // AlphaPremultiply. GL constants spelled out: SRC_ALPHA / ONE_MINUS_SRC_ALPHA / ONE /
+        // ONE_MINUS_SRC_ALPHA, FUNC_ADD both.
+        Rlgl.SetBlendFactorsSeparate(0x0302, 0x0303, 1, 0x0303, 0x8006, 0x8006);
+        Raylib.BeginBlendMode(BlendMode.CustomSeparate);
+        Rlgl.PushMatrix();
+        Rlgl.Translatef(-Cfg.OriginX, -Cfg.OriginY, 0f);
+        _decalText.Clear();
+        Cfg.TextSink = _decalText;          // labels are replayed upright by the AIR pass, not baked
+        try
+        {
+            if (DecalProbeX >= 0)
+                Raylib.DrawRectangle(Cfg.OriginX + DecalProbeX * Cfg.Tile, Cfg.OriginY + DecalProbeY * Cfg.Tile,
+                                     Cfg.Tile, Cfg.Tile, Pal.RGBA(255, 0, 255, 255));
+            else
+                Renderer.DrawGroundDecals(g);
+        }
+        finally
+        {
+            // A LEAKED SINK IS WORSE THAN A LEAKED TRANSFORM: `TextProject` misplaces type, this
+            // would make every string in the game disappear until the next bake. It is the one
+            // global in this file worth a finally.
+            Cfg.TextSink = null;
+        }
+        Rlgl.PopMatrix();
+        Raylib.EndBlendMode();
+        Raylib.EndTextureMode();
+
+        if (nested) Raylib.BeginTextureMode(Display.ActiveTarget);
+    }
+
+    static readonly List<(string t, Vector2 pos, float size, float spacing, Color tint, bool title)> _decalText = new();
+
+    /// Replay the labels the bake set aside, through the bridge, with the text escape armed — so
+    /// they land upright at exactly the board position they occupied before P44.
+    static void DrawDecalText()
+    {
+        foreach (var (t, pos, size, spacing, tint, title) in _decalText)
+            if (title) Cfg.TitleText(t, pos, size, spacing, tint);
+            else Cfg.Text(t, pos, size, spacing, tint);
+    }
+
+    /// The baked sheet, as one textured quad per tile at that tile's top.
+    ///
+    /// Per-tile rather than one board-sized quad for three reasons, all of which are the point:
+    /// a single quad would have to pick ONE height and would sink into every plateau; it would
+    /// paint over tiles nobody has looked at, and `Vision` is the one thing this view exists to
+    /// respect; and a decal crossing a step SHOULD be cut by that step, because it is paint.
+    static void DrawDecalLayer(Grid g)
+    {
+        var tex = _decal.Texture;
+        if (tex.Id == 0) return;
+
+        // A render texture is stored bottom-up, so v runs the other way. Measured, not assumed —
+        // DECALTEST leg (C) puts the probe tile off-centre precisely so a flipped sheet fails.
+        Raylib.BeginBlendMode(BlendMode.AlphaPremultiply);   // the sheet's colour is premultiplied
+        // PAINT IS TESTED AGAINST DEPTH AND DOES NOT WRITE IT. A transparent fragment still writes
+        // the depth buffer, and the sheet covers EVERY tile — so with the mask on, the quads sat
+        // 0.005 above `DrawOverlays`' ground plates and silently swallowed the move range, the path
+        // preview and the hover box: the whole interaction layer, gone, with nothing drawn over it.
+        // Measured on the first build of this wave, and leg (H) is there so it cannot come back.
+        Rlgl.DisableDepthMask();
+        Rlgl.SetTexture(tex.Id);
+        Rlgl.Begin(DrawMode.Quads);
+        Rlgl.Color4ub(255, 255, 255, 255);
+        for (int y = 0; y < g.H; y++)
+            for (int x = 0; x < g.W; x++)
+            {
+                if (Vision.At(x, y) == Vision.Unseen) continue;
+                if (Terrain.Enabled && g.Ground != null && g.Ground[x, y] == GroundKind.Rift) continue;
+                float h = TierH * g.HeightAt(x, y) + DecalLift;
+                float u0 = x / (float)g.W, u1 = (x + 1) / (float)g.W;
+                float v0 = 1f - y / (float)g.H, v1 = 1f - (y + 1) / (float)g.H;
+                // Same winding as GroundQuad, which is the one known-good ground facing here.
+                Rlgl.TexCoord2f(u0, v0); Rlgl.Vertex3f(x,     h, y);
+                Rlgl.TexCoord2f(u0, v1); Rlgl.Vertex3f(x,     h, y + 1);
+                Rlgl.TexCoord2f(u1, v1); Rlgl.Vertex3f(x + 1, h, y + 1);
+                Rlgl.TexCoord2f(u1, v0); Rlgl.Vertex3f(x + 1, h, y);
+            }
+        Rlgl.End();
+        Rlgl.SetTexture(0);
+        // AND THE FLUSH IS PART OF THE FIX, NOT TIDINESS. `Rlgl.End()` does not draw anything —
+        // rlgl accumulates into a batch and submits it later (at `EndMode3D`, or whenever a texture
+        // or blend change forces it). GL state is read AT SUBMIT TIME, so disabling the depth mask
+        // and re-enabling it around the vertex calls left the mask ENABLED for every one of them
+        // and changed nothing at all. Measured: leg (H) stayed red through exactly that version.
+        Rlgl.DrawRenderBatchActive();
+        Rlgl.EnableDepthMask();
+        Raylib.EndBlendMode();
+    }
+
+    /// How far a decal floats over its tile's top. Big enough to beat depth precision at a 40-unit
+    /// ortho camera, small enough that it still reads as paint rather than as a card.
+    const float DecalLift = 0.035f;
 
     /// P34 — the 2D feedback layer, over the projected board, through the bridge.
     ///
@@ -1342,7 +1510,11 @@ public static class View3D
     static void DrawFxLayer(Game g, Camera3D cam)
     {
         BeginBridge(cam);
-        Renderer.DrawGroundOverlays(g);    // P35 — the board's own decal layer, on the ground
+        // P44: the REGION half has already been drawn as ground geometry inside the 3D pass, so
+        // only the things genuinely ABOVE the board come through the bridge. With the layer off
+        // this is the whole pre-P44 list, in its pre-P44 order.
+        if (DecalLayer) { DrawDecalText(); Renderer.DrawAirOverlays(g); }
+        else Renderer.DrawGroundOverlays(g);
         g.Fx.DrawAmbient();
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();

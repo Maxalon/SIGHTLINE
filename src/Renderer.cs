@@ -979,10 +979,34 @@ public static class Renderer
     /// The order is `DrawBoard`'s own, with the excluded entries removed, so layering that was
     /// tuned over a dozen waves survives. Text inside these methods escapes the matrix through
     /// `Cfg.TextProject` and stays upright — see the note on it in `Util.cs`.
-    public static void DrawGroundOverlays(Game g)
+    /// P44 — THE BOARD'S 2D FEEDBACK LAYER, SPLIT ON ONE QUESTION:
+    /// **does this describe a REGION OF THE BOARD, or an OBJECT/EVENT ABOVE IT?**
+    ///
+    /// P35 carried all 27 of these into the projected view through one affine bridge, drawn AFTER
+    /// the 3D pass — so a threat zone painted over the wall standing in front of it, and every
+    /// decal rode at CHIP HEIGHT, which at a low camera reads as a disc hovering a foot off the
+    /// floor. Both are the same mistake: half this list is not a layer over the board, it is paint
+    /// ON the board, and paint on a floor is occluded by what stands on it and sits at the floor's
+    /// own height, tier by tier.
+    ///
+    /// So the REGION half bakes into a board-sized texture and is drawn as real ground geometry
+    /// inside the 3D pass (`View3D.BakeDecals` / `DrawDecalLayer`), where the depth buffer occludes
+    /// it for free and each tile's quad sits at that tile's elevation. The OBJECT half keeps the
+    /// bridge, because a reticle over a target, smoke rising off a tile, or a marker floating over
+    /// a soldier's head are all things that are genuinely ABOVE the board and would be wrong lying
+    /// flat on it.
+    ///
+    /// Borderline calls and why they went where they did:
+    ///   * FIRE is ground — the flames are drawn inside a tile's footprint, and a burning tile is
+    ///     a region you must not walk into.
+    ///   * SMOKE and VENT STEAM are air — both are volumes that rise out of a tile, and a cloud
+    ///     baked flat onto the floor stops being a cloud.
+    ///   * GRENADE / ITEM / SHOVE previews are ground — every one of them is "these tiles".
+    ///   * ENEMY INTENT is ground — it is a path across the floor.
+    ///   * The MARK / PIN / BOUNTY indicators are air — they belong to a UNIT, not to a tile.
+    public static void DrawGroundDecals(Game g)
     {
         EnsureNoise();                       // some of these tint through the shared noise texture
-        float t = (float)Now();
 
         DrawOverwatchThreat(g);
         DrawFocusCones(g);
@@ -1001,14 +1025,23 @@ public static class Renderer
         DrawEnemyIntent(g);
         DrawScorch(g);
         DrawFire(g);
+        DrawGrenade(g);
+        DrawItem(g);
+        DrawShove(g);
+    }
+
+    /// The other half: things that are above the board, drawn through the affine bridge exactly as
+    /// P35 shipped them.
+    public static void DrawAirOverlays(Game g)
+    {
+        EnsureNoise();
+        float t = (float)Now();
+
         DrawSmoke(g);
         DrawVentSteam(g, t);
         DrawAim(g);
         DrawBarrelAimReticle(g);
         DrawCrossfire(g);
-        DrawGrenade(g);
-        DrawItem(g);
-        DrawShove(g);
         DrawBountyMark(g);
         DrawMarkIndicators(g);
         DrawMark(g);
@@ -1016,6 +1049,11 @@ public static class Renderer
         DrawPinIndicators(g);
         DrawPin(g);
     }
+
+    /// Both halves in one pass, in the pre-P44 order — the arm `SIGHTLINE_DECALLAYER=0` restores,
+    /// and the only configuration in which a region decal is still drawn over the geometry that
+    /// should hide it.
+    public static void DrawGroundOverlays(Game g) { DrawGroundDecals(g); DrawAirOverlays(g); }
 
     // Inward AO ramp on the board rect: VignetteDepth 1px rings, alpha falling off quadratically
     // from the edge, in the biome-tinted deep. Square rings (DrawRectangleRoundedLines is
