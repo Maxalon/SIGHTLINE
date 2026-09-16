@@ -277,6 +277,11 @@ public static class Program
         // only in the projected view, which is why it is a placement POLICY rather than a lever.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_UISURFACE") == "table")
             Surface.ActionBarPlacement = Surface.Kind.Table;
+
+        // P44 — SIGHTLINE_DECALLAYER=0 restores the pre-P44 board-feedback layer: all 27 methods
+        // through the affine bridge in one pass AFTER the 3D draw, so a region decal paints over
+        // the wall in front of it and rides at chip height instead of on the floor.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DECALLAYER") == "0") View3D.DecalLayer = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FORCECEILING"), out int xceil) && xceil >= 3)
             Mission.ForceCeiling = xceil;
@@ -931,6 +936,18 @@ public static class Program
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fxbridgetest");
             LoadGameFonts();   // leg (E) measures GLYPH INK; without the real atlases it measures nothing
             Console.WriteLine(View3D.FxBridgeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_DECALTEST=1 : P44 — the board's REGION feedback as paint on the floor. Reads
+        // the framebuffer on every leg, so it needs a window and real frames.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DECALTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "decaltest");
+            LoadGameFonts();
+            Display.Init(true);    // leg (G) needs a REAL render target to nest the bake inside
+            Console.WriteLine(View3D.DecalSelfTest());
             Raylib.CloseWindow();
             return;
         }

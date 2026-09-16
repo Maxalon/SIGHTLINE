@@ -19132,3 +19132,110 @@ Open, in the order they matter:
    (`Surface.Console`) and no call site.
 4. The `Game.cs` click seam is the one thing SURFACETEST cannot reach: it asserts `PointerIn` is
    right, not that `Game` calls it.
+
+## P44. THE DECAL LAYER — paint on a floor is occluded by what stands on it
+
+P35 carried all 27 of `Renderer`'s board-feedback methods into the projected view through one affine
+bridge, drawn AFTER the 3D pass. That was right for the Fx layer and wrong for half of that list,
+and the two symptoms were the same defect wearing two hats:
+
+* a threat zone, an objective pad or a scorch mark **painted straight over the wall standing in
+  front of it** — no depth test, because a bridged 2D primitive has no depth;
+* every decal rode at `FxPlaneY` (chip height), so at a low camera it **hovered a foot above the
+  ground** instead of lying on it.
+
+Half that list is not a layer OVER the board. It is paint ON the board.
+
+### The split, and the question that makes it
+
+**Does this describe a REGION OF THE BOARD, or an OBJECT/EVENT ABOVE IT?** Region → ground. Object
+above → air. `Renderer.DrawGroundDecals` / `DrawAirOverlays` carries the argument; the borderline
+calls are the interesting ones. FIRE is ground (the flames are inside a tile's footprint and a
+burning tile is a region you must not walk into). SMOKE and VENT STEAM are air (both are volumes
+that rise out of a tile, and a cloud baked flat onto a floor stops being a cloud). GRENADE / ITEM /
+SHOVE previews are ground — every one of them is "these tiles". ENEMY INTENT is ground; it is a path
+across the floor. MARK / PIN / BOUNTY are air; they belong to a UNIT, not to a tile.
+
+### The mechanism, and why it is not 27 rewrites
+
+Re-authoring those methods as 3D geometry would throw away their noise textures, glyphs and labels,
+which is most of what they are. Instead the region half is **baked into a board-sized render texture
+in its own board-pixel coordinates** — the coordinate system it is already written in, so not one
+`Renderer` call site changed — and that sheet is drawn as **one textured quad per tile at that
+tile's own elevation**. Depth-testing then comes from the depth buffer for free, the paint steps up
+and down plateaus with the floor, and `Vision` gates it because a tile nobody has scanned gets no
+quad.
+
+Per-tile rather than one board-spanning quad for three reasons, all of them the point: a single quad
+would have to pick one height and would sink into every plateau; it would paint over undiscovered
+ground; and a decal crossing a step SHOULD be cut by that step, because it is paint.
+
+### THE TEXT SINK — a label is not paint
+
+At a shallow camera the floor is foreshortened to ~0.4, so a label baked into the sheet is squashed
+to four pixels and gone. Every other kind of ink in that layer WANTS to be squashed; type never
+does. So `Cfg.TextSink` (armed only during the bake) makes `Text`/`TitleText` **record instead of
+draw**, and the air pass replays them through the bridge with P35's escape armed — labels land
+upright at exactly the board position they had before P44. `Measure` is deliberately untouched: it
+does not draw, and a call site that measures before it draws must still get a real answer. It is
+wrapped in a `finally`, because a leaked sink makes every string in the game disappear.
+
+### Three raylib facts this wave paid for, in the order they bit
+
+**1. Alpha into a transparent render target is not the default blend, and the symptom is subtle.**
+Ordinary alpha blending writes `dst.a = src.a`, so a 50%-alpha decal drawn onto a cleared (a=0)
+sheet lands as `rgb*0.5, a=0.5`, and compositing THAT over the board halves it again: every decal
+comes out at a quarter strength and the wave reads as "the overlays got dimmer". Fix: separate blend
+factors, colour normal and alpha ACCUMULATING (`SRC_ALPHA / ONE_MINUS_SRC_ALPHA / ONE /
+ONE_MINUS_SRC_ALPHA`), which leaves the sheet's colour premultiplied — so the quads composite it
+with `BlendMode.AlphaPremultiply`.
+
+**2. A transparent fragment still writes depth.** The sheet covers EVERY tile, so with the depth
+mask on its quads sat 0.005 above `DrawOverlays`' ground plates and silently swallowed the entire
+interaction layer — move range, path preview, hover box — with nothing drawn on top to show for it.
+Paint is tested against depth and does not write it.
+
+**3. `Rlgl.End()` DOES NOT DRAW ANYTHING.** rlgl accumulates into a batch and submits it later (at
+`EndMode3D`, or whenever a texture or blend change forces a flush), and **GL state is read at submit
+time**. So `DisableDepthMask()` … vertices … `EnableDepthMask()` left the mask enabled for every one
+of those vertices and changed nothing at all — leg (H) stayed red through exactly that version. The
+flush (`Rlgl.DrawRenderBatchActive()`) is part of the fix, not tidiness.
+
+**And a fourth, which is the one that would have been hardest to find:** `EndTextureMode` unbinds to
+the DEFAULT framebuffer, not to whatever was bound before it. The bake runs inside
+`Display.RenderFrame`'s own target, so nested naively it would redirect the rest of the frame to the
+screen and then have the blit of an empty target paint over it — a black frame with every
+accessibility setting stranded on it. `Display.TargetBound` / `ActiveTarget` exist for the
+re-entry, and leg (G) reads the TARGET back to prove it.
+
+### SIGHTLINE_DECALTEST
+
+Eight legs, every one of them measuring PIXELS, because every claim here is about pixels. It drives
+the bake with a **synthetic decal** (`View3D.DecalProbeX/Y` paints one tile solid magenta) rather
+than a live threat zone — the difference between a test whose discriminator is exactly known and one
+that measures whatever an overlay happened to paint. P43's leg (H) is why this file does not make
+that mistake twice.
+
+(A) the sheet is board-sized and reused across frames. (B) it lands on its own tile **the right way
+up** — the probe tile is asymmetric in both axes precisely so a v-flip or a u/v swap moves it, and a
+render texture IS stored bottom-up. (C) **occlusion**, with the pre-P44 bridged ink as the control
+arm: a high wall must hide the ground sheet and must NOT hide the bridged one, which is the
+difference between "occlusion works" and "something is dark". (D) elevation, against
+`GetWorldToScreen` of the tile top. (E) discovery gates it. (F) the text sink records, draws nothing
+and disarms. (G) the nested framebuffer. (H) paint does not write depth.
+
+Verified red-before/green-after on three separate breakages: no framebuffer re-entry → (G); no v
+flip → (B), (C) and (D) together; depth mask left on → (H).
+
+`SIGHTLINE_DECALLAYER=0` restores the pre-P44 single bridged pass exactly, in its pre-P44 order.
+
+### Open
+
+* The sheet is authored at one board pixel per texel (64 px/tile) and stretched across whatever the
+  camera's zoom makes of a tile, so a hard zoom softens it. Bilinear filtering hides it; a
+  zoom-aware sheet size would fix it.
+* Ink that a decal method draws OUTSIDE the board rect is clipped by the sheet. Labels escape
+  through the sink, so what remains is decoration nobody has noticed missing — but it is a real
+  difference from the flat renderer.
+* The air half is still bridged and still has no depth. That is correct for most of it; SMOKE is the
+  one member that would read better as volume.

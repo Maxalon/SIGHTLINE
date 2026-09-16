@@ -7,6 +7,30 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P44 "THE DECAL LAYER" (2026-09-16)
+
+P44 split the board's 2D feedback layer on one question — REGION of the board, or OBJECT above it —
+and gave the region half real ground geometry (`View3D.BakeDecals` / `DrawDecalLayer`), so it is
+depth-tested, sits at each tile's own elevation and is gated by `Vision`. `SIGHTLINE_DECALLAYER=0`
+restores the pre-P44 single bridged pass.
+
+- [ ] **1. The sheet is a fixed 64 px per tile and the camera zooms.** Authored at board resolution
+      and stretched across whatever the zoom makes of a tile, so a hard zoom softens every decal.
+      Bilinear filtering hides it rather than fixing it; a zoom-aware sheet size (or a sheet sized
+      to the board's on-screen extent) would.
+- [ ] **2. Ink drawn OUTSIDE the board rect is clipped by the sheet.** Labels escape through
+      `Cfg.TextSink` and land upright, so what is lost is decoration nobody has yet noticed missing
+      — but it is a real difference from the flat renderer and it will bite the first decal that
+      deliberately overhangs an edge.
+- [ ] **3. SMOKE is the one AIR member that wants to be a volume.** It is correctly not on the
+      floor, but it is still a flat bridged card with no depth, so it neither occludes nor is
+      occluded. A billboard or a cheap volume is the honest answer; nothing else in the air half
+      has this problem.
+- [ ] **4. The flat renderer does not use the split.** `Renderer.DrawBoard` still calls the 27
+      methods individually, so the ground/air argument exists in exactly one renderer. Harmless
+      today; a second consumer would make it a real source of truth.
+
+
 ## OPEN — left by PARALLAX P43 "THE SURFACE" (2026-09-16)
 
 P43 made UI PLACEMENT a policy: `Surface.Panel` generalises P34's affine bridge to any plane, and

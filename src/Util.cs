@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Raylib_cs;
 
@@ -154,10 +155,25 @@ public static class Cfg
     public static Func<Vector2, Vector2> TextUnmap;
     public static float TextScale = 1f;
 
+    /// P44 — THE TEXT SINK. A LABEL IS NOT PAINT.
+    ///
+    /// The decal bake renders the board's REGION feedback into a texture that is then laid on the
+    /// floor as geometry, and at a shallow camera that floor is foreshortened to 0.4 — so a label
+    /// baked into it is squashed to four pixels and gone. Every other kind of ink in that layer
+    /// WANTS to be squashed (it is paint on a floor); type never does. That is the same argument
+    /// `TextProject` exists for, one layer further out.
+    ///
+    /// So while the sink is armed, `Text`/`TitleText` record instead of drawing, and the AIR pass
+    /// replays them through the bridge with the escape armed — i.e. labels land upright at the
+    /// same board position they had before P44, unchanged. `Measure` is untouched: it does not
+    /// draw, and a call site that measures before it draws must still get a real answer.
+    public static List<(string t, Vector2 pos, float size, float spacing, Color tint, bool title)> TextSink;
+
     public static void Text(string t, Vector2 pos, float size, float spacing, Color tint)
     {
         if (CaptureText != null) CaptureText.Add((t, size));
         if (InkProbe != null) InkProbe(t, pos, Measure(t, size, spacing), size, tint.A / 255f);
+        if (TextSink != null) { TextSink.Add((t, pos, size, spacing, tint, false)); return; }
         if (TextProject != null) { DrawEscaped(FontFor(size), t, pos, size, spacing, tint); return; }
         Raylib.DrawTextEx(FontFor(size), t, pos, Scaled(size), spacing, tint);
     }
@@ -173,6 +189,7 @@ public static class Cfg
     {
         if (CaptureText != null) CaptureText.Add((t, size));
         if (InkProbe != null) InkProbe(t, pos, TitleMeasure(t, size, spacing), size, tint.A / 255f);
+        if (TextSink != null) { TextSink.Add((t, pos, size, spacing, tint, true)); return; }
         if (TextProject != null) { DrawEscaped(TitleFontFor(size), t, pos, size, spacing, tint); return; }
         Raylib.DrawTextEx(TitleFontFor(size), t, pos, Scaled(size), spacing, tint);
     }

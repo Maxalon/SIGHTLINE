@@ -636,6 +636,28 @@ void main() {
     /// pre-W5 compositing), so SIGHTLINE_CONTRASTTEST is falsifiable without reverting the tree.
     static readonly bool HudInFx = Environment.GetEnvironmentVariable("SIGHTLINE_HUDINFX") == "1";
 
+    /// P44 — IS ONE OF THIS FILE'S RENDER TARGETS CURRENTLY BOUND?
+    ///
+    /// `View3D.BakeDecals` binds a framebuffer of its own in the middle of the frame, and raylib's
+    /// `EndTextureMode` unbinds to the DEFAULT framebuffer rather than to whatever was bound before
+    /// it. Nested naively, the rest of the frame would draw straight to the screen and then be
+    /// overwritten by the blit of an empty target — a black frame, with every accessibility setting
+    /// stranded on it. The bake reads this flag and re-enters `ActiveTarget` on the way out.
+    ///
+    /// It tracks `_target` ONLY. The bloom buffers below are begun and ended inside `BuildBloom`,
+    /// which nothing re-enters, and marking them here would report a target bound that the board
+    /// pass is not drawing into.
+    public static bool TargetBound { get; private set; }
+    public static RenderTexture2D ActiveTarget => _target;
+
+    static void BeginTarget() { Raylib.BeginTextureMode(_target); TargetBound = true; }
+    static void EndTarget() { Raylib.EndTextureMode(); TargetBound = false; }
+
+    /// Harness only — DECALTEST leg (G) needs a REAL bound target to nest a bake inside, because
+    /// the hazard it measures only exists when one is bound.
+    public static void SelfTestBeginTarget() => BeginTarget();
+    public static void SelfTestEndTarget() => EndTarget();
+
     public static void RenderFrame(Action board, Action hud)
     {
         if (HudInFx && hud != null) { var b = board; var h = hud; board = () => { b(); h(); }; hud = null; }
@@ -645,9 +667,9 @@ void main() {
         {
             // Pass 1 — the BLOOM SOURCE. Atmosphere only when the frame is split; when there is
             // no split `board` already IS the whole frame.
-            Raylib.BeginTextureMode(_target);
+            BeginTarget();
             board();
-            Raylib.EndTextureMode();
+            EndTarget();
 
             // P1: build the half-res bloom from that frame before compositing.
             BuildBloom();
@@ -655,9 +677,9 @@ void main() {
             // Pass 2 — the chrome, into the same target, after the bright-pass has already run.
             if (hud != null)
             {
-                Raylib.BeginTextureMode(_target);
+                BeginTarget();
                 hud();
-                Raylib.EndTextureMode();
+                EndTarget();
             }
 
             // Upload uniforms.
@@ -706,9 +728,9 @@ void main() {
             return;
         }
 
-        Raylib.BeginTextureMode(_target);
+        BeginTarget();
         draw();
-        Raylib.EndTextureMode();
+        EndTarget();
 
         Raylib.BeginDrawing();
         Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
