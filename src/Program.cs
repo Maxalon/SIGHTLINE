@@ -315,6 +315,14 @@ public static class Program
         if (siteGlyphEnv == "1") Maps.SiteGlyphs = true;
         if (siteGlyphEnv == "0") Maps.SiteGlyphs = false;
 
+        // P53 — THE FALSIFICATION ARM for P52's rule. `=0` moves SABOTAGE's INTERIOR charge out of
+        // the held room and changes nothing else, so the same objective on the same board is
+        // measured with and without a REQUIRED site inside. P52's rule ("a held room changes the
+        // mission only when the win condition forces the squad in") was read off SABOTAGE against
+        // HACK — two objectives at once — and this is the control it never had.
+        // NEVER A SHIPPING CONFIGURATION; the same status as SIGHTLINE_STALEGROUND=1.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ROOMSITE") == "0") Maps.RoomSite = false;
+
         // P48 — SIGHTLINE_MAP now reaches the BALANCE BATCH as well as the shot/autoplay paths.
         //
         // It is here because P48's own round could not see its own lever: one arena in thirty-five,
