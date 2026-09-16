@@ -226,6 +226,15 @@ public static class Program
         }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EDGES") == "0") Edges.Enabled = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DISCOVERY") == "1") Vision.Enabled = true;
+        // P39 — the confidence shader. =0 draws the same lines with no program bound, which is also
+        // the path a driver that refuses the program falls back to. SIGHTLINE_WIREGAIN=<0..1> dials
+        // the scan planes and the sweep; 0 binds the shader as a mathematical identity, which is how
+        // CONFTEST proves the pass tints nothing of its own.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_WIRESHADER") == "0") Wire.ShaderEnabled = false;
+        if (float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_WIREGAIN"),
+                           System.Globalization.NumberStyles.Float,
+                           System.Globalization.CultureInfo.InvariantCulture, out float wg))
+            Wire.Gain = Util.Clamp(wg, 0f, 1f);
         // P32 — start in the PROJECTED view. Unlike SIGHTLINE_VIEW3DSHOT (which photographs the
         // board through a bypass path and exits), this sets the same flag the I key toggles, so the
         // game runs normally: full HUD, full input, the 3D board underneath.
@@ -919,6 +928,16 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DENSITYTEST") == "1")
         {
             Console.WriteLine(Mission.DensitySelfTest());
+            return;
+        }
+        // SIGHTLINE_CONFTEST=1 : P39 — the CONFIDENCE terms and the shader that carries them.
+        // Needs a window: one leg compares the framebuffer with and without the program bound.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CONFTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "conftest");
+            Console.WriteLine(Wire.ConfidenceSelfTest());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_WIRETEST=1 : P38 — the hard-edge extractor behind the REMEMBERED tier. Needs a

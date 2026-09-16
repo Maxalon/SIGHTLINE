@@ -214,8 +214,18 @@ public static class View3D
     /// has light on it. It takes the SCAN's colour: the room's own edge hue pulled most of the way
     /// to a cold instrument blue, so a remembered board still reads as that place while reading as
     /// a reconstruction of it rather than a view of it.
-    static Color WireTint(float dim) =>
-        Fade(Pal.Mix(Scene.Edge, Pal.RGBA(150, 214, 240), 0.72f), 0.42f + 0.72f * dim);
+    /// P39 — a remembered line's brightness IS the squad's confidence in it, and the number comes
+    /// from what the squad did: how close it stood and how long ago (`Vision.Confidence`). A
+    /// low-confidence line also loses saturation, because two cues beat one for anybody reading
+    /// this at a glance or without full colour vision — and the range is floored well above zero,
+    /// since a memory this layer stops drawing is a memory the player is not told they have.
+    static Color WireTint(float conf)
+    {
+        float k = Util.Clamp(conf, 0f, 1f);
+        var hot = Pal.Mix(Scene.Edge, Pal.RGBA(150, 214, 240), 0.72f);
+        var cold = Pal.Mix(hot, Pal.RGBA(96, 116, 132), 0.55f);      // less sure -> less colour
+        return Fade(Pal.Mix(cold, hot, k), 0.34f + 0.62f * k);
+    }
 
     /// THE DISCIPLINE, since this is a mutable flag read by a primitive: every site that SETS it
     /// clears it on the same straight line, with no `return` or `continue` between the two. The
@@ -379,6 +389,21 @@ public static class View3D
     public static void DrawEdges(Grid g)
     {
         if (g == null || !g.AnyEdges || !Edges.Enabled) return;
+        DrawEdgePass(g, false);
+        if (Vision.Enabled) WirePass(g, () => DrawEdgePass(g, true));
+    }
+
+    /// Run one wireframe pass with the confidence shader bound, or plainly if it is unavailable.
+    /// Once per pass, twice per frame — not per object.
+    static void WirePass(Grid g, Action body)
+    {
+        bool bound = Wire.Begin(g.W, Renderer.NowPublic);
+        body();
+        if (bound) Wire.End();
+    }
+
+    static void DrawEdgePass(Grid g, bool wantWire)
+    {
         float T = 0.16f;
         void Slab(Vector3 baseCentre, float w, float h, float d, Color c) =>
             Solid(baseCentre with { Y = baseCentre.Y + h * 0.5f }, w, h, d, c, c);
@@ -389,6 +414,7 @@ public static class View3D
                 var k = g.EdgeV[x, y]; if (k == EdgeKind.None) continue;
                 byte w0 = Vision.FaceVAt(x, y, 0), w1 = Vision.FaceVAt(x, y, 1);
                 if (w0 == Vision.Unseen && w1 == Vision.Unseen) continue;
+                if ((Math.Max(w0, w1) == Vision.Remembered) != wantWire) continue;
                 // ONE SIDE KNOWN = ONE PLANE. Half the thickness, flush to the face that was
                 // actually observed, so the operator cannot read a depth nobody has been round
                 // the back to measure. Both sides known and the wall gets its real thickness.
@@ -400,7 +426,8 @@ public static class View3D
                 // A wall is remembered only if NEITHER face is in sight now; one live face means
                 // you are looking at the wall, and the far side's staleness is already carried by
                 // the half-thickness above.
-                _wire = Math.Max(w0, w1) == Vision.Remembered; _wireDim = vf;
+                _wire = Math.Max(w0, w1) == Vision.Remembered;
+                _wireDim = _wire ? Vision.ConfidenceV(x, y) : vf;
                 if (k == EdgeKind.Door)
                 {
                     Slab(at with { Z = y + 0.18f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHiTop), vf));
@@ -416,12 +443,14 @@ public static class View3D
                 var k = g.EdgeH[x, y]; if (k == EdgeKind.None) continue;
                 byte n0 = Vision.FaceHAt(x, y, 0), n1 = Vision.FaceHAt(x, y, 1);
                 if (n0 == Vision.Unseen && n1 == Vision.Unseen) continue;
+                if ((Math.Max(n0, n1) == Vision.Remembered) != wantWire) continue;
                 float th = (n0 != Vision.Unseen && n1 != Vision.Unseen) ? T : T * 0.5f;
                 float off = (n0 != Vision.Unseen && n1 != Vision.Unseen) ? 0f
                           : (n0 != Vision.Unseen ? -T * 0.25f : T * 0.25f);
                 float vf = Vision.Dim(Math.Max(n0, n1));
                 var at = new Vector3(x + 0.5f, 0f, y + off);
-                _wire = Math.Max(n0, n1) == Vision.Remembered; _wireDim = vf;
+                _wire = Math.Max(n0, n1) == Vision.Remembered;
+                _wireDim = _wire ? Vision.ConfidenceH(x, y) : vf;
                 if (k == EdgeKind.Door)
                 {
                     Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHiTop), vf));
@@ -468,6 +497,24 @@ public static class View3D
         Raylib.DrawLine3D(new Vector3(g.W, 0.03f, g.H), new Vector3(0, 0.03f, g.H), e);
         Raylib.DrawLine3D(new Vector3(0, 0.03f, g.H), new Vector3(0, 0.03f, 0), e);
 
+        DrawObjects(g, false);                 // everything in sight, lit
+        // P39 — THE WIREFRAME IS ITS OWN PASS, and that is what the shader costs. A bind per tile
+        // would flush rlgl's batch 1,120 times a frame to change nothing between them, so the
+        // remembered tier is drawn in one group with the program bound once around it. The second
+        // walk over the board is a handful of microseconds; the flushes would not be.
+        //
+        // With discovery OFF — the shipped default — `Vision.At` answers VISIBLE everywhere, so
+        // there is no remembered tier at all and the whole second pass is skipped rather than run
+        // to draw nothing.
+        if (Vision.Enabled) WirePass(g, () => DrawObjects(g, true));
+
+        DrawEdges(g);      // P30: the walls P28 put between tiles, finally visible in 3D
+    }
+
+    /// One tier of the board's OBJECTS — plateaus, cover and barrels. `wantWire` picks which:
+    /// false draws what is in sight, true draws what is only remembered.
+    static void DrawObjects(Grid g, bool wantWire)
+    {
         for (int y = 0; y < g.H; y++)
             for (int x = 0; x < g.W; x++)
             {
@@ -482,12 +529,14 @@ public static class View3D
 
                 byte tier = Vision.At(x, y);
                 if (tier == Vision.Unseen) continue;             // P30: not known, not drawn
+                if ((tier == Vision.Remembered) != wantWire) continue;   // P39: one tier per pass
                 float vf = Vision.Dim(tier);
                 // P38 — the object tier. THE FLOOR STAYS A SLAB whichever tier it is on, and that
                 // is deliberate: ground you have walked is ground you KNOW, and outlining it too
                 // would make a remembered board read as an unseen one. What memory costs you is
                 // the THINGS on it, so the things are what go to lines.
-                _wire = tier == Vision.Remembered; _wireDim = vf;
+                _wire = tier == Vision.Remembered;
+                _wireDim = _wire ? Vision.Confidence(x, y) : vf;
                 int h = g.Height[x, y];
                 float baseY = 0f;
                 if (h > 0)
@@ -507,8 +556,6 @@ public static class View3D
                           Known(Pal.RGBA(110, 82, 24), vf), Known(Pal.VipGold, vf));
                 _wire = false; _wireDim = 1f;
             }
-
-        DrawEdges(g);      // P30: the walls P28 put between tiles, finally visible in 3D
     }
 
     /// ── P31: THE GROUND LAYER, IN THREE DIMENSIONS ──────────────────────────────────────────
@@ -1258,6 +1305,7 @@ public static class View3D
     public static void DrawPlayable(Game g)
     {
         Raylib.ClearBackground(Pal.Bg);
+        Vision.Stamp = g.Turn;          // P39: the clock a memory's AGE is measured against
         Vision.Refresh(g.Grid, AllUnits(g));
         var cam = MakeCamera(g.Grid, (float)Cfg.ScreenW / Cfg.ScreenH);
         ApplyShake(ref cam, g.Fx.ShakeOffset, g.CamPulse);
