@@ -1564,6 +1564,9 @@ public static class Stats
                 // P49: whether the redrawn arena declares its objective SITES. The lever under test
                 // in P49's own round, and a separate dial from `edgeArenas` on purpose.
                 siteGlyphs = Maps.SiteGlyphs,
+                // P50: whether the arena's 'A' anchors seat a pod. The lever under test in P50's
+                // own round, and until P50 it was a flag with no consumer at all.
+                arenaAnchors = Sightline.Mission.ArenaAnchors,
             },
             // P15 THE UNVERIFIED: what this batch was ASKED for (see BatchEnv). null outside a
             // SIGHTLINE_BALANCE batch — an older archive has no `batch` key at all, which is how a

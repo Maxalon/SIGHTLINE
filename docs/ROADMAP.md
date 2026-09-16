@@ -7,6 +7,31 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P50 "THE GARRISON" (2026-09-16)
+
+P50 made P26's `A` enemy-pod anchor glyph actually seat a pod (it had been parsed and discarded for
+three programs, with a restore flag and no consumer) and priced it. The fight in the room is now
+good — choices 1.18 → 6.77, shots 37% → 87%, and the apex rung responds to heat again (h8 90.6 →
+59.7, resolved). `SIGHTLINE_SITEGLYPHS` is still default OFF.
+
+- [ ] **1. THE GEOMETRY, NOT THE FIGHT. This is the top item.** At h0/h4 the composite board reads
+      94.7% / 91.2% against the shipping board's 66.2% / 40.0%. **The garrison fixes the fight and
+      does not fix the difficulty**: a HACK whose terminal sits in one room is a mission with ONE
+      PLACE TO BE, and one place to be is easy however hard the fight there is. Three candidate
+      levers, each measurable on P50's instrument against its own ON arm:
+      a **second site** so the squad must split (SABOTAGE already wants three); a **second door** so
+      holding the room is a choice rather than a gift; or the garrison counted **on top of** the
+      mission's headcount rather than out of it (P50's h0/h4 flatness is entirely that it is the
+      same bodies, relocated).
+- [ ] **2. Only then reconsider the default.** Four waves have now priced four versions of this
+      object (P42 a rectangle, P48 a room, P49 a room with the prize in it, P50 that room held). The
+      fifth is the one that might earn a default flip.
+- [ ] **3. `GarrisonRing` is a first cut.** An anchored pod's members fill outward on a fixed
+      16-offset ring, which is draw-free and reproducible but knows nothing about walls — it is run
+      BEFORE `TryApplyLayout` stamps them, so a member can land outside the room it is meant to
+      hold. It happens not to on CITADEL; it will on the next arena with a tighter interior.
+
+
 ## OPEN — left by PARALLAX P49 "SOMETHING WORTH GOING IN FOR" (2026-09-16)
 
 P49 put the HACK terminal and the RESCUE captive inside P48's room, priced it on a doubly-forced
