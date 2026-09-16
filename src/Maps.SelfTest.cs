@@ -134,14 +134,30 @@ public static partial class Maps
                     if (SiteGlyphs)
                     {
                         var kinds = string.Concat(sites.Select(z => z.g).OrderBy(c => c));
-                        if (kinds != "ACT") fails.Add($"(A) the redrawn CITADEL declares '{kinds}', expected ACT (anchor, captive, terminal)");
+                        // P51: three SABOTAGE charges join the set — one INSIDE the room, two far
+                        // outside. The point of the round is that a SINGLETON objective in a room is
+                        // what P49 measured as a collapse; a three-site objective is the control.
+                        if (kinds != "ACTXXX") fails.Add($"(A) the redrawn CITADEL declares '{kinds}', expected ACTXXX (anchor, captive, terminal, 3 charges)");
+                        // P51 SPLIT THE ASSERTION WITH THE DESIGN. The terminal, the captive and the
+                        // garrison belong INSIDE the room. The three sabotage charges deliberately do
+                        // NOT — exactly one of them is inside and the other two are far outside, which
+                        // is the whole lever: a mission with three places to be instead of one.
+                        int inRoom = 0, outRoom = 0;
                         foreach (var (g2, sx, sy) in sites)
                         {
-                            if (sx < 6 || sx > 9 || sy < 3 || sy > 6)
+                            bool inside = sx >= 6 && sx <= 9 && sy >= 3 && sy <= 6;
+                            if (g2 == 'X') { if (inside) inRoom++; else outRoom++; continue; }
+                            if (!inside)
                                 fails.Add($"(A) site '{g2}' at {sx},{sy} is OUTSIDE the room — it is not a reason to go in");
                             if (cs[sx, sy] >= 0)
                                 fails.Add($"(A) site '{g2}' at {sx},{sy} is still reachable with the door sealed");
                         }
+                        if (inRoom != 1 || outRoom != 2)
+                            fails.Add($"(A) the sabotage charges are {inRoom} in / {outRoom} out, expected 1 in / 2 out");
+                        // and the two outside ones must be FAR apart, or "split the squad" is a word
+                        var outs = sites.Where(z => z.g == 'X' && !(z.x >= 6 && z.x <= 9 && z.y >= 3 && z.y <= 6)).ToList();
+                        if (outs.Count == 2 && Util.ChebyDist(outs[0].x, outs[0].y, outs[1].x, outs[1].y) < 8)
+                            fails.Add($"(A) the two outside charges are only {Util.ChebyDist(outs[0].x, outs[0].y, outs[1].x, outs[1].y)} tiles apart");
                         if (!AnySiteTemplates) fails.Add("(A) AnySiteTemplates is false with glyphs declared");
                     }
 
@@ -334,7 +350,8 @@ public static partial class Maps
             ? "ARENAEDGETEST: PASS (exactly one arena is double-resolution (CITADEL) and every other is passed "
               + "through by reference; SIGHTLINE_EDGEARENAS=0 hands back the original array itself; the redrawn "
               + "CITADEL spends no tile on cover, its interior is sealed without its door, and both of its "
-              + "objective sites AND its enemy anchor are inside that room and sealed with it; the glyph strip touches exactly the "
+              + "terminal, captive and enemy anchor are inside that room and sealed with it while its three "
+              + "sabotage charges are 1 in / 2 far outside; the glyph strip touches exactly the "
               + "site cells and takes AnySiteTemplates down with it; the hand-drawn "
               + "fixture parses to exactly 18 walls and 1 "
               + "door with nothing stray; five malformed forms are each refused with a reason; on a real board the "
