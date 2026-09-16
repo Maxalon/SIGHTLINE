@@ -1823,6 +1823,37 @@ public partial class Game
         AddZoomPunch(0.05f);
     }
 
+    /// P38 harness hook (screenshot only): STAGE THE REMEMBERED TIER.
+    ///
+    /// The wireframe tier is invisible on frame one by definition — nothing has been seen and lost
+    /// yet, so a normal shot photographs a board that is entirely VISIBLE or entirely UNSEEN, which
+    /// is exactly the picture that made this tier's absence hard to notice for six waves.
+    ///
+    /// So: walk the squad forward, look, walk it back. `Vision.Refresh` demotes everything it was
+    /// shown last call before re-lighting, so the forward band decays to REMEMBERED on the second
+    /// pass and the home band stays VISIBLE — the real shape of the thing, staged in four lines
+    /// rather than faked with a hand-painted state array.
+    public void DebugWireShot()
+    {
+        Vision.Enabled = true;
+        var live = Players.Where(p => p.Alive).ToList();
+        if (live.Count == 0) return;
+
+        var home = live.Select(u => (u.X, u.Y)).ToList();
+        int reach = Math.Min(11, Grid.W - 3);
+        for (int i = 0; i < live.Count; i++)
+        {
+            var u = live[i];
+            u.X = Util.Clamp(u.X + reach, 0, Grid.W - 1);
+            u.Y = Util.Clamp(u.Y, 0, Grid.H - 1);
+        }
+        Vision.Refresh(Grid, live);                       // the forward sweep: all of it VISIBLE
+
+        for (int i = 0; i < live.Count; i++) { live[i].X = home[i].Item1; live[i].Y = home[i].Item2; }
+        foreach (var u in live) u.SyncPos();
+        Vision.Refresh(Grid, live);                       // back home: the far band is now MEMORY
+    }
+
     /// Harness hook (screenshot only): force a barracks rank-up perk choice.
     public void DebugBarracksPerk()
     {

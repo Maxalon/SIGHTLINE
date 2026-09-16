@@ -3901,6 +3901,33 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       does**: all three are built to the crate's envelope and swapped in on the same scale factors,
       so the silhouette a player reads as "waist-high thing I can shoot over" is the same in every
       room, and nothing here is read by `Grid`, `Ai` or `Combat`.
+- [x] **The REMEMBERED tier is drawn as a wireframe, for any object.** DONE (P38). `src/Wire.cs`:
+      a hard-edge extractor that is a pure function of a `Mesh`, so the prop kit, the procedural
+      bevelled block and anything loaded later all get a wireframe with no per-asset preparation.
+      `View3D._wire` is the ONE SEAM — set per tile and per edge from `Vision`, read by the solid
+      primitives — so a draw site added later gets the tier free and cannot forget it.
+      **It is a GEOMETRY answer, not a shader one, and that was the deciding argument**: a shader
+      wireframe (barycentric) needs custom per-vertex attributes, which means un-indexing and
+      re-authoring every mesh, to solve a problem we do not have (lines drawn OVER a lit solid —
+      the three tiers are mutually exclusive). The hard-edge set is also 5-10x smaller than the
+      triangle set, and most of a discovered board is remembered, so the common case got faster.
+      **`Raylib.DrawModelWires` exists and is the wrong answer**: it draws every TRIANGLE edge, so
+      a bevelled box shows the diagonal split of all 26 of its quads. `Wire.Mode = AllEdges`
+      reproduces it exactly and is kept as the comparison — on the kit it is 66 edges against 48,
+      132 against 96, 486 against 108.
+      **The weld is the load-bearing part and the trap**: the kit is flat-shaded with per-corner
+      vertex colours, so no two triangles share an index. Key edges on indices and every edge looks
+      like a boundary, the crease test never runs, and the "hard edge" pass silently returns the
+      full triangle net — a working-looking wireframe that is one by accident. `SIGHTLINE_WIRETEST`
+      leg (A) pins it on arithmetic, not on a measurement: a unit cube is exactly 12 hard edges, 18
+      unique edges and 8 welded corners. Verified falsifiable — remove the weld and it reads 24/30.
+- [ ] **A CONFIDENCE shader is the next step, and it needs the tier that now exists.** Constant-width
+      lines that do not thin with distance, brightness falling with range from the scanner and with
+      how long ago a surface was seen, a scan sweep. `LoadShaderFromMemory` / `SetShaderValue` are
+      available and P36 established the 3D board renders into `Display`'s target, so it composites
+      normally. `Wire.CreaseDeg` (25 degrees) is the dial if the line work ever reads too busy — an
+      icosphere rock keeps every edge at that value, which is correct and is also the noisiest
+      thing on the board.
 - [ ] **The RAY/coverage render is not in the game.** `Vision` is per-face binary. The
       angular-footprint coverage masks in `prototypes/lidar` give PARTIAL knowledge of a surface
       and a confidence gradient, and need a texture atlas to decouple material grain from mask

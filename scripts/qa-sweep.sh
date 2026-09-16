@@ -110,6 +110,7 @@ echo -n "COMBATTEST : "; verdict "$(SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBA
 echo -n "EDGETEST   : "; verdict "$(SIGHTLINE_EDGETEST=1 run | grep -oE "EDGETEST: (PASS|FAIL)" | head -1)"
 # P32: the projected view's INPUT path -- every tile projected to a pixel and picked back.
 echo -n "PICKTEST   : "; verdict "$(SIGHTLINE_PICKTEST=1 run | grep -oE "PICKTEST: (PASS|FAIL)" | head -1)"
+echo -n "WIRETEST   : "; verdict "$(SIGHTLINE_WIRETEST=1 run | grep -oE "WIRETEST: (PASS|FAIL)" | head -1)"
 echo -n "FXBRIDGETEST: "; verdict "$(SIGHTLINE_FXBRIDGETEST=1 run | grep -oE "FXBRIDGETEST: (PASS|FAIL)" | head -1)"
 # P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
 echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"

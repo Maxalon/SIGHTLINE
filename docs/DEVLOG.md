@@ -18673,3 +18673,91 @@ own feature deleted: P35's text-escape ink leg (it checked WHERE the glyph was, 
 takes an un-escaped glyph to the same place — it had to measure the ink's SHAPE), and P37's density
 leg (it needed the `SIGHTLINE_DENSITY=0` half to prove the instrument can see the defect at all).
 Both were found by deliberately breaking the feature and re-running. Do that.
+
+---
+
+## P38. THE WIREFRAME — the tier that existed in the data and not in the picture
+
+**2026-09-16, base `db4dd58`.** `Vision` has had three tiers since P30 and the projected view only
+ever drew two of them: UNSEEN was absent, and **everything else was `Known()`, a brightness
+multiply**. So REMEMBERED — the tier the whole scanned-hologram premise turns on, "we looked at this
+and we are not looking at it now" — was a dim solid, indistinguishable from a lit one in a dark
+corner. The state was computed, stored per tile AND per edge face, refreshed every frame, and
+invisible.
+
+### Geometry, not a shader, and the argument is the durable half
+
+The obvious reach is a barycentric wireframe shader. It is the wrong tool here, for a reason that is
+about this project and not about taste:
+
+- **It needs custom per-vertex attributes**, which means un-indexing and re-authoring every mesh.
+  The requirement was "any object you load", and a solution that touches every asset is not that.
+- **It solves a problem we do not have.** Barycentric's real value is lines drawn *over* a lit
+  solid at constant width. The three tiers are mutually exclusive — a surface is visible or
+  remembered, never both — so the solid and its wireframe are never on screen together.
+- **The geometry answer is cheaper than what it replaces.** A hard-edge set is 5-10× smaller than
+  the triangle set, and most of a discovered board is remembered, so the common case got *faster*.
+
+`Wire.Extract` is a pure function of a `Mesh`: weld vertices by position, key edges on the welded
+ids, keep an edge if it is a boundary (one adjacent face) or its two faces differ by more than
+`CreaseDeg`. The prop kit, `Mesh3D.BevelBox` and anything added later all get a wireframe with no
+preparation at all.
+
+**`Raylib.DrawModelWires` already exists and is the wrong answer.** It draws every *triangle* edge,
+so a bevelled box shows the diagonal split of all 26 of its quads and reads as a dense net.
+`Wire.Mode = AllEdges` reproduces it exactly, kept as the comparison rather than as an option: on
+the kit it is 66 edges against 48, 132 against 96, 486 against 108.
+
+### The weld is the whole thing, and skipping it fails silently
+
+This kit is **flat-shaded with per-corner vertex colours** — every triangle carries its own three
+vertices and no two triangles share an index. Key the edges on indices and *every* edge in the mesh
+looks like a boundary, the crease test never runs, and the "hard edge" pass returns the full
+triangle net. It would look like a working wireframe and be one only by accident.
+
+So `WIRETEST` leg (A) pins arithmetic rather than a measurement: a raylib unit cube is **exactly 12
+hard edges, 18 unique edges and 8 welded corners** — 12 box edges plus 6 face diagonals, of which
+the diagonals die because a quad's two halves share a normal. Verified falsifiable: removing the
+weld reads 24 and 30, and the independent hygiene leg catches it too ("an edge appears twice").
+
+The kit counts are **printed, not pinned**. They are a property of the meshes and of `CreaseDeg`, so
+a golden number would break on any art change while saying nothing about correctness.
+
+### One seam, and no closure in the hot loop
+
+`View3D._wire` is set per tile and per edge face from `Vision` and read by `Solid` and `CoverProp` —
+the same one-seam shape as `Game.PickTile`, so a draw site added later gets the tier free.
+
+The first version wrapped each object in `AsWire(bool, Action)` for try/finally safety. That
+allocates **a closure per tile per frame** — 1,120 on a big board, 67k a second at 60fps, in the
+hottest loop the renderer has — to buy safety against a shape this code does not contain (there is
+no `return` or `continue` between the set and the clear). It is a plain flag with a stated
+discipline instead.
+
+Two deliberate calls inside it: **`Solid` states a box's twelve edges directly** rather than
+extracting them, because a cover block's hard-edge set includes its *bevel* — each chamfer face sits
+~45° off its neighbours — which draws every silhouette twice; the chamfer is a lighting device, not
+a feature a scan would report. And **the floor stays a slab on every tier**: ground you have walked
+is ground you know, and outlining it too would make a remembered board read as an unseen one. What
+memory costs you is the *things* on it.
+
+A bug caught on the way: `Solid` was deriving the tier's brightness from `top.A / 255f`. `Known()`
+scales a colour's RGB and leaves its alpha alone, so that number says nothing about how well a
+surface is known — it happened to work only because `_wire` is set for exactly one tier. It is
+carried explicitly in `_wireDim` now.
+
+### Staging a tier that cannot exist on frame one
+
+No screenshot could show this. On frame one nothing has been seen and lost, so a normal shot
+photographs a board that is entirely visible or entirely unseen — which is exactly why the tier's
+absence went unnoticed for six waves. `SIGHTLINE_WIRESHOT` walks the squad forward, looks, and walks
+it back; `Vision.Refresh` demotes what it lit last call before re-lighting, so the forward band
+decays to REMEMBERED on the second pass. Four lines, and the real mechanism rather than a
+hand-painted state array.
+
+### Still opt-in, and that has not changed
+
+`Vision.Enabled` still defaults **false**. P32's objection stands unaltered: only `View3D` consults
+this layer, so with it on, pressing `I` hides or reveals parts of the board — a *rendering* toggle
+changing what the player knows. Making it default would be a gameplay decision with balance
+consequences, and a better-looking remembered tier is not an argument for it.
