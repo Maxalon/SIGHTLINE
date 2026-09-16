@@ -108,6 +108,7 @@ public static partial class View3D
     const float LowH = 0.45f;    // low cover: hip height, you can see over it
     const float HighH = 1.15f;   // high cover: taller than a soldier — the only sight blocker
     const float TierH = 0.5f;    // one elevation tier
+    public static float TierHPublic => TierH;   // harness read (WALKTEST leg A)
     const float CapH = 0.06f;    // the lit top plate that makes a box read as a solid
     const float ChipR = 0.38f;      // soldier chip radius
     const float ChipH = 0.13f;      // chip thickness
@@ -115,6 +116,42 @@ public static partial class View3D
                                     // makes it read as a piece resting on the projection
 
     public static Vector3 TileWorld(int x, int y, float h = 0f) => new Vector3(x + 0.5f, h, y + 0.5f);
+
+    // ── P45 THE PIECE WALKS ──────────────────────────────────────────────────────────────────
+    /// A unit's DRAWN position, in world units.
+    ///
+    /// The projected view placed every piece at `(u.X + 0.5, u.Y + 0.5)` — the TILE INDEX — so the
+    /// entire movement tween was invisible in it: a soldier crossing six tiles was six teleports.
+    /// `Unit.Pos` is the tweened board-pixel centre THE STRIDE writes (W1), and it is the only
+    /// honest source for where a piece IS; the flat renderer has always drawn from it.
+    ///
+    /// The conversion is exactly the inverse of `Util.TileCenter`, which is why a stationary unit
+    /// lands on the same world point the old code computed, to the float — WALKTEST leg (A) asserts
+    /// that rather than trusting it.
+    ///
+    /// TWO TRANSIENTS HAVE TO BE UNPICKED, because the flat view fakes verticality inside a 2D
+    /// vector and this view has a real third axis:
+    ///   * `Unit.HopLift` — the vault's lift, which `MoveStepAnim` SUBTRACTS from `Pos.Y`. Mapped
+    ///     naively, a leap over a wall becomes a slide NORTHWARD. It is added back on the ground
+    ///     plane and spent on world Y instead, which is what a leap is.
+    ///   * `Unit.Recoil` — a real ground-plane displacement (knockback, muzzle kick), so it stays
+    ///     on the ground plane.
+    /// Elevation is sampled at the tile the piece is currently OVER, so a step onto a plateau pops
+    /// at the tile boundary exactly as the flat view's `ElevLift` does.
+    ///
+    /// `SIGHTLINE_CHIPTWEEN=0` puts every piece back on its tile centre.
+    public static bool ChipTween = true;
+
+    public static Vector3 ChipWorld(Grid g, Unit u)
+    {
+        if (!ChipTween) return new Vector3(u.X + 0.5f, TierH * g.Height[u.X, u.Y], u.Y + 0.5f);
+        var p = u.Pos + u.Recoil;
+        float wx = (p.X - Cfg.OriginX) / Cfg.Tile;
+        float wz = (p.Y + u.HopLift - Cfg.OriginY) / Cfg.Tile;      // undo the fake vertical
+        int tx = Util.Clamp((int)MathF.Floor(wx), 0, g.W - 1);
+        int tz = Util.Clamp((int)MathF.Floor(wz), 0, g.H - 1);
+        return new Vector3(wx, TierH * g.Height[tx, tz] + u.HopLift / Cfg.Tile, wz);
+    }
 
     /// Frame the whole board for the current pitch/yaw. Orthographic FovY is the VERTICAL extent in
     /// world units; the horizontal extent is FovY * aspect. The board's footprint rotates with yaw,
@@ -678,8 +715,9 @@ public static partial class View3D
         Color ring = u.IsVip ? Pal.VipGold : (friend ? Pal.Friend : Pal.Elite);
         Color dk = u.IsVip ? Pal.VipDk : (friend ? Pal.FriendDk : Pal.EliteDk);
 
-        float baseY = TierH * g.Height[u.X, u.Y];
-        float cx = u.X + 0.5f, cz = u.Y + 0.5f;
+        var w = ChipWorld(g, u);
+        float baseY = w.Y;
+        float cx = w.X, cz = w.Z;
         float y = baseY + ChipFloat;
 
         // A ring, made by overdraw: Raylib has no annulus, and DrawCylinderWires is not one either
@@ -789,9 +827,8 @@ public static partial class View3D
             if (!u.Alive || !Shown(u)) continue;
             bool friend = u.Team == Team.Player;
             Color dk = u.IsVip ? Pal.VipDk : (friend ? Pal.FriendDk : Pal.EliteDk);
-            Raylib.DrawModel(_chipModel,
-                             new Vector3(u.X + 0.5f, TierH * g.Height[u.X, u.Y] + ChipFloat, u.Y + 0.5f),
-                             1f, Fade(dk, 0.97f));
+            var cw = ChipWorld(g, u);
+            Raylib.DrawModel(_chipModel, cw with { Y = cw.Y + ChipFloat }, 1f, Fade(dk, 0.97f));
         }
         Rlgl.DrawRenderBatchActive();
     }
@@ -802,16 +839,16 @@ public static partial class View3D
     {
         Vector3 toCam = Vector3.Normalize(cam.Position - cam.Target);
         var order = new List<Unit>(units);
-        order.Sort((a, b) => Vector3.Distance(cam.Position, TileWorld(b.X, b.Y))
-                            .CompareTo(Vector3.Distance(cam.Position, TileWorld(a.X, a.Y))));
+        order.Sort((a, b) => Vector3.Distance(cam.Position, ChipWorld(g, b))
+                            .CompareTo(Vector3.Distance(cam.Position, ChipWorld(g, a))));
         Vector2 o = Raylib.GetWorldToScreen(new Vector3(0, 0, 0), cam);
         float px = Vector2.Distance(o, Raylib.GetWorldToScreen(new Vector3(1, 0, 0), cam));
 
         foreach (var u in order)
         {
             if (!u.Alive || !Shown(u)) continue;   // P30: no glyph for a hostile nobody can see
-            float baseY = TierH * g.Height[u.X, u.Y];
-            var top = new Vector3(u.X + 0.5f, baseY + ChipFloat + ChipH + 0.05f, u.Y + 0.5f);
+            var cw = ChipWorld(g, u);
+            var top = cw with { Y = cw.Y + ChipFloat + ChipH + 0.05f };
             // Paired with the x-ray pass below the glyph: an occluded chip keeps its identity but
             // drops out of the foreground read, so you can see WHO is behind the wall without them
             // competing with the units you actually have eyes on.

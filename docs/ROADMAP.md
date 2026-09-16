@@ -7,6 +7,28 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P45 "THE PIECE WALKS" (2026-09-16)
+
+P45 drove the projected view's pieces from `Unit.Pos` (the tween) instead of the tile index, so
+W1's stride is finally visible in the view that is now the game. `SIGHTLINE_CHIPTWEEN=0` restores
+the tile-centre placement.
+
+- [ ] **1. UNIT STATE IS INVISIBLE IN THE PROJECTED VIEW, AND THIS IS THE BIG ONE.** HP pips, enemy
+      ammo pips and the status chip row (`Renderer.DrawHpPips` / `DrawEnemyAmmoPips` /
+      `DrawUnitStatusChips`) are drawn at the unit in the flat view and **nowhere at all** in 3D.
+      Players read HP off the roster strip; **hostiles have no HP, no ammo and no status anywhere on
+      screen.** All three already take (or can take) a screen anchor, and `DrawMarkers` already runs
+      in screen space with the projected anchor in hand — so this is the decal layer's argument
+      again (reuse, don't re-author), not 3D geometry. It is also the `Slot.Chrome` question from
+      P43: this is UNIT-space information currently living in a screen corner.
+- [ ] **2. A piece POPS at an elevation change.** `ChipWorld` samples the height of the tile the
+      piece is over, which matches the flat view's `ElevLift` exactly — but 3D can express a real
+      ramp, so the pop is now a choice rather than a constraint.
+- [ ] **3. The drone HOVER and the idle BOB never made it into 3D.** Both are 2D fakes computed at
+      draw time in `Renderer`; in the projected view they are one more world-Y term and a drone that
+      does not hover loses its clearest identity cue.
+
+
 ## OPEN — left by PARALLAX P44 "THE DECAL LAYER" (2026-09-16)
 
 P44 split the board's 2D feedback layer on one question — REGION of the board, or OBJECT above it —
