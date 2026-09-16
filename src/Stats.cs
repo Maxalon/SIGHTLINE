@@ -1550,6 +1550,13 @@ public static class Stats
                 clampLast = Sightline.Mission.ClampLast,
                 finaleHeatStat = Sightline.Mission.FinaleHeatStat,
                 midTooth = Heat.MidTooth,
+                // P42: the BOARD's levers. `buildings` is the one under test in P42's own round,
+                // and it is exactly the case this block exists for — without it a chunk's arm lives
+                // only in its FILE NAME, which is the failure mode P15 and C4 were both bitten by.
+                buildings = Sightline.Mission.Buildings,
+                destructibleEdges = Edges.Destructible,
+                density = Sightline.Mission.DensityScaling,
+                edges = Edges.Enabled,
             },
             // P15 THE UNVERIFIED: what this batch was ASKED for (see BatchEnv). null outside a
             // SIGHTLINE_BALANCE batch — an older archive has no `batch` key at all, which is how a

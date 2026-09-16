@@ -18953,3 +18953,75 @@ picture of damaged walls alone says nothing, because you cannot see what they wo
 
 EDGETEST pins the predicate rather than the pixels: `0 < hp < max` must be reachable and
 distinguishable, because that is the part a test can hold and it is exactly what P40 shipped without.
+
+---
+
+## P42. PRICING BUILDINGS — the answer was not the one the gate implied
+
+**2026-09-16, base `8c75492`.** P40 removed P28's blocker, so buildings *could* become the default.
+This round asked whether they should. They should not, and the reason is not win rate.
+
+### The round
+
+3 rungs (h0/h4/h8) × 16 CRN slot bases × greedy+sloppy × 2 arms, on identical seeds with one lever
+between them. **96 chunks, 1,920 campaigns, 960 CRN pairs, zero BAD.** `LEAK-CHECK PASS` (0 of 1,920
+off-rung). Raw round and full method: `docs/measurements/p42/`.
+
+P42 also added `buildings` / `destructibleEdges` / `density` / `edges` to the balance JSON's
+`levers{}` block **before** running, so every chunk names its own arm. That is P24's discipline and
+it is not ceremony: the `ARM CHECK` asserts each artifact's `levers.buildings` against its file name
+over all 96 chunks, and this project has twice been bitten by a chunk that did not measure what its
+name said (P15's silent heat fallback, C4's shipped-is-not-the-measured layer).
+
+### Win rate did not resolve, and the discordance is why that means something
+
+    rung    n    OFF%    ON%   delta   n_disc    MDE      z
+    h0    320    51.9   46.6    -5.3      123   9.70  -1.53
+    h4    320    25.6   23.4    -2.2      101   8.79  -0.70
+    h8    320     5.9    5.6    -0.3       33   5.03  -0.17
+    POOLED 960 pairs: delta -2.60, n_disc 257, MDE 4.68, z -1.56
+
+Nothing resolves. But **26.8% of paired campaigns take a different course** — this is C2's rule read
+the other way: a flat row at LOW discordance is an absence of evidence, and a flat row at HIGH
+discordance is a bounded effect. The board really does change; the win rate really does not move
+much.
+
+**The OFF arm reproduces the ladder of record** (51.9 / 25.6 / 5.9 against P24's 49.5 / 26.1 / 4.8),
+which is the thing that licenses reading the ON arm against the band at all. Read that way, ON puts
+h0 at **46.6 against a 47 floor** — fractionally under, and inside the noise either way.
+
+### The finding is decision richness, and it is down at every rung
+
+    meaningfulChoices/turn    h0 3.32 -> 2.68    h4 3.22 -> 2.93    h8 1.81 -> 1.36
+
+Consistent, every rung, on the metric that is pillar 3's second-to-second half. And it agrees
+exactly with what P40's AICOVTEST census had already said about the same lever: **hunker 16.05% →
+26.76%**, shoot 40.84% → 34.26%, idle 28.60% → 21.72%.
+
+**Walls give you somewhere to sit, and sitting is not a decision.**
+
+Skill expression is flat — the greedy-minus-sloppy edge moves −6.2→−5.6, +0.0→+1.9, +5.6→+3.8, no
+direction. That matters more than it looks: P26 measured that skill is worth **+0.2 points** in this
+game overall, so a lever that raised skill expression would have been worth paying win rate for.
+This one does not.
+
+A lever that costs choices and buys nothing measurable does not earn a default.
+
+### What this round does NOT say, and it is the useful half
+
+It priced **procedural** buildings: `StampBuildings`' rectangles of wall, dropped wherever they fit
+and validated only for not sealing anything. **A rectangle gives cover without giving a reason to go
+in**, so what it buys is hunkering — which is precisely the measured result rather than a
+post-hoc story.
+
+An *authored* building is a different object: an objective inside it, a roof worth holding, a door
+worth breaching, a reason to take the risk of entering. This round says nothing about that, and it
+is where the edge layer P28 built actually earns its keep. The next move for buildings is the
+double-resolution authored template format, not another default flip.
+
+### Method note for whoever runs the next one
+
+`docs/measurements/l6/pairs.py` takes two prefixes in one directory and does the whole McNemar +
+cluster contrast, provided the chunk tags are `<arm>-h<H>-b<B>`. Naming the chunks that way from the
+start cost nothing and saved writing an analysis script; the first attempt used `h0-b0-off` and had
+to be restarted.
