@@ -19767,6 +19767,41 @@ noticed, because the campaign's `DepthFor(n) == n` made the depth axis look hand
 exist; one is wired. This is C1's defect class again (a table that is right and a consumer that does
 not read it), and L7's (the cumulative vector is correct and the BUILD does not honour it).
 
+### Item 2, run immediately: the per-objective win rates, and they are a CLIFF
+
+The first half reports LOSS-CAUSE shares, which is not a win rate (W8's rule). `objective_rungs.py`
+recomputes the thing actually at stake from `byObjectiveByMission`, n-weighted, same four rounds:
+
+    objective      h0      h4      h8    h4->h8        MID-RUN (m3-m5)
+    Rescue       97.9    96.2    40.0    -56.2      97.3 / 96.2 / 30.4
+    Escort       95.3    91.5    42.8    -48.7      95.6 / 91.3 / 36.2
+    Sabotage     75.0    66.7    43.6    -23.1
+    Evac         90.8    83.6    64.0    -19.6
+    Decapitate   55.8    35.8    18.4    -17.4
+    Hack         73.6    64.6    52.0    -12.6
+    Eliminate    83.1    78.6    76.4     -2.2
+    Defend       70.3    59.9    71.1    +11.2
+
+**The two objectives that go through `Mission.MakeVip` are the two flattest on the ladder and then
+fall off a cliff.** Every other objective degrades gradually. Rescue and Escort are essentially FREE
+for two-thirds of the ladder — 96-98% is not an objective — and then a wall. That is precisely the
+signature of an asset whose survivability is constant in heat.
+
+It also **reproduces W8's artifact as a control on the method**: `Eliminate` reads 83.1/78.6/76.4
+pooled and **44.8/21.7/6.0** on mid-run cells alone — the pooled row is mission-1s. And **`Defend`
+is NON-MONOTONE** (70.3/59.9/71.1 on n>3,000 per cell), which is its own unexplained anomaly and not
+this wave's.
+
+### ⚠ The obvious lever fixes ONE end, and must not be sold as fixing both
+
+"Give the asset a heat term" addresses the cliff and does **nothing** about the 96-98%. The
+principled dose (`Heat.StatDelta` for HP, `Heat.DmgDelta` for armor, both clamped at 0) happens to
+be nearly harmless at the low rungs — StatDelta is 0 at h0 and +1 at h4, and +1 HP against 96.2% is
+not a change — but **that is a property to VERIFY in the round, not to assume.**
+
+**These are TWO defects.** The asset does not scale with heat (the cliff), and the objective is
+uncontested at low heat (the 96-98%). A heat term is a candidate for the first only.
+
 ### What this does NOT establish
 
 It is **not a priced lever** — nothing here says what a heat term on the asset would buy, only where

@@ -24,12 +24,19 @@ gives the force ~+4 bodies, ~+4 stat, +1 dmg, AI tier 2. Full analysis: `docs/me
       and RECRUIT's StatDelta is −1 which must not shrink the asset). That clamp is worth having for
       its own sake: it makes two rungs into inertness controls for the round.
       Ship it with `SIGHTLINE_VIPHEAT=0` and price it on the FREE instrument (not a forced arena) at
-      h4/h6/h8 — the low rungs are controls, not data.
-- [ ] **2. RECOMPUTE THE RESCUE AND ESCORT WIN RATES BY RUNG BEFORE TUNING.** P54 reports LOSS-CAUSE
-      shares, which is not the same thing as a per-objective win rate, and W8's rule (a pooled
-      objective row hid a 49.5-point artifact) applies. `byObjectiveByMission` and
-      `byObjectiveByNodeKind` are already in every chunk. **Do this first** — it is free, and it
-      decides whether the asset is the problem or the objective's whole structure is.
+      h4/h6/h8. **Item 2 revised what the low rungs mean here**: h0 is a provable inertness control,
+      but h4 is NOT — Rescue/Escort sit at 96.2%/91.5% there, so the round must report h4 as data
+      and show the +1 HP did not make an already-free objective freer.
+- [x] **2. RECOMPUTE THE RESCUE AND ESCORT WIN RATES BY RUNG. DONE — `objective_rungs.py`, and it
+      changed item 1.** Rescue **97.9 / 96.2 / 40.0**, Escort **95.3 / 91.5 / 42.8** (mid-run
+      97.3/96.2/**30.4** and 95.6/91.3/**36.2**). The two `MakeVip` objectives are the two FLATTEST
+      on the ladder and then fall off a cliff; every other objective degrades gradually. **So they
+      are broken at BOTH ends and that is TWO defects** — the asset does not scale with heat (the
+      cliff) AND the objective is uncontested below it (96-98% is not an objective). A heat term is
+      a candidate for the first only and must not be written up as fixing both.
+      Method controls in the same run: W8's artifact reproduces (`Eliminate` 83.1 pooled vs 44.8
+      mid-run), and **`Defend` is NON-MONOTONE** (70.3 / 59.9 / 71.1, n>3,000 per cell) — its own
+      unexplained anomaly, and a candidate for its own wave.
 - [ ] **3. THE OTHER 73% IS STILL UNEXPLAINED.** RUN OVER is the majority at every rung and P54 says
       nothing about why it grows. `soldierDeathsByEnemy`, `shotGap` and `actionMix` are in the
       archive and have never been cross-tabbed by rung either. Same method, no new compute.
