@@ -19301,3 +19301,64 @@ go red together and name the exact geometry.
 * Unit STATE — HP, ammo, status chips — is drawn at the unit in the flat view and **nowhere** in the
   projected one; players get it from the roster strip and enemies get nothing at all. That is the
   next real gap in this view and it is a bigger one than either of the above.
+
+## P46. THE PIECE CARRIES ITS STATE — a hostile had no HP anywhere on screen
+
+The flat renderer draws HP pips, the overwatch/brace badge, the hunker mark, enemy ammo pips, the
+stance / suppression / rout / wavering tags, the elite name, the VIP diamond and the status chip row
+around **every** figure. The projected view drew a coloured disc and one initial.
+
+So in the view that is now the game: a player read their own squad's health off the roster strip,
+and **a hostile had no HP, no ammo and no status anywhere on screen at all** — the roster strip is
+friendlies only. The information did not merely move; for half the units on the board it did not
+exist.
+
+### Reuse, do not re-author — for the third time this program
+
+Same argument as P44's decal layer. Every one of those draws already takes (or now takes) a screen
+ANCHOR, and `DrawMarkers` already runs in screen space with the unit's projected point in hand. So
+the badge block was **extracted verbatim** out of `Renderer.DrawUnit` into
+`Renderer.DrawUnitBadges(g, u, anchor, elite, vip)`, and `DrawUnitStatusChips` gained an anchor
+override. The flat view passes the position it always computed; the projected view passes the unit
+projected into screen space. **Two views, one block** — there is no second copy to drift.
+
+### Two passes, and the second is not tidiness
+
+The status CHIP row is opaque, and an opaque pill buried under a vertically adjacent body is
+decision-critical state lost. `DrawUnits` learned that in SIGNAL W3 and draws chips after every
+figure; `View3D.DrawUnitState` does the same, over a list already sorted back-to-front for depth.
+
+### SIGHTLINE_UNITSTATETEST — a differential, on purpose
+
+Eight legs, each one rendering the same frame twice with exactly one piece of unit state changed and
+counting the pixels that moved near that unit. That shape needs no knowledge of what a badge looks
+like, so it cannot go stale when one is restyled, and it fails loudly the day a state stops reaching
+the screen.
+
+**The pre-P46 arm is the control on every leg**, and it reads **0px on all eight** — without it,
+"the pixels changed" would be satisfied by the chip disc alone.
+
+    foeHp 96/0   palHp 112/0   overwatch 136/0   hunker 72/0
+    suppress 166/0   routed 170/0   burning 940/0   moved: 2947px old anchor / 2976px new
+
+The clock is pinned on **both** `Renderer` and `Hud`, and the pointer with it: half these badges
+pulse and several read the hover, so an unpinned pair of frames differs by hundreds of pixels for
+reasons that have nothing to do with the state under test. That is CLAUDE.md's own rule for a test
+that reads pixels, and this is what it is for.
+
+Leg (E) — the anchor follows the unit — **failed on its first run against a unit that had not
+moved**: it nudged the probe hostile `+2` tiles and clamped, and hostiles deploy on the far edge, so
+the clamp put it back on the same tile and the leg reported "the state is not following it". It now
+moves toward the middle and asserts the move happened.
+
+`SIGHTLINE_UNITSTATE=0` restores the pre-P46 projected view.
+
+### Open
+
+* The badge offsets are FIXED screen pixels (-30 for pips, -34..-53 for tags, +24 for the chip row)
+  measured against the flat view's 24px body disc. At a hard zoom-out the projected chip is much
+  smaller than that and the badges float well clear of it. A camera-aware offset — anchored to the
+  chip's PROJECTED radius rather than to a constant — is the honest fix.
+* Nothing culls badges by density. Ten units in one corner of a zoomed-out board is ten overlapping
+  pill rows. The flat view has the same problem and has never hit it because the board is fixed;
+  `SIGHTLINE_BIGMAP` would.
