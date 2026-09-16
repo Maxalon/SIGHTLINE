@@ -19,6 +19,12 @@ public static class Renderer
     // probe's frame reproducible without touching a shipped pixel.
     public static double TimePin = -1.0;
     static double Now() => TimePin >= 0.0 ? TimePin : Raylib.GetTime();
+    /// The same clock, for the PROJECTED renderer. CLAUDE.md's rule is that every wall-clock read
+    /// in a drawing path goes through `Renderer.Now()` / `Hud.Now()` so `TimePin` can freeze a
+    /// frame for a pixel test; `View3D` is a drawing path and its shader is driven by time, so it
+    /// reads the clock here rather than calling `Raylib.GetTime()` and putting a second, unpinnable
+    /// source of motion on the board.
+    public static double NowPublic => Now();
 
     // how far raised terrain (and anything standing on it) lifts on screen
     public const float ElevLift = 8f;

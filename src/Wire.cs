@@ -179,6 +179,271 @@ public static class Wire
         * Matrix4x4.CreateFromAxisAngle(Vector3.Normalize(axis), angleDeg * MathF.PI / 180f)
         * Matrix4x4.CreateTranslation(position);
 
+    // ══════════════════ P39 — THE CONFIDENCE SHADER ══════════════════
+    /// What a shader buys that a per-line colour cannot, and nothing more than that.
+    ///
+    /// Most of "confidence" is INFORMATION and belongs in the data — how long ago a surface was
+    /// seen and from how far away are facts about what the squad did, `Vision` records them, and
+    /// they reach the screen through the colour each line is already handed. A shader is not needed
+    /// for any of it, and a shader that DERIVED it would be a second model of the same thing.
+    ///
+    /// What a shader can do that a per-line colour cannot is vary the picture ALONG a line and
+    /// ACROSS the board: horizontal scan planes the reconstruction brightens through, and a sweep
+    /// travelling over it. That is the difference between "geometry drawn thin" and "an instrument
+    /// reporting", and it is the whole of this shader's job.
+    ///
+    /// **THE DEFAULT VERTEX SHADER DOES NOT GIVE YOU WORLD POSITION, and that is the trap here.**
+    /// raylib's built-in vertex shader outputs `fragTexCoord` and `fragColor` only. Ask a fragment
+    /// shader for `in vec3 fragPosition` against it and the program still LINKS, still reports
+    /// valid, and draws nothing usable — which is exactly what the first spike of this wave did.
+    /// So this pair ships its own vertex shader. For rlgl's batched lines the submitted vertices
+    /// are already world coordinates (no matrix is pushed for `DrawLine3D` inside `BeginMode3D`),
+    /// so passing `vertexPosition` straight through IS the world position.
+    const string VS = @"#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec4 vertexColor;
+uniform mat4 mvp;
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragWorld;
+void main()
+{
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragWorld = vertexPosition;
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}";
+
+    const string FS = @"#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragWorld;
+out vec4 finalColor;
+uniform float uSweepX;
+uniform float uSweepW;
+uniform float uTime;
+uniform float uGain;
+void main()
+{
+    // Horizontal sampling planes. The reconstruction is brighter where the instrument has a layer,
+    // so a tall object reads as a stack of returns rather than as a drawn outline.
+    float planes = 0.5 + 0.5 * sin(fragWorld.y * 24.0 - uTime * 1.5);
+    planes = 0.86 + 0.14 * planes;
+
+    // The sweep: one soft band crossing the board. Low amplitude on purpose — this is a board you
+    // stare at while thinking, and a bright bar travelling over it every few seconds would be the
+    // most animated thing on screen for no informational gain.
+    float sweep = 1.0 - smoothstep(0.0, max(uSweepW, 0.001), abs(fragWorld.x - uSweepX));
+    sweep *= sweep;
+
+    vec3 rgb = fragColor.rgb * mix(1.0, planes, uGain) + fragColor.rgb * sweep * 0.55 * uGain;
+    float a  = clamp(fragColor.a * mix(1.0, planes, uGain) + sweep * 0.22 * uGain, 0.0, 1.0);
+    finalColor = vec4(rgb, a);
+}";
+
+    /// Off-switch. `SIGHTLINE_WIRESHADER=0` draws the same lines with no shader bound at all, which
+    /// is also the path a driver that refuses the program falls back to — so the fallback is a
+    /// configuration somebody runs, not a branch nobody has seen.
+    public static bool ShaderEnabled = true;
+    /// Master amplitude, 0..1. At 0 the shader is bound and mathematically the identity, which is
+    /// what CONFTEST uses to prove the pass is not silently blanking or tinting anything.
+    public static float Gain = 1f;
+    /// Seconds for the sweep to cross the board once.
+    public static float SweepPeriod = 7f;
+
+    static Shader _sh;
+    static bool _shTried, _shOk;
+    static int _locSweepX = -1, _locSweepW = -1, _locTime = -1, _locGain = -1;
+    /// True while `Begin` has a program bound, so `End` never unbinds one it did not bind.
+    static bool _bound;
+
+    public static bool ShaderReady => _shOk;
+
+    /// Load once. A failure here is not fatal and not silent: the lines still draw, and CONFTEST
+    /// reports which path ran.
+    public static bool EnsureShader()
+    {
+        if (_shTried) return _shOk;
+        _shTried = true;
+        _sh = Raylib.LoadShaderFromMemory(VS, FS);
+        _shOk = Raylib.IsShaderValid(_sh);
+        if (_shOk)
+        {
+            _locSweepX = Raylib.GetShaderLocation(_sh, "uSweepX");
+            _locSweepW = Raylib.GetShaderLocation(_sh, "uSweepW");
+            _locTime = Raylib.GetShaderLocation(_sh, "uTime");
+            _locGain = Raylib.GetShaderLocation(_sh, "uGain");
+        }
+        else Console.Error.WriteLine("WIRE: the confidence shader did not compile - lines draw unshaded.");
+        return _shOk;
+    }
+
+    /// Bind the shader for one wireframe PASS. The caller must group its wireframe draws: a bind
+    /// per object would flush rlgl's batch once per tile, which on a big board is 1,120 flushes a
+    /// frame to change nothing between them.
+    public static unsafe bool Begin(float boardW, double time)
+    {
+        _bound = false;
+        if (!ShaderEnabled || !EnsureShader()) return false;
+        float t = (float)time;
+        float phase = SweepPeriod <= 0f ? 0f : (float)(time % SweepPeriod) / SweepPeriod;
+        float sweepX = -2f + phase * (boardW + 4f);          // starts and ends off the board
+        float sweepW = MathF.Max(1.5f, boardW * 0.10f);
+        Raylib.BeginShaderMode(_sh);
+        if (_locSweepX >= 0) Raylib.SetShaderValue(_sh, _locSweepX, &sweepX, ShaderUniformDataType.Float);
+        if (_locSweepW >= 0) Raylib.SetShaderValue(_sh, _locSweepW, &sweepW, ShaderUniformDataType.Float);
+        if (_locTime >= 0) Raylib.SetShaderValue(_sh, _locTime, &t, ShaderUniformDataType.Float);
+        float g = Util.Clamp(Gain, 0f, 1f);
+        if (_locGain >= 0) Raylib.SetShaderValue(_sh, _locGain, &g, ShaderUniformDataType.Float);
+        _bound = true;
+        return true;
+    }
+
+    public static void End()
+    {
+        if (!_bound) return;
+        Raylib.EndShaderMode();
+        _bound = false;
+    }
+
+    // ══════════════════ SIGHTLINE_CONFTEST ══════════════════
+    /// (A) THE TWO TERMS, at their endpoints. Seen from adjacent, this turn, is 1.0; seen from
+    ///     `BaseSight` is exactly `RangeFloor`; age costs `AgePerTurn` and stops at `AgeFloor`.
+    ///     Arithmetic, so the constants cannot drift without this saying so.
+    /// (B) NEVER ZERO FROM AGE ALONE. A memory the layer stops drawing is a memory the player is
+    ///     not told they have, and the floor is what prevents it. Only UNSEEN reads 0.
+    /// (C) `Vision.Refresh` RECORDS what it saw: the stamp, and the distance the observer stood at.
+    /// (D) THE BEST LOOK WINS. Two soldiers see one tile from 8 tiles and from 1; the squad knows
+    ///     what its closest pair of eyes knows, so the recorded distance is 1. Written the obvious
+    ///     way — last writer wins — it would be whichever soldier happens to be later in the list.
+    /// (E) **THE SHADER IS AN IDENTITY AT GAIN 0, PROVEN IN PIXELS.** This is the leg that matters,
+    ///     and it exists because the first spike of this wave produced a program that compiled,
+    ///     linked, reported VALID, and drew nothing — `in vec3 fragPosition` against raylib's
+    ///     default vertex shader. A leg that only asks "did it compile" would have passed on that.
+    ///     So: draw a line with no shader, draw the same line through the shader at Gain 0, and
+    ///     compare the framebuffer. Anything the pass adds, drops or tints of its own shows up.
+    /// (F) THE FALLBACK IS A PATH, NOT A BRANCH NOBODY RUNS. With `ShaderEnabled` false, `Begin`
+    ///     reports false and `End` is safe to call anyway.
+    ///
+    /// Needs a window: (E) reads the framebuffer.
+    public static string ConfidenceSelfTest()
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        bool savedEnabled = Vision.Enabled, savedShader = ShaderEnabled;
+        float savedGain = Gain;
+        int savedStamp = Vision.Stamp;
+
+        var g = new Grid();
+        for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) g.Tiles[x, y] = TileType.Floor;
+        Vision.Enabled = true;
+        Vision.Reset(g);
+        Vision.Stamp = 0;
+
+        // ── (A)
+        if (Off(Vision.Score(0, 0), 1f)) fails.Add($"(A) adjacent and current scores {Vision.Score(0, 0):0.000}, not 1");
+        if (Off(Vision.Score(0, Vision.BaseSight), Vision.RangeFloor))
+            fails.Add($"(A) at max range it scores {Vision.Score(0, Vision.BaseSight):0.000}, not RangeFloor {Vision.RangeFloor}");
+        Vision.Stamp = 3;
+        if (Off(Vision.Score(0, 0), 1f - 3f * Vision.AgePerTurn))
+            fails.Add($"(A) three turns old scores {Vision.Score(0, 0):0.000}, not {1f - 3f * Vision.AgePerTurn:0.000}");
+
+        // ── (B)
+        Vision.Stamp = 10000;
+        float aged = Vision.Score(0, 0);
+        if (Off(aged, Vision.AgeFloor)) fails.Add($"(B) an ancient memory scores {aged:0.000}, not the floor {Vision.AgeFloor}");
+        if (aged <= 0f) fails.Add("(B) age alone drove a memory to zero");
+        Vision.Stamp = 0;
+
+        // ── (C)
+        var lone = new List<Unit> { Probe(4, 4) };
+        Vision.Stamp = 5;
+        Vision.Refresh(g, lone);
+        if (Vision.At(4, 4) != Vision.Visible) fails.Add("(C) the observer's own tile is not visible");
+        if (Vision.SeenAt[4, 4] != 5) fails.Add($"(C) the stamp recorded {Vision.SeenAt[4, 4]}, not 5");
+        if (Vision.SeenDist[4, 4] != 0) fails.Add($"(C) the observer's own tile recorded distance {Vision.SeenDist[4, 4]}");
+        if (Vision.SeenDist[7, 4] != 3) fails.Add($"(C) a tile 3 away recorded distance {Vision.SeenDist[7, 4]}");
+        if (Vision.Confidence(7, 4) >= Vision.Confidence(4, 4) - 1e-6f)
+            fails.Add("(C) a tile 3 away is not less confident than the observer's own");
+
+        // an unseen corner
+        int fx = g.W - 1, fy = g.H - 1;
+        if (Vision.At(fx, fy) == Vision.Unseen && Vision.Confidence(fx, fy) != 0f)
+            fails.Add($"(C) an unseen tile scores {Vision.Confidence(fx, fy):0.000}, not 0");
+
+        // ── (D)
+        Vision.Reset(g);
+        Vision.Stamp = 1;
+        Vision.Refresh(g, new List<Unit> { Probe(1, 4), Probe(9, 4) });   // far first, near second
+        byte near = Vision.SeenDist[8, 4];
+        Vision.Reset(g);
+        Vision.Refresh(g, new List<Unit> { Probe(9, 4), Probe(1, 4) });   // and the other order
+        if (near != 1 || Vision.SeenDist[8, 4] != 1)
+            fails.Add($"(D) the closest observer did not win: {near} one way, {Vision.SeenDist[8, 4]} the other (want 1 and 1)");
+
+        // ── (E) the identity, in pixels
+        {
+            var cam = new Camera3D
+            {
+                Position = new Vector3(0f, 6f, 6f), Target = Vector3.Zero, Up = Vector3.UnitY,
+                FovY = 10f, Projection = CameraProjection.Orthographic,
+            };
+            var line = Pal.RGBA(220, 90, 160);
+            Image Shot(bool shaded)
+            {
+                Raylib.BeginDrawing();
+                Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
+                Raylib.BeginMode3D(cam);
+                bool on = shaded && Begin(4f, 0.0);
+                for (int i = -3; i <= 3; i++)
+                    Raylib.DrawLine3D(new Vector3(i, 0f, -3f), new Vector3(i, 0f, 3f), line);
+                if (on) End();
+                Raylib.EndMode3D();
+                Raylib.EndDrawing();
+                return Raylib.LoadImageFromScreen();
+            }
+
+            Gain = 0f;
+            var plain = Shot(false);
+            var shadedImg = Shot(true);
+            // EVERY pixel, not a stride. The first version sampled every second row and column and
+            // reported the control as blank: these lines are ONE PIXEL wide, so a stride of 2 walks
+            // straight past most of them. A pixel leg over thin geometry has no sampling budget.
+            int lit = 0, differ = 0, maxSum = 0;
+            for (int y = 0; y < Cfg.ScreenH; y++)
+                for (int x = 0; x < Cfg.ScreenW; x++)
+                {
+                    var a = Raylib.GetImageColor(plain, x, y);
+                    var b = Raylib.GetImageColor(shadedImg, x, y);
+                    if (a.R + a.G + a.B > 40) lit++;
+                    if (maxSum < a.R + a.G + a.B) maxSum = a.R + a.G + a.B;
+                    if (Math.Abs(a.R - b.R) > 2 || Math.Abs(a.G - b.G) > 2 || Math.Abs(a.B - b.B) > 2) differ++;
+                }
+            Raylib.UnloadImage(plain); Raylib.UnloadImage(shadedImg);
+            if (lit == 0) fails.Add($"(E) the unshaded control drew nothing — the leg is vacuous (brightest pixel sum {maxSum})");
+            else if (differ > 0) fails.Add($"(E) the shader is not the identity at gain 0: {differ} sampled pixels differ over {lit} lit");
+            if (!ShaderReady) fails.Add("(E) the confidence shader did not compile");
+        }
+
+        // ── (F)
+        ShaderEnabled = false;
+        if (Begin(4f, 0.0)) fails.Add("(F) Begin claimed a program with the shader disabled");
+        End();                                            // must be safe, and must not unbind
+        ShaderEnabled = true;
+
+        Vision.Enabled = savedEnabled; ShaderEnabled = savedShader; Gain = savedGain; Vision.Stamp = savedStamp;
+        return fails.Count == 0
+            ? $"CONFTEST: PASS (range and age terms exact at their endpoints; age floors at {Vision.AgeFloor} and never zeroes; Refresh records stamp+distance and the CLOSEST observer wins; the shader is pixel-identical at gain 0; the no-shader fallback is safe)"
+            : "CONFTEST: FAIL\n  " + string.Join("\n  ", fails);
+    }
+
+    static Unit Probe(int x, int y)
+    {
+        var u = new Unit { Team = Team.Player, X = x, Y = y, Hp = 5, MaxHp = 5 };
+        u.SyncPos();
+        return u;
+    }
+
     // ══════════════════ SIGHTLINE_WIRETEST ══════════════════
     /// (A) THE GROUND TRUTH, and it is the leg that proves the WELD. A raylib cube is 12 triangles
     ///     over 6 quads, and it is NOT indexed — every triangle carries its own three vertices, so

@@ -18761,3 +18761,86 @@ hand-painted state array.
 this layer, so with it on, pressing `I` hides or reveals parts of the board — a *rendering* toggle
 changing what the player knows. Making it default would be a gameplay decision with balance
 consequences, and a better-looking remembered tier is not an argument for it.
+
+---
+
+## P39. CONFIDENCE — what belongs in the data, and what a shader is actually for
+
+**2026-09-16, base `0ff6dce`.** P38 made the REMEMBERED tier visible. This makes it say *how well*
+something is known, not just *whether*.
+
+### Most of "confidence" is information, and a shader is the wrong place to keep it
+
+The tempting version is a shader that fades lines by distance from the camera and calls that
+confidence. It would look right and mean nothing. How well the squad knows a surface is a fact about
+what the squad *did*:
+
+- **RANGE** — a wall read from two tiles away is better known than the same wall at the edge of
+  sight. `Vision.SeenDist`.
+- **AGE** — a memory ten turns old may be describing a board that has since moved. `Vision.SeenAt`,
+  against a `Stamp` the game publishes as the mission turn.
+
+Both are recorded **only while a surface is VISIBLE**, so they freeze at the moment sight is lost
+and then age on their own; seeing it again overwrites them, which is what makes *going and looking*
+the way to restore confidence. `Vision.Score` composes them, and the number reaches the screen
+through the colour each line is already handed — no shader required for any of it.
+
+Two decisions inside that. **The closest observer wins**, not the last one in the list: two soldiers
+can see the same tile from very different ranges, and the squad knows what its nearest pair of eyes
+knows. Written the obvious way — last writer wins — the recorded distance would depend on list
+order. And **age floors at 0.35 rather than decaying to nothing**: a memory this layer stops drawing
+is a memory the player is not told they have, which would punish scouting, the exact behaviour the
+whole layer exists to reward. Only UNSEEN reads zero.
+
+Low confidence also loses saturation as well as brightness. Two cues beat one for anyone reading the
+board at a glance or without full colour vision.
+
+### So what is the shader for
+
+Exactly what a per-line colour cannot do: vary the picture **along** a line and **across** the
+board. Horizontal scan planes the reconstruction brightens through — so a tall object reads as a
+stack of returns rather than a drawn outline — and a soft sweep travelling over the board. That is
+the difference between "geometry drawn thin" and "an instrument reporting", and it is the whole job.
+
+### The trap, which cost the first spike
+
+**raylib's default vertex shader outputs `fragTexCoord` and `fragColor` and nothing else.** Ask a
+fragment shader for `in vec3 fragPosition` against it and the program still links, still reports
+`IsShaderValid`, and draws *nothing usable*. The first spike of this wave did exactly that and
+produced a black frame that looked like a camera problem.
+
+So `Wire` ships its own vertex shader. For rlgl's batched lines the submitted vertices already *are*
+world coordinates — no matrix is pushed for `DrawLine3D` inside `BeginMode3D` — so passing
+`vertexPosition` straight through is the world position.
+
+`SIGHTLINE_CONFTEST` leg (E) exists because of that spike: it draws a line unshaded, draws the same
+line through the shader at **gain 0** (where the maths is the identity), and compares the
+framebuffer. A leg that only asked "did it compile" would have passed on the broken program.
+Verified falsifiable — halving `rgb` in the fragment shader turns it red on every lit pixel.
+
+**Its first version was itself vacuous**, and the reason is worth keeping: it sampled every second
+row and column, and these lines are *one pixel wide*, so the stride walked past the control and
+reported "the unshaded control drew nothing". A pixel leg over thin geometry has no sampling budget.
+
+### One bind per pass, and no pass at all by default
+
+A shader bind flushes rlgl's batch. Binding per object would be 1,120 flushes a frame on a big
+board to change nothing between them, so the board is walked twice — solids, then the remembered
+tier in one group with the program bound around it. The second walk is microseconds; the flushes
+would not be.
+
+And with discovery off — the shipped default — `Vision.At` answers VISIBLE everywhere, so there is
+no remembered tier and the whole second pass is skipped rather than run to draw nothing.
+
+The shader's clock comes from `Renderer.NowPublic`, not `Raylib.GetTime()`: CLAUDE.md's rule is that
+every wall-clock read in a drawing path goes through `Renderer.Now()` so `TimePin` can freeze a
+frame for a pixel test, and a shader driven by an unpinnable second clock would put motion on the
+board that no probe could stop.
+
+### What is still not possible
+
+**Constant-width lines.** `Rlgl.SetLineWidth` is not exposed by Raylib-cs 8.0, and core-profile GL
+ignores `glLineWidth > 1` on most drivers anyway. A line that does not thin at distance needs
+quad-expanded geometry — two triangles per edge, billboarded in a vertex shader — which is a real
+change to what `Wire.Draw` emits. Left open, and worth doing only if the 1px line ever actually
+reads as too faint.

@@ -3921,13 +3921,38 @@ objective sites and spawns; and `src/View3D.cs` + `src/Mesh3D.cs`, a projected-c
       full triangle net — a working-looking wireframe that is one by accident. `SIGHTLINE_WIRETEST`
       leg (A) pins it on arithmetic, not on a measurement: a unit cube is exactly 12 hard edges, 18
       unique edges and 8 welded corners. Verified falsifiable — remove the weld and it reads 24/30.
-- [ ] **A CONFIDENCE shader is the next step, and it needs the tier that now exists.** Constant-width
-      lines that do not thin with distance, brightness falling with range from the scanner and with
-      how long ago a surface was seen, a scan sweep. `LoadShaderFromMemory` / `SetShaderValue` are
-      available and P36 established the 3D board renders into `Display`'s target, so it composites
-      normally. `Wire.CreaseDeg` (25 degrees) is the dial if the line work ever reads too busy — an
-      icosphere rock keeps every edge at that value, which is correct and is also the noisiest
-      thing on the board.
+- [x] **Confidence.** DONE (P39). A remembered line's brightness IS the squad's confidence in it,
+      and the number comes from what the squad did: `Vision.SeenDist` (how close it stood) and
+      `Vision.SeenAt` (how long ago), composed by `Vision.Score`. Recorded only while a surface is
+      VISIBLE, so they freeze when sight is lost and age on their own; looking again overwrites
+      them, which makes "go and look at it" the way to restore confidence. The CLOSEST observer
+      wins, not the last one in the list. Low confidence also loses saturation — two cues beat one
+      — and the range is floored well above zero, because a memory this layer stops drawing is a
+      memory the player is not told they have.
+      **THE SPLIT BETWEEN DATA AND SHADER IS THE POINT.** Most of "confidence" is INFORMATION and
+      belongs in the data; it reaches the screen through the colour each line is already handed, and
+      a shader that derived it would be a second model of the same thing. The shader does only what
+      a per-line colour cannot: vary the picture ALONG a line and ACROSS the board — horizontal scan
+      planes the reconstruction brightens through, and a sweep travelling over it.
+      **raylib's DEFAULT VERTEX SHADER DOES NOT GIVE YOU WORLD POSITION**, and this is the trap: ask
+      a fragment shader for `in vec3 fragPosition` against it and the program still LINKS, still
+      reports valid, and draws nothing — which is exactly what this wave's first spike did. `Wire`
+      ships its own vertex shader; for rlgl's batched lines the submitted vertices already ARE world
+      coordinates.
+      One bind per PASS, never per object (a bind per tile is 1,120 batch flushes a frame to change
+      nothing between them), and the whole wireframe pass is skipped when discovery is off.
+      `SIGHTLINE_WIRESHADER=0` is the no-shader path — the same one a driver that refuses the
+      program falls back to — and `SIGHTLINE_WIREGAIN=<0..1>` dials the effect; at 0 the shader is
+      bound and is a mathematical identity, which is what `SIGHTLINE_CONFTEST` leg (E) proves **in
+      pixels**, because a leg that only asks "did it compile" would have passed on the spike's
+      broken program.
+- [ ] **Constant-width lines are still not possible.** `Rlgl.SetLineWidth` is not exposed by
+      Raylib-cs 8.0, and core-profile GL ignores `glLineWidth > 1` on most drivers anyway. A line
+      that does not thin at distance needs quad-expanded geometry (two triangles per edge, billboarded
+      in a vertex shader), which is a real change to `Wire.Draw`'s output and worth doing only if the
+      1px line ever actually reads as too faint.
+      `Wire.CreaseDeg` (25 degrees) is the dial if the line work reads too busy — an icosphere rock
+      keeps every edge at that value, which is correct and is also the noisiest thing on the board.
 - [ ] **The RAY/coverage render is not in the game.** `Vision` is per-face binary. The
       angular-footprint coverage masks in `prototypes/lidar` give PARTIAL knowledge of a surface
       and a confidence gradient, and need a texture atlas to decouple material grain from mask

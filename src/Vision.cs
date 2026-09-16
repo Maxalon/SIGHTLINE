@@ -52,13 +52,78 @@ public static class Vision
 
     static int _w, _h;
 
+    // ══════════════════ P39 — CONFIDENCE ══════════════════
+    /// HOW WELL a surface is known, as opposed to WHETHER it is. Two independent terms, both of
+    /// them things the squad actually did rather than decoration:
+    ///
+    ///   RANGE — a wall read from two tiles away is better known than the same wall at the edge of
+    ///           sight. `SeenDist` is the distance the observing soldier stood at, in tiles.
+    ///   AGE   — a memory ten turns old may be describing a board that has since moved. `SeenAt`
+    ///           is the stamp (the mission turn) it was last looked at.
+    ///
+    /// Both are recorded ONLY while a surface is VISIBLE, so they freeze at the moment sight was
+    /// lost and then age on their own. A surface seen again overwrites them, which is what makes
+    /// "go and look at it" the way to restore confidence.
+    ///
+    /// **THIS IS PRESENTATION, LIKE THE REST OF THIS FILE.** No rule reads it. It decides how
+    /// brightly a remembered line is drawn, and nothing else.
+    public static int[,] SeenAt;                // [W, H]  — Stamp at last sight
+    public static byte[,] SeenDist;             // [W, H]  — tiles from the observer at last sight
+    public static int[,,] FaceVAtT, FaceHAtT;   // the same two, per edge face
+    public static byte[,,] FaceVDist, FaceHDist;
+
+    /// The clock confidence ages against. `Game` publishes the mission turn here; everything else
+    /// leaves it at 0, which makes every memory the same age and the age term a constant — the
+    /// right behaviour for a harness that stages one frame and photographs it.
+    public static int Stamp;
+
+    /// How much of a memory's brightness survives at maximum scan range. A surface read at arm's
+    /// length is worth full confidence; one read at `BaseSight` keeps this much of it.
+    public const float RangeFloor = 0.55f;
+    /// How much a memory loses per turn, and the floor it cannot fall below. Old knowledge gets
+    /// less trustworthy, never worthless — a board that erased itself after ten turns would punish
+    /// scouting, which is the behaviour this whole layer exists to reward.
+    public const float AgePerTurn = 0.06f, AgeFloor = 0.35f;
+
     public static void Reset(Grid g)
     {
         _w = g.W; _h = g.H;
         Tile = new byte[_w, _h];
         FaceV = new byte[_w + 1, _h, 2];
         FaceH = new byte[_w, _h + 1, 2];
+        SeenAt = new int[_w, _h];
+        SeenDist = new byte[_w, _h];
+        FaceVAtT = new int[_w + 1, _h, 2];
+        FaceHAtT = new int[_w, _h + 1, 2];
+        FaceVDist = new byte[_w + 1, _h, 2];
+        FaceHDist = new byte[_w, _h + 1, 2];
     }
+
+    /// The two terms, composed. 1.0 = looked at, from close, just now.
+    public static float Score(int seenAt, int dist)
+    {
+        float range = 1f - (1f - RangeFloor) * Util.Clamp(dist / (float)BaseSight, 0f, 1f);
+        float age = Math.Max(AgeFloor, 1f - Math.Max(0, Stamp - seenAt) * AgePerTurn);
+        return Util.Clamp(range * age, 0f, 1f);
+    }
+
+    /// Confidence in what we believe about this TILE. 0 when it was never seen — a caller that
+    /// draws on a zero is drawing something nobody scanned.
+    public static float Confidence(int x, int y) =>
+        !Enabled || SeenAt == null || x < 0 || y < 0 || x >= _w || y >= _h ? 1f
+        : Tile[x, y] == Unseen ? 0f : Score(SeenAt[x, y], SeenDist[x, y]);
+
+    /// Confidence in one EDGE FACE. Takes the better of the two sides, matching how the renderer
+    /// already resolves a wall's tier: knowing one side well beats a stale glimpse of the other.
+    public static float ConfidenceV(int x, int y) =>
+        !Enabled || FaceVAtT == null || x < 0 || y < 0 || x > _w || y >= _h ? 1f
+        : Math.Max(FaceV[x, y, 0] == Unseen ? 0f : Score(FaceVAtT[x, y, 0], FaceVDist[x, y, 0]),
+                   FaceV[x, y, 1] == Unseen ? 0f : Score(FaceVAtT[x, y, 1], FaceVDist[x, y, 1]));
+
+    public static float ConfidenceH(int x, int y) =>
+        !Enabled || FaceHAtT == null || x < 0 || y < 0 || x >= _w || y > _h ? 1f
+        : Math.Max(FaceH[x, y, 0] == Unseen ? 0f : Score(FaceHAtT[x, y, 0], FaceHDist[x, y, 0]),
+                   FaceH[x, y, 1] == Unseen ? 0f : Score(FaceHAtT[x, y, 1], FaceHDist[x, y, 1]));
 
     public static byte At(int x, int y) =>
         !Enabled ? Visible
@@ -96,19 +161,42 @@ public static class Vision
                 {
                     // Looking DOWN buys range: +1 per level below the viewer, per the owner's rule.
                     int drop = Math.Max(0, eye - g.HeightAt(x, y));
-                    if (Util.TileDist(u.X, u.Y, x, y) > BaseSight + drop) continue;
+                    float d = Util.TileDist(u.X, u.Y, x, y);
+                    if (d > BaseSight + drop) continue;
                     if (!g.HasLineOfSight(u.X, u.Y, x, y)) continue;
+                    // P39 — take the BEST look anyone has had this pass, not the last one to run.
+                    // Two soldiers can see the same tile from very different ranges, and the squad
+                    // knows what its closest pair of eyes knows.
+                    bool better = Tile[x, y] != Visible || d < SeenDist[x, y];
                     Tile[x, y] = Visible;
+                    if (better) { SeenAt[x, y] = Stamp; SeenDist[x, y] = Near(d); }
 
                     // A seen tile reveals the INWARD face of each of its four boundaries — the
                     // side the soldier is standing on. The far side stays unknown, which is what
                     // makes a wall read as a plane of unknown thickness until you go round it.
-                    FaceV[x, y, 1] = Visible;
-                    if (x + 1 <= _w) FaceV[x + 1, y, 0] = Visible;
-                    FaceH[x, y, 1] = Visible;
-                    if (y + 1 <= _h) FaceH[x, y + 1, 0] = Visible;
+                    MarkV(x, y, 1, d); if (x + 1 <= _w) MarkV(x + 1, y, 0, d);
+                    MarkH(x, y, 1, d); if (y + 1 <= _h) MarkH(x, y + 1, 0, d);
                 }
         }
+    }
+
+    /// Round-to-nearest into a byte, clamped. The distance is a FLOAT (`Util.TileDist` is
+    /// Chebyshev-with-diagonals), and truncating it would quietly make every diagonal look closer
+    /// than it was.
+    static byte Near(float d) => (byte)Util.Clamp((int)MathF.Round(d), 0, 255);
+
+    static void MarkV(int x, int y, int side, float d)
+    {
+        bool better = FaceV[x, y, side] != Visible || d < FaceVDist[x, y, side];
+        FaceV[x, y, side] = Visible;
+        if (better) { FaceVAtT[x, y, side] = Stamp; FaceVDist[x, y, side] = Near(d); }
+    }
+
+    static void MarkH(int x, int y, int side, float d)
+    {
+        bool better = FaceH[x, y, side] != Visible || d < FaceHDist[x, y, side];
+        FaceH[x, y, side] = Visible;
+        if (better) { FaceHAtT[x, y, side] = Stamp; FaceHDist[x, y, side] = Near(d); }
     }
 
     /// How much of a surface's colour survives at this knowledge level. Remembered terrain is
