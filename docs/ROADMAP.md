@@ -4171,16 +4171,35 @@ bugs already found and fixed, all of the same class, so they are not re-found.
 
 #### OPEN — wave P28, still to do
 
-- [ ] **DESTRUCTIBLE EDGES — the one thing gating buildings ON by default.** MEASURED, two runs
-      per arm, deterministic: with buildings on, `Ai`'s `sap` branch falls from 19 acts (0.21%) to
-      9 (0.09%) and `SIGHTLINE_AICOVTEST` goes red on C1's dead-row floor. The cause is not a
-      tuning problem: sap destroys the COVER TILE a target hides behind, `Grid.CoverHp` is a
-      per-TILE array and `DamageCover` takes tile coordinates — so a soldier behind a building
-      WALL cannot be sapped at all. Cover moved from tiles to edges and the opponent's
-      cover-destruction branch could not follow it. Needs per-edge HP (High -> Low -> None), an
-      edge form of `SapTile`, and a damaged-wall visual. This is the owner's deferred "wall-bangs
-      and destructible elements", and it deserves its own measured wave. **Lowering the AICOVTEST
-      threshold to fit is not an option** — that is tuning a gate to pass.
+- [x] **DESTRUCTIBLE EDGES.** DONE (P40) — the fix P28 named, built as P28 specified it. Per-edge
+      HP (`Grid.EdgeVHp`/`EdgeHHp`, charged by `ResetCoverHp` so walls and blocks charge by one
+      call), `Grid.DamageEdge` degrading High -> Low -> None on the same two constants a block
+      uses, `Grid.CoverEdge` mirroring `CoverTile`'s dominant-side pick, and `EnemyPlan.SapEdge`
+      beside `SapTile`. `SapTile` stays a TILE either way — it is where the sapper must STAND — so
+      the planner's movement scoring is untouched.
+      **Red before, green after, on a gate that already existed** (AICOVTEST=6, deterministic):
+      buildings OFF sap 19 (0.21%) PASS; buildings ON + destructible sap **12 (0.12%) PASS**;
+      buildings ON + `SIGHTLINE_DESTRUCTEDGE=0` sap 9 (0.09%) FAIL — the third row reproducing
+      P28's recorded failure exactly.
+      **A BREACH IS THE ONE DAMAGE CALL ON THIS BOARD THAT CHANGES THE SHAPE OF THE MAP** rather
+      than the cost of standing somewhere: `CostMap` and `HasLineOfSight` both read the edge layer,
+      so the hole is a hole for both teams by construction. EDGETEST asserts that directly — a wall
+      across the board divides it, two hits clear one segment, and the route opens.
+      **Scoped to the SAPPER on purpose.** `DamageEdge` is public so grenades and stray fire can be
+      wired later, but making every explosion a wall-breach is a far larger tactical change than
+      the blocker needed, and it would want its own priced round.
+- [ ] **Buildings are STILL default-off, and the reason has changed.** P28's blocker is gone. What
+      remains is that the same AICOVTEST census says buildings change the FIGHT, not just the
+      board: hunker **16.05% -> 26.76%**, terminal-hunker 0.11% -> 2.81%, idle 28.60% -> 21.72%,
+      shoot 40.84% -> 34.26%. That is a different game, and a default flip is a LEVEL lever on
+      every mission — it wants a measured round against the ladder of record, not a flip because a
+      gate went green. The margin is thin too (0.12% against a 0.10% floor), which is a second
+      reason to price it deliberately. `SIGHTLINE_BUILDINGS=0` is the free arm.
+- [ ] **A damaged wall looks exactly like an intact one.** `DamageEdge` chips HP with no visual
+      until the kind changes, so the first hit on a High wall is invisible and the second appears
+      to halve it from nowhere. Cover blocks have the same problem and solved it with
+      `Grid.CoverHp`-driven cracks (`Renderer.DrawCrackGlyph`); the edge layer wants the
+      equivalent in both renderers.
 - [ ] **Wall readability is a first pass, not a finished look.** They read as a building outline
       and they are distinct from cover blocks, but they are thin beside the chunky faux-3D cover
       volumes. `Renderer.DrawEdges`' `HiW`/`HiLift` constants are the dials. Judge it against

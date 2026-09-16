@@ -215,27 +215,31 @@ public static class Mission
     /// therefore never seal a pocket, never strand a unit and never orphan an objective — not
     /// because the placement rules are clever, but because the failures are undone.
     ///
-    /// ═══ DEFAULT OFF, AND THE REASON IS A MEASUREMENT, NOT CAUTION ═══════════════════════════
-    /// Everything works: walls block, shelter and draw, the validator never strands a tile, and
-    /// autoplay is clean. The blocker is `SIGHTLINE_AICOVTEST`, which guards C1's dead-row class —
-    /// no AI branch may fall under 0.10% of acts, or it is effectively dead and nobody notices.
+    /// ═══ P28's BLOCKER IS GONE (P40). THE DEFAULT IS STILL OFF, FOR A DIFFERENT REASON. ══════
+    /// P28 measured this and recorded the cause exactly: `SIGHTLINE_AICOVTEST` guards C1's
+    /// dead-row class — no AI branch may fall under 0.10% of acts — and turning buildings on drove
+    /// the SAPPER branch under it. Not a tuning problem: `Ai`'s sap branch destroyed a COVER TILE,
+    /// `Grid.CoverHp` is a per-TILE array, so a soldier sheltering behind a building WALL could not
+    /// be sapped at all. Cover had moved from tiles to edges and the AI's cover-destruction branch
+    /// could not follow it. Buildings did not make the opponent dumber by accident; they removed
+    /// one of its options.
     ///
-    /// MEASURED, two runs per arm, deterministic and reproducible (AICOVTEST=6, ~9,771 acts):
-    ///     buildings OFF   sap = 19 (0.21%)   PASS, PASS
-    ///     buildings ON    sap =  9 (0.09%)   FAIL, FAIL
+    /// P40 SHIPPED THE NAMED FIX — destructible edges: per-edge HP, High -> Low -> None
+    /// (`Grid.DamageEdge`), and `SapTile` gaining an edge form (`EnemyPlan.SapEdge`). Re-measured
+    /// on the same instrument (AICOVTEST=6, ~9,800 acts, deterministic):
+    ///     buildings OFF                      sap = 19 (0.21%)   PASS
+    ///     buildings ON  + destructible edges sap = 12 (0.12%)   PASS
+    ///     buildings ON  + DESTRUCTEDGE=0     sap =  9 (0.09%)   FAIL   (the pre-P40 tree)
+    /// The third row reproduces P28's recorded failure exactly, so the fix is red-before,
+    /// green-after on a gate that already existed rather than one written to suit it.
     ///
-    /// The cause is real and is NOT a tuning problem. `Ai`'s sap branch destroys the COVER TILE a
-    /// target is hiding behind; `Grid.CoverHp` is a per-TILE array and `DamageCover` takes tile
-    /// coordinates. A soldier sheltering behind a building WALL therefore cannot be sapped at all
-    /// — cover moved from tiles to edges and the AI's cover-destruction branch could not follow
-    /// it. Buildings do not make the opponent dumber by accident; they remove one of its options.
-    ///
-    /// SO THE FIX IS DESTRUCTIBLE EDGES (per-edge HP, High -> Low -> None, `SapTile` gaining an
-    /// edge form) — which is exactly the "wall-bangs and destructible elements" the owner deferred
-    /// as future work. It is a wave of its own and it deserves a measured round, not a rushed one.
-    /// Lowering the AICOVTEST threshold to fit would be tuning a gate to pass, which this project
-    /// does not do; shipping a measurably duller opponent by default is worse than shipping the
-    /// walls behind a flag.
+    /// **SO WHY IS THE DEFAULT STILL OFF?** Because the blocker was never the only question. The
+    /// same census says buildings change the FIGHT, not just the board: hunker 16.05% -> 26.76%,
+    /// terminal-hunker 0.11% -> 2.81%, idle 28.60% -> 21.72%, shoot 40.84% -> 34.26%. That is a
+    /// different game, and this project does not ship a different game unpriced — a default flip
+    /// is a LEVEL lever on every mission and wants a measured round against the ladder of record.
+    /// The margin is also thin (0.12% against a 0.10% floor), which is a second reason to price it
+    /// deliberately rather than to flip it because a gate went green.
     ///
     /// `SIGHTLINE_BUILDINGS=1` turns them on. Everything below this line is live either way.
     public static bool Buildings = false;
@@ -593,7 +597,13 @@ public static class Mission
         int reachBefore = 0;
         for (int x = 0; x < g.W; x++) for (int y = 0; y < g.H; y++) if (before[x, y] >= 0) reachBefore++;
 
-        int want = Util.RandInt(1, 2);
+        // P40 — scale with the board, exactly as P37 scaled the cover archetypes and for the same
+        // reason: 1-2 buildings is an 18x11 number, and on 40x28 it is one or two huts in 1,120
+        // tiles. The cell grid is the same one the archetypes are tiled on, so a building belongs
+        // to a ROOM rather than being sprinkled over an expanse. Exactly 1-2 at 18x11 (one cell),
+        // so the shipped board is untouched.
+        CellGrid(g, out int bcx, out int bcy, out _, out _);
+        int want = Util.RandInt(1, 2) * bcx * bcy;
         var undo = new List<(bool vert, int x, int y, EdgeKind was)>();
         // Footprints already taken. Two buildings that overlap produce a double-walled shape
         // nobody authored and no player can read as a building — and the reachability validator
@@ -601,7 +611,7 @@ public static class Mission
         // this layer cannot check for itself has to be refused up front.
         var taken = new List<(int x0, int y0, int x1, int y1)>();
 
-        for (int attempt = 0, made = 0; attempt < 14 && made < want; attempt++)
+        for (int attempt = 0, made = 0; attempt < 14 * want && made < want; attempt++)
         {
             int bw = Util.RandInt(3, 5), bh = Util.RandInt(3, 4);
             int x0 = Util.RandInt(1, Math.Max(1, g.W - bw - 2));

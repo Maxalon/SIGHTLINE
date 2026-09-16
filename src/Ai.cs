@@ -15,6 +15,11 @@ public class EnemyPlan
     public int GrenX, GrenY;      // grenade aim tile
     public Unit HealTarget;       // medic: mend this wounded ally instead of fighting
     public (int x, int y)? SapTile; // sapper: demolish this player cover tile instead of shooting
+    /// P40 — the same decision, against a BOUNDARY. `SapTile` is where the sapper must stand next
+    /// to; when this is set it breaches the WALL between the target and its attacker instead of
+    /// destroying a block. Both are never set at once: a tile wins, because a block is the thing
+    /// the target is standing behind when there is one.
+    public Grid.EdgeRef? SapEdge;
     public bool UseItem;          // use a utility item (smoke/flash) this turn
     public Unit ShoveTarget;      // rusher/Legion: shove this soldier OUT of cover to expose it (Wave 5)
     public int ItemTx, ItemTy;    // item aim tile
@@ -346,9 +351,34 @@ public static class Ai
         // once per plan; kill the SPOTTER to break the crossfire (it doesn't fight much itself).
         bool spotterActive = SpotterActive(g, e);
 
-        // SAPPER: the nearest covered soldier's frontal cover tile — the demolition target
+        // SAPPER: the nearest covered soldier's frontal cover — the demolition target.
+        //
+        // P40: a TILE if there is one, otherwise the boundary between that soldier and this sapper.
+        // Cover moved from tiles to edges in P28 and this branch could not follow it, so a soldier
+        // behind a building wall was un-sappable and the branch fell under AICOVTEST's dead-row
+        // floor the moment buildings were switched on. `sapTarget` stays a TILE either way — it is
+        // what the movement scoring below gets adjacent to — and for an edge it is the tile on the
+        // SAPPER's side of the wall, which is where a breaching charge has to be placed from.
         (int x, int y)? sapTarget = null;
-        if (e.Cls == "SAPPER" && nearest != null) sapTarget = g.Grid.CoverTile(nearest.X, nearest.Y, e.X, e.Y);
+        Grid.EdgeRef? sapEdge = null;
+        if (e.Cls == "SAPPER" && nearest != null)
+        {
+            sapTarget = g.Grid.CoverTile(nearest.X, nearest.Y, e.X, e.Y);
+            if (sapTarget == null && Edges.Enabled && Edges.Destructible)
+            {
+                var er = g.Grid.CoverEdge(nearest.X, nearest.Y, e.X, e.Y);
+                if (er != null)
+                {
+                    sapEdge = er;
+                    // the tile the wall separates the target from — the sapper's side of it
+                    var r = er.Value;
+                    int sx = r.Vertical ? (r.X == nearest.X ? nearest.X - 1 : nearest.X + 1) : nearest.X;
+                    int sy = r.Vertical ? nearest.Y : (r.Y == nearest.Y ? nearest.Y - 1 : nearest.Y + 1);
+                    if (g.Grid.InBounds(sx, sy)) sapTarget = (sx, sy);
+                    else { sapEdge = null; }
+                }
+            }
+        }
 
         // MEDIC: prefer patching up the most-wounded active ally (incl. itself) over
         // fighting. Move to a covered tile within heal range + LoS of the patient. If
@@ -1039,13 +1069,23 @@ public static class Ai
         if (retreatMode && bestShotTarget == null && bestTile != (e.X, e.Y))
             g.Fx.PopText(e.Pos + new Vector2(0, -30), "FALLING BACK", Pal.Suspect, 14f);
 
-        // sapper: if it can reach the cover tile, demolish it instead of shooting
+        // sapper: if it can reach the cover, demolish it instead of shooting
         if (e.Cls == "SAPPER" && sapTarget != null &&
-            g.Grid.IsCover(sapTarget.Value.x, sapTarget.Value.y) &&
             Util.ChebyDist(bestTile.x, bestTile.y, sapTarget.Value.x, sapTarget.Value.y) <= 1)
         {
-            plan.SapTile = sapTarget;
-            plan.ShootTarget = null;       // demolition takes the action
+            // A TILE target must still BE cover when the sapper arrives (an ally may have cleared
+            // it mid-turn); an EDGE target must still be a wall. Same check, different layer.
+            if (sapEdge == null && g.Grid.IsCover(sapTarget.Value.x, sapTarget.Value.y))
+            {
+                plan.SapTile = sapTarget;
+                plan.ShootTarget = null;   // demolition takes the action
+            }
+            else if (sapEdge != null && Edges.CoverLevel(g.Grid.KindOf(sapEdge.Value)) > 0)
+            {
+                plan.SapTile = sapTarget;  // where to stand
+                plan.SapEdge = sapEdge;    // what to breach
+                plan.ShootTarget = null;
+            }
         }
 
         // grenade option: lob from the post-move tile at the best cluster. Prefer it

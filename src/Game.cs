@@ -7709,14 +7709,19 @@ public partial class Game
                     Enqueue(new WaitAnim(0.25f), Team.Enemy);
                 }
                 else if (_aiPlan.SapTile != null && e.ActionsLeft > 0 &&
-                    Grid.IsCover(_aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) &&
+                    SapStillStands(_aiPlan) &&
                     Util.ChebyDist(e.X, e.Y, _aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) <= 1)
                 {
                     _actBranch = "sap";
                     e.ActionsLeft = 0;
                     var (sx, sy) = _aiPlan.SapTile.Value;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "BREACH", Pal.Foe, 16f);
-                    var hit = Grid.DamageCover(sx, sy, Grid.HighCoverHp);  // demolish a full level
+                    // P40 — a WALL or a BLOCK, demolished a full level either way. The FX are the
+                    // block's, placed at the tile the wall faces, because a breach and a shattered
+                    // crate are the same event to a player: the cover you were behind is gone.
+                    var hit = _aiPlan.SapEdge != null
+                        ? Grid.DamageEdge(_aiPlan.SapEdge.Value, Grid.HighCoverHp)
+                        : Grid.DamageCover(sx, sy, Grid.HighCoverHp);
                     if (hit != Grid.CoverHit.None) CoverHitFx(sx, sy, hit);
                     Fx.AddShake(5f);
                     Enqueue(new WaitAnim(0.25f), Team.Enemy);
@@ -9007,6 +9012,16 @@ public partial class Game
         Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);
         Phase = Phase.Intro;
         Audio.Play("select");
+    }
+
+    /// P40 — is the thing the sapper planned to demolish still there? Validated at the moment of
+    /// the act, not at planning time: an ally's grenade can clear the block or drop the wall
+    /// between the plan and the action, and a sapper spending its turn breaching nothing is the
+    /// kind of wasted act AICOVTEST counts as a live branch while a player sees a unit stand still.
+    bool SapStillStands(EnemyPlan p)
+    {
+        if (p.SapEdge != null) return Edges.CoverLevel(Grid.KindOf(p.SapEdge.Value)) > 0;
+        return p.SapTile != null && Grid.IsCover(p.SapTile.Value.x, p.SapTile.Value.y);
     }
 
     /// The PRIMARY verb — the big plate and [Enter] — on whichever overlay screen owns the frame.
