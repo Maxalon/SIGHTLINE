@@ -1,3 +1,5 @@
+using System;
+
 namespace Sightline;
 
 /// Hand-authored arena layouts, applied over the procedural generator for map
@@ -33,7 +35,7 @@ namespace Sightline;
 /// sabotage site + its ring — are still left as open floor regardless of the template, and
 /// `Mission` verifies connectivity before committing to a layout (falling back to the
 /// procedural generator otherwise).
-public static class Maps
+public static partial class Maps
 {
     /// P26: does ANY shipped template declare a site glyph? Computed once, purely, at type init.
     ///
@@ -68,6 +70,150 @@ public static class Maps
     /// silence. SIGHTLINE_TEMPLATEGATE checks the templates against THESE and then, separately,
     /// reports whether the live board can use them at all.
     public const int TemplateW = 18, TemplateH = 11;
+
+    // ══ P47 — THE DOUBLE-RESOLUTION TEMPLATE: WALLS ON THE BOUNDARIES ═══════════════════════
+    /// P28 gave the board an EDGE layer — a wall that lives on the boundary between two tiles,
+    /// consumes no floor, and can have a DOOR in it. Thirty-five hand-authored arenas could not
+    /// express one, because a template is one character per TILE and a boundary has no character.
+    /// So the only building anybody could author was a ring of `#` cover tiles, which is a solid
+    /// block with no inside — and P42 then measured exactly what that buys: procedural rectangles
+    /// of wall move win rate not at all and cost `meaningfulChoicesPerTurn` at every rung, because
+    /// **a rectangle gives you somewhere to sit and sitting is not a decision.** An AUTHORED
+    /// building — an objective inside it, a door worth breaching, a roof worth holding — is a
+    /// different object, and P42 named it as the unpriced one. This is the notation for it.
+    ///
+    /// A template may be given in either form and `Parse` tells them apart by its ROW COUNT:
+    ///
+    ///   SINGLE (TemplateH rows x TemplateW chars) — every template shipped before P47. Edges all
+    ///   `None`; byte-for-byte the board it always built.
+    ///
+    ///   DOUBLE (2*TemplateH+1 rows x 2*TemplateW+1 chars) — odd row/column indices are TILES and
+    ///   even ones are the boundaries between them:
+    ///       row 2y+1, col 2x+1  ->  tile (x, y), the same legend as above
+    ///       row 2y+1, col 2x    ->  EdgeV[x, y]   (the WEST side of tile (x,y))
+    ///       row 2y,   col 2x+1  ->  EdgeH[x, y]   (the NORTH side of tile (x,y))
+    ///       row 2y,   col 2x    ->  a corner. Carries no state and is IGNORED; write `+` or a
+    ///                               space, whichever draws better.
+    ///
+    /// EDGE LEGEND. The canonical glyphs are the TILE legend's own, because the position already
+    /// says whether a character is a tile or a boundary and a second vocabulary is a second thing
+    /// to get wrong:
+    ///   `#` HIGH wall (stops movement and sight, HIGH cover)
+    ///   `o` LOW wall  (stops movement, sight and fire pass over, LOW cover)
+    ///   `+` DOOR      (passable, sight passes, shelters nobody — the reason a building has an
+    ///                  inside worth entering)
+    ///   ` ` or `.`    open boundary
+    /// Plus two ALIASES that exist purely so an authored map looks like the room it describes:
+    /// `|` in a vertical slot and `-` in a horizontal slot both mean HIGH. They are aliases, not a
+    /// second meaning — `Parse` folds them immediately.
+    ///
+    /// INERT UNTIL A TEMPLATE USES IT, by construction and not by promise: `Layouts` below is
+    /// entirely single-resolution today, so every `Arena` has `HasEdges == false`, `Mission` stamps
+    /// nothing and `Grid.AnyEdges` stays false — which is the fast-out every edge predicate in
+    /// `Grid` short-circuits on. **The commit that adds the first double-resolution template is the
+    /// one that severs the CRN stream**, exactly as P26 recorded for its site glyphs; this one does
+    /// not, and `ARENAEDGETEST` leg (A) is the standing proof.
+    public readonly struct Arena
+    {
+        public readonly string[] Tiles;        // TemplateH rows of TemplateW chars
+        public readonly EdgeKind[,] EdgeV;     // [TemplateW+1, TemplateH] or null
+        public readonly EdgeKind[,] EdgeH;     // [TemplateW, TemplateH+1] or null
+        public bool HasEdges => EdgeV != null;
+
+        public Arena(string[] tiles, EdgeKind[,] v, EdgeKind[,] h) { Tiles = tiles; EdgeV = v; EdgeH = h; }
+    }
+
+    /// One edge glyph. Returns false for anything not in the legend, so a typo in an authored map
+    /// is a loud gate failure rather than a silently missing wall.
+    public static bool EdgeGlyph(char c, bool vertical, out EdgeKind k)
+    {
+        switch (c)
+        {
+            case ' ': case '.': k = EdgeKind.None; return true;
+            case '#': k = EdgeKind.High; return true;
+            case 'o': k = EdgeKind.Low;  return true;
+            case '+': k = EdgeKind.Door; return true;
+            case '|': k = EdgeKind.High; return vertical;      // alias, vertical slots only
+            case '-': k = EdgeKind.High; return !vertical;     // alias, horizontal slots only
+            default:  k = EdgeKind.None; return false;
+        }
+    }
+
+    /// Parse either form. `why` names the first structural fault and the result is unusable when
+    /// it returns false — `SIGHTLINE_TEMPLATEGATE` runs this over every shipped template, so a
+    /// malformed one cannot reach a mission.
+    public static bool TryParse(string[] src, out Arena arena, out string why)
+    {
+        arena = default; why = null;
+        if (src == null || src.Length == 0) { why = "empty template"; return false; }
+
+        if (src.Length == TemplateH)
+        {
+            foreach (var r in src)
+                if (r.Length != TemplateW) { why = $"single-res row is {r.Length} chars, expected {TemplateW}"; return false; }
+            arena = new Arena(src, null, null);
+            return true;
+        }
+
+        int dh = TemplateH * 2 + 1, dw = TemplateW * 2 + 1;
+        if (src.Length != dh)
+        { why = $"{src.Length} rows — expected {TemplateH} (single) or {dh} (double)"; return false; }
+        for (int i = 0; i < src.Length; i++)
+            if (src[i].Length != dw) { why = $"double-res row {i} is {src[i].Length} chars, expected {dw}"; return false; }
+
+        var tiles = new string[TemplateH];
+        var ev = new EdgeKind[TemplateW + 1, TemplateH];
+        var eh = new EdgeKind[TemplateW, TemplateH + 1];
+        var row = new char[TemplateW];
+        for (int y = 0; y < TemplateH; y++)
+        {
+            for (int x = 0; x < TemplateW; x++) row[x] = src[2 * y + 1][2 * x + 1];
+            tiles[y] = new string(row);
+            for (int x = 0; x <= TemplateW; x++)
+            {
+                char c = src[2 * y + 1][2 * x];
+                if (!EdgeGlyph(c, true, out ev[x, y]))
+                { why = $"row {2 * y + 1} col {2 * x}: '{c}' is not a vertical edge glyph"; return false; }
+            }
+        }
+        for (int y = 0; y <= TemplateH; y++)
+            for (int x = 0; x < TemplateW; x++)
+            {
+                char c = src[2 * y][2 * x + 1];
+                if (!EdgeGlyph(c, false, out eh[x, y]))
+                { why = $"row {2 * y} col {2 * x + 1}: '{c}' is not a horizontal edge glyph"; return false; }
+            }
+        arena = new Arena(tiles, ev, eh);
+        return true;
+    }
+
+    static Arena[] _arenas;
+
+    /// The parsed form of `Layouts[i]`, cached. Parsing is pure and the templates are `const`-ish,
+    /// so this is done once — but it is LAZY for the same reason `AnySiteTemplates` is: `Layouts`
+    /// is declared below and C# runs static initializers in declaration order.
+    public static Arena ArenaAt(int i)
+    {
+        if (_arenas == null)
+        {
+            _arenas = new Arena[Layouts.Length];
+            for (int k = 0; k < Layouts.Length; k++)
+                if (!TryParse(Layouts[k], out _arenas[k], out string why))
+                    throw new InvalidOperationException($"Maps.Layouts[{k}] is malformed: {why}");
+        }
+        return _arenas[i];
+    }
+
+    /// Does ANY shipped template declare an edge? The inertness gate, mirroring `AnySiteTemplates`.
+    public static bool AnyEdgeTemplates
+    {
+        get
+        {
+            for (int i = 0; i < Layouts.Length; i++) if (ArenaAt(i).HasEdges) return true;
+            return false;
+        }
+    }
+
 
     public static readonly string[][] Layouts =
     {

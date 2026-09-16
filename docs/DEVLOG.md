@@ -19362,3 +19362,94 @@ moves toward the middle and asserts the move happened.
 * Nothing culls badges by density. Ten units in one corner of a zoomed-out board is ten overlapping
   pill rows. The flat view has the same problem and has never hit it because the board is fixed;
   `SIGHTLINE_BIGMAP` would.
+
+## P47. THE DOUBLE-RESOLUTION TEMPLATE — the notation for a building you can go inside
+
+P42's finding, restated: procedural buildings move win rate not at all and cost
+`meaningfulChoicesPerTurn` at every rung, because **a rectangle gives you somewhere to sit and
+sitting is not a decision**. An AUTHORED building — an objective inside it, a door worth breaching,
+a roof worth holding — is a different object, and P42 named it as the unpriced one and the next move
+for buildings.
+
+**It could not be authored.** P28 gave the board an EDGE layer — a wall that lives on the boundary
+between two tiles, consumes no floor, and can have a DOOR in it — and thirty-five hand-authored
+arenas could not express one, because a template is one character per TILE and a boundary has no
+character. The only building anybody could draw was a ring of `#` cover tiles: a solid block with no
+inside. This wave is the notation.
+
+### The format
+
+`Maps.TryParse` tells the two forms apart by ROW COUNT — 11 rows is a template as shipped since
+Phase 1; 23 rows is the double-resolution form, where odd row/column indices are TILES and even ones
+are the boundaries between them:
+
+    row 2y+1, col 2x+1  ->  tile (x, y), the same legend as always
+    row 2y+1, col 2x    ->  EdgeV[x, y]   (the WEST side of tile (x,y))
+    row 2y,   col 2x+1  ->  EdgeH[x, y]   (the NORTH side of tile (x,y))
+    row 2y,   col 2x    ->  a corner: carries no state, ignored
+
+The edge legend is the TILE legend's own — `#` high, `o` low, `+` door, space or `.` open — because
+the POSITION already says whether a character is a tile or a boundary, and a second vocabulary is a
+second thing to get wrong. Two aliases exist purely so a map looks like the room it describes: `|`
+in a vertical slot and `-` in a horizontal one, both meaning HIGH. They are aliases, not a second
+meaning, and `Parse` folds them immediately — leg (E) is what keeps that true.
+
+A room comes out looking like a room, which is the whole point:
+
+    + + + +-+-+++-+-+ + + + + + + + + + +
+     . . .|. . . . .|. . . . . . . . . .
+    + + + + + + + + + + + + + + + + + + +
+     . . .|. . . . .|. . . . . . . . . .
+    + + + +-+-+-+-+-+ + + + + + + + + + +
+
+### One new guard, and one deliberately absent
+
+The edge pass stamps AFTER the tiles and BEFORE the connectivity flood, **unconditionally** —
+including boundaries touching a reserved tile. A wall beside a spawn is legitimate authored geometry
+(it is how a squad deploys inside a building), and the `occupied` rule exists to stop a template
+BURYING a reserved tile in cover, which an edge cannot do: an edge consumes no floor. What it *can*
+do is seal one off — and that is exactly what the existing flood catches, because `Grid.CostMap`
+reads the edge layer. **So there is no new guard here and there should not be: the guard that was
+already there is the right one.**
+
+The one thing that IS new is the revert. A rejected layout now calls `ClearEdges()` alongside the
+tile reset, because a revert that left the walls behind would hand the procedural fallback a board
+shaped by the template it just rejected — L6's stale-layer defect, one array further out.
+
+### INERT, asserted rather than promised
+
+`Layouts` is entirely single-resolution today, so every `Arena` has `HasEdges == false`, `Mission`
+stamps nothing, and `Grid.AnyEdges` stays false — the fast-out every edge predicate short-circuits
+on. Leg (A) asserts all three **and** that each single-res template is passed through **by
+reference**, not copied: the stamp path gets the same array it always got.
+
+**The day a template goes double-resolution, leg (A) fails — and it should.** That is the commit
+that severs the CRN stream, exactly as P26 recorded for its site glyphs, and it must not slip in
+quietly. The engine change and the content change are two commits on purpose.
+
+### SIGHTLINE_ARENAEDGETEST
+
+The fixture is written as **ASCII art on purpose** rather than generated. The format's whole claim
+is that a person can draw a room and get that room, so the test has to read the way an authored map
+reads — a generated fixture would agree with a generator's bug instead of disagreeing with it.
+
+(A) inertness, as above. (B) the fixture parses to exactly 18 walls and 1 door with **nothing
+stray**, which is what catches a grid misaligned by a row or a column. (C) five malformed forms —
+wrong row count, wrong width, junk glyph, `-` in a vertical slot, `|` in a horizontal one — each
+refused *with a reason*. (D) the room on a real board: the interior is reachable through the door,
+**zero** of its 20 tiles are reachable with the door sealed, sight stops at a wall and passes
+through the door. (E) the aliases are aliases.
+
+Verified red-before/green-after on two breakages: shifting the tile column by one gives *"198
+non-floor tiles — the fixture should be boundaries only"*; dropping the slot check on the aliases
+gives *"(dashInVert) a malformed template parsed clean | (barInHoriz) ..."*.
+
+Leg (A) calls `TryParse` rather than `ArenaAt` on purpose: `ArenaAt` THROWS on a malformed template,
+which would abort the method with no verdict line at all. **A gate that dies is a gate that says
+nothing**, and this repository has been bitten by exactly that.
+
+### Next
+
+Author the first double-resolution arenas — a building with an objective inside it, a door worth
+breaching, a roof worth holding. That commit severs the CRN stream and wants a measured round
+against `SIGHTLINE_EDGES=0`; this one does not and did not.

@@ -7,6 +7,27 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P47 "THE DOUBLE-RESOLUTION TEMPLATE" (2026-09-16)
+
+P47 gave the template format a notation for EDGES — walls on the boundaries between tiles, with
+doors — so an authored building with an inside is finally expressible. It ships INERT: every one of
+the 35 arenas is still single-resolution and `ARENAEDGETEST` leg (A) asserts it.
+
+- [ ] **1. AUTHOR THE FIRST DOUBLE-RESOLUTION ARENAS. This is the top item.** P42 measured that
+      procedural rectangles of wall buy nothing and COST decision richness at every rung, and named
+      the authored building as the unpriced object. The format exists now; the content does not.
+      What earns its keep is a building with a REASON TO GO IN — the objective inside it, a door
+      worth breaching, a roof worth holding — not more cover.
+      **That commit severs the CRN stream** (leg (A) will go red, by design) and wants a measured
+      round against `SIGHTLINE_EDGES=0`, the same shape as P42's.
+- [ ] **2. Site glyphs are still unused too** (P26's `T`/`X`/`E`/`C`/`P`/`A`). The two belong in the
+      same authored template: a HACK terminal inside a room with one door is the whole argument for
+      both features at once, and neither is worth measuring alone.
+- [ ] **3. The format cannot say "roof".** A building with a holdable roof needs the edge layer AND
+      an elevation the template can place inside it — `^`/`=` already exist as tile glyphs, so this
+      may already work; nobody has drawn one to find out.
+
+
 ## OPEN — left by PARALLAX P46 "THE PIECE CARRIES ITS STATE" (2026-09-16)
 
 P46 closed P45's item 1: the projected view now draws HP, ammo, stance and the status chip row at

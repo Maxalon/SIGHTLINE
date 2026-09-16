@@ -501,21 +501,21 @@ public static class Mission
             {
                 attempted = true;
                 authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal,
-                                          Maps.Layouts[plan.Layout], sabotage, relaxEnemies: plan.Valid);
+                                          Maps.ArenaAt(plan.Layout), sabotage, relaxEnemies: plan.Valid);
                 if (authored) AppliedLayout = plan.Layout;
             }
         }
         else if (ArenasFitBoard && ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
         {
             attempted = true;
-            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
+            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.ArenaAt(ForcedLayout), sabotage);
             if (authored) AppliedLayout = ForcedLayout;
         }
         else if (ArenasFitBoard && Util.Roll(80))
         {
             attempted = true;
             int pick = PickLayout(missionNum);
-            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[pick], sabotage);
+            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.ArenaAt(pick), sabotage);
             if (authored) AppliedLayout = pick;
         }
         if (!authored)
@@ -1084,7 +1084,7 @@ public static class Mission
 
     static bool TryApplyLayout(Grid g, HashSet<(int, int)> occupied, List<Unit> players,
                                List<Unit> enemies, HashSet<(int, int)> evac,
-                               (int x, int y)? terminal, string[] tpl, List<(int x, int y)> sabotage,
+                               (int x, int y)? terminal, Maps.Arena arena, List<(int x, int y)> sabotage,
                                bool relaxEnemies = false)
     {
         // ══ P28 — A DIMENSION MISMATCH IS NOT A REJECTION ════════════════════════════════════
@@ -1096,6 +1096,7 @@ public static class Mission
         // hand-made maps quietly stop appearing.
         // A rejection is a runtime outcome. A wrong SIZE is a BUG in the template, so it is
         // counted and shouted about. SIGHTLINE_TEMPLATEGATE turns the count into a PASS/FAIL.
+        string[] tpl = arena.Tiles;
         if (tpl.Length != g.H || Array.Exists(tpl, r => r.Length != g.W))
         {
             LayoutDimMismatches++;
@@ -1126,6 +1127,22 @@ public static class Mission
                 }
             }
 
+        // ══ P47 — THE EDGE PASS ══════════════════════════════════════════════════════════════
+        // Stamped AFTER the tiles and BEFORE the flood, unconditionally — including boundaries
+        // touching a reserved tile. A wall beside a spawn is legitimate authored geometry (it is
+        // how a squad deploys inside a building), and the `occupied` rule exists to stop a template
+        // BURYING a reserved tile in cover, which an edge cannot do: an edge consumes no floor.
+        // What it CAN do is seal one off, and that is precisely what the connectivity flood below
+        // already catches, because `Grid.CostMap` reads the edge layer. So there is no new guard
+        // here and there should not be: the guard that was already there is the right one.
+        if (arena.HasEdges)
+        {
+            for (int y = 0; y < g.H; y++)
+                for (int x = 0; x <= g.W; x++) g.SetEdgeV(x, y, arena.EdgeV[x, y]);
+            for (int y = 0; y <= g.H; y++)
+                for (int x = 0; x < g.W; x++) g.SetEdgeH(x, y, arena.EdgeH[x, y]);
+        }
+
         // connectivity: flood from the first soldier across walkable tiles (cover = wall)
         var cost = g.CostMap(players[0].X, players[0].Y, (x, y) => false, out _, 9999);
         bool Reachable(int x, int y) => g.InBounds(x, y) && cost[x, y] >= 0;
@@ -1149,6 +1166,10 @@ public static class Mission
             for (int y = 0; y < g.H; y++)
                 for (int x = 0; x < g.W; x++)
                     if (!occupied.Contains((x, y))) { g.Tiles[x, y] = TileType.Floor; g.Height[x, y] = 0; g.Barrel[x, y] = false; }
+            // P47: and the walls with them. A revert that left the edges behind would hand the
+            // procedural fallback a board shaped by the template it just rejected — L6's stale-layer
+            // defect, one array further out.
+            if (arena.HasEdges) g.ClearEdges();
             return false;
         }
         return true;

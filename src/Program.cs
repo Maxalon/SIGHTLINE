@@ -959,6 +959,13 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_ARENAEDGETEST=1 : P47 — the double-resolution template format (walls on the
+        // boundaries between tiles). Pure parsing + grid logic, no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ARENAEDGETEST") == "1")
+        {
+            Console.WriteLine(Maps.EdgeSelfTest());
+            return;
+        }
         // SIGHTLINE_WALKTEST=1 : P45 — the projected view's pieces move on the TWEEN, not on the
         // tile index. Pure arithmetic over a driven animation; no window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WALKTEST") == "1")
