@@ -287,6 +287,10 @@ public static class Program
         // CENTRE, i.e. the pre-P45 behaviour in which the whole movement tween was invisible and a
         // six-tile walk was six teleports. Presentation only.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CHIPTWEEN") == "0") View3D.ChipTween = false;
+
+        // P46 — SIGHTLINE_UNITSTATE=0 restores the pre-P46 projected view, in which a unit is a
+        // coloured disc and one initial and its HP / ammo / stance / statuses appear nowhere.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_UNITSTATE") == "0") View3D.UnitState = false;
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FINALESTAT") == "0") Mission.FinaleHeatStat = false;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FORCECEILING"), out int xceil) && xceil >= 3)
             Mission.ForceCeiling = xceil;
@@ -941,6 +945,17 @@ public static class Program
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fxbridgetest");
             LoadGameFonts();   // leg (E) measures GLYPH INK; without the real atlases it measures nothing
             Console.WriteLine(View3D.FxBridgeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_UNITSTATETEST=1 : P46 — a unit's own state, at the unit, in the projected view.
+        // A framebuffer differential on every leg, so it needs a window and real frames.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_UNITSTATETEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "unitstatetest");
+            LoadGameFonts();
+            Console.WriteLine(View3D.UnitStateSelfTest());
             Raylib.CloseWindow();
             return;
         }

@@ -2853,8 +2853,8 @@ public static class Renderer
         // SIGNAL W3 (review): status chips draw AFTER every figure — an opaque chip pill on a
         // bottom unit must never be buried under a vertically-adjacent body drawn later in list
         // order; decision-critical state outranks silhouettes.
-        foreach (var u in g.Enemies) DrawUnitStatusChips(g, u);
-        foreach (var u in g.Players) DrawUnitStatusChips(g, u);
+        foreach (var u in g.Enemies) DrawUnitStatusChips(g, u, null);
+        foreach (var u in g.Players) DrawUnitStatusChips(g, u, null);
     }
 
     // ---- Environmental hazards (Wave 2) -----------------------------------------------------
@@ -3587,7 +3587,9 @@ public static class Renderer
     // any biome floor or overlay wash; the chip row centres under the figure. Runs as a LATE
     // pass from DrawUnits, recomputing DrawUnit's base anchor (the per-frame GetTime() drift
     // between the two computations is sub-pixel).
-    static void DrawUnitStatusChips(Game g, Unit u)
+    /// P46 — `anchor` overrides the figure's own tweened screen position, so the projected view can
+    /// put the same chip row under the same unit without a second copy of the layout.
+    public static void DrawUnitStatusChips(Game g, Unit u, Vector2? anchor)
     {
         // W2: a DRY hostile earns a chip in this row. It lives HERE and not in DrawUnit because this
         // is the LATE, opaque pass — the pass that exists precisely so a chip is never buried under
@@ -3600,7 +3602,7 @@ public static class Renderer
         bool drone = u.Team == Team.Enemy && u.Cls == "DRONE";
         float hover = drone ? 11f + MathF.Sin((float)Now() * 3f + u.Bob) * 2f : 0f;
         float bob = MathF.Sin((float)Now() * 2.2f + u.Bob) * 1.6f;
-        Vector2 p = u.Pos - new Vector2(0, hlift) + new Vector2(0, bob - hover) + u.Recoil;
+        Vector2 p = anchor ?? (u.Pos - new Vector2(0, hlift) + new Vector2(0, bob - hover) + u.Recoil);
         const float chipH = 18f;
         // FUL-7: the DOWN countdown pill leads the row — red "DOWN 3/2/1" while the timer runs,
         // amber "STABLE" once frozen (Pal.Foe/Pal.Suspect: both palette-safe; the glyph carries
@@ -4296,6 +4298,24 @@ public static class Renderer
             Raylib.DrawCircleV(new Vector2(cx, cyt + 3.5f), 1.6f, Raylib.Fade(ec, 0.7f + 0.3f * ep));
         }
 
+        // P46 — THE BADGES ARE ONE BLOCK AND THEY BELONG TO THE UNIT, NOT TO THE RENDERER.
+        // Extracted verbatim so the projected view can draw the SAME state at a projected anchor
+        // instead of growing a second, drifting copy. Nothing here changed; the flat view passes
+        // the anchor it always computed.
+        DrawUnitBadges(g, u, p, elite, vip);
+    }
+
+    /// P46 — a unit's own state, drawn around a screen ANCHOR: HP pips, the overwatch/brace badge,
+    /// the hunker mark, enemy ammo pips, the stance/suppression/rout/wavering tags, the elite name
+    /// and the VIP diamond. The flat renderer passes the figure's own tweened position; `View3D`
+    /// passes the unit PROJECTED into screen space, so both views read one truth.
+    ///
+    /// It does NOT include the status CHIP row — that is a deliberately LATE, opaque pass over all
+    /// figures (`DrawUnitStatusChips`), because a chip pill buried under a vertically adjacent body
+    /// is decision-critical state lost. The 3D caller draws it in the same order for the same
+    /// reason.
+    public static void DrawUnitBadges(Game g, Unit u, Vector2 p, bool elite, bool vip)
+    {
         // hp pips
         // FUL-7: the HP bar hides while DOWNED — a 0-HP bar under a countdown pill would lie
         // twice (the pill row below owns the read: DOWN n / STABLE).

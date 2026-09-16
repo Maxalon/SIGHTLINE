@@ -7,6 +7,21 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## OPEN — left by PARALLAX P46 "THE PIECE CARRIES ITS STATE" (2026-09-16)
+
+P46 closed P45's item 1: the projected view now draws HP, ammo, stance and the status chip row at
+each unit, using `Renderer.DrawUnitBadges` — the flat view's own block, extracted verbatim, so the
+two views cannot drift. `SIGHTLINE_UNITSTATE=0` restores the pre-P46 view.
+
+- [ ] **1. The badge offsets are FIXED screen pixels.** -30 for the HP pips, -34..-53 for the tags,
+      +24 for the chip row — all measured against the flat view's 24px body disc. The projected
+      chip's on-screen size changes with zoom, so at a hard zoom-out the badges float well clear of
+      the piece they belong to. Anchor them to the chip's PROJECTED radius instead of a constant.
+- [ ] **2. Nothing culls badges by density.** Ten units in one corner of a zoomed-out board is ten
+      overlapping pill rows. The flat view has the same problem and has never hit it because the
+      board is a fixed 18x11; `SIGHTLINE_BIGMAP` would hit it immediately.
+
+
 ## OPEN — left by PARALLAX P45 "THE PIECE WALKS" (2026-09-16)
 
 P45 drove the projected view's pieces from `Unit.Pos` (the tween) instead of the tile index, so

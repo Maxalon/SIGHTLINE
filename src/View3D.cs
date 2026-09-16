@@ -112,6 +112,7 @@ public static partial class View3D
     const float CapH = 0.06f;    // the lit top plate that makes a box read as a solid
     const float ChipR = 0.38f;      // soldier chip radius
     const float ChipH = 0.13f;      // chip thickness
+    public static float ChipHPublic => ChipH;   // harness read (UNITSTATETEST anchors)
     const float ChipFloat = 0.30f;  // how far the chip hovers above its tile — the GAP is what
                                     // makes it read as a piece resting on the projection
 
@@ -865,6 +866,56 @@ public static partial class View3D
         }
     }
 
+    // ── P46 THE PIECE CARRIES ITS STATE ──────────────────────────────────────────────────────
+    /// A unit's own state — HP, ammo, stance, statuses — at the unit, in the projected view.
+    ///
+    /// It was NOWHERE. The flat renderer draws HP pips, the overwatch badge, the hunker mark, enemy
+    /// ammo pips, the stance/suppression/rout/wavering tags and the status chip row around every
+    /// figure; the projected view drew a coloured disc and one initial. So a player read their own
+    /// squad's health off the roster strip and **a hostile had no HP, no ammo and no status anywhere
+    /// on screen** — in the view that is now the game.
+    ///
+    /// The fix is the decal layer's argument for the third time: REUSE, DO NOT RE-AUTHOR. Every one
+    /// of those draws already takes (or now takes) a screen ANCHOR, and this pass already runs in
+    /// screen space with the unit's projected point in hand. `Renderer.DrawUnitBadges` is the flat
+    /// view's own block, extracted verbatim, so the two views cannot drift.
+    ///
+    /// TWO PASSES, and the second one is not tidiness: the status CHIP row is opaque, and an opaque
+    /// pill buried under a vertically adjacent body is decision-critical state lost. `DrawUnits`
+    /// learned that in SIGNAL W3 and draws chips after every figure; this does the same, over a list
+    /// already sorted back-to-front.
+    ///
+    /// `SIGHTLINE_UNITSTATE=0` restores the pre-P46 projected view (disc and initial only).
+    public static bool UnitState = true;
+
+    public static void DrawUnitState(Game g, List<Unit> units, Camera3D cam)
+    {
+        if (!UnitState) return;
+        var grid = g.Grid;
+        var order = new List<Unit>(units);
+        order.Sort((a, b) => Vector3.Distance(cam.Position, ChipWorld(grid, b))
+                            .CompareTo(Vector3.Distance(cam.Position, ChipWorld(grid, a))));
+
+        Vector2 Anchor(Unit u)
+        {
+            var cw = ChipWorld(grid, u);
+            return Raylib.GetWorldToScreen(cw with { Y = cw.Y + ChipFloat + ChipH + 0.05f }, cam);
+        }
+
+        foreach (var u in order)
+        {
+            if (!u.Alive || !Shown(u)) continue;
+            bool friend = u.Team == Team.Player;
+            Renderer.DrawUnitBadges(g, u, Anchor(u),
+                                    u.Team == Team.Enemy && u.Cls == "ELITE", friend && u.IsVip);
+        }
+        foreach (var u in order)
+        {
+            if (!u.Alive || !Shown(u)) continue;
+            Renderer.DrawUnitStatusChips(g, u, Anchor(u));
+        }
+    }
+
     /// One full projected frame. Caller owns BeginDrawing/EndDrawing.
     /// P31 — the room this board is IN. The 2D renderer pulls cover and plateaus 0.55 toward the
     /// biome's hue and takes its floor checker from it, which is most of why eight biomes read as
@@ -1371,6 +1422,7 @@ public static partial class View3D
         DrawChips(g.Grid, AllUnits(g));
         Raylib.EndMode3D();
         DrawMarkers(g.Grid, AllUnits(g), cam);
+        DrawUnitState(g, AllUnits(g), cam);
         DrawFxLayer(g, cam);
     }
 
@@ -1623,6 +1675,9 @@ public static partial class View3D
                                     Pal.RGBA(90, 130, 160, 110));
         Cfg.Text(line, new Vector2(x, y), 14, 1f, Pal.TxtDim);
     }
+
+    public static List<Unit> AllUnitsPublic(Game g) => AllUnits(g);   // harness read
+
 
     static List<Unit> AllUnits(Game g)
     {
