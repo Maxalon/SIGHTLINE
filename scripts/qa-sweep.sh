@@ -126,6 +126,7 @@ echo -n "ARENAEDGETEST: "; verdict "$(SIGHTLINE_ARENAEDGETEST=1 run | grep -oE "
 echo -n "VIPHEATTEST: "; verdict "$(SIGHTLINE_VIPHEATTEST=1 run | grep -oE "VIPHEATTEST: (PASS|FAIL)" | head -1)"
 echo -n "BOARDNEUTRALTEST: "; verdict "$(SIGHTLINE_BOARDNEUTRALTEST=1 run | grep -oE "BOARDNEUTRALTEST: (PASS|FAIL)" | head -1)"
 echo -n "DEPTHSPREADTEST: "; verdict "$(SIGHTLINE_DEPTHSPREADTEST=1 run | grep -oE "DEPTHSPREADTEST: (PASS|FAIL)" | head -1)"
+echo -n "FLATZOOMTEST: "; verdict "$(SIGHTLINE_FLATZOOMTEST=1 run | grep -oE "FLATZOOMTEST: (PASS|FAIL)" | head -1)"
 # P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
 echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"
 # P29: the board is a runtime size -- the shipped default must not drift and the camera pan

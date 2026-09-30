@@ -2469,6 +2469,7 @@ public partial class Game
             Mission.StampBuildings(Grid, Players, Enemies);
 
         FrameCameraOnSquad();   // P29: a board bigger than the screen must open ON the squad
+        if (ShotFlatZoom > 0f) { CamZoom = MathF.Max(FlatZoomFloor, ShotFlatZoom); _autoCamManual = true; ClampCamPan(); }   // P58 harness
         if (Mode == GameMode.Campaign)
         {
             string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
@@ -5390,7 +5391,7 @@ public partial class Game
             _autoCamManual = true;
             var mouse = Raylib.GetMousePosition();
             var before = Raylib.GetScreenToWorld2D(mouse, ViewCamera(false));
-            CamZoom = Util.Clamp(CamZoom + wheel * 0.12f, 1f, 2.4f);
+            CamZoom = Util.Clamp(CamZoom + wheel * 0.12f, FlatZoomFloor, 2.4f);   // P58: floor fits a big board
             var after = Raylib.GetScreenToWorld2D(mouse, ViewCamera(false));
             CamPan += before - after;                 // keep the point under the cursor anchored
         }
@@ -5402,9 +5403,42 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
         ToggleViewKey();
 
-        if (CamZoom <= 1.001f) CamZoom = 1f;
+        // P58: the old line was `if (CamZoom <= 1.001f) CamZoom = 1f` — an anti-drift snap that,
+        // with a floor below 1, would have snapped every zoomed-out value straight back to 1 and
+        // made the new floor unreachable. It now snaps only NEAR 1 and enforces the floor. On the
+        // shipped 18x11 board the floor IS 1, so the two lines reduce to the original exactly.
+        ApplyZoomLimits();
+    }
+
+    /// The zoom snap + floor + pan clamp, as ONE method so `SIGHTLINE_FLATZOOMTEST` exercises the
+    /// code the input handler runs rather than a copy of it.
+    void ApplyZoomLimits()
+    {
+        if (MathF.Abs(CamZoom - 1f) <= 0.001f) CamZoom = 1f;
+        if (CamZoom < FlatZoomFloor) CamZoom = FlatZoomFloor;
         ClampCamPan();
     }
+
+    /// P58 — THE FLAT CAMERA CAN ZOOM OUT FAR ENOUGH TO SEE THE WHOLE BOARD.
+    ///
+    /// It zoomed IN only (1.0-2.4), which was correct for as long as the board fitted the screen at
+    /// zoom 1. On a big board it meant the default view could never show more than one screen of
+    /// the map — P57 needed a hand-picked 30px tile just to photograph a 36x22 board whole. The
+    /// projected view already frames the whole board at its zoom 1 by construction; this gives the
+    /// DEFAULT view the same reach.
+    ///
+    /// The floor is the zoom at which the whole board fits the screen (with a 4% margin so it does
+    /// not butt against the edge), CAPPED AT 1 — so on any board that already fits, including the
+    /// shipped 18x11 at 64px, it is exactly 1 and nothing changes. Presentation only: no RNG draw,
+    /// no CRN stream, no flag. `SIGHTLINE_FLATZOOMTEST` asserts the no-op, the fit, the centring
+    /// and that mouse picking still lands on the right tile at the floor.
+    public static float FlatZoomFloor
+        => MathF.Min(1f, 0.96f * MathF.Min((float)Cfg.ScreenW / Cfg.BoardW, (float)Cfg.ScreenH / Cfg.BoardH));
+
+    /// Harness-only: a flat zoom applied after the opening frame, so a SHOT can photograph a big
+    /// board zoomed out. -1 = off. Clamped to the real floor, so it cannot show a zoom a player
+    /// could not reach.
+    public static float ShotFlatZoom = -1f;
 
     /// P32 — I toggles the PROJECTED view. Derived free-letter check at the time of binding
     /// (grep KeyboardKey. over src/) said I, J and Z were the only unclaimed letters.

@@ -42,10 +42,14 @@ the goal. Its four seams still need parameterising — the transform they need i
       48x30: 14-46, 2.5 turns). Same bodies (P56's gate still holds); nearest pod never closer than
       on 18x11; 18x11 byte-identical. `SIGHTLINE_DEPTHSPREAD=0` restores. **Not yet done: ENVELOP**
       (centre squad, pods on every rim — exempt, ~2 turns out on a big board).
-- [ ] **0c. ZOOM OUT.** The flat camera zooms IN only (`CamZoom` clamped 1.0-2.4), so on a big board
-      you never see more than one screen of it. P57's screenshots needed a hand-picked 30px tile to
-      show the whole 36x22 board. A big board needs a zoom floor below 1.0 (the projected view has its
-      own camera and may already cover it — check before building a second answer).
+- [x] **0c. ZOOM OUT — P58.** Checked first: the projected view already frames the whole board at its
+      zoom 1, but it is not the default. `Game.FlatZoomFloor` gives the default flat view a floor at
+      which the whole board fits (36x22: 0.644, 48x30: 0.640), capped at 1 so 18x11 is untouched.
+      `SIGHTLINE_FLATZOOMTEST` (picking round-trips 45/45 at the floor).
+- [ ] **0d. THE BOTTOM ROWS UNDER THE ACTION BAR, AT THE FLOOR.** At the zoom floor a big board cannot
+      pan, so its bottom rows stay under the translucent action bar (18x11 has always had its bottom
+      row there). Either fit the floor to the area between the top bar and the action bar, or let
+      the floor view pan by that margin. And autocam's pan clamp still uses the pre-P29 formula.
 - [ ] **1. MAKE A BIG BOARD A FAIR TEST BEFORE MEASURING ONE. Top item.** Nothing has ever measured
       a big board, but measuring one today measures a BROKEN configuration: enemy count, mission
       pacing and sight range are all still 18x11 numbers, and the 35 authored arenas are out of play

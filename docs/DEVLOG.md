@@ -19712,6 +19712,35 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P58. THE FLAT CAMERA ZOOMS OUT
+
+The flat camera zoomed IN only — `CamZoom` clamped to 1.0-2.4 — which was correct for as long as the
+board fitted the screen at zoom 1. On a big board the DEFAULT view could never show more than one
+screen of the map; P57 needed a hand-picked 30px tile just to photograph a 36x22 board whole. The
+projected view (`I`) already frames the whole board at its own zoom 1 by construction, so this gives
+the default view the same reach rather than building a second camera.
+
+`Game.FlatZoomFloor` is the zoom at which the whole board fits the screen (4% margin), **capped at 1**,
+so on any board that already fits — the shipped 18x11 at 64px included — it is exactly 1 and nothing
+changes. The mouse wheel now goes down to it. Measured: 36x22@53 floor 0.644, 48x30@40 0.640, 72x44@26
+0.656.
+
+**The trap was one line.** The anti-drift snap `if (CamZoom <= 1.001f) CamZoom = 1f` would have snapped
+every zoomed-out value straight back to 1 and made the floor unreachable. It now snaps only NEAR 1 and
+enforces the floor; on 18x11 the two lines reduce to the original. Pulled into `ApplyZoomLimits()` so
+the gate exercises the code the input handler runs. `SIGHTLINE_FLATZOOMTEST` asserts the 18x11 no-op,
+the fit, the centring, **mouse picking round-tripping 45/45 tiles through `PickTile` at the floor**,
+and that the limits reach the floor — and it went red naming leg (E) when the old snap was put back.
+
+Presentation only: no RNG draw, no CRN stream, no restore flag (P22's rule). `SIGHTLINE_FLATZOOM=<z>`
+is a harness pin so a shot can photograph a big board zoomed out.
+
+**Seen, not changed:** at the floor the bottom rows sit under the translucent action bar — the same as
+on 18x11, where the bottom row has always sat under it (the "full-bleed, translucent, non-cropping UI"
+of `DESIGN.md` §6). On a big board at the floor there is no pan to bring them up, so it bites harder
+there. And autocam's pan clamp still uses the pre-P29 `BoardW * 0.5 * (1 - 1/zoom)` formula, which
+ignores the screen size on a big board; it only runs until the player zooms by hand.
+
 ## P56 + P57. THE BOARD IS THE COMMITMENT — a neutral force, then a spread one
 
 **Owner direction, recorded in `docs/DESIGN.md` §6.5**: bigger boards, because on 18x11 with ~6-tile
