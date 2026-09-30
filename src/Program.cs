@@ -323,6 +323,12 @@ public static class Program
         // Mission.VipHeatBonus.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VIPHEAT") == "0") Mission.VipHeat = false;
 
+        // P58 — harness-only: open the flat view at this zoom (clamped to the real floor), so a shot
+        // can photograph a big board zoomed out. Presentation only.
+        if (float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FLATZOOM"),
+                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fz))
+            Game.ShotFlatZoom = fz;
+
         // P57 — THE DEPTH SPREAD. `=0` restores the far-edge deployment. A no-op on the shipped
         // 18x11 board by construction, so it only matters under SIGHTLINE_BIGMAP.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DEPTHSPREAD") == "0") Mission.DepthSpread = false;
@@ -1018,6 +1024,13 @@ public static class Program
             LoadGameFonts();
             Console.WriteLine(View3D.UnitStateSelfTest());
             Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_FLATZOOMTEST=1 : P58 — the flat camera zooms out to fit a big board; 18x11
+        // untouched; picking still lands on the right tile at the floor.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FLATZOOMTEST") == "1")
+        {
+            Console.WriteLine(Game.FlatZoomSelfTest());
             return;
         }
         // SIGHTLINE_DEPTHSPREADTEST=1 : P57 — pods spread through a big board's depth; 18x11
