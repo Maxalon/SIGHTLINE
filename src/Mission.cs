@@ -158,6 +158,58 @@ public static partial class Mission
         }
     }
 
+    // ══ P57 — THE DEPTH SPREAD ═══════════════════════════════════════════════════════════════
+    /// **`SIGHTLINE_DEPTHSPREAD=0` restores the far-edge deployment exactly.** A NO-OP on the
+    /// shipped 18x11 board BY CONSTRUCTION, so it is live only under `SIGHTLINE_BIGMAP`.
+    ///
+    /// Every `PodAnchor` above is written relative to the FAR EDGE (`gw - 1 - offset`, `gw - 2`,
+    /// `gw - 5`). The deployment shapes vary the BEARING a pod comes from, but on any board they all
+    /// land in the last ~6 columns — so `SIGHTLINE_MAPSHAPEPROBE` measured the whole force massed
+    /// 3.2 turns from the squad on 36x22 and 4.2 on 48x30, with nothing in between. That is not a
+    /// shortage of bodies (P56 gated the headcount as board-neutral and it is correct); it is WHERE
+    /// they stand. Crossing the board was a walk through nothing to one clump at the end, which is
+    /// the "throw grenades at the blob and move on" mission the owner named, with a walk added.
+    ///
+    /// **THE RULE.** On a board wider than the reference, each pod is pulled toward the squad by a
+    /// fixed FRACTION of the extra width (`gw - RefW`). Pod 0 — the slot the named mid-boss and the
+    /// finale boss take — stays at the far edge; pod 1 comes to the reference line; the rest fill
+    /// in between. The SAME bodies, spread through the board's depth, so crossing it is a series of
+    /// engagements and the squad spends its grenades, ammo and HP along the way instead of on one
+    /// clump.
+    ///
+    /// **THE NEAREST A POD CAN COME IS THE DISTANCE IT ALREADY COMES ON THE SHIPPED BOARD**: the
+    /// shift is at most `gw - RefW`, which places a pod exactly where its anchor falls at 18x11. So
+    /// the turn-1 ambush risk (`docs/DESIGN.md` §5) is today's, never worse.
+    ///
+    /// **ZERO RNG DRAWS, AND ZERO SHIFT AT THE REFERENCE WIDTH** — `gw - RefW` is 0 on the shipped
+    /// board, the fractions are a fixed table indexed by pod id, and the collision relocate keeps
+    /// its two draws with only the column it lands in shifted. `DEPTHSPREADTEST` leg (A) asserts
+    /// the 18x11 board is byte-identical, every layer and every unit, across all four shapes.
+    ///
+    /// ENVELOP is EXEMPT: its squad deploys in the CENTRE with pods on every rim, so "toward the
+    /// squad" is not one axis. On a big board its rims are ~2 turns out. Left for a later wave.
+    public static bool DepthSpread = true;
+
+    /// P57 telemetry (harness-only; two int stores, read by no live path, like `LastForceCount`):
+    /// how many bodies the collision relocate moved during the LAST Build, and how many of those
+    /// belonged to a pod the spread had shifted. `DEPTHSPREADTEST` leg (E) needs the second one to
+    /// prove its relocate check is not VACUOUS — the first version of that gate passed with the
+    /// relocate regression in place, because at its fixed seed no shifted pod ever collided.
+    public static int LastRelocations, LastShiftedRelocations;
+
+    /// Pod `podId`'s share of the extra depth. A van der Corput-style order so any number of pods
+    /// covers the depth evenly: far edge, reference line, middle, then the quarters.
+    static readonly double[] DepthFrac = { 0.0, 1.0, 0.5, 0.25, 0.75, 0.125, 0.625, 0.375, 0.875 };
+
+    /// Columns pod `podId` is pulled toward the squad. 0 at the reference width, 0 under ENVELOP.
+    public static int DepthShift(int shape, int podId, int gw)
+    {
+        if (!DepthSpread || shape == DeployEnvelop) return 0;
+        int extra = Math.Max(0, gw - RefW);
+        if (extra == 0) return 0;
+        return (int)Math.Round(extra * DepthFrac[podId % DepthFrac.Length]);
+    }
+
     /// Which way pod members stack off their lead. FRONTAL/PINCER/CROSSFIRE keep the historical
     /// downward row stack; ENVELOP's rim pods stack ALONG their own edge so a pod on the north
     /// rim doesn't march into the squad's lap. Returns (dx, dy) for member 1; member 2 doubles it.
@@ -1527,6 +1579,7 @@ public static partial class Mission
         for (int i = rows.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (rows[i], rows[j]) = (rows[j], rows[i]); }
 
         var used = new HashSet<(int, int)>();
+        LastRelocations = 0; LastShiftedRelocations = 0;           // P57 telemetry, per Build
         bool siegeSpawned = false;    // hard cap: at most ONE SIEGE/BOMBARD artillery per mission (fairness)
         bool bannerSpawned = false;   // W8 review: at most ONE WARBRINGER banner per mission — overlapping
                                       // auras could blanket an arena and switch the rout lever off entirely
@@ -1597,6 +1650,8 @@ public static partial class Mission
             // the shared stream is untouched; the collision-relocate loop below stays the only
             // conditional draw source, exactly as before.
             var lead = PodAnchor(shape, podId, rows[i % rows.Count], grid.W, grid.H);
+            int depthShift = DepthShift(shape, podId, grid.W);         // P57 — 0 at 18x11
+            lead = (Math.Max(0, lead.x - depthShift), lead.y);
             int x, y;
             // ══ P50 — THE GARRISON: THE 'A' GLYPH FINALLY DOES SOMETHING ════════════════════
             // P26 shipped the anchor glyph, its parser, its cardinality rule AND its restore flag
@@ -1648,7 +1703,13 @@ public static partial class Mission
             x = Math.Clamp(x, 0, grid.W - 1); y = Math.Clamp(y, 0, grid.H - 1);
             int guard = 0;
             while ((used.Contains((x, y)) || evac.Contains((x, y))) && guard++ < 30)
-            { y = Util.RandInt(0, grid.H - 1); x = grid.W - 2 - Util.RandInt(0, 2); }
+            {
+                y = Util.RandInt(0, grid.H - 1); x = Math.Max(0, grid.W - 2 - depthShift - Util.RandInt(0, 2));
+                LastRelocations++; if (depthShift > 0) LastShiftedRelocations++;   // P57 telemetry: int stores, read by no live path
+            }
+            // P57: the relocate lands at the pod's OWN depth. Unshifted, a collision threw a
+            // mid-board body back to the far edge and quietly undid the spread. Same two draws,
+            // in the same order; at 18x11 depthShift is 0 and the expression is the original.
             used.Add((x, y));
             if (podsOf3 && member == 0) { podAnchor[podId] = y; podAnchorX[podId] = x; }   // the pod lead's final tile
 

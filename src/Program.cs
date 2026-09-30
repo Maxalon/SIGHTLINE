@@ -323,6 +323,10 @@ public static class Program
         // Mission.VipHeatBonus.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VIPHEAT") == "0") Mission.VipHeat = false;
 
+        // P57 — THE DEPTH SPREAD. `=0` restores the far-edge deployment. A no-op on the shipped
+        // 18x11 board by construction, so it only matters under SIGHTLINE_BIGMAP.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DEPTHSPREAD") == "0") Mission.DepthSpread = false;
+
         // P53 — THE FALSIFICATION ARM for P52's rule. `=0` moves SABOTAGE's INTERIOR charge out of
         // the held room and changes nothing else, so the same objective on the same board is
         // measured with and without a REQUIRED site inside. P52's rule ("a held room changes the
@@ -1014,6 +1018,21 @@ public static class Program
             LoadGameFonts();
             Console.WriteLine(View3D.UnitStateSelfTest());
             Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_DEPTHSPREADTEST=1 : P57 — pods spread through a big board's depth; 18x11
+        // byte-identical. Builds real missions; no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DEPTHSPREADTEST") == "1")
+        {
+            Console.WriteLine(Game.DepthSpreadSelfTest());
+            return;
+        }
+        // SIGHTLINE_MAPSHAPEPROBE=1 : the big-board program's instrument — where a built mission's
+        // squad, hostiles, objective and exit land, in TURNS of movement, at three board sizes.
+        // A REPORT, not an assertion (exempt from the sweep's coverage guard by name).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MAPSHAPEPROBE") == "1")
+        {
+            Console.WriteLine(Game.MapShapeProbe());
             return;
         }
         // SIGHTLINE_BOARDNEUTRALTEST=1 : P56 — board size is NOT a difficulty lever. Builds real

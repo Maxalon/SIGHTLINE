@@ -19712,6 +19712,72 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P56 + P57. THE BOARD IS THE COMMITMENT — a neutral force, then a spread one
+
+**Owner direction, recorded in `docs/DESIGN.md` §6.5**: bigger boards, because on 18x11 with ~6-tile
+moves and two actions every tile is reachable from every tile in about a turn, so positioning costs
+nothing and is not a choice — and because a small mission is short enough to *"just spam abilities
+like nades and move on"*. Map work first; the extraction model waits for it. And the correction that
+shaped both waves: **"we need a difficulty curve very clearly, and map size doesn't do that alone."**
+
+### P56 — board size is not a difficulty lever (a reverted attempt, then a gate)
+
+A 36x22 screenshot showed four hostiles on 792 tiles and I read it as a defect. I scaled the base
+force and the seating ceiling by board area. The gate I wrote for it printed `18x11:off=4
+36x22:off=4` **in its own PASS line** — the property saying the force was already board-neutral — and
+I read past it. The first autoplay on that build **lost on mission 1 in fifteen turns**, sixteen
+hostiles against four soldiers. Reverted whole.
+
+`SIGHTLINE_BOARDNEUTRALTEST` replaced it: the force requested and seated is identical at 18x11 /
+24x15 / 36x22 across the opener, a mid-run node and the apex (4/4/4, 8/8/8, 10/10/10), and the DEPLOY
+CAP does not vary (5/5/5) — the half that makes the first half mean neutrality rather than a
+difficulty drop. Its red was seen by re-introducing the area scaling.
+
+### The survey that should have come first — `SIGHTLINE_MAPSHAPEPROBE`
+
+A report (exempt from the coverage guard by name) that builds real missions at three sizes and prints
+where the squad, the hostiles, the objective and the exit land, in TURNS of movement:
+
+    board    squad x  hostile x  objective x  exit x   squad -> first hostile
+    18x11      0-3     14-16        10         16-17        1.2 turns
+    36x22      0-3     32-34        19         34-35        3.2 turns
+    48x30      0-3     44-46        25         46-47        4.2 turns
+
+**The big board was not empty because it lacked bodies. It was empty because of where they stood.**
+Every `Mission.PodAnchor` is written relative to the far edge; the four deployment shapes vary the
+bearing and never the depth. Cover (14-18%) and connectivity (99%+) were fine, the objective already
+sat mid-board, and the exit sat inside the enemy deployment (which is the extraction wave's).
+
+### P57 — the depth spread
+
+Each pod is pulled toward the squad by a fixed FRACTION of the extra width (`gw - RefW`): pod 0 (the
+mid-boss / finale-boss slot) stays at the far edge, pod 1 comes to the reference line, the rest fill
+between. The same bodies. The nearest a pod can come is where its anchor falls on 18x11, so the
+turn-1 ambush risk is today's. **Zero RNG draws and zero shift at the reference width** — 18x11 is
+byte-identical on 48 cells, all four shapes. ENVELOP is exempt. `SIGHTLINE_DEPTHSPREAD=0` restores.
+
+    board    hostile x before -> after      squad -> first hostile
+    36x22        32-34 -> 16-34                 3.2 -> 2.0 turns
+    48x30        44-46 -> 14-46                 4.2 -> 2.5 turns
+
+Four big-board autoplays: 2 WIN / 2 LOSE, reaching missions 4-6, 31-66 campaign turns against ~20-30 on
+18x11, no exception, stall or TIMEOUT. **A smoke test, not a measurement** — a big board is a
+different game and has no baseline yet.
+
+### The gate that passed empty, again
+
+`DEPTHSPREADTEST`'s first version claimed a leg guarded the collision relocate (which, unshifted,
+throws a spread body back to the far edge). **With that regression in place the gate still PASSED**:
+its one fixed seed never collided. A survey measured shifted-pod collisions in ~28% of builds, and a
+breakdown located them ONLY at missions 2 and 6 under PINCER and CROSSFIRE, where a pair's members
+share their lead's anchor. The first rewrite swept missions 1/3/5 and exercised exactly zero — **and
+the non-vacuity check it carried said so and failed loudly**, which is the only reason the second
+rewrite exists. Leg (E) now forces those shapes and missions, exercises 102 relocations, and fails the
+regression with 102 bodies off their depth.
+
+**A gate check that can pass without exercising the path it guards must FAIL when it exercised
+nothing.** That line caught the second miss; it would have caught the first.
+
 ## P55. THE ASSET ANSWERS HEAT — the lever works, and the campaign dies anyway
 
 P54's top item, built and priced. `Mission.VipHeatBonus` adds `Heat.StatDelta` to the protected
