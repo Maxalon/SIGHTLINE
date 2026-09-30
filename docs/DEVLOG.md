@@ -19712,6 +19712,32 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P59. ON A BIG BOARD THE TASK ENDS BEFORE THE FIGHT ARRIVES
+
+Built to answer one question and answered a bigger one. P56 gated the hostile HEADCOUNT as
+board-neutral, which cannot see DISTANCE — Defend waves and the pressure clock's reinforcements both
+drop in at the east edge, so on a big board they walk further. The round: a procedural-only size
+ladder (24x15 / 36x22 / 48x30), Defend and Hack as treatments, Sabotage (no waves) as the control,
+heat 0, 36 chunks, ARM CHECK PASS. `levers.board` was added so a chunk names its own board.
+
+**Every objective saturated at 36 wide, the control included** — Defend 86.4 -> 99.5 -> 100.0,
+Hack 82.3 -> 100.0 -> 99.7, Sabotage 94.2 -> 99.0 -> 100.0 — and **every campaign won, 24 of 24 chunks
+at 36 and 48 wide.** The control is capped, so the difference-in-differences it was designed for is
+NOT a result and the distance question is unanswered.
+
+The telemetry says why. Soldier deaths per mission on Hack fall 1.00 -> 0.06 -> 0.02. The enemy
+still ACTS (Defend: ~30 contested acts a mission at every size) but its acts with a shot fall
+11.9 -> 4.4 -> 3.2 — it spends the mission walking. On Hack and Sabotage the mission ends in ~4 turns:
+**the task completes before the fight arrives.**
+
+**So map geometry alone cannot make a big board taxing.** P57/P58 made it usable; a mission that ends
+the moment its task is done just gets more room to finish before contact. That is exactly what the
+owner's extraction model supplies — the mission does not end at the terminal, the squad must then
+reach a far exit while reinforcements arrive from its half. The data moves extraction from "after the
+map work" to "the thing the map work was waiting for", and that re-ordering was put to the owner
+rather than assumed. Not isolated here: whether the depth spread contributes (its `=0` arm was not
+run). Raw round and full tables: `docs/measurements/p59/`.
+
 ## P58. THE FLAT CAMERA ZOOMS OUT
 
 The flat camera zoomed IN only — `CamZoom` clamped to 1.0-2.4 — which was correct for as long as the

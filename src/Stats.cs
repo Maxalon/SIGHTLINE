@@ -1567,6 +1567,11 @@ public static class Stats
                 roomSite   = Maps.RoomSite,
                 vipHeat    = Sightline.Mission.VipHeat,
                 depthSpread = Sightline.Mission.DepthSpread,
+                // P59: the BOARD this chunk played, as "WxH@Tile". Until now a big-board chunk's size
+                // lived only in its file name and its env — the exact failure mode `levers{}` exists
+                // to close. A big board is a different game (DESIGN §6.5), so a chunk that cannot
+                // say which board it was is a chunk that cannot be filed.
+                board = $"{Cfg.GridW}x{Cfg.GridH}@{Cfg.Tile}",
                 // P50: whether the arena's 'A' anchors seat a pod. The lever under test in P50's
                 // own round, and until P50 it was a flag with no consumer at all.
                 arenaAnchors = Sightline.Mission.ArenaAnchors,
