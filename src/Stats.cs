@@ -1566,6 +1566,7 @@ public static class Stats
                 siteGlyphs = Maps.SiteGlyphs,
                 roomSite   = Maps.RoomSite,
                 vipHeat    = Sightline.Mission.VipHeat,
+                depthSpread = Sightline.Mission.DepthSpread,
                 // P50: whether the arena's 'A' anchors seat a pod. The lever under test in P50's
                 // own round, and until P50 it was a flag with no consumer at all.
                 arenaAnchors = Sightline.Mission.ArenaAnchors,

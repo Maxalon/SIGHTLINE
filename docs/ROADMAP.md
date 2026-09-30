@@ -35,6 +35,17 @@ the goal. Its four seams still need parameterising — the transform they need i
       opener, a mid-run node and the apex, and that the deploy cap does not vary. **The sparse
       feeling is real; the fix is items 2 and 1 below (contested traversal, fixed sight), never more
       starting bodies.**
+- [x] **0b. THE HOSTILE FORCE IS SPREAD THROUGH A BIG BOARD'S DEPTH — P57.** `SIGHTLINE_MAPSHAPEPROBE`
+      measured every pod massed against the far edge (36x22: cols 32-34, 3.2 turns from the squad;
+      48x30: 44-46, 4.2 turns) because every `PodAnchor` is far-edge-relative. Pods are now pulled
+      toward the squad by a fixed fraction of the extra width (36x22: 16-34, first contact 2.0 turns;
+      48x30: 14-46, 2.5 turns). Same bodies (P56's gate still holds); nearest pod never closer than
+      on 18x11; 18x11 byte-identical. `SIGHTLINE_DEPTHSPREAD=0` restores. **Not yet done: ENVELOP**
+      (centre squad, pods on every rim — exempt, ~2 turns out on a big board).
+- [ ] **0c. ZOOM OUT.** The flat camera zooms IN only (`CamZoom` clamped 1.0-2.4), so on a big board
+      you never see more than one screen of it. P57's screenshots needed a hand-picked 30px tile to
+      show the whole 36x22 board. A big board needs a zoom floor below 1.0 (the projected view has its
+      own camera and may already cover it — check before building a second answer).
 - [ ] **1. MAKE A BIG BOARD A FAIR TEST BEFORE MEASURING ONE. Top item.** Nothing has ever measured
       a big board, but measuring one today measures a BROKEN configuration: enemy count, mission
       pacing and sight range are all still 18x11 numbers, and the 35 authored arenas are out of play

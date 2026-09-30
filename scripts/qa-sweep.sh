@@ -125,6 +125,7 @@ echo -n "UNITSTATETEST: "; verdict "$(SIGHTLINE_UNITSTATETEST=1 run | grep -oE "
 echo -n "ARENAEDGETEST: "; verdict "$(SIGHTLINE_ARENAEDGETEST=1 run | grep -oE "ARENAEDGETEST: (PASS|FAIL)" | head -1)"
 echo -n "VIPHEATTEST: "; verdict "$(SIGHTLINE_VIPHEATTEST=1 run | grep -oE "VIPHEATTEST: (PASS|FAIL)" | head -1)"
 echo -n "BOARDNEUTRALTEST: "; verdict "$(SIGHTLINE_BOARDNEUTRALTEST=1 run | grep -oE "BOARDNEUTRALTEST: (PASS|FAIL)" | head -1)"
+echo -n "DEPTHSPREADTEST: "; verdict "$(SIGHTLINE_DEPTHSPREADTEST=1 run | grep -oE "DEPTHSPREADTEST: (PASS|FAIL)" | head -1)"
 # P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
 echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"
 # P29: the board is a runtime size -- the shipped default must not drift and the camera pan
@@ -362,7 +363,7 @@ fi
 #   SIGHTLINE_DAILYSIGPROBE  - P14's daily-signature line (Program.cs), the CHILD half of
 #     MODETEST leg (11)'s cross-process check. MODETEST launches it and does the comparing, so
 #     running it from here would print one hash and gate on nothing.
-_SWEEP_EXEMPT='SIGHTLINE_BANDPROBE|SIGHTLINE_MODEFORCEPROBE|SIGHTLINE_DAILYSIGPROBE'
+_SWEEP_EXEMPT='SIGHTLINE_BANDPROBE|SIGHTLINE_MODEFORCEPROBE|SIGHTLINE_DAILYSIGPROBE|SIGHTLINE_MAPSHAPEPROBE'
 _missing=$(comm -23 \
   <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' src/*.cs | sort -u | grep -vxE "$_SWEEP_EXEMPT") \
   <(grep -vE '^[[:space:]]*#' "$_SELF" | grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)' | sort -u | grep -vxE "$_SWEEP_EXEMPT"))
