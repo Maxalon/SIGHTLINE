@@ -1013,11 +1013,104 @@ Design intent only — the build checklist lives in `CLAUDE.md` → **ROADMAP �
 - **Bigger *and denser* maps + spawn standoff.** The goal is *standoff distance and
   meaningful traversal*, **not raw size** — empty maps cause boredom turns. More
   sightline-blocking terrain so a 12-tile sight line no longer sees the whole board.
+  > ### ⚠ THE "NOT RAW SIZE" CLAUSE WAS OVERRIDDEN BY THE OWNER, 2026-09-16. See §5.5.
+  > Raw size **is** the point, because it is what makes positioning a COMMITMENT. The
+  > anti-boredom answer is no longer *short* traversal, it is **CONTESTED** traversal.
 - **Alert/awareness tiers** (green/yellow/red) replacing binary dormant→instant-scatter.
 - **Concealment + ambush** as the marquee mechanic: the careful-opening fantasy.
 - **Tune the three knobs** (sight range, movement vs. map, the free scatter).
 - *(Deferred behind a flag, only if warranted later:)* fog of war + soldier-focused
   auto-camera.
+
+---
+
+## 6.5 THE BOARD IS THE COMMITMENT (owner direction, 2026-09-16)
+
+**This section records a direction set by the owner, and it OVERRIDES the standing "bigger *and
+denser*, not raw size" clause in §6 and the insertion-frame plan in `docs/ROADMAP.md`.** The roadmap's
+own words were: *"If a future wave wants genuinely distant objectives it is choosing a different
+game, and should say so."* This is the saying-so.
+
+### The argument
+
+> Small maps and long movement including a two action per turn economy with sprint option is just
+> plain boring **because positioning doesn't need commitment to do.**
+
+That is the whole of it, and it is a claim about the RATIO of movement to board, not about size in
+the abstract. On an 18x11 board with ~6-tile moves and two actions, any tile is reachable from any
+tile in about a turn, so choosing where to stand costs nothing and is therefore not a choice. The
+pillar this violates is **3 (a well-designed loop)** at the minute-to-minute scale, and it is also
+why P42 could measure that a rectangle of wall "gives you somewhere to sit, and sitting is not a
+decision" — on this board, *everywhere* is somewhere to sit.
+
+**What a bigger board buys is a real dilemma:** commit one or two FULL turns to relocate the squad
+to better ground (inside a building, onto a plateau) and spend those turns unable to fight — or stay
+where you are with worse cover and more clustering, and keep the action points for defending
+yourself or for the expensive verbs. Neither option is free. That is the trade the current board
+cannot express.
+
+### Why "empty traversal = boredom" is not the counter-argument it looks like
+
+§6's clause and `DESIGN.md` §3D are right that *empty* traversal turns are boredom. The error was
+concluding that the fix is to make traversal SHORT. **The fix is to make it CONTESTED** — and the
+owner supplied the mechanism (see below). A walk that the opposition is actively answering is not an
+empty turn; it is the fight.
+
+### The mission shape this enables
+
+- **Enter one side, find the objective in the middle, extract on the other side.**
+- A shorter variant: reach the far end, then **return to your starting location**.
+- **Bosses / longer challenges**: raid a bunker or a bastion — an objective that takes real time to
+  get into and out of.
+
+### The EXTRACTION model (XCOM-shaped), and the fiction check that motivates it
+
+> Extracting someone who has been with you from the beginning doesn't make sense — why did you enter
+> a combat zone with them in the first place?
+
+So **ESCORT must not start with the asset in the squad.** The asset is REACHED, and only then does
+extraction begin. Once it does:
+
+1. The exit is **far enough away that reaching it takes multiple turns** — by construction, not by
+   accident of layout.
+2. **Reinforcements spawn one or two at a time from the half of the board the extraction point is
+   in**, so the withdrawal is opposed and gets harder the longer it takes.
+
+That is the counter-pressure P54/P55 went looking for and could not find in a constant: P55 gave the
+asset a heat term, it worked exactly where it aimed (Escort h8 41.8 -> 61.2) and bought almost no
+campaign win rate, because **the asset's survivability was never the missing pressure — the free,
+unopposed walk was.** It also answers the half P55 explicitly could not reach: Rescue at 97.4% and
+Escort at 88.9% at heat 4, an objective that is free before heat arrives.
+
+### ⚠ BOARD SIZE IS NOT A DIFFICULTY LEVER — the correction that came one attempt in
+
+> We need a difficulty curve very clearly, and map size doesn't do that alone.
+
+**The squad does not grow with the board, so the opposition must not either.** A bigger board buys
+COMMITMENT and DISCOVERY; the difficulty curve stays where it already lives — the heat ladder, the
+mission number, and the deployment cards.
+
+This was learned by getting it wrong. A 36x22 screenshot showing four hostiles on 792 tiles was read
+as a defect, and the force was scaled by board area to "correct" it. The first autoplay on that build
+**lost on mission 1 in fifteen turns** — sixteen hostiles against a four-soldier squad. The board had
+been turned into a difficulty dial. It was reverted whole.
+
+**The sparse feeling is real and its fix is not more bodies at the start.** §3D's "empty traversal =
+boredom" risk applies, and this section's own answer is the one to use: **contested** traversal —
+reinforcements arriving from the extraction half, plus a **fixed** sight range that makes the space
+genuinely unknown rather than merely wide. Adding starting bodies would buy density by spending the
+difficulty curve, which is the one thing the board may not touch.
+
+`SIGHTLINE_BOARDNEUTRALTEST` asserts it: the force REQUESTED and SEATED is identical at 18x11, 24x15
+and 36x22 across the opener, a mid-run node and the finale at the apex, and the deploy cap does not
+vary either. The property was true by accident before that gate and nothing in `src/` had checked it.
+
+### What this costs, stated plainly
+
+**It severs the CRN chain on every axis at once** and it puts the 35 authored 18x11 arenas out of
+play until they are re-authored or tiled. `SIGHTLINE_BIGMAP` unset is the restore arm. Every number
+in `CLAUDE.md`'s ladder of record is an 18x11 number and stays one; a big board is a **different
+game** and must be given its own baseline rather than compared against that ladder.
 
 ---
 

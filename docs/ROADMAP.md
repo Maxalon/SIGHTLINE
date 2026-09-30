@@ -7,6 +7,70 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## ⚑ OWNER DIRECTION (2026-09-16) — THE BOARD IS THE COMMITMENT. This supersedes the insertion-frame plan.
+
+**Rationale: `docs/DESIGN.md` §6.5. Read it before touching any item here.** The owner overrode the
+standing "bigger *and denser*, **not raw size**" clause. Raw size IS the point: on 18x11 with ~6-tile
+moves and two actions, every tile is reachable from every tile in about a turn, so **positioning
+costs nothing and is therefore not a choice.** The dilemma a big board buys is: spend one or two FULL
+turns relocating to better ground and be unable to fight while you do, or stay put with worse cover
+and keep the action points.
+
+**"Empty traversal = boredom" is not the counter-argument it looks like.** The fix is not SHORT
+traversal, it is **CONTESTED** traversal — and the mechanism is given below.
+
+**This retires `P38`'s insertion-frame rule** ("DEPTH stays at the reference, LATERAL goes to the
+whole board"; "insert NEAR the objective and let size buy lateral choice, not distance"). That plan
+was coherent and is kept below for provenance, but it was built to AVOID distance and distance is now
+the goal. Its four seams still need parameterising — the transform they need is just the other one.
+
+### The order of work, and why this order
+
+- [x] **0. BOARD SIZE IS NOT A DIFFICULTY LEVER — ASSERTED, and learned the hard way.**
+      *"We need a difficulty curve very clearly, and map size doesn't do that alone."* The squad does
+      not grow with the board so the opposition must not either. **An attempt to scale the force by
+      board area was reverted whole**: it lost autoplay on mission 1 in fifteen turns (16 hostiles
+      vs 4 soldiers), i.e. it turned the board into a difficulty dial. `SIGHTLINE_BOARDNEUTRALTEST`
+      now asserts the force requested and seated is identical at 18x11 / 24x15 / 36x22 across the
+      opener, a mid-run node and the apex, and that the deploy cap does not vary. **The sparse
+      feeling is real; the fix is items 2 and 1 below (contested traversal, fixed sight), never more
+      starting bodies.**
+- [ ] **1. MAKE A BIG BOARD A FAIR TEST BEFORE MEASURING ONE. Top item.** Nothing has ever measured
+      a big board, but measuring one today measures a BROKEN configuration: enemy count, mission
+      pacing and sight range are all still 18x11 numbers, and the 35 authored arenas are out of play
+      at any other size. **Note what item 0 removed from this item**: "enemy count" is NOT on the
+      list any more — a constant force across board sizes is CORRECT and is now gated. What remains
+      is mission pacing (turn budgets), the arenas, and sight range. Sight range is the one that
+      changes the game most (9 tiles on an 18-wide board is half of it; on a 30-wide board the same
+      number is 30% — that is also the fog-of-war prerequisite, already noted below).
+- [ ] **2. THE EXTRACTION MODEL — and it is the answer P54/P55 went looking for.**
+      **ESCORT must not start with the asset in the squad** ("why did you enter a combat zone with
+      them in the first place?"). The asset is REACHED; only then does extraction begin; the exit is
+      far enough that it takes multiple turns; and **reinforcements spawn one or two at a time from
+      the half of the board the extraction point is in**, so the withdrawal is opposed and worsens
+      the longer it takes.
+      **This is what P55 could not buy with a constant.** P55 gave the asset a heat term: surgical
+      where it aimed (Escort h8 41.8 -> 61.2) and almost no campaign win rate, because the asset's
+      survivability was never the missing pressure — **the free, unopposed walk was.** It also
+      reaches P55's declared-open half (Rescue 97.4 / Escort 88.9 at h4), which no heat term can.
+      **It depends on item 1**: "far enough to take multiple turns" is not expressible on 18x11.
+- [ ] **3. MISSION SHAPES a big board makes possible.** Enter one side, objective in the middle,
+      extract on the other. A shorter variant that sends you to the far end and back to the start.
+      And **bosses / longer challenges — raid a bunker or a bastion.**
+- [ ] **4. THE ARENAS.** 35 hand-authored 18x11 templates go out of play at any other size. Decide
+      between re-authoring at the new reference, tiling them as ROOMS inside a bigger board (P37's
+      "more rooms, not one stretched room" applies directly), or accepting procedural-only on big
+      boards for now. **P47's double-resolution format and P26's site glyphs are both ready for
+      whichever is chosen.**
+
+### The cost, stated up front so no round is surprised by it
+
+**A big board severs the CRN chain on every axis at once.** `SIGHTLINE_BIGMAP` unset is the restore
+arm. **Every number in CLAUDE.md's ladder of record is an 18x11 number and stays one** — a big board
+is a different game and needs its own baseline, never a comparison against that ladder. (P48's rule
+for a forced arena, one level up.)
+
+
 ## OPEN — left by PARALLAX P55 "THE ASSET ANSWERS HEAT" (2026-09-16)
 
 P55 built and priced P54's lever. It is **surgical and large where it aims** (Escort h8 41.8 -> 61.2,
@@ -19,10 +83,30 @@ NPC death was largely a SYMPTOM. Shipped ON as a defect repair. Round: `docs/mea
       heat arrives is not an objective, and P55 moved neither by a single point there (by
       construction: `Heat.StatDelta(4)` is 1). **This is a DESIGN question, not a tuning one** — the
       escort/rescue mission has no failure mode at low heat because the asset is never meaningfully
-      threatened. Candidate directions, none priced: give the asset a job that can fail
-      independently of its HP (a leash it must keep, a timer); make the objective require the asset
-      to ARRIVE rather than merely survive; or accept these two as "easy objectives" by design and
-      say so in `docs/DESIGN.md` instead of leaving it as an unlabelled hole.
+      threatened.
+
+      **⚠ TWO CORRECTIONS TO THIS ITEM, BOTH FROM READING THE CODE RATHER THAN GUESSING:**
+
+      **(a) "Make the objective require the asset to ARRIVE" ALREADY EXISTS and was a wrong
+      candidate.** `Game.cs`'s win checks are `EvacZone.Contains((Vip.X, Vip.Y))` for Escort and
+      `!CaptiveLocked && EvacZone.Contains(...)` for Rescue — both already require the walk, and the
+      evac zone is the far corner, so it is a cross-board escort. The mission is not too easy because
+      arrival is unrequired; it is too easy because **arrival is unopposed**.
+
+      **(b) THE REAL HOLE IS THAT NEITHER OBJECTIVE HAS A CLOCK.** `DefendTurns` is the only
+      per-mission turn cap in the game. Measured on P55's own archive, Escort averages **9.31 turns
+      at h0** — the longest objective in the game apart from Defend — and wins 95%. Rescue averages
+      5.76. **A squad can advance one tile a turn behind full cover indefinitely and nothing
+      punishes it**, so P26's finding (declining the fight is optimal) applies here with no
+      counter-pressure at all. That is why heat is the only thing that ever makes these missions
+      hard: heat is the only source of pressure they have.
+
+      So the design question is narrower than this item first stated: **what supplies
+      counter-pressure that is not difficulty?** A mission clock is the obvious candidate and is
+      consistent with the "stakes that bite" pillar; a leash, a pursuing force, or accepting these
+      as easy-by-design in `docs/DESIGN.md` are the alternatives. **None is priced, and the choice
+      changes what the mission IS rather than how hard it is — it is a design call, not a tuning
+      one.**
 - [ ] **2. THE 22 CAMPAIGNS THAT KEPT THE ASSET ALIVE AND LOST ANYWAY are the apex's real content.**
       P55 converted NPC deaths into other losses almost one-for-one. That says the apex's difficulty
       is not located in any single labelled cause, and it is the strongest evidence yet for P54 item
