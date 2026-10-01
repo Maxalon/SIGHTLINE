@@ -5455,6 +5455,9 @@ public partial class Game
     {
         if (!Raylib.IsKeyPressed(KeyboardKey.I)) return;
         View3D.Enabled = !View3D.Enabled;
+        // A: remember the choice — the projected view is the default, so this is how a player opts
+        // out of it for good. Never from the harness (NoPersist), which must not touch disk.
+        if (!NoPersist) Display.SetFlatView(!View3D.Enabled);
         CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
         View3D.ResetCamera();
         ShowBanner(View3D.Enabled ? "PROJECTED VIEW" : "FLAT VIEW", false);

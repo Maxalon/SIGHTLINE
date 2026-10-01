@@ -28,11 +28,13 @@ namespace Sightline;
 ///
 /// ORTHOGRAPHIC, not perspective: a tactics grid wants every tile the same size wherever it is.
 ///
-/// Nothing here runs unless View3D.Enabled is set, and only SIGHTLINE_VIEW3DSHOT sets it.
+/// Nothing here runs unless View3D.Enabled is set (the real launch sets it by default; see Enabled).
 public static partial class View3D
 {
-    /// Master gate. Default FALSE and never set by normal play or by any other harness hook, so
-    /// every existing screenshot, self-test and balance run is untouched by construction.
+    /// Master gate. Default FALSE in the process, so every self-test, screenshot and balance run
+    /// keeps the view it asks for explicitly. Item A (2026-10-01) made the projected view the
+    /// PLAYER's default: the real launch in Program.RealMain sets it from `Display.FlatView`
+    /// (persisted, default false), and the I key flips and remembers it.
     public static bool Enabled;
 
     /// Camera elevation above the horizon, degrees. 90 = straight down (today's game), 0 = ground
@@ -50,6 +52,10 @@ public static partial class View3D
     /// computes); higher = closer. The board ALWAYS fits at Zoom 1 by construction, which is why
     /// a big map needs no pan until you have zoomed into it.
     public static float Zoom = 1f;
+
+    /// A: frame the board in the band between the HUD's two plates (see MakeCamera). Presentation
+    /// only; false restores the pre-A whole-screen framing.
+    public static bool FitHudBand = true;
     public const float ZoomMin = 1f, ZoomMax = 3.5f;
 
     /// Ground-plane offset of the camera's target, in world units (tiles).
@@ -169,12 +175,26 @@ public static partial class View3D
         // Depth compresses by sin(pitch) on screen; add headroom for the tallest geometry.
         float needV = spanZ * MathF.Sin(pitch) + (HighH + TierH * 2f) * MathF.Cos(pitch) + 1.0f;
         float needH = spanX + 1.0f;
-        float fovY = MathF.Max(needV, needH / MathF.Max(aspect, 0.01f)) * Margin
+        // A — THE HUD BAND. With the projected view as the default, "the whole board framed" has
+        // to mean framed where it can be READ: between the top bar and the action bar, not under
+        // them. The vertical fit is taken against the band's height and the image is then slid so
+        // the board's centre sits on the band's centre. FitHudBand=false is the pre-A framing.
+        float band = FitHudBand ? Cfg.ScreenH - Cfg.HudTopInset - Cfg.HudBotInset : Cfg.ScreenH;
+        float fovY = MathF.Max(needV * Cfg.ScreenH / band, needH / MathF.Max(aspect, 0.01f)) * Margin
                    / Util.Clamp(Zoom, ZoomMin, ZoomMax);
 
         var dir = new Vector3(MathF.Cos(pitch) * MathF.Sin(yaw),
                               MathF.Sin(pitch),
                               MathF.Cos(pitch) * MathF.Cos(yaw));
+        if (FitHudBand)
+        {
+            // screen-up in world space; moving the camera DOWN it by d slides the image UP by d
+            var fwd = -dir;
+            var right = Vector3.Normalize(Vector3.Cross(fwd, new Vector3(0, 1, 0)));
+            var screenUp = Vector3.Cross(right, fwd);
+            float bandMidPx = Cfg.HudTopInset + band * 0.5f - Cfg.ScreenH * 0.5f;   // < 0: above centre
+            target += screenUp * (bandMidPx * fovY / Cfg.ScreenH);
+        }
         return new Camera3D
         {
             Position = target + dir * 40f,   // ortho: distance affects only clipping/depth precision

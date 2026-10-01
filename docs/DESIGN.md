@@ -1114,6 +1114,54 @@ game** and must be given its own baseline rather than compared against that ladd
 
 ---
 
+## 6.6 WHAT THE GAME CAN BECOME — big is the default, and the run is the power curve (owner direction, 2026-10-01)
+
+> We want to go 90% big maps ratio. Small maps are only useful for tutorial and early levels, but the
+> majority should be on bigger maps and even bigger than we spoke of for now — vertical and
+> horizontal bigger. [...] We need to get rid of the thought of small = good because short, and go
+> towards what the game can become.
+
+Asked what to do with the 35 authored 18x11 arenas on a big board, the owner answered the question
+behind it instead. Four decisions, in the owner's order of emphasis:
+
+1. **THE BIG BOARD IS THE GAME.** About **90% of missions** play on a big board. 18x11 stays for the
+   tutorial and the first missions of a run, where a short fight teaches the verbs. This overturns
+   the working assumption behind every wave since FULCRUM, that the small board was the game and a
+   big board an experiment (`SIGHTLINE_BIGMAP`). Every number in `CLAUDE.md`'s ladder of record is an
+   18x11 number. That ladder now describes the tutorial band, not the game.
+2. **BIGGER THAN 36x22 / 48x30, AND VERTICAL.** The target scale is XCOM's: **a whole housing block**
+   (ground floor only), or a **smaller footprint with a complex VERTICAL building — a skyscraper of
+   about six floors.** Floors are a **data-model change, not a view change** (P27's row in
+   `CLAUDE.md`). `Grid` gains a storey axis; line of sight, movement (stairs, ladders, drops), cover,
+   the AI planner and the renderer all read it. The projected view is the only one that can show a
+   storey, which is why decision 4 comes with it.
+3. **A ROGUELIKE'S POWER CURVE IS THE POINT, AND IT NEEDS ROOM.** Soldiers **retire after one run**
+   and are never carried into the next. So within a run the squad must **grow a lot**: stronger
+   upgrades, stronger abilities, synergies. Across runs, meta progression gives *better options*
+   (a richer in-run upgrade pool, unlockable abilities), never stronger carried-over soldiers.
+   **"Every small map with soldiers at the power level of round 15 is a snooze fest"**: a powered-up
+   squad flattens a small board, and only a big one gives late-run power something to spend itself
+   on. **A fresh run with basic soldiers must still feel unique**, through a big library of missions
+   and maps and, later, upgrade synergies.
+4. **THE PROJECTED (3D) VIEW BECOMES THE DEFAULT.** Flat stays on `I`.
+
+### How this sits with §6.5's correction
+
+§6.5 stands: **board size is not a difficulty lever.** What changes is where difficulty and *interest*
+come from on a big board. Difficulty: the heat ladder and the mission number, as before, now set
+against a squad that **grows** within the run. Interest: commitment, discovery, contested traversal
+(§6.5), and now **power expression**: a late-run squad must have a board big and complex enough to
+make its abilities matter. P59 measured today's big board as trivially easy because the task ends
+before the fight arrives. That is a mission-STRUCTURE defect (the extraction model fixes it), and it
+must be fixed before big boards become the default, or "90% big" means "90% trivial".
+
+### What this costs
+
+The CRN chain and the ladder of record are tied to 18x11. A campaign that is 90% big boards is a new
+game on every axis, so it needs **a new baseline of its own**, built once mission structure and the
+power curve exist. Until then, any number measured on it is a single-tree reading, never a
+comparison against the old ladder.
+
 ## 7. Do's & Don'ts — quick reference
 
 **Loops**

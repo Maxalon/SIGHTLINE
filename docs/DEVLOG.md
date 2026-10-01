@@ -19712,6 +19712,32 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P61. THE PROJECTED VIEW IS THE DEFAULT (item A of the 2026-10-01 owner direction)
+
+Base `57cf48e`. The owner asked "why is it 2d?" and, given the choice, made the projected view the
+default. They also set a new direction: ~90% big boards, bigger and vertical boards, and a roguelike
+power curve. Recorded in `docs/DESIGN.md` §6.6 and the new top block of `docs/ROADMAP.md`. This wave
+is item A only.
+
+- **Launch.** The real launch sets `View3D.Enabled = View3D.LaunchEnabled(env, Display.FlatView)`,
+  after `Display.Init` has read the player's settings. `View3D.Enabled` stays false in-process, so
+  every self-test, shot and balance run keeps the view it asks for, and no gate changes meaning.
+  `I` writes `Display.FlatView` (never from the harness: `NoPersist`).
+- **Framing.** `View3D.MakeCamera` fit the board to the whole screen, so its edge rows sat under the
+  bars at the opening framing on every board size. It now takes the vertical fit against the band
+  between `Cfg.HudTopInset` and `Cfg.HudBotInset` (P60's constants), then slides the camera down its
+  own screen-up vector so the board's centre lands on the band's centre. `FitHudBand=false` is the
+  pre-A framing. 18x11 renders about 14% smaller in the projected view as a result: the price of
+  never putting a row under the action bar.
+- **Gate.** `SIGHTLINE_VIEWDEFAULTTEST`, leg (A): every corner, at floor height and at the tallest
+  geometry's height, projects inside the band on 18x11/36x22/48x30 × 4 yaws × 3 pitches (worst 0.0px).
+  The whole-screen control overshoots by 109px, and the leg fails if the control never overshoots.
+  Removing only the centring shift turns it red (5-9px). Legs (B) and (C) cover the launch rule and
+  the settings round trip, including an old file that has no `FlatView` field.
+- **Found while doing it, NOT fixed:** the game already carries soldiers between runs (W9 SIGNAL's
+  veteran reserve), which contradicts "soldiers retire after one run". Logged under ROADMAP item F
+  as a question for the owner.
+
 ## P60. THE EDGE ROWS AND THE CENTRE SEAT — two big-board fixes from the map list
 
 Base `77eca70` (`main` after P59). The owner chose to finish the big-board map list before the
