@@ -620,6 +620,10 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **HACK / SABOTAGE extract (P63, big boards only):** the evac stays hidden until the task is done,
   then opens on the far edge and the BOARD / CALL EVAC rules apply; killing every hostile also wins,
   and the pressure clock sends no reinforcements on these missions.
+- **RESCUE = ESCORT, and an opposed withdrawal (P64, big boards only):** an ESCORT node plays as
+  RESCUE (the asset is reached mid-board). Once it is freed, 1-2 alerted hostiles a turn arrive on
+  the board edge of the extraction's half (never within 6 of the exit), up to 4 + heat/2. No clock
+  waves and no forward beacon there. `SIGHTLINE_WITHDRAWAL=0` turns the trickle off.
 - **Forward EVAC beacon + ESCORT leash (de-drag):** DEPLOY BEACON (key G) plants a forward extraction 3×3 that's
   unioned with the fixed far-corner FALLBACK (always present → no soft-lock), so the squad fights to a defensible
   mid-field spot and extracts there instead of a 14-tile stroll (Evac ~10.9t → ~7.8t). The ESCORT VIP now auto-follows
