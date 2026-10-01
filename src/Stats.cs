@@ -1567,6 +1567,7 @@ public static class Stats
                 roomSite   = Maps.RoomSite,
                 vipHeat    = Sightline.Mission.VipHeat,
                 depthSpread = Sightline.Mission.DepthSpread,
+                envelopCentre = Sightline.Mission.EnvelopCentre,
                 // P59: the BOARD this chunk played, as "WxH@Tile". Until now a big-board chunk's size
                 // lived only in its file name and its env — the exact failure mode `levers{}` exists
                 // to close. A big board is a different game (DESIGN §6.5), so a chunk that cannot

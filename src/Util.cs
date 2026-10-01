@@ -39,6 +39,18 @@ public static class Cfg
         Tile = Math.Clamp(Math.Min(byW, byH), 16, 64);
     }
 
+    // 0d: the screen bands the HUD's two plates sit in, as ONE source of truth for the draw
+    // (Hud.DrawTopBar / Hud.DrawBottomBar) and for the camera clamp (Game.ClampPan), which lets a
+    // board that OVERFLOWS the screen pan its edge rows out from under them.
+    public const int HudTopInset = 64;    // the top bar's plate
+    // The action bar is anchored at ScreenH-106 (Hud.DrawBottomBar) with its FIRST button row at
+    // y 720, and each overflow row stacks 46px above (bh 40 + gapY 6). A full squad's verbs wrap to
+    // TWO rows — measured at a 760 board shot, the top row starts at y 674 — so the band ends there,
+    // with a 6px gap. Fixed rather than read live off the bar, so the clamp does not jump when the
+    // selection changes the verb count; a unit with a THIRD row overlaps the bottom row by 46px.
+    public const int HudBotInset = 132;
+    public static bool BoardOverflows => BoardW > ScreenW || BoardH > ScreenH;
+
     public static int BoardW => GridW * Tile;       // 1152
     public static int BoardH => GridH * Tile;       // 704
     public static int OriginX => (ScreenW - BoardW) / 2; // 64 — NOTE: the roster strip (x 8..140) still overlaps board column 0 (x 64..128); Hud.DrawRoster reflows occluded chips

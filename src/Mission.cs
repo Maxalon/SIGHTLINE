@@ -109,8 +109,52 @@ public static partial class Mission
     static readonly (int x, int y)[] PlayerSpawnsCentre =
         { (8, 3), (7, 5), (9, 6), (7, 4), (10, 3), (10, 6), (8, 5) };
 
-    static (int x, int y)[] SpawnTableFor(int shape)
-        => shape == DeployEnvelop ? PlayerSpawnsCentre : PlayerSpawns;
+    static (int x, int y)[] SpawnTableFor(int shape, int gw, int gh)
+    {
+        if (shape != DeployEnvelop) return PlayerSpawns;
+        var (ox, oy) = EnvelopOffset(gw, gh);
+        if (ox == 0 && oy == 0) return PlayerSpawnsCentre;
+        var t = new (int x, int y)[PlayerSpawnsCentre.Length];
+        for (int i = 0; i < t.Length; i++) t[i] = (PlayerSpawnsCentre[i].x + ox, PlayerSpawnsCentre[i].y + oy);
+        return t;
+    }
+
+    // ══ 0d+1 — ENVELOP ON A BIG BOARD ════════════════════════════════════════════════════════
+    /// **`SIGHTLINE_ENVELOPCENTRE=0` restores the pre-wave ENVELOP exactly.** A NO-OP on the
+    /// shipped 18x11 board BY CONSTRUCTION (both the offset and the depth blend are zero there), so
+    /// it is live only under `SIGHTLINE_BIGMAP`.
+    ///
+    /// ENVELOP is "squad in the CENTRE, pods on every rim" — and both halves were written in
+    /// ABSOLUTE 18x11 coordinates. On 36x22 the squad's table (cols 7-10, rows 3-6) put it in the
+    /// north-west QUARTER, the west pod 7 tiles off and the east pod 26: not surrounded, just
+    /// lopsided. P57 left it exempt from the depth spread for exactly this reason ("toward the
+    /// squad is not one axis").
+    ///
+    /// THE RULE. (1) The squad's table is translated by half the extra width and height, so it
+    /// sits where it sits on 18x11 relative to the board's CENTRE. (2) Each rim pod's lead takes a
+    /// point between the BIG board's rim anchor and the REFERENCE board's anchor carried to that
+    /// same centre, by P57's `DepthFrac` for its pod id: pod 0 (the boss's slot) stays on the far
+    /// rim, pod 1 opens at exactly the 18x11 standoff, the rest fill the depth in between — a ring
+    /// with DEPTH on every bearing, the same bodies, and no pod ever nearer than the shipped
+    /// board puts it. Zero RNG draws.
+    public static bool EnvelopCentre = true;
+
+    /// Columns/rows the ENVELOP squad and its reference ring are carried by. (0,0) at 18x11.
+    public static (int ox, int oy) EnvelopOffset(int gw, int gh)
+        => EnvelopCentre ? (Math.Max(0, (gw - RefW) / 2), Math.Max(0, (gh - RefH) / 2)) : (0, 0);
+
+    /// The ENVELOP pod lead on a board of any size (see EnvelopCentre). Identity at 18x11.
+    static (int x, int y) EnvelopAnchor(int podId, int row, int gw, int gh)
+    {
+        var rim = PodAnchor(DeployEnvelop, podId, row, gw, gh);
+        var (ox, oy) = EnvelopOffset(gw, gh);
+        if (ox == 0 && oy == 0) return rim;
+        var r = PodAnchor(DeployEnvelop, podId, row, RefW, RefH);
+        double f = DepthFrac[podId % DepthFrac.Length];
+        int x = (int)Math.Round(rim.x + (r.x + ox - rim.x) * f);
+        int y = (int)Math.Round(rim.y + (r.y + oy - rim.y) * f);
+        return (Math.Clamp(x, 0, gw - 1), Math.Clamp(y, 0, gh - 1));
+    }
 
     /// Where pod `podId`'s LEAD body deploys. `row` is the shuffled row the FRONTAL path would
     /// have used (kept as the jitter source so the shared RNG stream is untouched — reading
@@ -187,7 +231,7 @@ public static partial class Mission
     /// the 18x11 board is byte-identical, every layer and every unit, across all four shapes.
     ///
     /// ENVELOP is EXEMPT: its squad deploys in the CENTRE with pods on every rim, so "toward the
-    /// squad" is not one axis. On a big board its rims are ~2 turns out. Left for a later wave.
+    /// squad" is not one axis. It gets its own rule — see `EnvelopCentre` (0d+1).
     public static bool DepthSpread = true;
 
     /// P57 telemetry (harness-only; two int stores, read by no live path, like `LastForceCount`):
@@ -460,7 +504,7 @@ public static partial class Mission
         // P26: the ARENA owns where the squad STANDS when it declared a 'P' table; the deployment
         // SHAPE still owns where the force comes from (AppliedDeploy stays published, so pod
         // bearings, SpawnReinforcements' rim wave and the HORDETEST/BALANCE telemetry are unmoved).
-        var spawnTable = plan.Valid && plan.ArenaSpawns ? plan.Spawns : SpawnTableFor(shape);
+        var spawnTable = plan.Valid && plan.ArenaSpawns ? plan.Spawns : SpawnTableFor(shape, grid.W, grid.H);
 
         // place players at their deployment footprint, refresh per-mission state (HP persists)
         for (int i = 0; i < players.Count && i < spawnTable.Length; i++)
@@ -1649,7 +1693,9 @@ public static partial class Mission
             // FINAL tile along the shape's own stacking axis. rows[] reads are not RNG draws, so
             // the shared stream is untouched; the collision-relocate loop below stays the only
             // conditional draw source, exactly as before.
-            var lead = PodAnchor(shape, podId, rows[i % rows.Count], grid.W, grid.H);
+            var lead = shape == DeployEnvelop
+                ? EnvelopAnchor(podId, rows[i % rows.Count], grid.W, grid.H)   // 0d+1 — identity at 18x11
+                : PodAnchor(shape, podId, rows[i % rows.Count], grid.W, grid.H);
             int depthShift = DepthShift(shape, podId, grid.W);         // P57 — 0 at 18x11
             lead = (Math.Max(0, lead.x - depthShift), lead.y);
             int x, y;
@@ -2888,7 +2934,7 @@ public static partial class Mission
         bool canEnvelop = !(needEvac || needTerminal || needSabotage || needCaptive);
         int shape = DeployFor(DeckSeed, missionNum, canEnvelop);
         if (shape == DeployEnvelop) plan.ArenaSpawns = false;
-        var spawns = plan.ArenaSpawns ? plan.Spawns : SpawnTableFor(shape);
+        var spawns = plan.ArenaSpawns ? plan.Spawns : SpawnTableFor(shape, Cfg.GridW, Cfg.GridH);
         if (spawns == null || spawns.Length == 0) return spent;
         plan.Spawns = spawns;
 

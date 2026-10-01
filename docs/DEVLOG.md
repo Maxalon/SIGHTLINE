@@ -19712,6 +19712,50 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P60. THE EDGE ROWS AND THE CENTRE SEAT — two big-board fixes from the map list
+
+Base `77eca70` (`main` after P59). The owner chose to finish the big-board map list before the
+extraction model; this wave did items 0d and ENVELOP. Both are no-ops on the shipped 18x11 board.
+
+**0d — the edge rows under the HUD.** At P58's zoom floor a 36x22 board fits the SCREEN, but the top
+bar and the action bar sit on its first and last rows, and the clamp (solved for the whole screen)
+gave the view no room to move them. `Game.ClampPan` now solves the vertical bounds for the band between
+the two plates when `Cfg.BoardOverflows`. It is keyed on the board, not the zoom, so the bounds do not
+jump as the wheel turns. The band's bottom edge is 132px, not the bar's 106px anchor. The first
+measurement used 106, and the shot showed the last row still under the bar's second row: the bar grows
+UP 46px per overflow row, and a full squad's verbs wrap to two rows. Autocam had its own clamp, the
+pre-P29 `±Board*0.5*(1-1/zoom)`. On a big board that formula has the wrong shape, not just a loose fit:
+on 36x22 it held autocam to ±247px of a ±480px range, so a soldier at the edge was framed off-screen.
+Autocam now uses `ClampPan` through `Game.AutoCamPan`.
+`SIGHTLINE_FLATZOOMTEST` gained (F): panned fully either way at the floor, each board edge lands exactly
+on the band's edge and that row picks back; and (G): autocam frames all four corner tiles inside the band.
+Its 18x11 checks also assert no pan at zoom 1. Proven red three ways: insets removed → (F)+(G); insets
+leaked onto 18x11 → (A) (BOARDSIZETEST (B) catches it too); old autocam clamp → (G).
+Harness knob: `SIGHTLINE_FLATPAN=bottom|top` with `SIGHTLINE_FLATZOOM`. Presentation only, no flag.
+
+**ENVELOP.** Its squad table (`PlayerSpawnsCentre`, cols 7-10 rows 3-6) and its rim anchors were
+absolute 18x11 coordinates. On 36x22 the "surrounded" squad opened at (8,4), in the north-west
+quarter, with hostiles 7-27 tiles away (48x30: 11-39). P57 had left it exempt from the depth spread.
+Now `Mission.EnvelopOffset` carries the squad seat to the board's centre, and `Mission.EnvelopAnchor`
+blends each rim pod between the big board's rim anchor and the reference ring carried to that centre,
+using P57's `DepthFrac`: pod 0 (the boss slot) stays on the far rim, and pod 1 opens at exactly the
+18x11 standoff. The blend is radial, because both anchors lie on the same bearing. Measured: 36x22
+hostiles 7-27 → 7-17 tiles from the squad; 48x30 11-39 → 7-23. Same bodies, zero RNG draws.
+`SIGHTLINE_ENVELOPCENTRE=0` restores (read above the BALANCE entry; `levers.envelopCentre`).
+`DEPTHSPREADTEST` leg (F) covers it: 18x11 byte-identical on 27 cells under the flag (ENVELOP's three
+legal objectives × 3 missions × 3 seeds); and on 36x22/48x30 the centred seat, no hostile further than
+half the board (the off arm is lopsided on 12/12 cells, and the leg FAILS if it never is), the standoff,
+the depth span, and the same bodies. Red three ways: no depth blend → (F5); squad not translated →
+(F1)+(F2).
+**A first draft of (F2) asked for "a hostile on every side the reference has one" and was wrong.** On
+18x11 the north body was a pod FOLLOWER on a shuffled row, not a ring position, so the sides were
+noise. What the defect actually broke was symmetry of reach, and that is what (F2) asserts now.
+
+**Asked mid-wave: "why is it 2d?"** The flat view is still the default; the projected view is `I`
+(or `SIGHTLINE_VIEW3D=1`). Both shots in this wave are flat, because 0d is a flat-camera defect.
+The projected view frames a big board with its own camera, and that framing also leaves the bottom
+rows under the action bar. That is logged in the ROADMAP, not fixed here.
+
 ## P59. ON A BIG BOARD THE TASK ENDS BEFORE THE FIGHT ARRIVES
 
 Built to answer one question and answered a bigger one. P56 gated the hostile HEADCOUNT as

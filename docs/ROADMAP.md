@@ -40,8 +40,7 @@ the goal. Its four seams still need parameterising — the transform they need i
       48x30: 44-46, 4.2 turns) because every `PodAnchor` is far-edge-relative. Pods are now pulled
       toward the squad by a fixed fraction of the extra width (36x22: 16-34, first contact 2.0 turns;
       48x30: 14-46, 2.5 turns). Same bodies (P56's gate still holds); nearest pod never closer than
-      on 18x11; 18x11 byte-identical. `SIGHTLINE_DEPTHSPREAD=0` restores. **Not yet done: ENVELOP**
-      (centre squad, pods on every rim — exempt, ~2 turns out on a big board).
+      on 18x11; 18x11 byte-identical. `SIGHTLINE_DEPTHSPREAD=0` restores. ENVELOP: see 0f.
 - [x] **0c. ZOOM OUT — P58.** Checked first: the projected view already frames the whole board at its
       zoom 1, but it is not the default. `Game.FlatZoomFloor` gives the default flat view a floor at
       which the whole board fits (36x22: 0.644, 48x30: 0.640), capped at 1 so 18x11 is untouched.
@@ -52,10 +51,21 @@ the goal. Its four seams still need parameterising — the transform they need i
       shoots (Defend acts-with-a-shot 11.9 -> 4.4 -> 3.2 per mission) and task missions end in ~4
       turns — **the task completes before the fight arrives.** Map geometry alone cannot fix that;
       it is what item 2's extraction model is for. `docs/measurements/p59/`.
-- [ ] **0d. THE BOTTOM ROWS UNDER THE ACTION BAR, AT THE FLOOR.** At the zoom floor a big board cannot
-      pan, so its bottom rows stay under the translucent action bar (18x11 has always had its bottom
-      row there). Either fit the floor to the area between the top bar and the action bar, or let
-      the floor view pan by that margin. And autocam's pan clamp still uses the pre-P29 formula.
+- [x] **0d. THE BOTTOM ROWS UNDER THE ACTION BAR — P60.** On a board that OVERFLOWS the screen,
+      `Game.ClampPan` now solves its vertical bounds for the band between the top bar and the action
+      bar (`Cfg.HudTopInset` 64 / `Cfg.HudBotInset` 132 — the bar at its usual two rows), so the
+      first and last rows can be panned out from under the HUD at any zoom, the floor included. Keyed
+      on the BOARD, not the zoom, so the bounds never jump; 18x11 fits and keeps the screen bounds
+      exactly (its bottom row stays under the translucent bar, as designed). Autocam's own pre-P29
+      clamp is gone — it uses `ClampPan` too (`Game.AutoCamPan`); on 36x22 the old one held it to
+      ±247px of a ±480px range, so a soldier at the map edge could not be followed there.
+      **Left open:** a unit whose verbs wrap to a THIRD row still overlaps the bottom row by 46px;
+      and the PROJECTED view's own framing still puts the bottom rows under the bar on a big board.
+- [x] **0f. ENVELOP ON A BIG BOARD — P60.** Its squad table and rim anchors were absolute 18x11
+      coordinates, so on 36x22 the "surrounded" squad opened in the NW quarter (west pod 7 tiles off,
+      east pod 26). Now the squad seat is carried to the board's centre and each rim pod is blended
+      between the big rim and the reference ring by P57's `DepthFrac` (pod 0 on the far rim, pod 1 at
+      the 18x11 standoff). 18x11 byte-identical; `SIGHTLINE_ENVELOPCENTRE=0` restores.
 - [ ] **1. MAKE A BIG BOARD A FAIR TEST BEFORE MEASURING ONE. Top item.** Nothing has ever measured
       a big board, but measuring one today measures a BROKEN configuration: enemy count, mission
       pacing and sight range are all still 18x11 numbers, and the 35 authored arenas are out of play
