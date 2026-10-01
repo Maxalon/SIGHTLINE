@@ -602,6 +602,31 @@ public class Run
     /// saved at another length is refused rather than loaded into the wrong map.
     public static int MaxMissions = 10;
 
+    // ══ C2 — THE BOARD CURVE (owner, 2026-10-01: docs/DESIGN.md §6.6) ═══════════════════════════
+    /// The opening missions are the short ones, on the 18x11 board the game was built on.
+    public const int SmallMissions = 2;
+
+    /// The board for mission `mission` of a campaign: 18x11 for the opener, then a size drawn inside
+    /// a RANGE PER MISSION TYPE — kill missions mid-sized, task missions larger, extraction/asset
+    /// missions largest (they need the walk out). Never a difficulty lever (§6.5): the force is
+    /// board-neutral (BOARDNEUTRALTEST) and the paced depth owns the curve. Keyed on the CARD's
+    /// objective, so EVAC/STEAL and ESCORT/RESCUE share a range; drawn from Hash3, zero RNG draws.
+    public static (int w, int h) BoardFor(int mission, Objective cardObjective, int mapSeed)
+    {
+        if (mission <= SmallMissions) return (18, 11);
+        var (lo, hi) = BoardRange(cardObjective);
+        int w = lo + (int)(Util.Hash3(mapSeed, 41, mission) % (uint)(hi - lo + 1));
+        int h = (int)Math.Round(w * 11.0 / 18.0);
+        return (w, h);
+    }
+
+    public static (int lo, int hi) BoardRange(Objective o) => o switch
+    {
+        Objective.Eliminate or Objective.Decapitate or Objective.Defend => (30, 36),
+        Objective.Hack or Objective.Sabotage => (36, 42),
+        _ => (40, 48),   // Evac / Steal / Escort / Rescue: the extraction needs room to be a walk
+    };
+
     /// The scale every difficulty number in this game was TUNED on: depth 1..6, the old run.
     public const int DepthScale = 6;
 

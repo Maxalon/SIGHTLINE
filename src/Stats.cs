@@ -1572,11 +1572,15 @@ public static class Stats
                 withdrawal = Sightline.Game.WithdrawalWaves,
                 stealOnEvac = Sightline.Game.StealOnEvac,
                 runLength = Sightline.Run.MaxMissions,
+                boardCurve = Sightline.Game.BoardCurve,
                 // P59: the BOARD this chunk played, as "WxH@Tile". Until now a big-board chunk's size
                 // lived only in its file name and its env — the exact failure mode `levers{}` exists
                 // to close. A big board is a different game (DESIGN §6.5), so a chunk that cannot
                 // say which board it was is a chunk that cannot be filed.
-                board = $"{Cfg.GridW}x{Cfg.GridH}@{Cfg.Tile}",
+                // C2: under the board curve the board CHANGES per mission, so the lever names the
+                // curve (and the home board it departs from) instead of whichever board was last.
+                board = Sightline.Game.BoardCurve ? $"curve:{Cfg.HomeW}x{Cfg.HomeH}@{Cfg.HomeTile}"
+                                                  : $"{Cfg.GridW}x{Cfg.GridH}@{Cfg.Tile}",
                 // P50: whether the arena's 'A' anchors seat a pod. The lever under test in P50's
                 // own round, and until P50 it was a flag with no consumer at all.
                 arenaAnchors = Sightline.Mission.ArenaAnchors,

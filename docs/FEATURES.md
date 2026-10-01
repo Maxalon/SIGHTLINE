@@ -629,6 +629,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   it to an adjacent soldier, a carrier who goes down drops it, and it must leave through the
   extraction (the CALL is refused without it). On a big board EVAC nodes play as STEAL;
   `SIGHTLINE_OBJ=steal` forces it anywhere.
+- **A ten-mission run on a board curve (P67 + P68):** a campaign is 10 missions walking the tuned
+  depth curve in finer steps (`Run.Pace`). Missions 1-2 are on 18x11; 3-10 are big boards sized per
+  mission type (kill 30-36 wide, HACK/SABOTAGE 36-42, extraction/asset missions 40-48).
+  `SIGHTLINE_RUNLENGTH=6` / `SIGHTLINE_BOARDCURVE=0` restore; `SIGHTLINE_PACETEST`.
 - **Forward EVAC beacon + ESCORT leash (de-drag):** DEPLOY BEACON (key G) plants a forward extraction 3×3 that's
   unioned with the fixed far-corner FALLBACK (always present → no soft-lock), so the squad fights to a defensible
   mid-field spot and extracts there instead of a 14-tile stroll (Evac ~10.9t → ~7.8t). The ESCORT VIP now auto-follows
