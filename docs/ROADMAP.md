@@ -53,9 +53,12 @@ block re-orders it and adds to it.
             LEVEL change and it has not been tuned; the first cut, which spawned ON the exit, read 0/8.
       - [ ] **B4. STEAL — a new objective** (appended to `Objective`): pick up a carryable object,
             PASS it to an adjacent soldier, get it out through the extraction.
-      - [ ] **B5. REMOVE THE VETERAN RESERVE.** Owner decision. Recall gone from the draft, stored
-            veterans discarded on load, `StandingReserve`/`DeepReserve` re-meant as power-curve
-            unlocks (members kept: append-only). `SIGHTLINE_VETTEST` is retired or repurposed.
+      - [x] **B5. THE VETERAN RESERVE IS GONE — P65.** `MetaProg.VeteranReserve` (default false;
+            `SIGHTLINE_VETERANS=1` restores): the draft recalls nobody, ranked survivors are not
+            enshrined, the WAR ROOM drops the VETERANS cell and the two reserve unlocks, and the draft
+            stops offering MERCENARY CLAUSE and LIVING LEGENDS (both trade on the reserve). Nothing on
+            disk is deleted. **Left for F:** `StandingReserve`/`DeepReserve` (owned ones are inert) and the
+            two contracts need power-curve meanings.
 - [ ] **C. THE CAMPAIGN'S BOARD CURVE.** Tutorial and the first missions on 18x11; most of the run on
       big boards, sized per node (`Cfg.SetBoard` is already runtime). Re-baseline the heat ladder on
       the new game: a new instrument, never compared with the 18x11 ladder of record.

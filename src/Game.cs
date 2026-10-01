@@ -1582,7 +1582,8 @@ public partial class Game
         if (NoPersist) return Run.GenerateDraftPool();
         int maxVets = Run.MaxDraftVeterans + (SaveGame.HasUnlock((int)MetaUnlock.StandingReserve) ? 1 : 0);
         bool crossTrain = SaveGame.HasUnlock((int)MetaUnlock.CrossTraining);
-        return Run.GenerateDraftPool(SaveGame.LoadVeterans(), maxVets, crossTrain);
+        // B5: soldiers retire after one run — nobody is recalled unless SIGHTLINE_VETERANS=1
+        return Run.GenerateDraftPool(MetaProg.VeteranReserve ? SaveGame.LoadVeterans() : null, maxVets, crossTrain);
     }
 
     // W12 first-run RECOMMENDED draft: the pre-selected fixed squad + safe doctrine, so a brand-new
@@ -3074,11 +3075,12 @@ public partial class Game
         // touch it) so the end card's "N JOIN THE RESERVE" line is the count that actually landed
         // on disk — a name already in the reserve updates its record and does not re-join.
         int vetsBefore = SaveGame.VeteranCount();
-        if (vets.Count > 0 && _run.Contract != Contract.MercenaryClause) SaveGame.EnshrineVeterans(vets);
+        if (MetaProg.VeteranReserve && vets.Count > 0 && _run.Contract != Contract.MercenaryClause)   // B5: they retire
+            SaveGame.EnshrineVeterans(vets);
         EndReserve = Math.Max(0, SaveGame.VeteranCount() - vetsBefore);
         // FUL-10 LGD: a KIA whose name matches a reserve record ERASES it — veterans are mortal
         // across runs, not just priced. Name-keyed exactly like EnshrineVeterans' dedupe.
-        if (_run.Contract == Contract.LivingLegends && _run.Fallen.Count > 0)
+        if (MetaProg.VeteranReserve && _run.Contract == Contract.LivingLegends && _run.Fallen.Count > 0)
         {
             int gone = SaveGame.RemoveVeterans(_run.Fallen);
             if (gone > 0) _run.Report.Insert(0, $"LIVING LEGENDS: {gone} reserve record{(gone > 1 ? "s" : "")} died with the fallen");

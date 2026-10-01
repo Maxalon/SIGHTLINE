@@ -110,8 +110,21 @@ public static class MetaProg
     /// being visible: it is what tells the player the ladder still pays.
     public static IEnumerable<MetaUnlock> ListedUnlocks()
     {
-        foreach (var u in AllUnlocks) if (SecondAxis || !IsHeatGated(u)) yield return u;
+        foreach (var u in AllUnlocks)
+            if ((SecondAxis || !IsHeatGated(u)) && (VeteranReserve || !IsReserveUnlock(u))) yield return u;
     }
+
+    // ══ B5 — SOLDIERS RETIRE AFTER ONE RUN (owner, 2026-10-01; docs/DESIGN.md §6.6) ═══════════
+    /// W9 SIGNAL's cross-run VETERAN RESERVE is gone: promoted survivors are no longer enshrined, the
+    /// draft recalls nobody, and the WAR ROOM stops listing the two unlocks that extended it.
+    /// `SIGHTLINE_VETERANS=1` restores all of it. Nothing on disk is deleted — a profile's stored
+    /// records are simply never read, so the restore arm finds them intact. `StandingReserve` and
+    /// `DeepReserve` stay in the append-only enum; an owner keeps them, inert, until ROADMAP item F
+    /// gives those two slots power-curve meanings (the owner's answer: "replaced by power-curve
+    /// unlocks").
+    public static bool VeteranReserve = false;
+
+    public static bool IsReserveUnlock(MetaUnlock u) => u == MetaUnlock.StandingReserve || u == MetaUnlock.DeepReserve;
 
     /// May `u` be PURCHASED at this best-cleared-heat? Cost is checked separately (a locked unlock
     /// is refused even by an infinitely rich profile — see Game.TryBuyUnlock).

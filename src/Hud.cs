@@ -3713,6 +3713,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 ("VETERANS",     $"{p.Veterans}/{p.VeteranCap}", p.VeteranCap > SaveGame.MaxVeterans),
                 ("DAILY STREAK", p.DailyStreak.ToString(), p.DailyStreak > 0),
             };
+            // B5: no reserve, no VETERANS cell (the restore arm keeps it)
+            if (!MetaProg.VeteranReserve) cells = cells.Where(c => c.Item1 != "VETERANS").ToArray();
             float cellW = (foot.Width - 28) / cells.Length;
             for (int i = 0; i < cells.Length; i++)
             {
@@ -4584,8 +4586,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// and the blurb column grows 268 -> 362 px. Growing the chrome, not shrinking the writing.
     public static int DraftRowW()
     {
-        int cn = DraftContractCards.Length;
-        return cn * DraftContractCardW() + (cn - 1) * DraftContractGap;
+        // B5: the SCREEN's composition row — measured as the full six-card contract row whether or
+        // not every contract is on offer. With two retired, a row that tracked the OFFERED count
+        // shrank to 924 px and narrowed every candidate card under it until three class blurbs
+        // ellipsized at 110%/120% (CHROMETEST + FITTEST caught it). The offered cards centre in it.
+        int cn = AllDraftContractCards.Length;
+        int cw = Math.Min(222, (Cfg.ScreenW - 48 - (cn - 1) * DraftContractGap) / cn);
+        return cn * cw + (cn - 1) * DraftContractGap;
     }
     public static int DraftCardW() => OldFit ? 300 : (DraftRowW() - 2 * DraftGridGap) / 3;
     public static int DraftBlurbWidth() => DraftCardW() - 32;
@@ -4710,9 +4717,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     /// The contract row's cards, as one list — the stack has to measure them before the screen
     /// can be laid out, so the renderer can no longer own the array privately.
-    public static readonly Contract[] DraftContractCards =
+    static readonly Contract[] AllDraftContractCards =
         { Contract.None, Contract.IronVeterans, Contract.HighStakes,
           Contract.Spearhead, Contract.MercenaryClause, Contract.LivingLegends };
+    // B5: MERCENARY CLAUSE (cheap recalls / never enshrined) and LIVING LEGENDS (its downside erases a
+    // reserve record) both trade on the veteran reserve; without it one is meaningless and the other
+    // all upside. They are not offered until item F redesigns them. The enum is append-only.
+    static readonly Contract[] RetiredDraftContractCards =
+        { Contract.None, Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead };
+    public static Contract[] DraftContractCards => MetaProg.VeteranReserve ? AllDraftContractCards : RetiredDraftContractCards;
 
     /// The contract card's width and the row's content height, measured through the real font at
     /// the live UI scale. Shared by the renderer and by CHROMETEST — the stack needs the height

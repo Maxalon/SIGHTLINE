@@ -563,7 +563,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 
 ## PROGRAM COUNTERPLAY additions
 
-- **Cross-run VETERAN reserve.** Promoted survivors (Rank≥1) of a finished run retire into a persistent
+- **Cross-run VETERAN reserve — RETIRED by P65 (owner, 2026-10-01: soldiers retire after one run).**
+  Off by default; `SIGHTLINE_VETERANS=1` restores everything below. Promoted survivors (Rank≥1) of a finished run retire into a persistent
   reserve (`meta.json`, append-only `UnitDto` list, dedup-by-name, capped 12 most-storied). A new run's DRAFT
   recalls up to 2 as gold "VETERAN" cards carrying their full rank/perks/traits/spec/scars/nickname; the rest
   are fresh recruits. WAR ROOM shows `VETERANS n/12`. `SaveGame.LoadVeterans/EnshrineVeterans`,
