@@ -7,6 +7,51 @@
 
 ## ROADMAP — pick up here (ordered by impact)
 
+## ⚑ OWNER DIRECTION (2026-10-01) — WHAT THE GAME CAN BECOME. This is the top of the list.
+
+**Rationale: `docs/DESIGN.md` §6.6.** About 90% of missions on BIG boards (18x11 only for the tutorial
+and the opening missions), boards **bigger than 36x22 and VERTICAL** (an XCOM-scale housing block, or
+a ~6-floor tower), a **within-run power curve** sized for a roguelike whose soldiers retire after one
+run, and the **projected view as the default**. The 2026-09-16 block below stays in force; this
+block re-orders it and adds to it.
+
+### The order of work, and why this order
+
+- [x] **A. THE PROJECTED VIEW IS THE DEFAULT — P61.** The real launch opens in the projected view
+      (`View3D.LaunchEnabled`); `I` flips it and the choice persists (`Display.FlatView`, absent in an
+      old settings file = projected); `SIGHTLINE_VIEW3D=0` forces flat for one launch. Every harness
+      path keeps the view it asks for explicitly. The opening framing now fits the board into the band
+      between the HUD plates (`View3D.FitHudBand`) on every board size. `SIGHTLINE_VIEWDEFAULTTEST`.
+      **Left open:** at Zoom > 1 the projected pan clamp still lets the edge rows reach the SCREEN
+      edge, not the band edge (the flat view got that in P60).
+- [ ] **B. A MISSION THAT DOES NOT END AT THE TASK — the extraction model** (item 2 of the block
+      below). P59: on a big board the task completes before the fight arrives, so every campaign wins.
+      Until this lands, "90% big" means "90% trivial". **It gates C.**
+- [ ] **C. THE CAMPAIGN'S BOARD CURVE.** Tutorial and the first missions on 18x11; most of the run on
+      big boards, sized per node (`Cfg.SetBoard` is already runtime). Re-baseline the heat ladder on
+      the new game: a new instrument, never compared with the 18x11 ladder of record.
+- [ ] **D. BIGGER: THE HOUSING BLOCK.** Push past 48x30 toward XCOM scale. Measure what breaks first:
+      planner cost per enemy act, Dijkstra per unit, draw cost in the projected view, fog of war.
+      The authored arenas come back here as ROOMS / BLOCKS inside the big board (P37's cell grid
+      already builds a big board as 18x11 cells; a cell can take an arena's terrain instead of an
+      archetype). Decided by the owner's answer: the arenas become pieces of a big map, not the map.
+- [ ] **E. STOREYS — the tower.** A storey axis in `Grid` (and in the save format: a new persisted
+      field, append-only), plus stairs/ladders in `CostMap`, LoS across floors, cover by floor, the
+      planner, and rendering by floor in the projected view (cut-away above the active storey). The
+      largest single change in this list. Plan it as its own program.
+- [ ] **F. THE POWER CURVE.** Within a run: a much steeper growth in soldier power (upgrades,
+      abilities, synergies). Across runs: meta unlocks widen the OPTIONS (a richer upgrade pool, new
+      abilities), never carried soldiers (they retire). A fresh run must feel unique through a big
+      mission and map library. The heat ladder must then be set against the GROWN squad, which is
+      why F is measured after C, not before.
+      **⚠ CONFLICT TO RESOLVE WITH THE OWNER BEFORE F:** the game ALREADY carries soldiers between
+      runs. W9 SIGNAL's veteran reserve enshrines promoted survivors and lets a later run's draft
+      recall them for a price (`SaveGame.MaxVeterans` 12; WAR ROOM unlocks `StandingReserve` and
+      `DeepReserve` extend it; `SIGHTLINE_VETTEST`). The owner's direction says soldiers retire after
+      one run. Either the reserve goes (and the two unlocks become something else, `MetaUnlock` being
+      append-only), or it is redefined as something that is not a carried soldier. Do not remove it
+      without that answer.
+
 ## ⚑ OWNER DIRECTION (2026-09-16) — THE BOARD IS THE COMMITMENT. This supersedes the insertion-frame plan.
 
 **Rationale: `docs/DESIGN.md` §6.5. Read it before touching any item here.** The owner overrode the

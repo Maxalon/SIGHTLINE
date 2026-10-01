@@ -1035,6 +1035,11 @@ public static class Program
         }
         // SIGHTLINE_FLATZOOMTEST=1 : P58 — the flat camera zooms out to fit a big board; 18x11
         // untouched; picking still lands on the right tile at the floor.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VIEWDEFAULTTEST") == "1")
+        {
+            Console.WriteLine(View3D.ViewDefaultSelfTest());
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FLATZOOMTEST") == "1")
         {
             Console.WriteLine(Game.FlatZoomSelfTest());
@@ -1850,6 +1855,13 @@ public static class Program
         // Display is normally OFF in the headless harness (byte-identical screenshots).
         // SIGHTLINE_POSTFX=1 forces it ON (+ the post-FX demo bloom) for verification.
         Display.Init(!(shot || autoplay) || postFxShot);
+        // A (2026-10-01) — THE PROJECTED VIEW IS THE PLAYER'S DEFAULT. Only on the real launch, after
+        // Display.Init has read the player's settings: a player who pressed I for the flat view keeps
+        // it. Every harness path (SHOT / AUTOPLAY / the self-tests, which exit long before this line)
+        // keeps the view it asks for explicitly, so no gate changes meaning. SIGHTLINE_VIEW3D=0
+        // forces flat for one launch.
+        if (!(shot || autoplay))
+            View3D.Enabled = View3D.LaunchEnabled(Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3D"), Display.FlatView);
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 

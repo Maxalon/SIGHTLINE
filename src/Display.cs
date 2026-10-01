@@ -421,6 +421,10 @@ void main() {
 
     // auto-cam: optional character-focus camera that follows the selected/acting unit
     public static bool AutoCam;
+    /// A (2026-10-01): the player chose the FLAT view with I. Default false = the projected view,
+    /// which is the game's default. Read only by the real launch (Program.RealMain).
+    public static bool FlatView;
+    public static void SetFlatView(bool flat) { if (FlatView == flat) return; FlatView = flat; Save(); }
     public static void ToggleAutoCam() { AutoCam = !AutoCam; Save(); }
 
     // onboarding tutorial (3.12): a one-time "seen" flag so it only shows on the first run
@@ -872,6 +876,7 @@ void main() {
         public bool TutorialSeen { get; set; }
         public bool PostFX { get; set; } = true;
         public bool AutoCam { get; set; }
+        public bool FlatView { get; set; }       // A: absent in an old display.json = false = projected view
         public bool BraceTipSeen { get; set; }   // FUL-12 (JSON field: absent in old files = false, back-compat)
         public int TipsSeen { get; set; }        // T1 just-in-time tip bitmask (absent = 0 = all unseen)
         public bool TrainingSeen { get; set; }   // T1 training op completed/declined once
@@ -916,7 +921,7 @@ void main() {
     /// now asserts the mechanism on all three files.
     static void Save()
     {
-        try { SaveGame.WriteAtomic(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx, WinW = WinW, WinH = WinH }, DisplayJson.Default.Dto)); }
+        try { SaveGame.WriteAtomic(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, FlatView = FlatView, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx, WinW = WinW, WinH = WinH }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -947,6 +952,7 @@ void main() {
                 TutorialSeen = d.TutorialSeen;
                 PostFX = d.PostFX;
                 AutoCam = d.AutoCam;
+                FlatView = d.FlatView;
                 BraceTipSeen = d.BraceTipSeen;
                 // T1 migration bridge: an old profile only has the single BraceTipSeen bool — fold
                 // it into bit 0 so a player who already read the BRACE tip never sees it again.
