@@ -1145,6 +1145,37 @@ behind it instead. Four decisions, in the owner's order of emphasis:
    and maps and, later, upgrade synergies.
 4. **THE PROJECTED (3D) VIEW BECOMES THE DEFAULT.** Flat stays on `I`.
 
+### The owner's answers on extraction, the veterans and the objectives (2026-10-01, same day)
+
+**EXTRACTION — "board one by one; nobody is left unless you choose to leave them."**
+> Soldiers can board the extraction one by one, but the mission doesn't end on its own without
+> everyone still alive on board. The mission can be ended as soon as one soldier is extracted, but
+> that would leave any soldier not on board the extraction or in the extraction zone behind to die.
+
+- A soldier in the zone can **BOARD**: it leaves the board and is safe.
+- The mission **never ends on its own** while a living soldier is still on the ground.
+- From the moment one soldier has boarded, the player may **CALL EXTRACTION**: everyone aboard, and
+  everyone standing in the zone, gets out. **Anyone else is left behind and dies.**
+
+**WHICH MISSIONS EXTRACT — mission-specific.**
+- **RESCUE and ESCORT need the evac.** The owner asked what the difference between them is. Today
+  ESCORT starts with the asset in the squad and RESCUE starts with it caged mid-map. Under §6.5's
+  fiction rule (the asset is reached, not brought), **they are the same mission**: ESCORT takes
+  RESCUE's shape. `Objective` is append-only, so the ordinal stays and its behaviour converges.
+- **HACK and SABOTAGE spawn the evac when the task is done, and ALSO end when every hostile is dead.
+  No respawns on these missions**, so both routes are real: sneak in, do the task and leave, or go
+  in guns blazing and clear the board.
+- **A new objective: STEAL.** A carryable object (a drive, a terminal, a piece of tech). A soldier
+  picks it up, it can be **passed between soldiers**, and it leaves through the extraction. The
+  enum gains a member at the end.
+- Kill missions (ELIMINATE, DECAPITATE, DEFEND) keep their own end conditions; the owner did not
+  ask for an extraction on them.
+
+**THE VETERAN RESERVE IS REMOVED.** Soldiers retire after one run. W9 SIGNAL's cross-run recall
+goes, and the two WAR ROOM unlocks that extend it become power-curve unlocks instead (`MetaUnlock`
+is append-only: the members stay, their meaning changes, and an old profile's stored veterans are
+discarded on load).
+
 ### How this sits with §6.5's correction
 
 §6.5 stands: **board size is not a difficulty lever.** What changes is where difficulty and *interest*
