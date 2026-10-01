@@ -1176,6 +1176,22 @@ goes, and the two WAR ROOM unlocks that extend it become power-curve unlocks ins
 is append-only: the members stay, their meaning changes, and an old profile's stored veterans are
 discarded on load).
 
+### The run, the acts and the true ending (owner, 2026-10-01, same day)
+
+> We go for 10 now, and we add 2 more acts and maybe a fourth later. The game should be made to not
+> win the first run without experience (possible though), and beating the first act unlocks the
+> second, but resetting the run. Same for the third being unlocked by beating the second, and the
+> fourth needs a secret/puzzle or something like that for a true ending.
+
+- **A run is 10 missions** (was 6): nine upgrade stops between missions instead of five, because
+  five is too few to build a roguelike power curve. Missions 1-2 are short (18x11); 3-10 are big.
+- **Board size varies per mission**, inside a **size range per mission TYPE**, never by difficulty.
+- **ACTS.** A run is one act. Beating act 1 unlocks act 2 as a new starting option, and act 2 is a
+  fresh run, not a continuation. Act 3 unlocks the same way. **Act 4 is hidden behind a
+  secret or puzzle and leads to the true ending.**
+- **Difficulty target:** a first run should usually be lost by a player without experience, but
+  it must be winnable.
+
 ### How this sits with §6.5's correction
 
 §6.5 stands: **board size is not a difficulty lever.** What changes is where difficulty and *interest*
