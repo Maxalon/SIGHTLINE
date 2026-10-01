@@ -128,6 +128,7 @@ echo -n "BOARDNEUTRALTEST: "; verdict "$(SIGHTLINE_BOARDNEUTRALTEST=1 run | grep
 echo -n "DEPTHSPREADTEST: "; verdict "$(SIGHTLINE_DEPTHSPREADTEST=1 run | grep -oE "DEPTHSPREADTEST: (PASS|FAIL)" | head -1)"
 echo -n "FLATZOOMTEST: "; verdict "$(SIGHTLINE_FLATZOOMTEST=1 run | grep -oE "FLATZOOMTEST: (PASS|FAIL)" | head -1)"
 echo -n "VIEWDEFAULTTEST: "; verdict "$(SIGHTLINE_VIEWDEFAULTTEST=1 run | grep -oE "VIEWDEFAULTTEST: (PASS|FAIL)" | head -1)"
+echo -n "EXTRACTIONTEST: "; verdict "$(SIGHTLINE_EXTRACTIONTEST=1 run | grep -oE "EXTRACTIONTEST: (PASS|FAIL)" | head -1)"
 # P30: the DISCOVERY layer -- what HQ knows vs what is there. Pure grid logic, no window.
 echo -n "VISIONTEST : "; verdict "$(SIGHTLINE_VISIONTEST=1 run | grep -oE "VISIONTEST: (PASS|FAIL)" | head -1)"
 # P29: the board is a runtime size -- the shipped default must not drift and the camera pan

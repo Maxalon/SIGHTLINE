@@ -2113,6 +2113,7 @@ public partial class Game
         // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
         if (Mode == GameMode.Training) Objective = Objective.Eliminate;
         EvacZone.Clear();
+        Aboard.Clear(); LeftBehindLastMission = 0;   // B1: nobody is aboard at the start of a mission
         BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;   // forward evac beacon is fresh each mission
         HackProgress = 0;
         SabotageSites.Clear();
@@ -4463,6 +4464,8 @@ public partial class Game
             if (TryReinforcements()) return;
             LoseRun("CAPTIVE ABANDONED", $"Every soldier fell with the captive still caged on mission {_run.Mission}."); return;
         }
+        // B1: on a big board an extraction mission ends ONLY by boarding or a CALL EVAC
+        if (CheckExtractionEnd(alivePlayers)) return;
         if (alivePlayers.Count == 0)
         {
             // ONE-TIME CHECKPOINT: a squad wipe at/after the threshold mission triggers an emergency
@@ -5260,6 +5263,8 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.E)) DoStabilize();   // FUL-7: stabilize an adjacent downed ally (T is the tag editor)
         if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
+        if (Raylib.IsKeyPressed(KeyboardKey.J)) DoBoard();        // B1: board the extraction (big board)
+        if (Raylib.IsKeyPressed(KeyboardKey.Z)) DoCallEvac();     // B1: call the extraction in
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
         // T1: [P] restarts the TRAINING OP from the top — the drill is the one place where
         // "just start over" must be one keystroke away. Drill-only, so it can never nuke a run.
@@ -5842,6 +5847,8 @@ public partial class Game
             case "hack": DoHack(); break;
             case "beacon": DoBeacon(); break;
             case "extract": DoExtract(); break;
+            case "board": DoBoard(); break;          // B1
+            case "callevac": DoCallEvac(); break;    // B1
             case "stabilize": DoStabilize(); break;   // FUL-7: freeze an adjacent downed ally's timer
             case "reload": DoReload(); break;
             case "showall": ToggleShowAllVerbs(); break;   // T1: the permanent verb-staging escape

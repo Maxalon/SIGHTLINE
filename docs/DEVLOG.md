@@ -19712,6 +19712,41 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P62. BOARD AND CALL EVAC (item B1 of the 2026-10-01 owner direction)
+
+Base `71132b9`. The owner's rule, verbatim in `docs/DESIGN.md` §6.6: soldiers board one by one, the
+mission never ends on its own while anyone alive is on the ground, and it can be called as soon as
+one has boarded, leaving the rest behind to die.
+
+- **`Game.Extraction.cs`.** BOARD moves a unit from `Players` to `Aboard`, so no enemy, vision pass
+  or turn rule sees it, and `FinishExtraction` puts it back for the debrief. CALL EVAC takes the
+  in-zone along; anyone else is marked down and passed to `KillUnit`, so it is a real KIA (the
+  memorial, the cause-of-death tally) rather than a disappearance. `CheckExtractionEnd` sits in
+  `CheckEnd` before the wipe check, because an all-aboard squad has zero units on the ground and
+  would otherwise read as a wipe.
+- **Scope.** Live only when `BigBoard` (either axis above 18x11), in the campaign, on the three
+  objectives that already extract. The 18x11 tutorial band keeps every rule, and every gate pinned
+  to it with them. `SIGHTLINE_EXTRACTION=0` restores the old rule on a big board too
+  (`levers.extraction`, read above the BALANCE entry).
+- **Verbs.** BOARD [J] and CALL EVAC [Z] use the last two free letters (`I` went to the view toggle
+  in P32). They sit at the bar's tail, present for the whole mission (so nothing shifts). README's
+  key table was regenerated, not hand-edited.
+- **Autopilot.** It boards whenever the asset is secured, and calls once everyone left on the ground
+  is in the zone or down. A 4-campaign batch per objective on 36x22: EVAC BOARD 68 / CALLEVAC 11,
+  ESCORT 73 / 13. Autoplay ×2 on EVAC, ESCORT and RESCUE: no TIMEOUT.
+- **Gate.** `SIGHTLINE_EXTRACTIONTEST` reads the PHASE the game lands in. The flag-off control
+  proves the old rule still ends an EVAC with the squad in the zone, so (B) is not vacuous. Red
+  twice: with the CheckEnd hook removed, and with CALL EVAC sparing the soldier outside.
+  **The first draft counted the roster and failed on the test's own arithmetic**: a won mission
+  grows the roster, so the assertion is now identity (the abandoned soldier is gone, every boarded
+  one is kept).
+- **JUICETEST caught a real gap, not a staging one.** Once the two verbs were staged (behind the
+  harness-only `ExtractionForceForTest`, because its scene is 18x11 with no run), BOARD answered on
+  every channel but CALL EVAC was HEARD and not SEEN: the mission-ending verb drew nothing. It now
+  bursts over every zone tile with an `EXTRACTED xN` readout and a shake.
+- **Noted for B3:** UNDERTOW W6's forward BEACON plants a second evac 3×3 near the squad. Under an
+  extraction that is meant to be far away, that is a shortcut, and B3 must decide its fate.
+
 ## P61. THE PROJECTED VIEW IS THE DEFAULT (item A of the 2026-10-01 owner direction)
 
 Base `57cf48e`. The owner asked "why is it 2d?" and, given the choice, made the projected view the

@@ -100,6 +100,8 @@ between the two `KEYTABLE` markers. The set of bound keys it must cover is deriv
 | **H** / HACK / PLANT | Work the objective site: HACK a terminal, or PLANT a demolition charge on a sabotage target. Costs 1 action. |
 | **G** / BEACON | Deploy a forward evac beacon on your tile: opens a 3x3 extraction zone right here (in addition to the far corner). One per mission. Costs 1 action, won't end your turn. |
 | **X** / EXTRACT | Haul an adjacent ally / asset aboard - pulls them into the extraction zone. Costs 1 action. |
+| **J** / BOARD | Board the extraction from inside the zone. The soldier leaves the field and is safe. Ends their turn. |
+| **Z** / CALL EVAC | Call the extraction in. Everyone aboard or in the zone gets out - anyone else is LEFT BEHIND and dies. |
 | **E** / STABILIZE | Stop an adjacent DOWNED soldier's bleed-out - the timer freezes and they hold on (still down: drag them, or win the field and they recover). A corpsman's PATCH gets them back up. 1 action, won't end your turn. |
 | **R** / RELOAD | Reload your weapon to full. |
 
