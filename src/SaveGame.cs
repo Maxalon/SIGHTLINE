@@ -310,6 +310,7 @@ public static partial class SaveGame
             // before the field, or any version up to ours) still load: every change so far has been
             // additive, which is exactly what CurrentSchema's contract says a bump is NOT for.
             if (dto.SchemaVersion > CurrentSchema) { StashCorruptSave(); return null; }
+            if ((dto.RunLength > 0 ? dto.RunLength : 6) != Run.MaxMissions) { StashCorruptSave(); return null; }   // C1
             return FromDto(dto);
         }
         catch
@@ -834,6 +835,7 @@ public static partial class SaveGame
         var dto = new RunDto
         {
             SchemaVersion = CurrentSchema,
+            RunLength = Run.MaxMissions,   // C1: the map is a function of (MapSeed, run length)
             Mission = r.Mission, Intel = r.Intel, Fallen = new List<string>(r.Fallen),
             BondTally = new Dictionary<string, int>(r.BondTally),
             MapSeed = r.MapSeed, MapPos = r.MapPos,
@@ -960,6 +962,10 @@ public static partial class SaveGame
         /// whose TYPE or MEANING changed, which defaults cannot rescue). Bump it in the same commit
         /// as such a change and branch on it in FromDto. Persisted; do not repurpose.
         public int SchemaVersion;
+        /// C1: the run length this save was written under — the map generator's column count. 0 in a
+        /// file written before the field = the six-mission run. A mismatch is refused (stashed, not
+        /// misread): the same MapSeed regenerates a DIFFERENT map at another length.
+        public int RunLength;
         public int Mission;
         public int Intel;
         public List<UnitDto> Squad = new();
@@ -1343,9 +1349,10 @@ public static partial class SaveGame
         // P13 re-goldened: the hash was widened to feed each node's Intel and its MissionCard's
         // ModName/EnemyDelta/StatDelta/Reward (see MapFingerprint). The MAP ITSELF did not move —
         // the pre-P13 hashes were 0xC169C99E / 0xEC48647A / 0x5CE96D55 over the same three DAGs.
-        (1,       0xB51B0399u),
-        (424242,  0x62B48DEAu),
-        (31337,   0xC48C84A8u),
+        // C1: re-pinned for the TEN-mission run (SIGHTLINE_RUNLENGTH=6 reproduces the old three)
+        (1,       0xABFFB0B6u),
+        (424242,  0x73FC6109u),
+        (31337,   0x21651BF5u),
     };
 
     static void MapShapeFails(List<string> fails)

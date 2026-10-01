@@ -89,10 +89,23 @@ public static class Voice
     /// biome-true (a TUNDRA room never reads as EMBER CUT).
     public static string RegionName(int mission, int mapSeed)
     {
-        int bi = Biome.IndexFor(Math.Max(1, mission), mapSeed);
-        bi = ((bi % Regions.Length) + Regions.Length) % Regions.Length;
-        var pool = Regions[bi];
-        return pool[Pick(pool.Length, mapSeed, mission, 0x5247)];   // "RG"
+        // C1: a 10-mission run revisits a biome (the deal is an 8-cycle), so the raw pick could name
+        // two missions alike. Names are assigned in mission order and a pick steps past any name
+        // already used earlier in the run. A 6-mission run never revisits a biome, so it is unchanged.
+        mission = Math.Max(1, mission);
+        var used = new HashSet<string>();
+        string name = null;
+        for (int m = 1; m <= mission; m++)
+        {
+            int bi = Biome.IndexFor(m, mapSeed);
+            bi = ((bi % Regions.Length) + Regions.Length) % Regions.Length;
+            var pool = Regions[bi];
+            int idx = Pick(pool.Length, mapSeed, m, 0x5247);   // "RG"
+            for (int k = 0; k < pool.Length && used.Contains(pool[idx]); k++) idx = (idx + 1) % pool.Length;
+            name = pool[idx];
+            used.Add(name);
+        }
+        return name;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────

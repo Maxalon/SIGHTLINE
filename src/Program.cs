@@ -347,6 +347,10 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WITHDRAWAL") == "0") Game.WithdrawalWaves = false;
         // B4 — STEAL. `=0` keeps a big-board EVAC node a plain EVAC instead of a STEAL.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_STEAL") == "0") Game.StealOnEvac = false;
+        // C1 — the run's length. `=6` restores the six-mission run exactly (Run.Pace is then the
+        // identity). Read here, above the BALANCE entry point, so a batch honours it.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_RUNLENGTH"), out int runLen) && runLen >= 2)
+            Run.MaxMissions = runLen;
         // B5 — soldiers retire after one run. `=1` restores W9 SIGNAL's cross-run veteran reserve
         // (draft recall, enshrining, the two reserve unlocks and the two contracts that trade on it).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VETERANS") == "1") MetaProg.VeteranReserve = true;
@@ -1046,6 +1050,11 @@ public static class Program
         }
         // SIGHTLINE_FLATZOOMTEST=1 : P58 — the flat camera zooms out to fit a big board; 18x11
         // untouched; picking still lands on the right tile at the floor.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PACETEST") == "1")
+        {
+            Console.WriteLine(Game.PaceSelfTest());
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EXTRACTIONTEST") == "1")
         {
             Console.WriteLine(Game.ExtractionSelfTest());
@@ -1088,7 +1097,7 @@ public static class Program
         // no window. Its leg (E) uses the restore flag as a RED CONTROL.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VIPHEATTEST") == "1")
         {
-            Console.WriteLine(Mission.VipHeatSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => Mission.VipHeatSelfTest()));   // C1: pins the tuned depth model
             return;
         }
         // SIGHTLINE_ARENAEDGETEST=1 : P47 — the double-resolution template format (walls on the
@@ -1349,7 +1358,7 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HVTTEST") == "1")
         {
             Raylib.InitWindow(64, 64, "hvttest");   // SetupMission uses tile math
-            Console.WriteLine(new Game().HvtSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => new Game().HvtSelfTest()));   // C1: pins the tuned depth model
             Raylib.CloseWindow();
             return;
         }
@@ -1358,7 +1367,7 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTEST") == "1")
         {
             Raylib.InitWindow(64, 64, "openertest");   // SetupMission uses tile math
-            Console.WriteLine(new Game().OpenerSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => new Game().OpenerSelfTest()));   // C1: pins the tuned depth model
             Raylib.CloseWindow();
             return;
         }
@@ -1383,7 +1392,7 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FORCETEST") == "1")
         {
             Raylib.InitWindow(64, 64, "forcetest");   // SetupMission uses tile math
-            Console.WriteLine(new Game().ForceSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => new Game().ForceSelfTest()));   // C1: pins the tuned depth model
             Raylib.CloseWindow();
             return;
         }
@@ -1414,7 +1423,7 @@ public static class Program
         // string composition, no GL context and no mission build.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FORKTEST") == "1")
         {
-            Console.WriteLine(Game.ForkSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => Game.ForkSelfTest()));   // C1: pins the tuned depth model
             return;
         }
         // SIGHTLINE_ROUTETEST=1 : W1 — measure the AUTOPILOT'S ROUTE through the campaign DAG (the
@@ -1509,7 +1518,7 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_ROSTERTEST") == "1")
         {
             Raylib.InitWindow(64, 64, "rostertest");
-            Console.WriteLine(new Game().RosterSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => new Game().RosterSelfTest()));   // C1: pins the tuned depth model
             Raylib.CloseWindow();
             return;
         }
@@ -1527,7 +1536,7 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_PODTEST") == "1")
         {
             Raylib.InitWindow(64, 64, "podtest");
-            Console.WriteLine(new Game().PodSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => new Game().PodSelfTest()));   // C1: pins the tuned depth model
             Raylib.CloseWindow();
             return;
         }
@@ -1536,7 +1545,7 @@ public static class Program
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FUL11PROBE"), out int ful11N) && ful11N > 0)
         {
             Raylib.InitWindow(64, 64, "ful11probe");   // StartMission -> Unit.SyncPos uses tile->px math
-            Console.WriteLine(Game.Ful11ProbeTest(ful11N));
+            Console.WriteLine(Run.OnTunedScale(() => Game.Ful11ProbeTest(ful11N)));   // C1: pins the tuned depth model
             Raylib.CloseWindow();
             return;
         }
@@ -1665,7 +1674,7 @@ public static class Program
             LoadGameFonts();
             Display.Init(false);
             Raylib.SetTargetFPS(0);
-            Console.WriteLine(Game.SaveEdgeSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => Game.SaveEdgeSelfTest()));   // C1: pins the tuned depth model
             Display.Shutdown();
             Renderer.UnloadNoise();
             Raylib.CloseWindow();
@@ -1824,7 +1833,7 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_MODETEST") == "1")
         {
             Raylib.InitWindow(64, 64, "modetest");
-            Console.WriteLine(new Game().ModeSelfTest());
+            Console.WriteLine(Run.OnTunedScale(() => new Game().ModeSelfTest()));   // C1: pins the tuned depth model
             Raylib.CloseWindow();
             return;
         }

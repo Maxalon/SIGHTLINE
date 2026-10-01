@@ -19712,6 +19712,40 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P67. A RUN IS TEN MISSIONS (item C1)
+
+Base `161db25`. The owner: "6 is not enough. Upgrades in between mean 5 opportunities to buy in-run
+upgrades, that's not enough." They chose 10 (acts come later, item G).
+
+- **The run got longer; the difficulty curve did not get taller.** Every number in this game was
+  tuned on depth 1..6. `Run.Pace(m)` walks a 10-mission run along that curve
+  (1,2,2,3,3,4,4,5,5,6), and every SCALING site reads it: the force request, the stat bump, the
+  roster tier, the finale's bump, the procedural plateaus, barrels, the checkpoint cadre's kills,
+  deploy growth, base intel, the morale link and the forecast text. FINALE checks keep the real
+  mission number, so only mission 10 is the finale. `MidBossFloorMission` became `MaxMissions - 1`.
+  More missions means more stops and more income in total, which is the power curve the owner
+  asked for, without a depth-10 force that nobody balanced.
+- **Save format.** It is the map generator's column count, so the three map fingerprints were
+  re-pinned (a deliberate change, per house procedure), and the run save now stamps `RunLength`.
+  A save with no stamp is a 6-mission run and is STASHED, not misread: the same MapSeed now
+  regenerates a different map.
+- **Fourteen gates went red; each was read, none was silenced.** Ten pin the depth model by
+  mission number. They run on the tuned scale through `Run.OnTunedScale`, named at each dispatch.
+  `SIGHTLINE_PACETEST` bridges the two scales: every mission of the ten seats exactly the force its
+  paced depth seats on the six (24 cells across three heats). It is red when the force reads the
+  raw mission number, and red when the save guard is removed. The other four were real:
+  - **VOICETEST:** region names repeated within a run, because the biome deal is an 8-cycle and a
+    10-mission run revisits a biome. Names now step past any already used, which leaves 6-mission
+    runs unchanged.
+  - **FITTEST:** a shop line shrank to 9px, under the 12px floor. That was a latent defect: the new
+    map changed which faction was telegraphed, and SYNDICATE is longer than WARDENS. The line is
+    shorter and the fit floor is now 12.
+  - **ROUTETEST:** the INSTRUMENT, not the hash. It judged the hash walk against the uniform
+    expectation of the *first-branch* walk's path. A double hash moved nothing; against its own
+    branches the hash reads 49.3% vs a fair 47.3%.
+  - **SAVEEDGETEST:** its legacy saves are 6-mission saves, so it runs on the tuned scale, and
+    PACETEST (D) asserts the refusal at 10.
+
 ## P66. STEAL (item B4)
 
 Base `cde9679`. The owner: "stealing a flash drive or PC or a piece of technology that could be
