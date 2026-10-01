@@ -19712,6 +19712,29 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P65. SOLDIERS RETIRE AFTER ONE RUN (item B5)
+
+Base `6b79393`. The owner chose removal of W9 SIGNAL's cross-run veteran reserve.
+
+- **One switch, four seams.** `MetaProg.VeteranReserve` (default false, `SIGHTLINE_VETERANS=1`)
+  gates the draft's recall (`BuildDraftPool` passes no veterans), the run-end enshrine and LIVING
+  LEGENDS' record erasure, the WAR ROOM's VETERANS cell and its two reserve unlocks
+  (`ListedUnlocks`), and the draft's contract row.
+- **Nothing on disk is deleted.** A profile's stored records are simply never read, so the restore
+  arm finds them intact and the change is reversible without data loss.
+- **Two contracts went with it.** MERCENARY CLAUSE is "half-price recalls, never enshrined", which
+  is meaningless without a reserve. LIVING LEGENDS' downside is "a KIA erases their reserve record",
+  so without the reserve it becomes pure upside. Neither is offered; item F redesigns them with the
+  two unlocks (`MetaUnlock` and `Contract` are append-only, so the members stay).
+- **The layout caught a coupling.** The candidate cards derived their width from the CONTRACT row's
+  width. Four cards instead of six shrank that row to 924 px, and three class blurbs ellipsized at
+  110%/120% (CHROMETEST + FITTEST). `DraftRowW` now measures the full six-card composition row;
+  the offered cards centre in it.
+- **Gate.** METATEST gained a B5 leg: a stored record is never recalled or billed, ranked survivors
+  are not enshrined, no reserve unlock or contract is listed, and the RESTORE arm recalls the same
+  record (the control). Every older reserve leg now runs against the restore arm explicitly. Red
+  when the draft gate is removed.
+
 ## P64. ONE MISSION, AND THE WALK OUT IS OPPOSED (item B3)
 
 Base `e4f9254`.

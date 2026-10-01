@@ -345,6 +345,9 @@ public static class Program
         // B3 — the withdrawal trickle (asset missions on a big board). `=0` turns it off; the
         // ESCORT->RESCUE remap stays (that is SIGHTLINE_EXTRACTION's).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WITHDRAWAL") == "0") Game.WithdrawalWaves = false;
+        // B5 — soldiers retire after one run. `=1` restores W9 SIGNAL's cross-run veteran reserve
+        // (draft recall, enshrining, the two reserve unlocks and the two contracts that trade on it).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VETERANS") == "1") MetaProg.VeteranReserve = true;
 
         // P53 — THE FALSIFICATION ARM for P52's rule. `=0` moves SABOTAGE's INTERIOR charge out of
         // the held room and changes nothing else, so the same objective on the same board is

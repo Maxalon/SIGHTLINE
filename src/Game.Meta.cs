@@ -244,10 +244,44 @@ public partial class Game
         // OVERWRITES a real player's save.json. Preserve/restore it exactly like meta.json above.
         string saveSaved = System.IO.File.Exists(SaveGame.SavePathPublic)
             ? System.IO.File.ReadAllText(SaveGame.SavePathPublic) : null;
+        bool vr0 = MetaProg.VeteranReserve;
         try
         {
             // start from a clean meta so the assertions are deterministic
             try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+
+            // (B5) SOLDIERS RETIRE AFTER ONE RUN — the shipped default. A profile that already holds a
+            //      reserve record (an old install) recalls nobody and pays no fee; a run's ranked
+            //      survivors are not enshrined; the WAR ROOM does not list the reserve unlocks; the
+            //      draft does not offer the two contracts that trade on the reserve. The CONTROL is the
+            //      restore arm on the SAME stored record: it must recall, or this leg proves nothing.
+            {
+                MetaProg.VeteranReserve = false;
+                var old = new Unit { Name = "KESTREL", Cls = "ASSAULT", Team = Team.Player, MaxHp = 12, Hp = 12, Aim = 80, Mobility = 8, Kills = 9, Rank = 3, Alive = true, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                SaveGame.EnshrineVeterans(new[] { old });
+                int stored = SaveGame.VeteranCount();
+                if (stored != 1) fails.Add($"b5Setup={stored}");
+                var gd = new Game { NoPersist = false };
+                gd.BeginDraft();
+                if (gd.DraftPool.Exists(u => u.FromReserve)) fails.Add("b5RecalledVeteran");
+                if (gd.DraftRecallCost != 0) fails.Add($"b5RecallFee={gd.DraftRecallCost}");
+                var gr = new Game { NoPersist = false };
+                gr.StartMission(1);
+                foreach (var u in gr.RunState.Squad) if (!u.IsVip) u.Rank = 2;
+                gr.LoseRun("METATEST", "b5 retire leg");
+                if (SaveGame.VeteranCount() != stored || gr.EndReserve != 0) fails.Add($"b5Enshrined={SaveGame.VeteranCount() - stored}");
+                foreach (var u in MetaProg.ListedUnlocks()) if (MetaProg.IsReserveUnlock(u)) fails.Add("b5ReserveUnlockListed:" + u);
+                if (System.Array.IndexOf(Hud.DraftContractCards, Contract.MercenaryClause) >= 0
+                    || System.Array.IndexOf(Hud.DraftContractCards, Contract.LivingLegends) >= 0) fails.Add("b5ReserveContractOffered");
+                MetaProg.VeteranReserve = true;
+                var gc = new Game { NoPersist = false };
+                gc.BeginDraft();
+                if (!gc.DraftPool.Exists(u => u.FromReserve)) fails.Add("b5ControlRecallsNobody");
+                try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+            }
+            // Every leg below exercises W9 SIGNAL's reserve itself, i.e. the RESTORE arm
+            // (SIGHTLINE_VETERANS=1): it is still code that ships behind a flag, so it stays tested.
+            MetaProg.VeteranReserve = true;
 
             // (1) salvage add/spend + refusal
             SaveGame.AddSalvage(100);
@@ -711,6 +745,7 @@ public partial class Game
         catch (Exception e) { return "METATEST: FAIL (exception " + e.Message + ")"; }
         finally
         {
+            MetaProg.VeteranReserve = vr0;
             if (metaSaved != null) { try { System.IO.File.WriteAllText(SaveGame.MetaPathPublic, metaSaved); } catch { } }
             else { try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { } }
             // W9 fix: restore (or remove) save.json exactly as it was before the test ran.
@@ -722,7 +757,8 @@ public partial class Game
               + "recall charged once in ConfirmDraft + broke-confirm refuses; barracks sinks pend until the checkpoint commit "
               + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved; "
               + "a corrupt MaxHeat can never lock the difficulty picker; the WAR ROOM publishes a buy-rect for every unowned unlock at every owned/unowned split, and never paints an unlock body below the 12px floor; "
-              + "P18 THE SECOND AXIS: three heat-gated unlocks appended at the END, gates 2/5/8 with the top ON Heat.Max, BestHeatWon raises-only + migrates off MaxHeat, a locked buy is refused BEFORE the spend, and DEEP RESERVE widens the reserve cap)"
+              + "P18 THE SECOND AXIS: three heat-gated unlocks appended at the END, gates 2/5/8 with the top ON Heat.Max, BestHeatWon raises-only + migrates off MaxHeat, a locked buy is refused BEFORE the spend, and DEEP RESERVE widens the reserve cap; "
+              + "B5: by default soldiers retire - a stored record is never recalled or billed, ranked survivors are not enshrined, the reserve unlocks and contracts are not offered, and the restore arm recalls the same record)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
