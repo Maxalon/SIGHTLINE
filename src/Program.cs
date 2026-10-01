@@ -328,10 +328,17 @@ public static class Program
         if (float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FLATZOOM"),
                 System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fz))
             Game.ShotFlatZoom = fz;
+        // 0d — harness-only: with SIGHTLINE_FLATZOOM, pan the opening view fully to the board's
+        // `bottom` or `top` edge, so a shot can show the edge row lifted out from under the HUD.
+        string fpan = Environment.GetEnvironmentVariable("SIGHTLINE_FLATPAN");
+        Game.ShotFlatPanEdge = fpan == "bottom" ? 1 : fpan == "top" ? -1 : 0;
 
         // P57 — THE DEPTH SPREAD. `=0` restores the far-edge deployment. A no-op on the shipped
         // 18x11 board by construction, so it only matters under SIGHTLINE_BIGMAP.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DEPTHSPREAD") == "0") Mission.DepthSpread = false;
+        // 0d+1 — ENVELOP ON A BIG BOARD. `=0` restores the absolute 18x11 squad table and rim
+        // anchors. A no-op on the shipped board by construction.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ENVELOPCENTRE") == "0") Mission.EnvelopCentre = false;
 
         // P53 — THE FALSIFICATION ARM for P52's rule. `=0` moves SABOTAGE's INTERIOR charge out of
         // the held room and changes nothing else, so the same objective on the same board is

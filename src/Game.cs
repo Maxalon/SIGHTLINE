@@ -2469,7 +2469,12 @@ public partial class Game
             Mission.StampBuildings(Grid, Players, Enemies);
 
         FrameCameraOnSquad();   // P29: a board bigger than the screen must open ON the squad
-        if (ShotFlatZoom > 0f) { CamZoom = MathF.Max(FlatZoomFloor, ShotFlatZoom); _autoCamManual = true; ClampCamPan(); }   // P58 harness
+        if (ShotFlatZoom > 0f)   // P58 harness (+ 0d's edge pan)
+        {
+            CamZoom = MathF.Max(FlatZoomFloor, ShotFlatZoom); _autoCamManual = true;
+            if (ShotFlatPanEdge != 0) CamPan = new Vector2(CamPan.X, ShotFlatPanEdge * 99999f);
+            ClampCamPan();
+        }
         if (Mode == GameMode.Campaign)
         {
             string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
@@ -5439,6 +5444,8 @@ public partial class Game
     /// board zoomed out. -1 = off. Clamped to the real floor, so it cannot show a zoom a player
     /// could not reach.
     public static float ShotFlatZoom = -1f;
+    /// Harness-only (0d): +1 pans that opening view fully to the bottom edge, -1 to the top, 0 = leave it.
+    public static int ShotFlatPanEdge = 0;
 
     /// P32 — I toggles the PROJECTED view. Derived free-letter check at the time of binding
     /// (grep KeyboardKey. over src/) said I, J and Z were the only unclaimed letters.
@@ -5533,16 +5540,41 @@ public partial class Game
     /// The bounds themselves: static and PURE so SIGHTLINE_BOARDTESTS can assert them without
     /// standing up a Game, a window or a mission. A camera rule nothing can check is how the old
     /// "no pan when fully out" line survived long enough to become the bigger board's only blocker.
+    ///
+    /// 0d — THE HUD BANDS. On a board that OVERFLOWS the screen the vertical bounds are solved for
+    /// the band BETWEEN the top bar and the action bar rather than for the whole screen, so the
+    /// first and last rows can be panned out from under the two plates instead of living there.
+    /// At P58's zoom floor that is the difference between "the whole board fits" and "the whole
+    /// board can be READ". It is keyed on the BOARD (`Cfg.BoardOverflows`), not on the zoom, so the
+    /// bounds never jump as the wheel turns; and the shipped 18x11 board fits, so it keeps the
+    /// screen bounds exactly — BOARDSIZETEST (B) still holds it at zero pan at zoom 1, and its
+    /// bottom row stays under the translucent bar as it always has.
     public static Vector2 ClampPan(Vector2 pan, Vector2 bc, float zoom)
     {
         float z = MathF.Max(0.01f, zoom);
+        float top = Cfg.BoardOverflows ? Cfg.HudTopInset : 0f;
+        float bot = Cfg.BoardOverflows ? Cfg.HudBotInset : 0f;
         float loX = Cfg.OriginX - bc.X + bc.X / z;
         float hiX = Cfg.OriginX + Cfg.BoardW - bc.X - (Cfg.ScreenW - bc.X) / z;
-        float loY = Cfg.OriginY - bc.Y + bc.Y / z;
-        float hiY = Cfg.OriginY + Cfg.BoardH - bc.Y - (Cfg.ScreenH - bc.Y) / z;
+        float loY = Cfg.OriginY - bc.Y + (bc.Y - top) / z;
+        float hiY = Cfg.OriginY + Cfg.BoardH - bc.Y - (Cfg.ScreenH - bot - bc.Y) / z;
         return new Vector2(loX <= hiX ? Util.Clamp(pan.X, loX, hiX) : 0f,
                            loY <= hiY ? Util.Clamp(pan.Y, loY, hiY) : 0f);
     }
+
+    /// Auto-cam's zoom: a modest 1.35x so the board edge is still visible.
+    public const float AutoCamZoom = 1.35f;
+
+    /// Where auto-cam wants the pan for a focus tile: centred on it (CamPan is added to
+    /// BoardCenter as the camera Target, so centring TileCenter(focus) means CamPan =
+    /// TileCenter(focus) - BoardCenter), then clamped by THE SAME RULE the manual camera obeys.
+    ///
+    /// 0d: it used to clamp with its own pre-P29 formula, `±Board*0.5*(1 - 1/zoom)` — derived for a
+    /// board that fits the screen. On a board that does not it is the WRONG SHAPE, not merely a
+    /// loose one: on 36x22 it held auto-cam to ±247px of a ±480px range, so a soldier at the map's
+    /// edge could never be followed to the edge. Two clamps for one camera is how that survived.
+    public static Vector2 AutoCamPan(int tx, int ty, Vector2 bc)
+        => ClampPan(Util.TileCenter(tx, ty) - bc, bc, AutoCamZoom);
 
     // Auto-cam: gently lerps CamZoom/CamPan toward the focus unit each frame.
     // Focus = Selected on player turn; the currently-acting enemy on enemy turn.
@@ -5562,24 +5594,11 @@ public partial class Game
 
         if (focus == null || !focus.Alive) return;
 
-        // Target zoom: modest 1.35x so the board edge is still visible.
-        const float TargetZoom = 1.35f;
-        // Target pan: shift so the focus unit's world position is at BoardCenter.
-        // CamPan is added to BoardCenter as the camera Target, so to centre on
-        // TileCenter(focus) we want CamPan = TileCenter(focus) - BoardCenter.
-        var unitPos = Util.TileCenter(focus.X, focus.Y);
-        var boardCenter = BoardCenter;
-        var targetPan = unitPos - boardCenter;
-
-        // Clamp pan so we never show blank space beyond the board.
-        float halfW = Cfg.BoardW * 0.5f * (1f - 1f / TargetZoom);
-        float halfH = Cfg.BoardH * 0.5f * (1f - 1f / TargetZoom);
-        targetPan.X = Util.Clamp(targetPan.X, -halfW, halfW);
-        targetPan.Y = Util.Clamp(targetPan.Y, -halfH, halfH);
+        var targetPan = AutoCamPan(focus.X, focus.Y, BoardCenter);
 
         // Frame-rate-aware lerp (exp decay): ~6 units/s feel — smooth glide.
         float alpha = 1f - MathF.Exp(-dt * 6f);
-        CamZoom = CamZoom + (TargetZoom - CamZoom) * alpha;
+        CamZoom = CamZoom + (AutoCamZoom - CamZoom) * alpha;
         CamPan.X = CamPan.X + (targetPan.X - CamPan.X) * alpha;
         CamPan.Y = CamPan.Y + (targetPan.Y - CamPan.Y) * alpha;
     }

@@ -150,6 +150,83 @@ public partial class Game
                 if (Mission.DepthShift(Mission.DeployFrontal, 1, 18) != 0)
                     fails.Add("(D) DepthShift is non-zero at the reference width");
             }
+
+            // ── (F) 0d+1: ENVELOP IS CENTRED AND RINGED ON A BIG BOARD ───────────────────────
+            //     Its squad table and rim anchors were ABSOLUTE 18x11 coordinates, so on 36x22 the
+            //     "surrounded" squad opened in the north-west quarter with one pod 7 tiles off and
+            //     another 26. Read off the BUILT board, against the flag's off arm.
+            Mission.DepthSpread = true;
+            bool savedEnv = Mission.EnvelopCentre;
+            try
+            {
+                int cellsF = 0;
+                foreach (int seed in new[] { 101, 202, 303 })
+                    foreach (var obj in new[] { Objective.Eliminate, Objective.Defend, Objective.Decapitate })
+                        foreach (int m in new[] { 1, 4, 6 })
+                        {
+                            Mission.EnvelopCentre = true;  var on = Build(18, 11, Mission.DeployEnvelop, true, seed, obj, m);
+                            Mission.EnvelopCentre = false; var off = Build(18, 11, Mission.DeployEnvelop, true, seed, obj, m);
+                            cellsF++;
+                            if (on.board != off.board)
+                                fails.Add($"(F) 18x11 ENVELOP seed {seed} {obj} m{m}: board signature moved under EnvelopCentre");
+                        }
+                detail.Append($"ENVELOP 18x11 byte-identical on {cellsF} cells; ");
+
+                int offLopsided = 0, cellsBig = 0;
+                int Cheb((int x, int y) a, (int x, int y) b) => Math.Max(Math.Abs(a.x - b.x), Math.Abs(a.y - b.y));
+                foreach (var (w, h) in new[] { (36, 22), (48, 30) })
+                    foreach (int seed in new[] { 555, 556, 557 })
+                        foreach (int m in new[] { 1, 4 })
+                        {
+                            Mission.EnvelopCentre = true;  var on = Build(w, h, Mission.DeployEnvelop, true, seed, Objective.Eliminate, m);
+                            Mission.EnvelopCentre = false; var off = Build(w, h, Mission.DeployEnvelop, true, seed, Objective.Eliminate, m);
+                            Mission.EnvelopCentre = true;  var refB = Build(18, 11, Mission.DeployEnvelop, true, seed, Objective.Eliminate, m);
+                            string tag = $"{w}x{h} seed {seed} m{m}";
+                            cellsBig++;
+                            if (Mission.AppliedDeploy != Mission.DeployEnvelop) { fails.Add($"(F) {tag}: the build did not deploy ENVELOP — the leg tested nothing"); continue; }
+
+                            (double x, double y) Cen(List<(int x, int y)> l) => (l.Average(p => p.x), l.Average(p => p.y));
+                            var c = Cen(on.squad); var c0 = Cen(off.squad);
+                            // (F1) the squad opens at the board's centre, as it does on 18x11
+                            var rc = Cen(refB.squad);
+                            double wantX = rc.x + (w - Mission.RefW) / 2, wantY = rc.y + (h - Mission.RefH) / 2;
+                            if (Math.Abs(c.x - wantX) > 0.01 || Math.Abs(c.y - wantY) > 0.01)
+                                fails.Add($"(F1) {tag}: squad centroid ({c.x:F1},{c.y:F1}), want the 18x11 seat carried to the centre ({wantX:F1},{wantY:F1})");
+                            // (F2) NOT LOPSIDED: the defect was a squad in a CORNER of a ring, so one
+                            //      rim was most of the board away (36x22: 27 tiles). From the centre no
+                            //      hostile can be further than half the board's longer side.
+                            var cc = ((int)Math.Round(c.x), (int)Math.Round(c.y));
+                            var c0i = ((int)Math.Round(c0.x), (int)Math.Round(c0.y));
+                            int far = on.foes.Max(f => Cheb(f, cc)), farOff = off.foes.Max(f => Cheb(f, c0i));
+                            int halfSide = (Math.Max(w, h) + 1) / 2;
+                            if (far > halfSide)
+                                fails.Add($"(F2) {tag}: farthest hostile {far} tiles from the squad, more than half the board ({halfSide}) — lopsided (off arm {farOff})");
+                            if (farOff > halfSide) offLopsided++;
+                            // (F3) the standoff: no hostile nearer than the shipped board puts one
+                            var ci = ((int)Math.Round(c.x), (int)Math.Round(c.y));
+                            var rci = ((int)Math.Round(rc.x), (int)Math.Round(rc.y));
+                            int near = on.foes.Min(f => Cheb(f, ci)), refNear = refB.foes.Min(f => Cheb(f, rci));
+                            if (near < refNear - 1)
+                                fails.Add($"(F3) {tag}: nearest hostile {near} tiles from the squad centre against the reference's {refNear} — an ambush");
+                            // (F5) A RING WITH DEPTH: centring the squad alone would leave every pod on
+                            //      the far rim (36x22: all of them 15-17 tiles out). The span between
+                            //      the nearest and farthest hostile must grow past the reference's by
+                            //      half the smaller extra dimension, as P57's leg (B) asks of the others.
+                            int refFar = refB.foes.Max(f => Cheb(f, rci));
+                            int needSpan = (refFar - refNear) + Math.Min(w - Mission.RefW, h - Mission.RefH) / 2;
+                            if (far - near < needSpan)
+                                fails.Add($"(F5) {tag}: hostiles {near}-{far} tiles out, a depth span of {far - near}; want at least {needSpan} (reference {refNear}-{refFar})");
+                            // (F4) the same bodies
+                            if (on.nFoes != off.nFoes) fails.Add($"(F4) {tag}: {off.nFoes} hostiles became {on.nFoes}");
+                            if (seed == 555)
+                                detail.Append($"ENVELOP {w}x{h} m{m} squad ({c0.x:F0},{c0.y:F0})->({c.x:F0},{c.y:F0}) foe dist {off.foes.Min(f => Cheb(f, ((int)c0.x, (int)c0.y)))}-{off.foes.Max(f => Cheb(f, ((int)c0.x, (int)c0.y)))} -> {near}-{on.foes.Max(f => Cheb(f, ci))} (ref {refNear}); ");
+                        }
+                detail.Append($"ENVELOP off arm lopsided on {offLopsided}/{cellsBig} big-board cells; ");
+                if (offLopsided == 0) fails.Add("(F2) the off arm was never lopsided — the leg cannot tell the fix from the defect");
+                Mission.EnvelopCentre = false;
+                if (Mission.EnvelopOffset(36, 22) != (0, 0)) fails.Add("(F) the flag's off arm still carries the ENVELOP seat");
+            }
+            finally { Mission.EnvelopCentre = savedEnv; }
         }
         catch (Exception e) { fails.Add($"threw: {e.Message}"); }
         finally
@@ -163,7 +240,9 @@ public partial class Game
               + "across all four deployment shapes, three seeds, two objectives and two missions; on 36x22 and 48x30 the "
               + "SAME bodies occupy a much deeper span of the board; no hostile opens closer to the squad than the reference "
               + "allows; across a 48-build sweep AIMED at the collision relocate (and failing if it exercised none), every body of a shifted pod "
-              + "stays at its pod's depth; ENVELOP is exempt and the flag is an exact restore) [" + detail + "]"
+              + "stays at its pod's depth; ENVELOP is exempt from the spread and the flag is an exact restore; 0d+1: ENVELOP "
+              + "is byte-identical on 18x11 under its own flag, and on 36x22 and 48x30 its squad opens at the board's centre "
+              + "no hostile further than half the board (the off arm is lopsided, and the leg fails if it never is), none nearer than the shipped board puts one, the ring has DEPTH (its span grows past the reference's), the same bodies) [" + detail + "]"
             : "DEPTHSPREADTEST: FAIL (" + string.Join(" | ", fails.Distinct()) + ") [" + detail + "]";
     }
 }

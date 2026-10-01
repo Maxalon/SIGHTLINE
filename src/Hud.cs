@@ -833,7 +833,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                    && g.RunState.Mission >= Run.MaxMissions;
         Color plateTop = finale ? Pal.RGBA(30, 9, 13, 235) : Pal.RGBA(8, 12, 17, 235);
         Color plateBot = finale ? Pal.RGBA(30, 9, 13, 0)   : Pal.RGBA(8, 12, 17, 0);
-        Raylib.DrawRectangleGradientV(0, 0, Cfg.ScreenW, 64, plateTop, plateBot);
+        Raylib.DrawRectangleGradientV(0, 0, Cfg.ScreenW, Cfg.HudTopInset, plateTop, plateBot);
         if (finale) Raylib.DrawRectangle(0, 0, Cfg.ScreenW, 2, Raylib.Fade(Pal.Foe, 0.45f));
         const int cy = 26;   // shared vertical center for the whole bar
         // FUL-12: pill hover anchors are re-published per frame; a pill not drawn this frame must

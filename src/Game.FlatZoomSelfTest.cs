@@ -15,6 +15,8 @@ namespace Sightline;
 /// tile centres to the screen through the live `ViewCamera` and picking them back through
 /// `PickTile`, the one picking seam every click goes through; and (E) the zoom limits the input
 /// handler applies actually reach the floor (the old anti-drift snap would have pinned it at 1).
+/// 0d adds (F) the edge rows can be panned out from under the HUD at the floor and (G) auto-cam
+/// follows a soldier into every corner — it had its own pre-P29 clamp, half the legal range.
 public partial class Game
 {
     public static string FlatZoomSelfTest()
@@ -70,6 +72,44 @@ public partial class Game
                 if (MathF.Abs(g.CamZoom - (floor + 1f) / 2f) > 1e-5f)
                     fails.Add($"(E) {w}x{h}: a zoom between the floor and 1 was not kept ({g.CamZoom}) — the anti-drift snap is eating it");
 
+                // ── (F) 0d: at the floor the edge rows can be panned OUT FROM UNDER the HUD ──
+                //     The board fits the SCREEN at the floor, but the top bar and the action bar sit
+                //     on its first and last rows; the clamp must let the view travel exactly far
+                //     enough to put each edge on the band's edge — and pick correctly there.
+                g.CamZoom = floor;
+                foreach (var (dir, want, edgeName) in new[] { (99999f, Cfg.ScreenH - Cfg.HudBotInset, "bottom"),
+                                                              (-99999f, Cfg.HudTopInset, "top") })
+                {
+                    g.CamPan = new Vector2(0f, dir); g.ClampCamPan();
+                    var camF = g.ViewCamera(false);
+                    float edgeY = dir > 0
+                        ? Raylib.GetWorldToScreen2D(new Vector2(Cfg.OriginX, Cfg.OriginY + Cfg.BoardH), camF).Y
+                        : Raylib.GetWorldToScreen2D(new Vector2(Cfg.OriginX, Cfg.OriginY), camF).Y;
+                    if (MathF.Abs(edgeY - want) > 0.75f)
+                        fails.Add($"(F) {w}x{h}: panned fully {edgeName}, the board's {edgeName} edge lands at y {edgeY:F1}, not on the HUD band's edge {want}");
+                    int row = dir > 0 ? h - 1 : 0, badF = 0;
+                    for (int x = 0; x < w; x += Math.Max(1, w / 9))
+                    {
+                        var sp = Raylib.GetWorldToScreen2D(Util.TileCenter(x, row), camF);
+                        if (!g.PickTile(sp, out int px, out int py) || px != x || py != row) badF++;
+                    }
+                    if (badF > 0) fails.Add($"(F) {w}x{h}: {badF} {edgeName}-row tiles did not pick back to themselves panned to the band");
+                }
+                g.CamPan = Vector2.Zero; g.ClampCamPan();
+
+                // ── (G) 0d: auto-cam can FOLLOW a soldier to every corner of a big board ──────
+                //     It used its own pre-P29 clamp (±Board*0.5*(1-1/zoom)), which on 36x22 held it
+                //     to about half the legal range — the corner soldier was framed off-screen.
+                foreach (var (cx, cy) in new[] { (0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1) })
+                {
+                    g.CamZoom = AutoCamZoom; g.CamPan = AutoCamPan(cx, cy, g.BoardCenter);
+                    var sp = Raylib.GetWorldToScreen2D(Util.TileCenter(cx, cy), g.ViewCamera(false));
+                    float half = Cfg.Tile * AutoCamZoom / 2f;
+                    bool inBand = sp.X - half >= -0.5f && sp.X + half <= Cfg.ScreenW + 0.5f
+                               && sp.Y - half >= Cfg.HudTopInset - 0.5f && sp.Y + half <= Cfg.ScreenH - Cfg.HudBotInset + 0.5f;
+                    if (!inBand) fails.Add($"(G) {w}x{h}: auto-cam on corner ({cx},{cy}) frames its tile at ({sp.X:F0},{sp.Y:F0}), not inside the band between the bars");
+                }
+
                 detail.Append($"{w}x{h}@{Cfg.Tile} floor {floor:F3} fits, picks {tried - bad}/{tried}; ");
             }
 
@@ -80,6 +120,18 @@ public partial class Game
             if (g0.CamZoom != 1f) fails.Add($"(A) 18x11: the anti-drift snap no longer snaps 1.0004 to 1 ({g0.CamZoom})");
             g0.CamZoom = 0.6f; g0.ApplyZoomLimits();
             if (g0.CamZoom != 1f) fails.Add($"(A) 18x11: zoom 0.6 settled at {g0.CamZoom}, must be held at 1 on a board that fits");
+            // (A, again) 0d is a big-board change: the board that FITS keeps the screen bounds, so
+            // it does not pan at zoom 1 and its bottom row stays where it has always been.
+            g0.CamZoom = 1f; g0.CamPan = new Vector2(0f, 99999f); g0.ClampCamPan();
+            if (g0.CamPan != Vector2.Zero) fails.Add($"(A) 18x11: pans to {g0.CamPan} at zoom 1 — the HUD bands leaked onto a board that fits");
+            // and auto-cam on it still frames every corner tile on screen
+            foreach (var (cx, cy) in new[] { (0, 0), (17, 0), (0, 10), (17, 10) })
+            {
+                g0.CamZoom = AutoCamZoom; g0.CamPan = AutoCamPan(cx, cy, g0.BoardCenter);
+                var sp = Raylib.GetWorldToScreen2D(Util.TileCenter(cx, cy), g0.ViewCamera(false));
+                if (sp.X < 0 || sp.X > Cfg.ScreenW || sp.Y < 0 || sp.Y > Cfg.ScreenH)
+                    fails.Add($"(A) 18x11: auto-cam on corner ({cx},{cy}) puts its centre off screen at ({sp.X:F0},{sp.Y:F0})");
+            }
         }
         catch (Exception e) { fails.Add($"threw: {e.Message}"); }
         finally { View3D.Enabled = saved3d; Cfg.SetBoard(savedW, savedH, savedTile); }
@@ -88,7 +140,10 @@ public partial class Game
             ? "FLATZOOMTEST: PASS (the flat zoom floor is exactly 1 on the shipped 18x11 board and the anti-drift snap is "
               + "unchanged there; on 36x22, 48x30 and 72x44 at the tile a player actually gets, the floor is below 1, the "
               + "whole board fits the screen at it, sits centred, every probed tile centre picks back to itself through "
-              + "PickTile, and the input handler's limits reach the floor and keep zooms between it and 1) [" + detail + "]"
+              + "PickTile, the input handler's limits reach the floor and keep zooms between it and 1; 0d: at the floor the "
+              + "view pans exactly far enough to lift the bottom row above the action bar and drop the top row below the top "
+              + "bar, picking there too, auto-cam frames all four corner tiles inside that band, and 18x11 still does not pan "
+              + "at zoom 1) [" + detail + "]"
             : "FLATZOOMTEST: FAIL (" + string.Join(" | ", fails.Distinct()) + ") [" + detail + "]";
     }
 }
