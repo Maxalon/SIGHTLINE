@@ -36,8 +36,13 @@ block re-orders it and adds to it.
             top-right block (far from a west-deployed squad by geometry, not by rule), and a big-board
             EVAC still wins 8/8 — nothing opposes the walk until B3's reinforcements. Skirmish/daily
             on a big board keep the old rule (`CheckSkirmish` is untouched).
-      - [ ] **B2. HACK / SABOTAGE:** the evac spawns when the task is done, and the mission ALSO ends
-            when every hostile is dead. No reinforcements on these two (sneak or clear, both real).
+      - [x] **B2. HACK / SABOTAGE — P63.** On a big board the evac (a 2x4 block on the east edge, in
+            the corner farther from the objective) is reserved at setup so Build keeps it clear,
+            HIDDEN until the task is done, then opened (`Game.PendingEvac`/`EvacOpen`) and B1's
+            rules apply. A cleared field wins outright, task or no task. The pressure clock fields
+            no reinforcements there (`ClockMayReinforce`). `SIGHTLINE_EXTRACTIONTEST` legs (G)-(J).
+            **Indication, not a result:** a 4+4-campaign batch at unpinned heat read HACK 62.5% /
+            SABOTAGE 50% campaign wins where P59 read 100%. n=8; measure before quoting.
       - [ ] **B3. RESCUE and ESCORT converge:** the asset is REACHED mid-board, never brought. Evac
             required, with the withdrawal opposed (§6.5: reinforcements 1-2 at a time from the
             extraction's half of the board).

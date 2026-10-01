@@ -19712,6 +19712,29 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P63. HACK AND SABOTAGE EXTRACT (item B2)
+
+Base `12ee26c`. The owner: HACK and SABOTAGE "spawn an evac after the objective is done, but also
+end when all enemies are killed (no respawn mechanic, giving the option between sneaky or guns
+blazing)."
+
+- **The evac is reserved at SETUP, not conjured at completion.** It is added to `EvacZone` before
+  `Mission.Build`, so Build's connectivity net and seating treat it as reserved and keep it clear.
+  Right after Build it moves to `PendingEvac` and `EvacZone` is emptied. Spawning it mid-mission
+  would have meant rewriting terrain under units, or a zone that could open on a wall. Placement:
+  the east edge, in the corner farther from the objective's row, with zero RNG draws.
+  `EXTRACTIONTEST` (G) asserts every reserved tile is floor and the block is at least W/3 from the
+  terminal (it measured 15 on 36x22).
+- **One hook, three outcomes.** In `CheckExtractionEnd`: a cleared field wins at any time; before
+  the task is done nothing else ends the mission; once it is done the evac opens and B1's rules run.
+  The old `HackProgress >= HackRequired → EnterBarracks` branch is never reached on a big board.
+- **No respawns.** `ClockMayReinforce` is false under `TaskExtractRules`. The clock's AIM arm is
+  untouched, so camping is still punished; it just never fields bodies.
+- **Autopilot.** HACK/SABOTAGE route through `SmartEvac` once the evac opens. Batch on 36x22, 4+4
+  campaigns each: HACK 35 hacks / 34 boards / 13 calls, SABOTAGE 60 plants / 35 boards / 10 calls.
+  Campaign wins 62.5% / 50% against P59's 100%. **n=8 at unpinned heat. Not a result.**
+- Red three ways by sabotage: no opening, no guns-blazing win, respawns back on.
+
 ## P62. BOARD AND CALL EVAC (item B1 of the 2026-10-01 owner direction)
 
 Base `71132b9`. The owner's rule, verbatim in `docs/DESIGN.md` §6.6: soldiers board one by one, the

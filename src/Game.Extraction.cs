@@ -36,13 +36,66 @@ public partial class Game
     public readonly List<Unit> Aboard = new();
 
     static bool ExtractObjective(Objective o) => o == Objective.Evac || o == Objective.Escort || o == Objective.Rescue;
+    static bool TaskObjective(Objective o) => o == Objective.Hack || o == Objective.Sabotage;
 
-    /// The extraction rules are in force for THIS mission.
     /// Harness-only: JUICETEST stages every verb on an 18x11 scene, where the rules are never live.
     public static bool ExtractionForceForTest;
 
-    public bool ExtractionLive => ExtractionModel && (BigBoard || ExtractionForceForTest) && Mode == GameMode.Campaign
-                                  && ExtractObjective(Objective) && EvacZone.Count > 0;
+    bool ExtractionArena => ExtractionModel && (BigBoard || ExtractionForceForTest) && Mode == GameMode.Campaign;
+
+    /// B2 — HACK / SABOTAGE on a big board: the evac opens when the task is done, the mission ALSO
+    /// ends when every hostile is dead, and the pressure clock fields no reinforcements.
+    public bool TaskExtractRules => ExtractionArena && TaskObjective(Objective);
+
+    /// B2: the extraction a task mission will open, reserved at setup so Build keeps it clear, and
+    /// hidden until the task is done.
+    public readonly HashSet<(int x, int y)> PendingEvac = new();
+    public bool EvacOpen;
+
+    bool TaskDone => Objective == Objective.Hack ? HackProgress >= HackRequired
+                   : Objective == Objective.Sabotage && SabotageSites.Count > 0 && SabotageBlown.Count >= SabotageSites.Count;
+
+    /// The extraction rules are in force for THIS mission.
+    public bool ExtractionLive => ExtractionArena && EvacZone.Count > 0
+                                  && (ExtractObjective(Objective) || (TaskObjective(Objective) && EvacOpen));
+
+    /// B2: the 2x4 evac block a task mission will open — on the far (east) edge, in whichever corner
+    /// is farther from the objective, so the withdrawal is a real walk. Zero RNG draws.
+    void ReserveTaskEvac()
+    {
+        int sy = Objective == Objective.Sabotage && SabotageSites.Count > 0
+            ? (int)Math.Round(SabotageSites.Average(t => t.y))
+            : Terminal.y;
+        bool bottom = sy < Grid.H / 2;          // objective in the top half -> extract bottom-right
+        for (int k = 0; k < 4; k++)
+        {
+            int ey = bottom ? Grid.H - 1 - k : k;
+            EvacZone.Add((Grid.W - 2, ey));
+            EvacZone.Add((Grid.W - 1, ey));
+        }
+    }
+
+    /// Called right after Build: the reserved block goes into hiding.
+    void StashTaskEvac()
+    {
+        PendingEvac.Clear();
+        foreach (var t in EvacZone) PendingEvac.Add(t);
+        EvacZone.Clear();
+        EvacOpen = false;
+    }
+
+    void OpenTaskEvac()
+    {
+        foreach (var t in PendingEvac) EvacZone.Add(t);
+        EvacOpen = true;
+        ShowBanner(Objective == Objective.Hack ? "DATA SECURED - GET TO THE EVAC" : "CHARGES SET - GET TO THE EVAC",
+                   true, Audio.CueFor(Audio.GameEvent.Objective));
+        BannerSub = "board at the extraction zone - or clear the field";
+        var zc = Vector2.Zero;
+        foreach (var t in EvacZone) zc += Util.TileCenter(t.x, t.y);
+        zc /= Math.Max(1, EvacZone.Count);
+        Fx.PopText(zc + new Vector2(0, -30), "EVAC", Pal.Good, 24f);
+    }
 
     bool AssetMission => Objective == Objective.Escort || Objective == Objective.Rescue;
 
@@ -124,6 +177,17 @@ public partial class Game
     /// nothing may end it yet); false hands control back to the normal checks (a wipe, a lost asset).
     bool CheckExtractionEnd(List<Unit> alivePlayers)
     {
+        if (TaskExtractRules)
+        {
+            if (alivePlayers.Count == 0 && Aboard.Count == 0) return false;          // a true wipe
+            // GUNS BLAZING: a cleared field ends a task mission whether or not the task got done
+            if (AliveEnemies().Count == 0) { FinishExtraction(); return true; }
+            if (!EvacOpen)
+            {
+                if (TaskDone && PendingEvac.Count > 0) OpenTaskEvac();
+                else return true;               // the task is the only way forward; nothing ends yet
+            }
+        }
         if (!ExtractionLive) return false;
         // a dead asset that never got out is lost exactly as before — let the objective branch say so
         if (AssetMission && (Vip == null || (!Vip.Alive && !Aboard.Contains(Vip)))) return false;

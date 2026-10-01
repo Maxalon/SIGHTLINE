@@ -576,7 +576,8 @@ public partial class Game
 
     /// True when the anti-turtle clock's REINFORCEMENT arm may fire this mission. The aim arm is
     /// never gated by this — see UpdatePressure.
-    bool ClockMayReinforce => ClockWavesOnEliminate || Objective != Objective.Eliminate;
+    bool ClockMayReinforce => (ClockWavesOnEliminate || Objective != Objective.Eliminate)
+                              && !TaskExtractRules;   // B2: no respawns on a big-board HACK/SABOTAGE
 
     // The clock only runs on objectives where camping is the exploit. Defend is already
     // wave-based; Evac/Escort/Rescue are movement-pressured; Sabotage already makes you move
@@ -2114,6 +2115,7 @@ public partial class Game
         if (Mode == GameMode.Training) Objective = Objective.Eliminate;
         EvacZone.Clear();
         Aboard.Clear(); LeftBehindLastMission = 0;   // B1: nobody is aboard at the start of a mission
+        PendingEvac.Clear(); EvacOpen = false;        // B2
         BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;   // forward evac beacon is fresh each mission
         HackProgress = 0;
         SabotageSites.Clear();
@@ -2172,6 +2174,9 @@ public partial class Game
                 SabotageSites.Add((Grid.W / 2 + 4, my + 2));
             }
         }
+        // B2: a big-board HACK/SABOTAGE reserves its (hidden) evac now, so Build keeps it clear
+        bool taskEvac = TaskExtractRules;
+        if (taskEvac) ReserveTaskEvac();
         // P55 — THE READ IS HOISTED, AND THE HOIST IS THE STRUCTURAL HALF OF THE FIX.
         // This was declared SIXTEEN LINES BELOW, under the comment that begins "Heat folds into the
         // SAME difficulty params...". The two protected-asset branches directly beneath therefore
@@ -2323,6 +2328,7 @@ public partial class Game
                       // opener is untouched by construction. Every other Build caller passes 0.
                       heatStat,
                       plan);   // P26: the arena's own sites + spawns, already validated
+        if (taskEvac) StashTaskEvac();   // B2: the reserved block hides until the task is done
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
