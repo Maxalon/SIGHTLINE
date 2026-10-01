@@ -490,7 +490,8 @@ public partial class Game
     // (a non-floor planter refuses gracefully, never crashes).
     public bool HasBeaconAction => (Objective == Objective.Evac || Objective == Objective.Escort
                                     || (Objective == Objective.Rescue && !CaptiveLocked))
-                                   && Mode != GameMode.Endless;
+                                   && Mode != GameMode.Endless
+                                   && !ExtractionLive;   // B3: a forward beacon would shortcut the far exit
     public bool CanBeacon(Unit u)
         => HasBeaconAction && !BeaconPlanted && u != null && u.Team == Team.Player && !u.IsVip
            && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y))
@@ -577,7 +578,8 @@ public partial class Game
     /// True when the anti-turtle clock's REINFORCEMENT arm may fire this mission. The aim arm is
     /// never gated by this — see UpdatePressure.
     bool ClockMayReinforce => (ClockWavesOnEliminate || Objective != Objective.Eliminate)
-                              && !TaskExtractRules;   // B2: no respawns on a big-board HACK/SABOTAGE
+                              && !TaskExtractRules    // B2: no respawns on a big-board HACK/SABOTAGE
+                              && !(ExtractionLive && AssetMission && WithdrawalWaves);   // B3: the withdrawal trickle replaces it
 
     // The clock only runs on objectives where camping is the exploit. Defend is already
     // wave-based; Evac/Escort/Rescue are movement-pressured; Sabotage already makes you move
@@ -2113,8 +2115,11 @@ public partial class Game
         // T1: the TRAINING OP is a fixed kill-the-targets drill — force Eliminate so every
         // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
         if (Mode == GameMode.Training) Objective = Objective.Eliminate;
+        // B3: on a big board ESCORT and RESCUE are one mission — the asset is reached, not brought.
+        if (EscortIsRescue && Objective == Objective.Escort) Objective = Objective.Rescue;
         EvacZone.Clear();
         Aboard.Clear(); LeftBehindLastMission = 0;   // B1: nobody is aboard at the start of a mission
+        WithdrawalSpawned = 0;                        // B3
         PendingEvac.Clear(); EvacOpen = false;        // B2
         BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;   // forward evac beacon is fresh each mission
         HackProgress = 0;
@@ -7247,6 +7252,7 @@ public partial class Game
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         ShowBanner("PLAYER TURN", false);
         MaybeWaveTelegraph();
+        MaybeWithdrawalTrickle();   // B3: the withdrawal is opposed once the asset is reached
     }
 
     /// FUL-4: DEFEND wave-edge telegraph, ONE PLAYER TURN ahead of the wave acting — this turn

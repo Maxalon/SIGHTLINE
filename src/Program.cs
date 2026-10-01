@@ -342,6 +342,9 @@ public static class Program
         // B1 — THE EXTRACTION MODEL on a big board (board one by one, CALL EVAC). `=0` restores the
         // pre-B1 end conditions. A no-op on 18x11 by construction.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EXTRACTION") == "0") Game.ExtractionModel = false;
+        // B3 — the withdrawal trickle (asset missions on a big board). `=0` turns it off; the
+        // ESCORT->RESCUE remap stays (that is SIGHTLINE_EXTRACTION's).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_WITHDRAWAL") == "0") Game.WithdrawalWaves = false;
 
         // P53 — THE FALSIFICATION ARM for P52's rule. `=0` moves SABOTAGE's INTERIOR charge out of
         // the held room and changes nothing else, so the same objective on the same board is

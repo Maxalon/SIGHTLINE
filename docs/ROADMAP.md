@@ -43,9 +43,14 @@ block re-orders it and adds to it.
             no reinforcements there (`ClockMayReinforce`). `SIGHTLINE_EXTRACTIONTEST` legs (G)-(J).
             **Indication, not a result:** a 4+4-campaign batch at unpinned heat read HACK 62.5% /
             SABOTAGE 50% campaign wins where P59 read 100%. n=8; measure before quoting.
-      - [ ] **B3. RESCUE and ESCORT converge:** the asset is REACHED mid-board, never brought. Evac
-            required, with the withdrawal opposed (§6.5: reinforcements 1-2 at a time from the
-            extraction's half of the board).
+      - [x] **B3. RESCUE and ESCORT converge; the withdrawal is opposed — P64.** On a big board an
+            ESCORT node plays and reads as RESCUE (`Game.EscortIsRescue`): the asset waits mid-board
+            to be reached. Once it is, each player turn brings 1 hostile (2 from heat 4) onto the board
+            EDGE of the extraction's half, never within 6 tiles of the exit, up to `4 + heat/2` a
+            mission (`Game.WithdrawalCap`). The pressure clock's waves and the forward BEACON are off
+            there. `SIGHTLINE_WITHDRAWAL=0` turns the trickle off. **Measured, forced RESCUE on 36x22, two
+            slot sets × 16 campaigns per arm, paired: trickle ON 9/32 (28%), OFF 27/32 (84%).** That is a
+            LEVEL change and it has not been tuned; the first cut, which spawned ON the exit, read 0/8.
       - [ ] **B4. STEAL — a new objective** (appended to `Objective`): pick up a carryable object,
             PASS it to an adjacent soldier, get it out through the extraction.
       - [ ] **B5. REMOVE THE VETERAN RESERVE.** Owner decision. Recall gone from the draft, stored

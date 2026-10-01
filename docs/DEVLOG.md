@@ -19712,6 +19712,31 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P64. ONE MISSION, AND THE WALK OUT IS OPPOSED (item B3)
+
+Base `e4f9254`.
+
+- **ESCORT is RESCUE on a big board.** The owner asked what the difference was, and under §6.5's
+  fiction check there is none once the asset is reached rather than brought. `SetupMission` remaps
+  the objective right after the card is read, and `Codex.ObjectiveName`/`ObjectiveDesc` show the
+  remapped name, so a node never promises one thing and plays another. One line, and every Rescue
+  path applies: seating, the cage, freeing, the leash, the soft-lock. 18x11 keeps ESCORT as it was.
+- **The withdrawal.** Once the asset is free, each player turn brings 1 hostile (2 from heat 4),
+  alerted, up to `4 + heat/2` a mission. The cap grows with HEAT, not with the board (§6.5).
+  The pressure clock's reinforcement arm is off there (no double-dipping), and so is the forward
+  BEACON, which existed to "collapse the long empty walk": exactly the walk this item exists to
+  create.
+- **Placement was the finding.** The first cut reused `SpawnReinforcements` with a row filter, so
+  arrivals came on the east edge in the zone's own half. Because the zone is in the east corner,
+  that put them ON the exit, and a 4+4 batch read 0/8 against 7/8 without the trickle. They now land
+  on the board's PERIMETER in the extraction's half (by the long axis), never within
+  `WithdrawalStandoff` = 6 of the zone. Paired, forced RESCUE, 36x22, two slot sets × 16: **ON 9/32
+  (28%), OFF 27/32 (84%).** That is a large LEVEL move and it is published, not tuned: the
+  instrument is forced and big, so it may not be read against any band, and the right level is a
+  measured question for C's new baseline.
+- **Gate:** EXTRACTIONTEST (K)-(N). (L) now asserts perimeter, half, standoff and the exact cap.
+  Red twice (remap removed; trickle while caged).
+
 ## P63. HACK AND SABOTAGE EXTRACT (item B2)
 
 Base `12ee26c`. The owner: HACK and SABOTAGE "spawn an evac after the objective is done, but also

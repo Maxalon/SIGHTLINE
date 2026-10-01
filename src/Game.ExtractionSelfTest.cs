@@ -20,6 +20,7 @@ namespace Sightline;
 /// (F) `ExtractionModel = false` restores the pre-B1 rule on the same big board.
 /// (G)-(J) B2: HACK/SABOTAGE hide their evac until the task is done, a cleared field wins, no
 ///     respawns on a big board, and 18x11 still ends on the task.
+/// (K)-(N) B3: ESCORT is RESCUE on a big board, and the withdrawal is opposed once the asset is reached.
 ///
 /// WHAT IT CANNOT SEE: whether the withdrawal is TENSE. That needs B3's reinforcements and a
 /// measured big-board round.
@@ -30,7 +31,7 @@ public partial class Game
         var fails = new List<string>();
         var detail = new System.Text.StringBuilder();
         int w0 = Cfg.GridW, h0 = Cfg.GridH, t0 = Cfg.Tile;
-        bool m0 = ExtractionModel;
+        bool m0 = ExtractionModel, wv0 = WithdrawalWaves;
 
         Game Stage(int w, int h, Objective obj, int seed = 4242)
         {
@@ -174,6 +175,65 @@ public partial class Game
                 if (g.Phase == Phase.PlayerTurn) fails.Add("(J) 18x11 HACK no longer ends when the hack completes");
             }
 
+            // ── (K) B3: a big-board ESCORT is a RESCUE — the asset is reached, not brought ─────
+            {
+                var g = Stage(36, 22, Objective.Escort, 1001);
+                if (g.Objective != Objective.Rescue) fails.Add($"(K) 36x22 ESCORT staged as {g.Objective}, want RESCUE");
+                if (g.Vip == null || !g.CaptiveLocked) fails.Add("(K) the asset is not waiting mid-board to be reached");
+                else
+                {
+                    int toSquad = Soldiers(g).Min(p => Util.ChebyDist(p.X, p.Y, g.Vip.X, g.Vip.Y));
+                    if (toSquad < 6) fails.Add($"(K) the asset starts {toSquad} tiles from the squad — it is being brought, not reached");
+                    detail.Append($"asset {toSquad} tiles out; ");
+                }
+                if (Codex.ObjectiveName(Objective.Escort) != "RESCUE") fails.Add($"(K) a big-board ESCORT reads '{Codex.ObjectiveName(Objective.Escort)}'");
+                var g0 = Stage(18, 11, Objective.Escort, 1001);
+                if (g0.Objective != Objective.Escort) fails.Add("(K) 18x11 ESCORT was remapped");
+                if (Codex.ObjectiveName(Objective.Escort) != "ESCORT") fails.Add("(K) 18x11 ESCORT no longer reads ESCORT");
+            }
+
+            // ── (L) B3: the withdrawal — nothing while caged, then 1-2 a turn on the extraction side ─
+            foreach (int heat in new[] { 0, 4 })
+            {
+                var g = Stage(36, 22, Objective.Rescue, 1100 + heat);
+                g._run.HeatLevel = heat;
+                int before = g.Enemies.Count;
+                g.MaybeWithdrawalTrickle();
+                if (g.Enemies.Count != before) fails.Add($"(L) h{heat}: hostiles arrived while the asset was still caged");
+                g.CaptiveLocked = false;
+                g.MaybeWithdrawalTrickle();
+                var fresh = g.Enemies.Skip(before).ToList();
+                int want = heat >= 4 ? 2 : 1;
+                if (fresh.Count != want) fails.Add($"(L) h{heat}: {fresh.Count} hostiles arrived once the asset was reached, want {want}");
+                bool east = g.EvacZone.Average(t => t.x) >= g.Grid.W / 2.0;
+                foreach (var e in fresh)
+                {
+                    bool rim = e.X == 0 || e.Y == 0 || e.X == g.Grid.W - 1 || e.Y == g.Grid.H - 1;
+                    if (!rim) fails.Add($"(L) h{heat}: a withdrawal hostile landed off the board edge at ({e.X},{e.Y})");
+                    if (east ? e.X < g.Grid.W / 2 : e.X >= g.Grid.W / 2) fails.Add($"(L) h{heat}: a withdrawal hostile landed in the far half at x {e.X}");
+                    int dz = g.EvacZone.Min(t => Util.ChebyDist(t.x, t.y, e.X, e.Y));
+                    if (dz < WithdrawalStandoff) fails.Add($"(L) h{heat}: a withdrawal hostile landed {dz} tiles from the exit — the exit is not a spawn point");
+                }
+                // the ceiling: keep calling until it stops, and it must stop exactly at the cap
+                for (int k = 0; k < 20; k++) g.MaybeWithdrawalTrickle();
+                if (g.WithdrawalSpawned != g.WithdrawalCap) fails.Add($"(L) h{heat}: {g.WithdrawalSpawned} withdrawal arrivals, the cap is {g.WithdrawalCap}");
+                // ── (M) the clock does not double up, and the beacon cannot shortcut the exit ─────
+                if (g.ClockMayReinforce) fails.Add("(M) the pressure clock may still reinforce a big-board RESCUE");
+                if (g.HasBeaconAction) fails.Add("(M) the forward beacon is offered on a big-board extraction");
+                detail.Append($"h{heat} withdrawal +{fresh.Count}; ");
+            }
+
+            // ── (N) the withdrawal flag turns the trickle off ────────────────────────────────
+            {
+                WithdrawalWaves = false;
+                var g = Stage(36, 22, Objective.Rescue, 1200);
+                g.CaptiveLocked = false;
+                int before = g.Enemies.Count;
+                g.MaybeWithdrawalTrickle();
+                if (g.Enemies.Count != before) fails.Add("(N) SIGHTLINE_WITHDRAWAL=0 still fields the trickle");
+                WithdrawalWaves = true;
+            }
+
             // ── (F) the flag restores the pre-B1 rule on the same big board ──────────────────
             {
                 ExtractionModel = false;
@@ -184,11 +244,13 @@ public partial class Game
                 if (g.Phase == Phase.PlayerTurn) fails.Add("(F) the control: the old rule should end EVAC with the squad in the zone, and did not — (B) proves nothing without it");
                 var gh = Stage(36, 22, Objective.Hack);
                 if (gh.TaskExtractRules || gh.PendingEvac.Count > 0) fails.Add("(F) the flag left B2's hidden evac in place");
+                var ge = Stage(36, 22, Objective.Escort);
+                if (ge.Objective != Objective.Escort) fails.Add("(F) the flag left B3's ESCORT->RESCUE remap in place");
                 ExtractionModel = true;
             }
         }
         catch (Exception e) { fails.Add($"threw: {e.GetType().Name}: {e.Message}"); }
-        finally { ExtractionModel = m0; Cfg.SetBoard(w0, h0, t0); }
+        finally { ExtractionModel = m0; WithdrawalWaves = wv0; Cfg.SetBoard(w0, h0, t0); }
 
         return fails.Count == 0
             ? "EXTRACTIONTEST: PASS (18x11 keeps today's rules; on a big board the squad standing in the zone does not end "
@@ -196,7 +258,11 @@ public partial class Game
               + "the in-zone and leaves the soldier outside behind dead and off the roster, boarding everyone ends the mission "
               + "on its own, ESCORT will not call the bird with the asset on the ground, and a lost asset still loses; B2: a "
               + "big-board HACK hides a clear evac far from the terminal and opens it on completion instead of ending, a cleared "
-              + "field wins a SABOTAGE outright, the clock fields no respawns there, and 18x11 HACK still ends on the task) [" + detail + "]"
+              + "field wins a SABOTAGE outright, the clock fields no respawns there, and 18x11 HACK still ends on the task; B3: a "
+              + "big-board ESCORT plays and reads as RESCUE with the asset well out from the squad, nothing arrives while it is "
+              + "caged, then 1 (2 from heat 4) per turn on the board edge of the extraction's half but never within "
+              + "6 tiles of the exit, up to 4 + heat/2 a mission, with no clock waves and no "
+              + "forward beacon, and SIGHTLINE_WITHDRAWAL=0 turns the trickle off) [" + detail + "]"
             : "EXTRACTIONTEST: FAIL (" + string.Join(" | ", fails.Distinct()) + ") [" + detail + "]";
     }
 }

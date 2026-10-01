@@ -206,6 +206,83 @@ public partial class Game
         return true;   // someone is still on the ground: only BOARD or CALL EVAC can end this
     }
 
+    // ══ B3 — RESCUE AND ESCORT ARE ONE MISSION; THE WITHDRAWAL IS OPPOSED ═══════════════════════
+    /// The owner: "rescue and escort (which in my mind are the same, what's the difference?)". Today
+    /// ESCORT starts with the asset in the squad, which fails §6.5's fiction check (why bring it into
+    /// a combat zone?). On a big board an ESCORT node plays as RESCUE — the asset is REACHED mid-board
+    /// — and is labelled so (`Codex.ObjectiveName`). `Objective` is append-only, so the member stays.
+    public static bool EscortIsRescue => ExtractionModel && BigBoard;
+
+    /// `SIGHTLINE_WITHDRAWAL=0` turns the reinforcement trickle off (the remap stays).
+    public static bool WithdrawalWaves = true;
+
+    /// Once the asset is reached, hostiles arrive one or two at a time from the extraction's half of
+    /// the board, every player turn, until the squad is out — so the walk out gets harder the longer
+    /// it takes. Replaces the pressure clock's reinforcements on these missions.
+    public bool WithdrawalLive => WithdrawalWaves && ExtractionLive && AssetMission
+                                  && Vip != null && Vip.Alive && !CaptiveLocked;
+
+    /// Harness read: hostiles the withdrawal has fielded this mission.
+    public int WithdrawalSpawned;
+
+    /// The tiles a withdrawal hostile may arrive on: the board's PERIMETER, on the extraction's side
+    /// of the long axis, and never within `WithdrawalStandoff` of the zone — the first cut put them
+    /// on the east edge in the zone's own rows, i.e. ON the exit, and the measured batch went from
+    /// 7/8 wins to 0/8. The exit is where the squad is going, not where the opposition lives.
+    public const int WithdrawalStandoff = 6;
+
+    List<(int x, int y)> WithdrawalTiles()
+    {
+        var list = new List<(int x, int y)>();
+        if (EvacZone.Count == 0) return list;
+        bool east = EvacZone.Average(t => t.x) >= Grid.W / 2.0;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                bool rim = x == 0 || y == 0 || x == Grid.W - 1 || y == Grid.H - 1;
+                if (!rim || (east ? x < Grid.W / 2 : x >= Grid.W / 2)) continue;
+                if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
+                if (EvacZone.Any(t => Util.ChebyDist(t.x, t.y, x, y) < WithdrawalStandoff)) continue;
+                list.Add((x, y));
+            }
+        return list;
+    }
+
+    /// The per-mission ceiling on withdrawal arrivals: it grows with heat, so the curve stays the
+    /// ladder's, not the board's (§6.5: board size is not a difficulty lever).
+    public int WithdrawalCap => 4 + (_run?.HeatLevel ?? 0) / 2;
+
+    void MaybeWithdrawalTrickle()
+    {
+        if (!WithdrawalLive || WithdrawalSpawned >= WithdrawalCap) return;
+        int heat = _run?.HeatLevel ?? 0;
+        int want = Math.Min(1 + (heat >= 4 ? 1 : 0), WithdrawalCap - WithdrawalSpawned);
+        var tiles = WithdrawalTiles();
+        int depth = Mission.DepthFor(_run?.Mission ?? 1);
+        int got = 0;
+        while (got < want && tiles.Count > 0 && AliveEnemies().Count < 12)
+        {
+            int i = Util.RandInt(0, tiles.Count - 1);
+            var (x, y) = tiles[i]; tiles.RemoveAt(i);
+            var e = Mission.MakeWaveHostile(depth, x, y, false, 0);
+            e.Alert = AlertLevel.Alert;              // they know where the squad is going
+            e.PodId = -1;
+            e.SyncPos();
+            Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);
+            Enemies.Add(e);
+            Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
+            got++;
+        }
+        if (got == 0) return;
+        WithdrawalSpawned += got;
+        RefreshCombatRoster();
+        Stats.RecordReinforce(got);
+        Audio.Cue(Audio.GameEvent.Reinforce, foe: true);
+        ShowBanner(got == 1 ? "HOSTILE INBOUND - EXTRACTION SIDE" : $"{got} HOSTILES INBOUND - EXTRACTION SIDE", true,
+                   Audio.CueFor(Audio.GameEvent.Reinforce));
+        BannerSub = WithdrawalSpawned >= WithdrawalCap ? "that's all of them - get out" : "the longer the walk, the more of them";
+    }
+
     /// Harness/autopilot: board everyone who can, then call it once nobody on the ground can still
     /// reach the zone on their own (everyone left is in it, or down).
     bool AutoExtractStep()
