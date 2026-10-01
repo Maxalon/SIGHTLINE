@@ -21,6 +21,7 @@ namespace Sightline;
 /// (G)-(J) B2: HACK/SABOTAGE hide their evac until the task is done, a cleared field wins, no
 ///     respawns on a big board, and 18x11 still ends on the task.
 /// (K)-(N) B3: ESCORT is RESCUE on a big board, and the withdrawal is opposed once the asset is reached.
+/// (O)-(R) B4: STEAL — grab, pass, drop, and the loot gates the CALL.
 ///
 /// WHAT IT CANNOT SEE: whether the withdrawal is TENSE. That needs B3's reinforcements and a
 /// measured big-board round.
@@ -31,7 +32,7 @@ public partial class Game
         var fails = new List<string>();
         var detail = new System.Text.StringBuilder();
         int w0 = Cfg.GridW, h0 = Cfg.GridH, t0 = Cfg.Tile;
-        bool m0 = ExtractionModel, wv0 = WithdrawalWaves;
+        bool m0 = ExtractionModel, wv0 = WithdrawalWaves, st0 = StealOnEvac;
 
         Game Stage(int w, int h, Objective obj, int seed = 4242)
         {
@@ -68,6 +69,7 @@ public partial class Game
                 if (g.ExtractionLive) fails.Add($"(A) 18x11 {o}: the extraction rules are live on the tutorial board");
             }
 
+            StealOnEvac = false;   // (B)-(F) price B1's rule on plain EVAC; B4's remap is legs (O)-(R)
             // ── (B) the whole squad in the zone does not end a big-board EVAC ─────────────────
             {
                 var g = Stage(36, 22, Objective.Evac);
@@ -130,6 +132,7 @@ public partial class Game
                 }
             }
 
+            StealOnEvac = true;
             // ── (G) B2: a big-board HACK hides its evac until the task is done ───────────────
             {
                 var g = Stage(36, 22, Objective.Hack, 515);
@@ -234,8 +237,66 @@ public partial class Game
                 WithdrawalWaves = true;
             }
 
+            // ── (O) B4: a big-board EVAC plays and reads as STEAL; the drive waits mid-board ────
+            {
+                var g = Stage(36, 22, Objective.Evac, 1301);
+                if (g.Objective != Objective.Steal) fails.Add($"(O) 36x22 EVAC staged as {g.Objective}, want STEAL");
+                if (!g.LootOnGround) fails.Add("(O) the loot is not on the ground at the start");
+                if (!g.Grid.IsFloor(g.LootTile.x, g.LootTile.y)) fails.Add("(O) the loot sits on a tile nobody can stand on");
+                int toSquad = Soldiers(g).Min(p => Util.ChebyDist(p.X, p.Y, g.LootTile.x, g.LootTile.y));
+                if (toSquad < 6) fails.Add($"(O) the loot starts {toSquad} tiles from the squad");
+                if (Codex.ObjectiveName(Objective.Evac) != "STEAL") fails.Add($"(O) a big-board EVAC reads '{Codex.ObjectiveName(Objective.Evac)}'");
+                var g0 = Stage(18, 11, Objective.Evac, 1301);
+                if (g0.Objective != Objective.Evac) fails.Add("(O) 18x11 EVAC was remapped");
+                Cfg.SetBoard(36, 22, 32);   // Cfg is GLOBAL: the control above just made `g` read as a small board
+                detail.Append($"drive {toSquad} tiles out; ");
+
+                // ── (P) GRAB — through the shared objective verb ───────────────────────────────
+                var a = Soldiers(g)[0]; var b = Soldiers(g)[1];
+                a.X = g.LootTile.x - 1; a.Y = g.LootTile.y; a.SyncPos();
+                b.X = g.LootTile.x - 2; b.Y = g.LootTile.y; b.SyncPos();
+                g.Selected = a;
+                if (!g.HasHackAction || !g.CanHack(a) || g.LootVerbLabel(a) != "GRAB") fails.Add("(P) a soldier beside the loot is not offered GRAB");
+                g.DoHack();
+                if (g.Carrier != a || g.LootOnGround) fails.Add("(P) GRAB did not hand the loot to the soldier");
+                if (!g.WithdrawalLive) fails.Add("(P) lifting the loot did not start the withdrawal");
+
+                // ── (Q) PASS, then a carrier going down DROPS it ──────────────────────────────
+                a.ActionsLeft = 2;
+                if (g.LootVerbLabel(a) != "PASS" || !g.CanPass(a)) fails.Add("(Q) the carrier beside a squadmate is not offered PASS");
+                g.Selected = a; g.DoHack();
+                if (g.Carrier != b) fails.Add("(Q) PASS did not move the loot to the adjacent soldier");
+                var dropAt = (b.X, b.Y);
+                g.KillUnit(b);
+                if (!g.LootOnGround || g.LootTile != dropAt) fails.Add($"(Q) the carrier went down and the loot did not drop where they fell (onGround {g.LootOnGround}, at {g.LootTile})");
+
+                // ── (R) the CALL needs the loot; leaving without it loses ──────────────────────
+                a.ActionsLeft = 2;
+                IntoZone(g, new[] { a });
+                g.Selected = a; g.DoBoard();
+                if (g.CanCallEvac) fails.Add("(R) CALL EVAC offered with the loot still on the ground");
+                foreach (var s0 in Soldiers(g).Where(p => !p.Downed)) { IntoZone(g, new[] { s0 }); s0.ActionsLeft = 2; g.Selected = s0; g.DoBoard(); }
+                foreach (var d in g.Players.Where(p => p.Alive).ToList()) { d.Hp = 0; d.Alive = false; }
+                g._anims.Clear();          // the drop leg's death beats are still queued; CheckEnd waits on them
+                g.CheckEnd();
+                if (g.Phase != Phase.Lose) fails.Add($"(R) the squad left without the loot and the run did not end ({g.Phase})");
+            }
+            {
+                var g = Stage(36, 22, Objective.Evac, 1302);
+                var c = Soldiers(g)[0];
+                c.X = g.LootTile.x; c.Y = g.LootTile.y + 1; c.SyncPos();
+                g.Selected = c; g.DoHack();
+                var mate = Soldiers(g)[1];
+                IntoZone(g, new[] { mate, c });
+                g.Selected = mate; g.DoBoard();
+                if (!g.CanCallEvac) fails.Add("(R) the carrier is in the zone and one soldier is aboard, but CALL EVAC is refused");
+                g.DoCallEvac();
+                if (!g.LootAboard || g.Phase == Phase.PlayerTurn || g.Phase == Phase.Lose) fails.Add($"(R) calling with the carrier in the zone did not get the loot out ({g.Phase})");
+            }
+
             // ── (F) the flag restores the pre-B1 rule on the same big board ──────────────────
             {
+                StealOnEvac = false;
                 ExtractionModel = false;
                 var g = Stage(36, 22, Objective.Evac);
                 if (g.ExtractionLive) fails.Add("(F) SIGHTLINE_EXTRACTION=0 left the rules live");
@@ -244,13 +305,16 @@ public partial class Game
                 if (g.Phase == Phase.PlayerTurn) fails.Add("(F) the control: the old rule should end EVAC with the squad in the zone, and did not — (B) proves nothing without it");
                 var gh = Stage(36, 22, Objective.Hack);
                 if (gh.TaskExtractRules || gh.PendingEvac.Count > 0) fails.Add("(F) the flag left B2's hidden evac in place");
+                StealOnEvac = true;
+                var gs = Stage(36, 22, Objective.Evac);
+                if (gs.Objective != Objective.Evac) fails.Add("(F) SIGHTLINE_EXTRACTION=0 left B4's EVAC->STEAL remap in place");
                 var ge = Stage(36, 22, Objective.Escort);
                 if (ge.Objective != Objective.Escort) fails.Add("(F) the flag left B3's ESCORT->RESCUE remap in place");
                 ExtractionModel = true;
             }
         }
         catch (Exception e) { fails.Add($"threw: {e.GetType().Name}: {e.Message}"); }
-        finally { ExtractionModel = m0; WithdrawalWaves = wv0; Cfg.SetBoard(w0, h0, t0); }
+        finally { ExtractionModel = m0; WithdrawalWaves = wv0; StealOnEvac = st0; Cfg.SetBoard(w0, h0, t0); }
 
         return fails.Count == 0
             ? "EXTRACTIONTEST: PASS (18x11 keeps today's rules; on a big board the squad standing in the zone does not end "
@@ -262,7 +326,10 @@ public partial class Game
               + "big-board ESCORT plays and reads as RESCUE with the asset well out from the squad, nothing arrives while it is "
               + "caged, then 1 (2 from heat 4) per turn on the board edge of the extraction's half but never within "
               + "6 tiles of the exit, up to 4 + heat/2 a mission, with no clock waves and no "
-              + "forward beacon, and SIGHTLINE_WITHDRAWAL=0 turns the trickle off) [" + detail + "]"
+              + "forward beacon, and SIGHTLINE_WITHDRAWAL=0 turns the trickle off; B4: a big-board EVAC plays and reads as "
+              + "STEAL with the drive on reachable floor mid-board, GRAB through the objective verb starts the withdrawal, PASS "
+              + "hands it on, a carrier going down drops it where they fell, the CALL is refused without it, leaving without "
+              + "it loses the run, and calling with the carrier in the zone gets it out) [" + detail + "]"
             : "EXTRACTIONTEST: FAIL (" + string.Join(" | ", fails.Distinct()) + ") [" + detail + "]";
     }
 }

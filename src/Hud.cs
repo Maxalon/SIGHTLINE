@@ -980,6 +980,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 case Objective.Sabotage: objTxt = $"SABOTAGE {g.SabotageBlown.Count}/{g.SabotageSites.Count}"; objCol = Pal.Accent; break;
                 case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
                 case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
+                case Objective.Steal: objTxt = g.LootOnGround ? "STEAL THE DRIVE" : "EXTRACT THE DRIVE"; objCol = Pal.VipGold; break;
                 case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Accent; break;
                 case Objective.Decapitate:
                     // W4 GUARDED HVT: read the guarded state at a glance — danger-red "HVT GUARDED"
@@ -1640,7 +1641,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Add("brace", "BRACE", "B", interactive && u != null && u.CanAct && u.Ammo > 0, false);      // UNDERTOW W2: disrupting interrupt watch
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
-            Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
+            Add("hack", g.HasSabotage ? "PLANT" : g.HasLoot ? g.LootVerbLabel(u) : "HACK", "H", interactive && g.CanHack(u), false);
         if (g.HasExtractAction)
             Add("extract", "EXTRACT", "X", interactive && g.CanExtract(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);

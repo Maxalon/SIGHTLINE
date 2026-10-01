@@ -5694,6 +5694,11 @@ public partial class Game
     /// Across all seeds: every one of the 8 objectives is dealt somewhere, and every authored
     /// arena is dealt somewhere. Prints both histograms + PASS/FAIL. Windowless + persistence-
     /// free: Run.GenerateMap and Mission.DeckPick are pure derivations off the seed.
+    /// P66: objectives the campaign DEAL never hands out. STEAL arrives only through the big-board
+    /// EVAC->STEAL remap (`Game.EvacIsSteal`), because adding it to the deal would move
+    /// `Run.GenerateMap`'s draw order — a save-format break. EXPOSURETEST asserts both directions.
+    static bool NotDealtByDesign(Objective o) => o == Objective.Steal;
+
     public static string ExposureSelfTest()
     {
         var fails = new List<string>();
@@ -5758,7 +5763,10 @@ public partial class Game
         }
 
         foreach (Objective o in Enum.GetValues<Objective>())
-            if (objHist.GetValueOrDefault(o) == 0) fails.Add($"objectiveNeverDealt:{o}");
+            if (!NotDealtByDesign(o) && objHist.GetValueOrDefault(o) == 0) fails.Add($"objectiveNeverDealt:{o}");
+        // ...and an objective the deal must NOT reach, reached, is a save-format break in disguise
+        foreach (Objective o in Enum.GetValues<Objective>())
+            if (NotDealtByDesign(o) && objHist.GetValueOrDefault(o) > 0) fails.Add($"objectiveDealtButMustNotBe:{o}");
         for (int a = 0; a < nLay; a++)
             if (arenaHist[a] == 0) fails.Add($"arenaNeverDealt:{a}");
 
@@ -5852,6 +5860,7 @@ public partial class Game
                 foreach (Objective o in Enum.GetValues<Objective>())
                 {
                     if (sh == Mission.DeployEnvelop && !EnvOk(o)) continue;   // illegal by design
+                    if (NotDealtByDesign(o)) continue;                        // P66: never on the map
                     if (shapeObj.GetValueOrDefault((sh, o)) == 0) fails.Add($"shape{ShapeName(sh)}Never{o}");
                 }
             }
@@ -10320,7 +10329,9 @@ public partial class Game
             var all = (Objective[])Enum.GetValues(typeof(Objective));
             // The count is pinned so that APPENDING a ninth objective (the enums are append-only)
             // cannot silently inherit "not a kill objective" — someone has to come here and decide.
-            if (all.Length != 8) fails.Add("objectiveCount=" + all.Length);
+            // P66 decided the ninth: STEAL is a TASK objective (carry something out), so it stays "not
+            // a kill objective" by decision rather than by default.
+            if (all.Length != 9) fails.Add("objectiveCount=" + all.Length);
             foreach (var o in all)
             {
                 bool want = o == Objective.Eliminate || o == Objective.Decapitate;
@@ -10486,7 +10497,7 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "CLASSTEST: PASS (model: exactly Eliminate+Decapitate of 8 objectives are PITCHED, both by "
+            ? "CLASSTEST: PASS (model: exactly Eliminate+Decapitate of 9 objectives are PITCHED, both by "
               + "enum and by telemetry name; DRAW-OBSERVED: the campaign fork paints a class mark per "
               + "reachable node plus a two-entry key, keeps the objective label, stays >=12px, and its "
               + "hover tooltip paints THIS node's class line and not the other one — both classes staged; "

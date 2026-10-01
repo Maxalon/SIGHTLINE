@@ -930,6 +930,7 @@ public static class Renderer
         DrawTerminal(g);
         DrawSabotage(g);
         DrawIntelCache(g);        // W10: the optional gold-diamond intel pickup (objective-level object)
+        DrawLoot(g);              // B4: the STEAL objective's drive
         DrawGridLines(g);
         DrawPathPreview(g);
         DrawCover(g);
@@ -1017,6 +1018,7 @@ public static class Renderer
         DrawTerminal(g);
         DrawSabotage(g);
         DrawIntelCache(g);
+        DrawLoot(g);
         // NOT DrawBarrels: `View3D.DrawTerrain` already builds a barrel as a SOLID, so the flat
         // card lands on top of its own geometry. P35 shipped it in this list by mis-reading its own
         // rule — "does the 3D view already own this?" is the test, and the 3D view owns barrels.
@@ -1358,6 +1360,38 @@ public static class Renderer
         float tw = Cfg.Measure(tt, 10, 1f).X;
         Cfg.Text(tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + (flip ? 15 : 1))), 10, 1f,
                           expiring ? Pal.Foe : Raylib.Fade(col, 0.8f));
+    }
+
+    // B4 STEAL: the loot. On the ground, a pulsing gold drive on its tile (objective salience, like the
+    // terminal); in someone's hands, a small gold chip riding over the carrier so the player always
+    // knows who must not go down. Drawn in the shared objective pass, so both views get it.
+    static void DrawLoot(Game g)
+    {
+        if (!g.HasLoot || g.LootAboard) return;
+        float t = (float)Now();
+        float pulse = 0.5f + 0.5f * MathF.Sin(t * 3f);
+        Color col = Pal.VipGold;
+        if (g.LootOnGround)
+        {
+            var r = ElevRect(g, g.LootTile.x, g.LootTile.y);
+            var c = ElevCenter(g, g.LootTile.x, g.LootTile.y);
+            Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.12f + 0.12f * pulse));
+            Raylib.DrawCircleV(c, 22f, Raylib.Fade(col, 0.06f + 0.07f * pulse));
+            var body = new Rectangle(c.X - 10, c.Y - 6, 20, 12);
+            Raylib.DrawRectangleRec(body, Pal.RGBA(14, 20, 28));
+            Raylib.DrawRectangleLinesEx(body, 1.6f, col);
+            Raylib.DrawRectangleRec(new Rectangle(c.X + 4, c.Y - 3, 4, 6), Raylib.Fade(col, 0.6f + 0.4f * pulse));
+            Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 3, r.Y + 3, r.Width - 6, r.Height - 6), 2f,
+                                        Raylib.Fade(col, 0.45f + 0.4f * pulse));
+            bool flip = r.Y - 14 < 30;
+            Cfg.Text("DRIVE", new Vector2((int)c.X - 17, (int)(flip ? r.Y + r.Height + 2 : r.Y - 14)), 12, 1f, col);
+        }
+        else if (g.Carrier != null && g.Carrier.Alive)
+        {
+            var p = g.Carrier.Pos + new Vector2(0, -Cfg.Tile * 0.46f);
+            Raylib.DrawPoly(p, 4, 6f + pulse, 45f, Raylib.Fade(col, 0.9f));
+            Raylib.DrawPolyLinesEx(p, 4, 9f + pulse, 45f, 1.4f, Raylib.Fade(col, 0.5f + 0.4f * pulse));
+        }
     }
 
     // W10 BOUNTY secondary: a small gold chevron + tag over the marked specialist so the bonus

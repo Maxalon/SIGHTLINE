@@ -19712,6 +19712,39 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P66. STEAL (item B4)
+
+Base `cde9679`. The owner: "stealing a flash drive or PC or a piece of technology that could be
+picked up by a soldier with extraction mechanics, but that object can be passed between soldiers."
+
+- **`Objective.Steal`, appended.** SAVETEST printed the new `Objective` fingerprint (an append, so
+  pasted per house procedure). Codex, voice and briefing coverage all enumerate the enum, so each got
+  its line. CODEXTEST, VOICETEST and BRIEFTEST pass.
+- **Where it lives is the design decision.** Putting it into the campaign's objective deal moves
+  `Run.GenerateMap`'s draw order, which is a save-format break and a new CRN world. So it follows
+  B3's route: on a big board an EVAC node plays and reads as STEAL (`Game.EvacIsSteal`). EVAC
+  ("walk to the exit") is the thinnest objective, and STEAL is that walk with something to carry.
+  `SIGHTLINE_STEAL=0` keeps plain EVAC. B1's EXTRACTIONTEST legs now stage with it off, because
+  they price B1's rule on plain EVAC.
+- **No free letter.** GRAB and PASS share the objective verb slot [H] with HACK/PLANT, labelled by
+  what it would do for the selected soldier. A pass goes to the adjacent soldier nearest the exit.
+- **The drop is in `KillUnit`'s first line,** before the bleed-out branch, so a carrier who goes
+  DOWN lets go as surely as one who dies.
+- **Hard by the autopilot's measure.** Forced STEAL on 36x22, two slot sets × 16: 2/32 wins with the
+  withdrawal, 4/32 without, nearly all squad wipes at missions 1-3, against RESCUE's 27/32 without
+  the trickle on the same instrument. I first suspected my own "goes loud" on GRAB. Removing it
+  changed NOTHING: identical action counts, because the squad is already revealed by the time it
+  lifts. The lift stays QUIET anyway, for the owner's "sneaky or guns blazing". **The cause is not
+  established.** It is recorded for item C's baseline, not tuned here.
+- **Two enum gates made me decide, which is their job.** CLASSTEST pins the objective count
+  precisely so that a ninth member cannot silently inherit "not a kill objective". It is now 9, with
+  STEAL a task objective by decision. EXPOSURETEST asserted the campaign deal reaches every
+  objective; it now names STEAL as NOT dealt by design and also asserts the converse (an objective
+  that must not be dealt, dealt, is a save break in disguise).
+- Gate: EXTRACTIONTEST (O)-(R). Red twice (no drop on down; the CALL not taking the loot aboard).
+  An instructive test bug on the way: an 18x11 control staged mid-leg reset the GLOBAL `Cfg` board,
+  so the big-board game under test read as small, and the withdrawal "failed to start".
+
 ## P65. SOLDIERS RETIRE AFTER ONE RUN (item B5)
 
 Base `6b79393`. The owner chose removal of W9 SIGNAL's cross-run veteran reserve.

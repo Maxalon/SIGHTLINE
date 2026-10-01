@@ -345,6 +345,8 @@ public static class Program
         // B3 — the withdrawal trickle (asset missions on a big board). `=0` turns it off; the
         // ESCORT->RESCUE remap stays (that is SIGHTLINE_EXTRACTION's).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WITHDRAWAL") == "0") Game.WithdrawalWaves = false;
+        // B4 — STEAL. `=0` keeps a big-board EVAC node a plain EVAC instead of a STEAL.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_STEAL") == "0") Game.StealOnEvac = false;
         // B5 — soldiers retire after one run. `=1` restores W9 SIGNAL's cross-run veteran reserve
         // (draft recall, enshrining, the two reserve unlocks and the two contracts that trade on it).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VETERANS") == "1") MetaProg.VeteranReserve = true;
@@ -2893,6 +2895,7 @@ public static class Program
     {
         "eliminate" or "elim" => Objective.Eliminate,
         "evac" or "extract" => Objective.Evac,
+        "steal" => Objective.Steal,
         "hack" => Objective.Hack,
         "escort" => Objective.Escort,
         "sabotage" => Objective.Sabotage,
@@ -2910,6 +2913,7 @@ public static class Program
         {
             case "eliminate": case "elim": return Objective.Eliminate;
             case "evac": case "extract": return Objective.Evac;
+            case "steal": return Objective.Steal;
             case "hack": return Objective.Hack;
             case "escort": return Objective.Escort;
             case "sabotage": return Objective.Sabotage;

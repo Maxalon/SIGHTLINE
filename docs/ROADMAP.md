@@ -51,8 +51,15 @@ block re-orders it and adds to it.
             there. `SIGHTLINE_WITHDRAWAL=0` turns the trickle off. **Measured, forced RESCUE on 36x22, two
             slot sets × 16 campaigns per arm, paired: trickle ON 9/32 (28%), OFF 27/32 (84%).** That is a
             LEVEL change and it has not been tuned; the first cut, which spawned ON the exit, read 0/8.
-      - [ ] **B4. STEAL — a new objective** (appended to `Objective`): pick up a carryable object,
-            PASS it to an adjacent soldier, get it out through the extraction.
+      - [x] **B4. STEAL — P66.** `Objective.Steal` (appended; SAVETEST golden updated). The drive
+            sits mid-board; GRAB/PASS share the HACK verb slot [H] (no letter is free); a carrier who
+            goes down drops it where they fell; it leaves through B1's extraction and gates the CALL.
+            **Where it lives:** adding it to the objective deal would move `Run.GenerateMap`'s draw order
+            (a save break), so on a big board an EVAC node plays as STEAL instead (`SIGHTLINE_STEAL=0`
+            keeps plain EVAC). **Measured, forced STEAL on 36x22, 32 campaigns: 2/32 wins with the
+            withdrawal, 4/32 without; nearly every loss is a squad wipe at m1-3.** The grab is QUIET
+            (it measured inert in the autopilot either way). STEAL is the hardest objective by the
+            autopilot's measure — a finding for C's baseline, not a tuned level.
       - [x] **B5. THE VETERAN RESERVE IS GONE — P65.** `MetaProg.VeteranReserve` (default false;
             `SIGHTLINE_VETERANS=1` restores): the draft recalls nobody, ranked survivors are not
             enshrined, the WAR ROOM drops the VETERANS cell and the two reserve unlocks, and the draft

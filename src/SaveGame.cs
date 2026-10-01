@@ -1251,7 +1251,7 @@ public static partial class SaveGame
     /// "actual" hash it prints in here. Anything other than an append is a save-format break.
     static readonly (Type Type, uint Golden)[] PersistedEnums =
     {
-        (typeof(Objective),     0x65158518u),
+        (typeof(Objective),     0x630156D6u),   // B4 appended Steal
         (typeof(WeaponKind),    0x00BF6448u),
         (typeof(Perk),          0xEADD48BAu),
         (typeof(WeaponMod),     0xB2635D54u),
