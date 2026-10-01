@@ -1033,9 +1033,9 @@ public static partial class Mission
                 // Shared by all archetypes so elevation play is always present.
                 RaisePlateau(grid, evac, ox + 7, oy + 3, 2, 2);
                 RaisePlateau(grid, evac, ox + 11, oy + 7, 2, 2);
-                if (missionNum >= 3) RaisePlateau(grid, evac, ox + Util.RandInt(6, 11), oy + Util.RandInt(1, 8), 2, 2);
+                if (Run.Pace(missionNum) >= 3) RaisePlateau(grid, evac, ox + Util.RandInt(6, 11), oy + Util.RandInt(1, 8), 2, 2);
                 // a commanding tier-2 redoubt appears on later missions (sees over high cover)
-                if (missionNum >= 4) RaisePlateau(grid, evac, ox + Util.RandInt(7, 10), oy + Util.RandInt(3, 6), 2, 2, 2);
+                if (Run.Pace(missionNum) >= 4) RaisePlateau(grid, evac, ox + Util.RandInt(7, 10), oy + Util.RandInt(3, 6), 2, 2, 2);
 
                 // pick a mid-field cover archetype (variety); each leaves an open lane + no walled column
                 switch (Util.RandInt(0, 3))
@@ -1051,7 +1051,7 @@ public static partial class Mission
         // cover). Scaled by AREA, not by cell count: the cells are only approximately the reference
         // size, and it is tiles-per-tile that a player reads as clutter. Exactly the old count at
         // 18x11, because the ratio is exactly 1 there.
-        int sprinkle = 14 + Math.Min(6, missionNum);
+        int sprinkle = 14 + Math.Min(6, Run.Pace(missionNum));
         if (DensityScaling) sprinkle = (int)Math.Round(sprinkle * (double)(grid.W * grid.H) / (RefW * RefH));
         Sprinkle(grid, occupied, sprinkle);
     }
@@ -1402,7 +1402,7 @@ public static partial class Mission
 
     /// The depth this fight should be PRICED at: the mode's own dial when a single-mission mode
     /// published one, otherwise the literal mission number.
-    public static int DepthFor(int missionNum) => ModeDepth > 0 ? ModeDepth : missionNum;
+    public static int DepthFor(int missionNum) => ModeDepth > 0 ? ModeDepth : Run.Pace(missionNum);   // C1: paced
 
     // ── P19 "THE ROSTER CONTESTS" — THE NAMED ELITE BELONGS TO THE ELITE NODE ────────────────
     // The campaign map ships a `NodeKind.Elite` whose whole advertised identity is "the heavier
@@ -1438,7 +1438,7 @@ public static partial class Mission
     /// number rule itself left 30 (2.7%), which nobody had ever counted. The route-walked floor
     /// leaves zero. `MidBossFloorMission` is kept as a belt-and-braces proxy for any caller that
     /// cannot see the route.
-    public const int MidBossFloorMission = 5;
+    public static int MidBossFloorMission => Run.MaxMissions - 1;   // C1: "the last fight before the finale"
 
     /// The one predicate: does slot 0 of this force field the named mid-boss? `modeSlot` is the
     /// single-mission modes' own arm (SKIRMISH heat >= 4, Game.SetupMission) and is unchanged.
@@ -1491,7 +1491,10 @@ public static partial class Mission
         // switched to rosterTier reads the same value it always did, and no draw moved); the modes
         // pass 3-5 off the heat dial (Game.SetupMission). `midBossSlot` is the mode's own mid-boss
         // arm (heat >= 4) — the campaign's `n == 3 || n == 5` rule is kept exactly as written.
-        if (rosterTier < 0) rosterTier = n;
+        // C1: every SCALING read below uses the paced depth `pace`; the FINALE checks keep the mission
+        // number `n` (only the last mission is the finale, whatever the run length).
+        int pace = Run.Pace(n);
+        if (rosterTier < 0) rosterTier = pace;
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
         // fits easily: spawns occupy cols 14-17 over grid.H rows (44 slots) and the collision loop
@@ -1510,7 +1513,7 @@ public static partial class Mission
         // rung's declared body was eaten on the one mission that decides a campaign. Under
         // `ClampLast` the clamp moves to the END of the pipeline (just before the telemetry), so it
         // bounds what is SEATED. The seated worst case is unchanged (still <= ForceCeiling).
-        int request = EnemyBaseCount + n + enemyDelta;                     // deployment-card + Heat modifier
+        int request = EnemyBaseCount + pace + enemyDelta;                     // deployment-card + Heat modifier
         int count = ClampLast ? request : Math.Clamp(request, 3, ForceCeiling);
         // Every trim below is floored. `Floor` is the same `Math.Max` with a witness attached, so
         // the harness can say "the force is at its minimum" without re-deriving the pipeline.
@@ -1525,7 +1528,7 @@ public static partial class Mission
         // multi-tier adaptive assist — still bottoms out at -1, so no archetype can be trivialised).
         // Heats 1-8 are bit-for-bit unchanged by construction: there statDelta = card.StatDelta +
         // heatStat is never negative, so (n-1)+statDelta >= 0 and the new floor is unreachable.
-        int bump = Math.Max(-1, (n - 1) + statDelta);        // stat growth per mission +/- card (relief floor -1)
+        int bump = Math.Max(-1, (pace - 1) + statDelta);        // stat growth per mission +/- card (relief floor -1)
         // X2 TRUE NORTH II — THE COLD OPENER. Game.SetupMission already ramps HEAT's escalation in
         // over m1-2 ("the measured ~20% mission-1 loss, which hard-caps run completion"), but that
         // grace is gated on heat > 0, so the BASE force meets the coldest squad in the game with no
@@ -1614,8 +1617,8 @@ public static partial class Mission
             // arriving on its own parameter precisely so this line can separate it from the sum in
             // `statDelta`. Every other caller passes 0, so nothing but the campaign finale moves.
             bump = FinaleHeatStat
-                 ? Math.Max(0, (n - 1) + heatStat)           // drop the card's/assist's stat, KEEP heat's
-                 : Math.Max(0, n - 1);                       // pre-P23: drop the boss-card AND heat StatDelta
+                 ? Math.Max(0, (pace - 1) + heatStat)           // drop the card's/assist's stat, KEEP heat's
+                 : Math.Max(0, pace - 1);                       // pre-P23: drop the boss-card AND heat StatDelta
         }
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
@@ -1786,7 +1789,7 @@ public static partial class Mission
             // draw above stays unconditional so the RNG stream is unchanged for every slot.
             Unit e = null;
             if (finalMission)
-                e = i == 0 ? MakeFinaleBoss(n, x, y) : MakeFinaleRetinue(i, n, bump, x, y);
+                e = i == 0 ? MakeFinaleBoss(pace, x, y) : MakeFinaleRetinue(i, pace, bump, x, y);
             if (e == null)
                 e = midBoss ? MakeMidBoss(rosterTier, x, y)
                             : SelectArchetype(rosterTier, r, bump, x, y);   // tier-appropriate rank-and-file
@@ -2179,7 +2182,7 @@ public static partial class Mission
             3 => MakeSoldier(name, "CORPSMAN", WeaponKind.Smg, 7, 62, 8),
             _ => MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6),
         };
-        u.Kills = Math.Max(0, (mission - 1) / 2);
+        u.Kills = Math.Max(0, (Run.Pace(mission) - 1) / 2);   // C1: paced
         return u;
     }
 
@@ -2684,7 +2687,7 @@ public static partial class Mission
         if (players.Count == 0) return;
 
         // gentle count scaling: m1 -> 2, growing to a cap of 5 on later missions
-        int target = Math.Clamp(2 + missionNum / 2, 2, 5);
+        int target = Math.Clamp(2 + Run.Pace(missionNum) / 2, 2, 5);   // C1: paced
         var from = players[0];
 
         // the set of tiles that MUST remain reachable from the squad after each placement

@@ -6004,7 +6004,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // R2 FIX 3: shrink-to-fit before clipping — at 120% "counters WARDENS for one mission"
             // still ellipsized ("...for one mi…") after W5 reserved the right column.
             string effTxt = g.ShopEffect(i);
-            int effFs = FitSize(effTxt, 12, 9, effMaxW);
+            int effFs = FitSize(effTxt, 12, 12, effMaxW);   // C1: never below the 12px small-text floor
             Cfg.Text(Clip(effTxt, effFs, effMaxW), new Vector2(textX, effY), effFs, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
             Color cc = run.Intel >= icost ? Pal.Good : Pal.Foe;
             Cfg.Text(cost, new Vector2((int)(r.X + r.Width - costW - 14), (int)r.Y + 12), 16, 1f, cc);

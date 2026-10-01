@@ -12381,7 +12381,8 @@ public partial class Game
 
         var kindsFirst = new Dictionary<string, int>();
         var kindsHash = new Dictionary<string, int>();
-        int firstZero = 0, hashZero = 0, choices = 0;
+        int firstZero = 0, hashZero = 0, choices = 0, hashChoices = 0;
+        double hashUniformExpect = 0;   // C1: the hash walk's own fair expectation
         double uniformZeroExpect = 0;   // sum of 1/k over the SAME choices, i.e. a fair deal's index-0 rate
 
         // (c) determinism + draw-freedom: snapshot the shared stream around the whole sweep.
@@ -12408,20 +12409,30 @@ public partial class Game
                 uniformZeroExpect += 1.0 / f.optionCounts[i];
                 if (f.idx[i] == 0) firstZero++;
             }
-            for (int i = 0; i < h.idx.Count; i++) if (h.optionCounts[i] >= 2 && h.idx[i] == 0) hashZero++;
+            // C1: the hash walk's OWN fair expectation. It visits different nodes than the 'first'
+            // walk, with different branch counts, so judging it against the first walk's uniform
+            // figure compared unlike things — invisible on a 6-column map, a 10-point "bias" on a
+            // 10-column one that a stronger hash did not move at all.
+            for (int i = 0; i < h.idx.Count; i++)
+            {
+                if (h.optionCounts[i] < 2) continue;
+                hashChoices++; hashUniformExpect += 1.0 / h.optionCounts[i];
+                if (h.idx[i] == 0) hashZero++;
+            }
         }
         rngProbeAfter = Util.RandF();
         Util.Reseed(0);
 
         if (choices < 100) fails.Add($"VACUOUS — only {choices} real (k>=2) branch choices sampled");
         double firstPct = choices == 0 ? 0 : 100.0 * firstZero / choices;
-        double hashPct = choices == 0 ? 0 : 100.0 * hashZero / choices;
+        double hashPct = hashChoices == 0 ? 0 : 100.0 * hashZero / hashChoices;
+        double hashUniPct = hashChoices == 0 ? 0 : 100.0 * hashUniformExpect / hashChoices;
         double uniPct = choices == 0 ? 0 : 100.0 * uniformZeroExpect / choices;
 
         // (a) the shipped route must be provably skewed, or this whole finding is imaginary.
         if (firstPct <= uniPct + 15) fails.Add($"firstNotSkewed(first={firstPct:0.0}% uniform={uniPct:0.0}%)");
         // (b) the hashed route must be a fair deal.
-        if (Math.Abs(hashPct - uniPct) > 8.0) fails.Add($"hashNotUniform(hash={hashPct:0.0}% uniform={uniPct:0.0}%)");
+        if (Math.Abs(hashPct - hashUniPct) > 8.0) fails.Add($"hashNotUniform(hash={hashPct:0.0}% uniform={hashUniPct:0.0}%)");
         // (c) neither policy may consume a draw from the shared gameplay stream.
         if (rngProbeBefore != rngProbeAfter) fails.Add("routeConsumedGameplayRngDraws");
 
@@ -12435,7 +12446,7 @@ public partial class Game
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"ROUTETEST: {seeds} maps, {choices} REAL branch choices (k>=2); a fair deal takes branch 0 {uniPct:0.0}% of the time");
         sb.AppendLine($"  first (SHIPPED): branch-0 {firstPct:0.0}%   nodes visited: {Hist(kindsFirst)}");
-        sb.AppendLine($"  hash            : branch-0 {hashPct:0.0}%   nodes visited: {Hist(kindsHash)}");
+        sb.AppendLine($"  hash            : branch-0 {hashPct:0.0}% (fair on its own {hashChoices} branches: {hashUniPct:0.0}%)   nodes visited: {Hist(kindsHash)}");
         foreach (var f in fails.Take(8)) sb.AppendLine("  " + f);
         sb.Append(fails.Count == 0
             ? "ROUTETEST: PASS ('first' is measurably skewed to branch 0; 'hash' deals within 8pts of uniform; both take zero Util.Rng draws)"

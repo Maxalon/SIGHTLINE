@@ -596,7 +596,37 @@ public static class Heat
 /// Holds the persistent squad across a campaign run, plus XP/rank progression.
 public class Run
 {
-    public const int MaxMissions = 6;
+    /// C1 (owner, 2026-10-01): a run is TEN missions — nine upgrade stops instead of five.
+    /// `SIGHTLINE_RUNLENGTH=6` restores the six-mission run (and with it `Pace` == identity).
+    /// It is the map generator's column count, so it is SAVE FORMAT: SaveGame stamps it and a run
+    /// saved at another length is refused rather than loaded into the wrong map.
+    public static int MaxMissions = 10;
+
+    /// The scale every difficulty number in this game was TUNED on: depth 1..6, the old run.
+    public const int DepthScale = 6;
+
+    /// Run `test` with the run length set to the tuned scale (six missions, so mission == depth),
+    /// then restore it. For the self-tests that pin the DEPTH MODEL by mission number — the force
+    /// table, the VIP's durability, the opener trim, the HVT, the pods, the economy — which remain
+    /// exactly as valid as they were; SIGHTLINE_PACETEST is the gate that bridges a ten-mission
+    /// run onto this scale. Named at each call site in Program.cs, so nothing is hidden.
+    public static string OnTunedScale(Func<string> test)
+    {
+        int mm0 = MaxMissions;
+        MaxMissions = DepthScale;
+        try { return test(); }
+        finally { MaxMissions = mm0; }
+    }
+
+    /// Where mission `mission` sits on that tuned scale. A 10-mission run walks the same 1..6 curve
+    /// in finer steps (1,2,2,3,3,4,4,5,5,6), so mission 10 is the tuned finale, never a depth-10
+    /// force nobody balanced; a 6-mission run maps to itself exactly.
+    public static int Pace(int mission)
+    {
+        if (MaxMissions <= 1) return Math.Clamp(mission, 1, DepthScale);
+        int m = Math.Clamp(mission, 1, MaxMissions);
+        return 1 + (int)Math.Round((m - 1) * (DepthScale - 1) / (double)(MaxMissions - 1), MidpointRounding.AwayFromZero);
+    }
 
     public static readonly string[] Ranks =
         { "ROOKIE", "SQUADDIE", "CORPORAL", "SERGEANT", "LIEUTENANT", "CAPTAIN", "MAJOR", "COLONEL" };
@@ -634,7 +664,7 @@ public class Run
     // the squad grows to 5 mid-run and 6 for the brutal back half.
     public const int DeployCapBase = 4;       // m1-2
     public const int DeployCapMax = 6;        // m5-6
-    public static int DeployCapFor(int mission) => mission >= 5 ? 6 : (mission >= 3 ? 5 : 4);
+    public static int DeployCapFor(int mission) { int d = Pace(mission); return d >= 5 ? 6 : (d >= 3 ? 5 : 4); }   // C1: paced
 
     // Adaptive assist (Hades God-Mode): consecutive LOST runs grant a small, capped, fully
     // reversible difficulty relief — but ONLY at base Heat (Heat is the opt-in hard mode, so the
@@ -1050,7 +1080,7 @@ public class Run
     }
 
     /// The depth term every non-Event node's payout is built on.
-    public static int BaseIntel(int mission) => DepthBase + 4 * mission;
+    public static int BaseIntel(int mission) => DepthBase + 4 * Pace(mission);   // C1: paced — a longer run pays more STOPS, not a steeper rate
 
     /// The PITCHED premium a node's card earns: the class price, paid only by the two kinds
     /// chosen FOR their fight. Pure; Start / Boss / Supply / Event never pay it (see NodeIntel).
@@ -2166,7 +2196,7 @@ public class Run
         // branch pick telegraphs the encounter's personality (counter-build before you commit).
         if (node.Faction != Faction.None)
             return FactionRosterLine(node.Faction);
-        int m = node.Mission;   // 1-based column == mission number
+        int m = Pace(node.Mission);   // C1: the forecast reads the paced depth the force is built from
         switch (node.Kind)
         {
             case NodeKind.Event:

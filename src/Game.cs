@@ -2306,7 +2306,7 @@ public partial class Game
         // P4's roster tier and P14's depth are the SAME formula (Mission.ModeTierFor) but they are
         // separate levers: SIGHTLINE_MODEDEPTH=0 must restore P14's four consumers WITHOUT undoing
         // P4's roster opening, so this line does not read Mission.ModeDepth.
-        int rosterTier = Mode == GameMode.Skirmish ? Mission.ModeTierFor(heat) : n;
+        int rosterTier = Mode == GameMode.Skirmish ? Mission.ModeTierFor(heat) : Run.Pace(n);   // C1: paced
         bool modeMidBoss = Mode == GameMode.Skirmish && heat >= 4;
         // P19 THE ROSTER CONTESTS — the campaign NODE the player routed through, handed to the
         // force builder so the map's own ELITE label can field the named elite it advertises
@@ -4880,7 +4880,7 @@ public partial class Game
             // there by construction. Zero RNG — the link fires off positions alone (CRN-safe).
             // The read never lies: a linked pod IS coming, with the existing 4.3 Suspicious
             // warning (the remainder of this turn + the turn-end beat; no scatter either way).
-            if (podId >= 0 && _run != null && _run.Mission >= 3)
+            if (podId >= 0 && _run != null && Run.Pace(_run.Mission) >= 3)   // C1: paced
             {
                 int bestPod = -1; float bestDist = float.MaxValue; Unit bestMember = null;
                 foreach (var s in Enemies)
@@ -8402,7 +8402,7 @@ public partial class Game
             if (_run.PrepFaction != Faction.None) return "prep already secured";
             return PrepFactionOffered == Faction.None
                 ? "no faction telegraphed next"
-                : $"counters {Run.FactionName(PrepFactionOffered)} for one mission";
+                : $"vs {Run.FactionName(PrepFactionOffered)}, next mission";   // C1: fits at 12px at 120%
         }
         var t = ShopTarget(item);
         if (IsModItem(item))
