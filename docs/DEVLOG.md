@@ -19712,6 +19712,33 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P68. THE BOARD CURVE (item C2)
+
+Base `841aaf3`. The owner: "1-2 short", and board size should "vary per mission with size-ranges per
+mission type."
+
+- **`Run.BoardFor(mission, cardObjective, mapSeed)`.** Missions 1-2 return 18x11. From mission 3
+  the width is drawn inside the card objective's range by `Util.Hash3(mapSeed, 41, mission)` (zero
+  `Util.Rng` draws), and the height follows the 18:11 aspect. Kill missions (ELIMINATE / DECAPITATE /
+  DEFEND) 30-36; HACK / SABOTAGE 36-42; EVAC / STEAL / ESCORT / RESCUE 40-48, because the extraction
+  is a walk and needs the room. It is keyed on the CARD's objective so each remapped pair shares a range.
+- **Where it applies.** `Game.ApplyBoardCurve(n)` runs in `SetupMission` before the big-board
+  remaps (which read the board size) and rebuilds the `Grid` when the size changed. The decal render
+  target and `Vision` already re-size off the Grid, and a 10-mission autoplay crosses 18x11 -> big ->
+  big without a fault. `Game.BoardCurve` is set by the real launch, autoplay and the balance batch,
+  and is **false everywhere else**: every self-test keeps the board it stages. `SIGHTLINE_BIGMAP`
+  pins a board (`Game.BigMapPinned`) and becomes the home board that the non-campaign modes return
+  to (`Cfg.HomeW/HomeH/HomeTile`).
+- **Not a difficulty lever** (§6.5). The force is board-neutral (BOARDNEUTRALTEST) and the paced
+  depth owns the curve. **What it DOES change is the game the balance batch measures:** from this
+  commit a `SIGHTLINE_BALANCE` chunk plays missions 3-10 on big boards, so nothing it reports may
+  be read against the 18x11 ladder of record. `levers.board` reads `curve:18x11@64` under the curve.
+  The 18x11 instrument is `SIGHTLINE_BOARDCURVE=0 SIGHTLINE_RUNLENGTH=6`.
+- **Gate:** PACETEST leg (E). It checks each type's range over ten missions, determinism, that
+  the seam builds the board and a fresh Grid, and that with the curve off a staged 24x15 is left
+  alone. Full sweep green (110/110, exit 0). Autoplay x3 on the curve: LOSE m7 / LOSE m2 / LOSE m2.
+  An earlier x3 read WIN m10 / WIN m10 / LOSE m2. No TIMEOUT in either.
+
 ## P67. A RUN IS TEN MISSIONS (item C1)
 
 Base `161db25`. The owner: "6 is not enough. Upgrades in between mean 5 opportunities to buy in-run

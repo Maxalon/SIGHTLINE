@@ -218,6 +218,8 @@ public static class Program
                 {
                     int bt = parts.Length >= 3 && int.TryParse(parts[2], out int t) ? t : 0;
                     Cfg.SetBoard(bw, bh, bt);
+                    Cfg.HomeW = Cfg.GridW; Cfg.HomeH = Cfg.GridH; Cfg.HomeTile = Cfg.Tile;   // C2
+                    Game.BigMapPinned = true;   // C2: a pinned board overrides the campaign's board curve
                     Console.WriteLine($"SIGHTLINE_BIGMAP: board {Cfg.GridW}x{Cfg.GridH} @ {Cfg.Tile}px "
                                     + $"({Cfg.BoardW}x{Cfg.BoardH} px vs {Cfg.ScreenW}x{Cfg.ScreenH} screen)");
                 }
@@ -347,6 +349,10 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WITHDRAWAL") == "0") Game.WithdrawalWaves = false;
         // B4 — STEAL. `=0` keeps a big-board EVAC node a plain EVAC instead of a STEAL.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_STEAL") == "0") Game.StealOnEvac = false;
+        // C2 — the campaign's board curve (missions 1-2 on 18x11, then big boards sized per mission
+        // type). `=0` keeps every mission on the home board. Live for the player, autoplay and the
+        // balance batch; self-tests keep the board they set (Game.BoardCurve defaults false).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BOARDCURVE") == "0") Game.BoardCurveAllowed = false;
         // C1 — the run's length. `=6` restores the six-mission run exactly (Run.Pace is then the
         // identity). Read here, above the BALANCE entry point, so a batch honours it.
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_RUNLENGTH"), out int runLen) && runLen >= 2)
@@ -1890,6 +1896,7 @@ public static class Program
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 
+        Game.BoardCurve = Game.BoardCurveAllowed && !Game.BigMapPinned;   // C2: the player's (and autoplay's) campaign
         var game = new Game();
         game.NoPersist = shot || autoplay;   // the harness never reads/writes the save file
         // P11 THE CRASH FILE: publish the live game so a crash report can say what was happening
@@ -2437,6 +2444,7 @@ public static class Program
         // Cumulative telemetry across the whole batch (NOT reset per match).
         Stats.Reset();
         Stats.Enabled = true;
+        Game.BoardCurve = Game.BoardCurveAllowed && !Game.BigMapPinned;   // C2: the batch measures the real game
 
         // Keep batch-wide static state deterministic across matches.
         // P48: `SIGHTLINE_MAP` is the one exception, and it has to be re-applied AFTER this reset

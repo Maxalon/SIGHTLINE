@@ -2117,6 +2117,9 @@ public partial class Game
         // T1: the TRAINING OP is a fixed kill-the-targets drill — force Eliminate so every
         // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
         if (Mode == GameMode.Training) Objective = Objective.Eliminate;
+        // C2: THE BOARD CURVE — decided from the CARD's objective, before the big-board remaps below
+        // read the board size. Off in self-tests (they keep the board they set) and under BIGMAP.
+        ApplyBoardCurve(n);
         // B3: on a big board ESCORT and RESCUE are one mission — the asset is reached, not brought.
         if (EscortIsRescue && Objective == Objective.Escort) Objective = Objective.Rescue;
         // B4: on a big board EVAC ("walk to the exit") plays as STEAL — the exit, with something to take out.

@@ -51,6 +51,10 @@ public static class Cfg
     public const int HudBotInset = 132;
     public static bool BoardOverflows => BoardW > ScreenW || BoardH > ScreenH;
 
+    /// C2: the board every non-campaign mission returns to (18x11@64, or whatever
+    /// SIGHTLINE_BIGMAP pinned at launch). The campaign's board curve departs from it per mission.
+    public static int HomeW = 18, HomeH = 11, HomeTile = 64;
+
     public static int BoardW => GridW * Tile;       // 1152
     public static int BoardH => GridH * Tile;       // 704
     public static int OriginX => (ScreenW - BoardW) / 2; // 64 — NOTE: the roster strip (x 8..140) still overlaps board column 0 (x 64..128); Hud.DrawRoster reflows occluded chips

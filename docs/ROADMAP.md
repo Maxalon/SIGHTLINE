@@ -74,10 +74,14 @@ block re-orders it and adds to it.
             loaded into the 10-column map. `SIGHTLINE_PACETEST` bridges the two scales; the gates that
             pin the depth model by mission number run explicitly on the tuned scale
             (`Run.OnTunedScale`, named at each call site in `Program.cs`).
-      - [ ] **C2. THE BOARD CURVE.** Missions 1-2 on 18x11; 3-10 big, sized per mission inside a
-            per-TYPE range (e.g. raids/extractions bigger than kill missions). Board size switches
-            per mission at runtime (`Cfg.SetBoard` is global: everything sized off the board, such as
-            the decal render texture, must follow it).
+      - [x] **C2. THE BOARD CURVE — P68.** Missions 1-2 on 18x11; 3-10 big, sized per mission from
+            the CARD's objective (`Run.BoardFor`/`BoardRange`, Hash3 on MapSeed, zero RNG draws): kill
+            30-36 wide, HACK/SABOTAGE 36-42, EVAC/STEAL/ESCORT/RESCUE 40-48, height = width x 11/18.
+            `Game.ApplyBoardCurve` runs in `SetupMission` before the big-board remaps and rebuilds the
+            Grid; the decal target and `Vision` already re-size off the Grid. Live for the player,
+            autoplay and the balance batch; OFF in self-tests (they keep the board they stage) and
+            under `SIGHTLINE_BIGMAP` (a pinned board). `SIGHTLINE_BOARDCURVE=0` restores; the balance
+            JSON's `levers.board` reads `curve:18x11@64` under it. PACETEST leg (E).
       - [ ] **C3. A NEW BASELINE** for the new game, never compared with the 18x11 ladder of record.
             Target: an inexperienced first run usually loses, but can win.
 - [ ] **G. ACTS** (later). Act 1 = today's run. Beating act 1 unlocks act 2 and act 2 unlocks act 3,

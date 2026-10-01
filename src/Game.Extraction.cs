@@ -24,6 +24,30 @@ namespace Sightline;
 /// and SABOTAGE, B3 reshapes ESCORT, B4 adds STEAL.
 public partial class Game
 {
+    // ══ C2 — the board curve's switch and its one seam ═══════════════════════════════════════════
+    /// True for the player's campaign, autoplay and the balance batch (set in Program.RealMain);
+    /// false in-process so a self-test keeps the board it staged.
+    public static bool BoardCurve;
+    /// `SIGHTLINE_BOARDCURVE=0` clears it.
+    public static bool BoardCurveAllowed = true;
+    /// SIGHTLINE_BIGMAP pinned a board: the curve stands down.
+    public static bool BigMapPinned;
+
+    /// Size the board for this mission: the campaign's curve, or the home board for every other
+    /// mode. The Grid is re-made when the size changes (its dimensions are read-only).
+    void ApplyBoardCurve(int mission)
+    {
+        if (BoardCurve)
+        {
+            var (w, h) = Mode == GameMode.Campaign
+                ? Run.BoardFor(mission, Objective, _run?.MapSeed ?? 0)
+                : (Cfg.HomeW, Cfg.HomeH);
+            int tile = (w == Cfg.HomeW && h == Cfg.HomeH) ? Cfg.HomeTile : 0;
+            if (w != Cfg.GridW || h != Cfg.GridH) Cfg.SetBoard(w, h, tile);
+        }
+        if (Grid.W != Cfg.GridW || Grid.H != Cfg.GridH) Grid = new Grid();
+    }
+
     /// `SIGHTLINE_EXTRACTION=0` restores the pre-B1 end conditions on a big board.
     public static bool ExtractionModel = true;
 

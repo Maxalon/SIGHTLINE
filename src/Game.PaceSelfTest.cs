@@ -20,6 +20,8 @@ namespace Sightline;
 ///     of a ten-mission run is an ordinary depth-4 fight.
 /// (D) A save written by a six-mission build (no RunLength) is refused, never loaded into the
 ///     ten-column map its MapSeed would now regenerate; a ten-mission save round-trips.
+/// (E) C2: the board curve — the opener is 18x11, later missions sit in their type's size range,
+///     and the curve is a seam the self-tests can switch off.
 public partial class Game
 {
     public static string PaceSelfTest()
@@ -78,6 +80,44 @@ public partial class Game
                 if (SaveGame.Load() != null) fails.Add("(D) a six-mission (legacy) save loaded into the ten-mission map");
             }
             finally { SaveGame.RestoreForSelfTest(stash); }
+
+            // ── (E) C2: THE BOARD CURVE ───────────────────────────────────────────────────────
+            Run.MaxMissions = 10;
+            int w0 = Cfg.GridW, h0 = Cfg.GridH, t0 = Cfg.Tile; bool bc0 = BoardCurve;
+            try
+            {
+                foreach (var o in new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Rescue })
+                    for (int m = 1; m <= 10; m++)
+                    {
+                        var (bw, bh) = Run.BoardFor(m, o, 4242);
+                        var (lo, hi) = Run.BoardRange(o);
+                        if (m <= Run.SmallMissions) { if (bw != 18 || bh != 11) fails.Add($"(E) m{m} {o} is {bw}x{bh}, the opener is 18x11"); }
+                        else if (bw < lo || bw > hi) fails.Add($"(E) m{m} {o} is {bw} wide, outside its type's {lo}-{hi}");
+                        if (Run.BoardFor(m, o, 4242) != (bw, bh)) fails.Add($"(E) m{m} {o}: the board is not deterministic");
+                    }
+                if (Run.BoardRange(Objective.Steal) != Run.BoardRange(Objective.Evac) || Run.BoardRange(Objective.Escort) != Run.BoardRange(Objective.Rescue))
+                    fails.Add("(E) a remapped pair (EVAC/STEAL, ESCORT/RESCUE) does not share a range");
+                // the seam: under the curve a campaign mission takes its board and a fresh Grid;
+                // with the curve off (every self-test) the staged board is left alone
+                Cfg.SetBoard(18, 11, 64);
+                BoardCurve = true;
+                var g = new Game { NoPersist = true, ForcedObjective = Objective.Hack };
+                g._run = new Run(); g._run.Start();
+                g.SetupMission(5);
+                var want = Run.BoardFor(5, Objective.Hack, g._run.MapSeed);
+                if ((Cfg.GridW, Cfg.GridH) != want || g.Grid.W != want.w || g.Grid.H != want.h)
+                    fails.Add($"(E) mission 5 under the curve built {g.Grid.W}x{g.Grid.H}, want {want.w}x{want.h}");
+                g.SetupMission(2);
+                if (g.Grid.W != 18 || g.Grid.H != 11) fails.Add($"(E) mission 2 under the curve is {g.Grid.W}x{g.Grid.H}, the opener is 18x11");
+                detail.Append($"m5 {want.w}x{want.h}; ");
+                BoardCurve = false;
+                Cfg.SetBoard(24, 15);
+                var g2 = new Game { NoPersist = true, ForcedObjective = Objective.Hack };
+                g2._run = new Run(); g2._run.Start();
+                g2.SetupMission(5);
+                if (g2.Grid.W != 24 || g2.Grid.H != 15) fails.Add($"(E) with the curve off the staged 24x15 became {g2.Grid.W}x{g2.Grid.H}");
+            }
+            finally { BoardCurve = bc0; Cfg.SetBoard(w0, h0, t0); }
         }
         catch (Exception e) { fails.Add($"threw: {e.GetType().Name}: {e.Message}"); }
         finally { Run.MaxMissions = mm0; }
@@ -86,7 +126,9 @@ public partial class Game
             ? "PACETEST: PASS (a ten-mission run walks the tuned 1..6 depth curve as 1,2,2,3,3,4,4,5,5,6 and a six-mission "
               + "run maps to itself; every mission of the ten seats exactly the force its paced depth seats on the six, at "
               + "heat 0 everywhere and at heats 4/8 outside the m1-2 grace; the finale is mission 10 and mission 6 is an "
-              + "ordinary fight; a six-mission save is refused and a ten-mission save round-trips) [" + detail + "]"
+              + "ordinary fight; a six-mission save is refused and a ten-mission save round-trips; C2: missions 1-2 are "
+              + "18x11 and 3-10 sit inside their type's range, deterministically, the seam builds that board with a fresh "
+              + "Grid, and with the curve off a staged board is left alone) [" + detail + "]"
             : "PACETEST: FAIL (" + string.Join(" | ", fails.Distinct()) + ") [" + detail + "]";
     }
 }
