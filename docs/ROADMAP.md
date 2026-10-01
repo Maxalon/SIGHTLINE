@@ -46,6 +46,12 @@ the goal. Its four seams still need parameterising — the transform they need i
       zoom 1, but it is not the default. `Game.FlatZoomFloor` gives the default flat view a floor at
       which the whole board fits (36x22: 0.644, 48x30: 0.640), capped at 1 so 18x11 is untouched.
       `SIGHTLINE_FLATZOOMTEST` (picking round-trips 45/45 at the floor).
+- [x] **0e. P59 MEASURED A BIG BOARD — AND IT IS TRIVIALLY EASY.** Forced objectives at heat 0 on a
+      procedural size ladder: every objective saturates at 36 wide (Defend 99.5, Hack 100.0, Sabotage
+      99.0) and **every campaign wins, 24 of 24 chunks at 36 and 48 wide.** The enemy acts but rarely
+      shoots (Defend acts-with-a-shot 11.9 -> 4.4 -> 3.2 per mission) and task missions end in ~4
+      turns — **the task completes before the fight arrives.** Map geometry alone cannot fix that;
+      it is what item 2's extraction model is for. `docs/measurements/p59/`.
 - [ ] **0d. THE BOTTOM ROWS UNDER THE ACTION BAR, AT THE FLOOR.** At the zoom floor a big board cannot
       pan, so its bottom rows stay under the translucent action bar (18x11 has always had its bottom
       row there). Either fit the floor to the area between the top bar and the action bar, or let
