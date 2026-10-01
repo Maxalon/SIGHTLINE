@@ -1182,8 +1182,9 @@ public static partial class Mission
         if (ArenasFitBoard || _saidArenasUnusable) return;
         _saidArenasUnusable = true;
         Console.Error.WriteLine($"SIGHTLINE: board is {Cfg.GridW}x{Cfg.GridH} but the {Maps.Layouts.Length} "
-            + $"authored arenas are drawn for {Maps.TemplateW}x{Maps.TemplateH}. They are OUT OF PLAY for this "
-            + "run and every mission will be procedural. Expected under SIGHTLINE_BIGMAP.");
+            + $"authored arenas are drawn for {Maps.TemplateW}x{Maps.TemplateH}. They are OUT OF PLAY on this "
+            + "board and its missions are procedural. Expected on a big board (the campaign's board curve "
+            + "from mission 3, or SIGHTLINE_BIGMAP).");
     }
 
     public static int LayoutDimMismatches;
