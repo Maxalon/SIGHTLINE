@@ -209,8 +209,8 @@ public partial class Game
         switch (Objective)
         {
             case Objective.Evac:    if (SmartEvac(u))    return; break;
-            case Objective.Hack:    if (SmartHack(u))    return; break;
-            case Objective.Sabotage:if (SmartSabotage(u))return; break;
+            case Objective.Hack:    if (EvacOpen ? SmartEvac(u) : SmartHack(u))     return; break;   // B2
+            case Objective.Sabotage:if (EvacOpen ? SmartEvac(u) : SmartSabotage(u)) return; break;   // B2
             case Objective.Escort:  if (SmartEscort(u))  return; break;
             case Objective.Rescue:  if (SmartRescue(u))  return; break;
             case Objective.Defend:  if (SmartDefend(u))  return; break;
@@ -1991,7 +1991,7 @@ public partial class Game
         }
 
         // EVAC objective: get everyone to the extraction zone
-        if (Objective == Objective.Evac)
+        if (Objective == Objective.Evac || EvacOpen)   // B2: an opened task evac routes the same way
         {
             // drop the forward beacon once the point man is past mid-field (cuts the march to the corner)
             if (CanBeacon(u) && u.X >= Grid.W / 2 && DistToEvac(u.X, u.Y) > 2) { DoBeacon(); return; }
