@@ -66,9 +66,22 @@ block re-orders it and adds to it.
             stops offering MERCENARY CLAUSE and LIVING LEGENDS (both trade on the reserve). Nothing on
             disk is deleted. **Left for F:** `StandingReserve`/`DeepReserve` (owned ones are inert) and the
             two contracts need power-curve meanings.
-- [ ] **C. THE CAMPAIGN'S BOARD CURVE.** Tutorial and the first missions on 18x11; most of the run on
-      big boards, sized per node (`Cfg.SetBoard` is already runtime). Re-baseline the heat ladder on
-      the new game: a new instrument, never compared with the 18x11 ladder of record.
+- [ ] **C. THE RUN AND ITS BOARDS** (owner, 2026-10-01: `docs/DESIGN.md` §6.6, "The run, the acts").
+      - [ ] **C1. A RUN IS 10 MISSIONS.** `Run.MaxMissions` 6 -> 10. This is a SAVE-FORMAT change (the
+            map generator's shape) and touches everything keyed on a mission NUMBER: depth scaling,
+            the finale, the mid-boss floor, the checkpoint threshold, deploy growth, the objective
+            rotation. Audit every consumer; stretch the depth curve so mission 10 is not a heat
+            ladder nobody tuned. Old in-progress saves must not load into the wrong map.
+      - [ ] **C2. THE BOARD CURVE.** Missions 1-2 on 18x11; 3-10 big, sized per mission inside a
+            per-TYPE range (e.g. raids/extractions bigger than kill missions). Board size switches
+            per mission at runtime (`Cfg.SetBoard` is global: everything sized off the board, such as
+            the decal render texture, must follow it).
+      - [ ] **C3. A NEW BASELINE** for the new game, never compared with the 18x11 ladder of record.
+            Target: an inexperienced first run usually loses, but can win.
+- [ ] **G. ACTS** (later). Act 1 = today's run. Beating act 1 unlocks act 2 and act 2 unlocks act 3,
+      each a fresh run. Act 4 is unlocked by a secret/puzzle and leads to the true ending. Needs a
+      persisted act-progress field in the meta profile (append-only) and per-act content (enemy
+      roster, biomes, bosses).
 - [ ] **D. BIGGER: THE HOUSING BLOCK.** Push past 48x30 toward XCOM scale. Measure what breaks first:
       planner cost per enemy act, Dijkstra per unit, draw cost in the projected view, fog of war.
       The authored arenas come back here as ROOMS / BLOCKS inside the big board (P37's cell grid
