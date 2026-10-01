@@ -612,6 +612,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   and the squad's shared focus is recomputed live per unit — so a shove/breach that exposes a soldier redirects the
   pod onto that opening the same turn (setup-then-collapse). Advisory-only, TIMEOUT-safe. (`Game.IsSetupUnit` + a
   per-unit `PlanEnemySquad` recompute; AITEST-covered.)
+- **BOARD / CALL EVAC (P62, big boards only):** in the campaign on a board larger than 18x11, an
+  EVAC / ESCORT / RESCUE mission ends only by extraction. BOARD [J] takes a soldier in the zone off the
+  field; the mission never ends on its own while anyone alive is on the ground; CALL EVAC [Z] (once one
+  is aboard and the asset is secured) wins with the boarded and the in-zone, and anyone else is left
+  behind and dies. `SIGHTLINE_EXTRACTION=0` restores the old rule; `SIGHTLINE_EXTRACTIONTEST`.
 - **Forward EVAC beacon + ESCORT leash (de-drag):** DEPLOY BEACON (key G) plants a forward extraction 3×3 that's
   unioned with the fixed far-corner FALLBACK (always present → no soft-lock), so the squad fights to a defensible
   mid-field spot and extracts there instead of a 14-tile stroll (Evac ~10.9t → ~7.8t). The ESCORT VIP now auto-follows

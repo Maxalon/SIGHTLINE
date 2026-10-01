@@ -28,10 +28,14 @@ block re-orders it and adds to it.
       it** (`docs/DESIGN.md` §6.6, "The owner's answers"). P59: on a big board the task completes
       before the fight arrives, so every campaign wins. **It gates C.** Live on BIG boards only, so
       the 18x11 tutorial band and every gate pinned to it keep today's rules. In waves:
-      - [ ] **B1. BOARD and CALL EXTRACTION.** A soldier in the zone boards (leaves the board, safe).
-            The mission never ends on its own while a living soldier is on the ground. Once one has
-            boarded, CALL EXTRACTION ends it: aboard + in-zone get out, everyone else is lost (KIA).
-            The evac zone is placed far from the objective (several turns).
+      - [x] **B1. BOARD and CALL EVAC — P62.** BOARD [J] takes a soldier in the zone off the field
+            (`Game.Aboard`); the mission never ends on its own while a living unit is on the ground;
+            CALL EVAC [Z] (one aboard, asset secured) wins with the aboard + in-zone and leaves the
+            rest behind dead. Big boards, campaign, EVAC/ESCORT/RESCUE; `SIGHTLINE_EXTRACTION=0`
+            restores; `SIGHTLINE_EXTRACTIONTEST`. **Not done here:** the zone is still the fixed
+            top-right block (far from a west-deployed squad by geometry, not by rule), and a big-board
+            EVAC still wins 8/8 — nothing opposes the walk until B3's reinforcements. Skirmish/daily
+            on a big board keep the old rule (`CheckSkirmish` is untouched).
       - [ ] **B2. HACK / SABOTAGE:** the evac spawns when the task is done, and the mission ALSO ends
             when every hostile is dead. No reinforcements on these two (sneak or clear, both real).
       - [ ] **B3. RESCUE and ESCORT converge:** the asset is REACHED mid-board, never brought. Evac

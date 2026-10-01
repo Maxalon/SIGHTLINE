@@ -1458,6 +1458,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         ("hack",      "HACK / PLANT", "H"),
         ("beacon",    "BEACON",     "G"),
         ("extract",   "EXTRACT",    "X"),
+        ("board",     "BOARD",      "J"),
+        ("callevac",  "CALL EVAC",  "Z"),
         ("stabilize", "STABILIZE",  "E"),
         ("reload",    "RELOAD",     "R"),
     };
@@ -1664,6 +1666,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Add("beacon", "BEACON", "G", interactive && g.CanBeacon(u), false);
         // FUL-7: STABILIZE — the universal rescue verb. Surfaces only while a squadmate is DOWN
         // (exactly the moment it matters); enabled when one lies adjacent and un-stabilized.
+        //   TAIL 2b BOARD / CALL EVAC — B1, big-board extraction only; present for the whole mission
+        if (g.ExtractionLive)
+        {
+            Add("board", "BOARD", "J", interactive && g.CanBoard(u), false);
+            Add("callevac", g.Aboard.Count > 0 ? $"CALL EVAC ({g.Aboard.Count})" : "CALL EVAC", "Z", interactive && g.CanCallEvac, false);
+        }
         if (g.Players.Any(p => p.Alive && p.Downed))
         {
             if (OldChrome) specs.Insert(Math.Min(7, specs.Count), ("stabilize", "STABILIZE", "E", interactive && g.CanStabilize(u), false));
@@ -2032,9 +2040,22 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 Raylib.DrawLineEx(new Vector2(cx - 1f, cy), new Vector2(cx + 1f, cy), 1.5f, c);
                 break;
             }
+            case "callevac":
+            {
+                // B1: a signal flare — a ring with four short rays (calling the bird in)
+                Raylib.DrawCircleLinesV(new Vector2(cx, cy), 4f, c);
+                for (int k = 0; k < 4; k++)
+                {
+                    float a = k * MathF.PI / 2f + MathF.PI / 4f;
+                    var d = new Vector2(MathF.Cos(a), MathF.Sin(a));
+                    Raylib.DrawLineEx(new Vector2(cx, cy) + d * 6f, new Vector2(cx, cy) + d * 9f, 1.5f, c);
+                }
+                break;
+            }
+            case "board":
             case "extract":
             {
-                // Up-arrow lifting into a landing-zone bracket (haul aboard)
+                // Up-arrow lifting into a landing-zone bracket (haul aboard; B1 BOARD shares it)
                 Raylib.DrawLineEx(new Vector2(cx, cy + 6f), new Vector2(cx, cy - 5f), 1.8f, c);
                 Raylib.DrawLineEx(new Vector2(cx, cy - 5f), new Vector2(cx - 3.5f, cy - 1f), 1.8f, c);
                 Raylib.DrawLineEx(new Vector2(cx, cy - 5f), new Vector2(cx + 3.5f, cy - 1f), 1.8f, c);
@@ -2270,6 +2291,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 ? "Deploy a forward evac beacon for the VIP: opens a 3x3 extraction zone right here (in addition to the far corner). ESCORT: needs the FAR THIRD of the map and a COLD LZ (no living enemy within 3 tiles - dormant counts). One per mission. Costs 1 action, won't end your turn."
                 : "Deploy a forward evac beacon on your tile: opens a 3x3 extraction zone right here (in addition to the far corner). One per mission. Costs 1 action, won't end your turn.";
             case "extract": return "Haul an adjacent ally / asset aboard - pulls them into the extraction zone. Costs 1 action.";
+            case "board": return "Board the extraction from inside the zone. The soldier leaves the field and is safe. Ends their turn.";
+            case "callevac": return "Call the extraction in. Everyone aboard or in the zone gets out - anyone else is LEFT BEHIND and dies.";
             case "reload": return "Reload your weapon to full.";
             case "showall": return "The action bar is STAGED while you are learning - it shows only the verbs the lessons have covered. Turn this on to see every verb now; the choice is remembered.";
             case "ability":

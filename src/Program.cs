@@ -339,6 +339,9 @@ public static class Program
         // 0d+1 — ENVELOP ON A BIG BOARD. `=0` restores the absolute 18x11 squad table and rim
         // anchors. A no-op on the shipped board by construction.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_ENVELOPCENTRE") == "0") Mission.EnvelopCentre = false;
+        // B1 — THE EXTRACTION MODEL on a big board (board one by one, CALL EVAC). `=0` restores the
+        // pre-B1 end conditions. A no-op on 18x11 by construction.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EXTRACTION") == "0") Game.ExtractionModel = false;
 
         // P53 — THE FALSIFICATION ARM for P52's rule. `=0` moves SABOTAGE's INTERIOR charge out of
         // the held room and changes nothing else, so the same objective on the same board is
@@ -1035,6 +1038,11 @@ public static class Program
         }
         // SIGHTLINE_FLATZOOMTEST=1 : P58 — the flat camera zooms out to fit a big board; 18x11
         // untouched; picking still lands on the right tile at the floor.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EXTRACTIONTEST") == "1")
+        {
+            Console.WriteLine(Game.ExtractionSelfTest());
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VIEWDEFAULTTEST") == "1")
         {
             Console.WriteLine(View3D.ViewDefaultSelfTest());

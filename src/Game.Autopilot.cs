@@ -76,6 +76,7 @@ public partial class Game
                                    losTargets, tgtChoices, posChoices);
         }
         TryFreeCaptive();                       // free a captive a soldier already stands next to
+        if (AutoExtractStep()) return;          // B1: board / call the extraction on a big board
         var u = Players.FirstOrDefault(p => p.CanAct);
         if (u == null) { EndPlayerTurn(); return; }
         Selected = u;
@@ -1970,6 +1971,7 @@ public partial class Game
     {
         if (_anims.Count > 0 || Phase != Phase.PlayerTurn) return;
         TryFreeCaptive();                       // free a captive a soldier is already standing next to
+        if (AutoExtractStep()) return;          // B1: board / call the extraction on a big board
         var u = Players.FirstOrDefault(p => p.CanAct);
         if (u == null) { EndPlayerTurn(); return; }
         Selected = u;

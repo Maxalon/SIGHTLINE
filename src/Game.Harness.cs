@@ -14525,6 +14525,7 @@ public partial class Game
         var covered = new HashSet<string>();
         foreach (var row in plan)
         {
+            ExtractionForceForTest = false;
             var g = Scene(70300 + vi++);
             var sol = MkU(Team.Player, 5, 5, 8, row.Cls); g.Players.Add(sol); g.Selected = sol;
             var watch = new List<Unit> { sol };
@@ -14610,6 +14611,17 @@ public partial class Game
                     mate = MkU(Team.Player, 6, 5, 8); g.Players.Add(mate); watch.Add(mate);
                     g.Players.Add(MkU(Team.Player, 12, 9, 8));      // ditto: the pull must not WIN the field
                     arm = () => g.DoAction("extract"); fired = () => g.EvacZone.Contains((mate.X, mate.Y)); break;
+                case "board":       // P62 — the big-board extraction verbs, forced live on this 18x11 scene
+                    ExtractionForceForTest = true;
+                    g.Objective = Objective.Evac; g.EvacZone.Add((5, 5)); g.EvacZone.Add((4, 5));
+                    g.Players.Add(MkU(Team.Player, 12, 9, 8));      // someone stays on the ground: boarding must not WIN
+                    arm = () => g.DoAction("board"); fired = () => g.Aboard.Contains(sol); break;
+                case "callevac":
+                    ExtractionForceForTest = true;
+                    g._run = new Run(); g._run.Start();             // the CALL ends the mission: it needs a run to debrief into
+                    g.Objective = Objective.Evac; g.EvacZone.Add((5, 5)); g.EvacZone.Add((4, 5));
+                    mate = MkU(Team.Player, 4, 5, 8); g.Aboard.Add(mate);
+                    arm = () => g.DoAction("callevac"); fired = () => g.Phase != Phase.PlayerTurn; break;
                 case "stabilize":
                     mate = MkU(Team.Player, 6, 5, 1); g.Players.Add(mate); watch.Add(mate);
                     mate.Downed = true; mate.Stabilized = false;
@@ -14633,6 +14645,7 @@ public partial class Game
             sb.AppendLine($"JUICETEST: census {Row(row.Label, done)}"
                         + (modal ? $"  [arm: {armState} seen {armed.Seen} heard {armed.Heard} cues {armed.Ids}]" : ""));
         }
+        ExtractionForceForTest = false;
         foreach (var v in Hud.VerbTable) if (!covered.Contains(v.Id)) fails.Add($"verbNotStaged({v.Id})");
         // MOVE is not on the action bar (it is the default board act) and is the most frequent
         // action in the game, so the census would be a lie without it.
