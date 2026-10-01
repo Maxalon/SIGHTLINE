@@ -1570,6 +1570,7 @@ public static class Stats
                 envelopCentre = Sightline.Mission.EnvelopCentre,
                 extraction = Sightline.Game.ExtractionModel,
                 withdrawal = Sightline.Game.WithdrawalWaves,
+                stealOnEvac = Sightline.Game.StealOnEvac,
                 // P59: the BOARD this chunk played, as "WxH@Tile". Until now a big-board chunk's size
                 // lived only in its file name and its env — the exact failure mode `levers{}` exists
                 // to close. A big board is a different game (DESIGN §6.5), so a chunk that cannot

@@ -485,7 +485,9 @@ public static class Codex
     // Objective enum has no Def class — provide the readable name + a one-line goal here (mirrors the
     // HUD objective readout / Hud.DrawObjectiveIcon semantics). Data only.
     /// B3: on a big board an ESCORT node plays — and so reads — as RESCUE.
-    static Objective Shown(Objective o) => o == Objective.Escort && Game.EscortIsRescue ? Objective.Rescue : o;
+    public static Objective Shown(Objective o) =>
+        o == Objective.Escort && Game.EscortIsRescue ? Objective.Rescue
+      : o == Objective.Evac && Game.EvacIsSteal ? Objective.Steal : o;   // B3 + B4
 
     public static string ObjectiveName(Objective o) => Shown(o) switch
     {
@@ -497,6 +499,7 @@ public static class Codex
         Objective.Rescue     => "RESCUE",
         Objective.Defend     => "DEFEND",
         Objective.Decapitate => "DECAPITATE",
+        Objective.Steal      => "STEAL",
         _ => o.ToString().ToUpperInvariant(),
     };
 
@@ -510,6 +513,7 @@ public static class Codex
         Objective.Rescue     => "Free the caged captive, then escort it to extraction.",
         Objective.Defend     => "Hold out for a set number of turns as reinforcement waves spawn.",
         Objective.Decapitate => "Kill the marked high-value target; peel its bodyguards first.",
+        Objective.Steal      => "Grab the loot mid-field and carry it out through the extraction - pass it if you must.",
         _ => "",
     };
 

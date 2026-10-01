@@ -213,6 +213,7 @@ public partial class Game
             case Objective.Sabotage:if (EvacOpen ? SmartEvac(u) : SmartSabotage(u)) return; break;   // B2
             case Objective.Escort:  if (SmartEscort(u))  return; break;
             case Objective.Rescue:  if (SmartRescue(u))  return; break;
+            case Objective.Steal:   if (SmartSteal(u))   return; break;   // B4
             case Objective.Defend:  if (SmartDefend(u))  return; break;
             case Objective.Decapitate: if (SmartDecapitate(u)) return; break;
         }
@@ -1991,6 +1992,7 @@ public partial class Game
         }
 
         // EVAC objective: get everyone to the extraction zone
+        if (Objective == Objective.Steal && SmartSteal(u)) return;   // B4
         if (Objective == Objective.Evac || EvacOpen)   // B2: an opened task evac routes the same way
         {
             // drop the forward beacon once the point man is past mid-field (cuts the march to the corner)

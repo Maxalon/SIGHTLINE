@@ -625,6 +625,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   RESCUE (the asset is reached mid-board). Once it is freed, 1-2 alerted hostiles a turn arrive on
   the board edge of the extraction's half (never within 6 of the exit), up to 4 + heat/2. No clock
   waves and no forward beacon there. `SIGHTLINE_WITHDRAWAL=0` turns the trickle off.
+- **STEAL (P66):** a ninth objective. A drive sits mid-board; GRAB [H] lifts it, the same key PASSes
+  it to an adjacent soldier, a carrier who goes down drops it, and it must leave through the
+  extraction (the CALL is refused without it). On a big board EVAC nodes play as STEAL;
+  `SIGHTLINE_OBJ=steal` forces it anywhere.
 - **Forward EVAC beacon + ESCORT leash (de-drag):** DEPLOY BEACON (key G) plants a forward extraction 3×3 that's
   unioned with the fixed far-corner FALLBACK (always present → no soft-lock), so the squad fights to a defensible
   mid-field spot and extracts there instead of a 14-tile stroll (Evac ~10.9t → ~7.8t). The ESCORT VIP now auto-follows

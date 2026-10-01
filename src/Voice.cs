@@ -235,7 +235,7 @@ public static class Voice
     // ─────────────────────────────────────────────────────────────────────────────────────
 
     /// The task line: the objective, said the way a commander would say it.
-    public static string ObjectiveLine(Objective o) => o switch
+    public static string ObjectiveLine(Objective o) => Codex.Shown(o) switch
     {
         Objective.Eliminate  => "Clear the field. Nothing hostile walks off it.",
         Objective.Evac       => "Fight to the extraction zone and get every soldier inside it.",
@@ -245,6 +245,7 @@ public static class Voice
         Objective.Rescue     => "Cut the captive loose, then walk them to extraction.",
         Objective.Defend     => "Hold this ground. Waves are already inbound — the clock is the win.",
         Objective.Decapitate => "Kill the marked target. Peel the bodyguards first.",
+        Objective.Steal      => "The drive is mid-field. Lift it, carry it out, and do not drop it.",
         _                    => "Take the ground and hold it.",
     };
 

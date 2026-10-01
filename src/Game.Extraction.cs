@@ -35,7 +35,8 @@ public partial class Game
     /// mission ends so the debrief sees them.
     public readonly List<Unit> Aboard = new();
 
-    static bool ExtractObjective(Objective o) => o == Objective.Evac || o == Objective.Escort || o == Objective.Rescue;
+    static bool ExtractObjective(Objective o) => o == Objective.Evac || o == Objective.Escort || o == Objective.Rescue
+                                                 || o == Objective.Steal;   // B4
     static bool TaskObjective(Objective o) => o == Objective.Hack || o == Objective.Sabotage;
 
     /// Harness-only: JUICETEST stages every verb on an 18x11 scene, where the rules are never live.
@@ -97,12 +98,20 @@ public partial class Game
         Fx.PopText(zc + new Vector2(0, -30), "EVAC", Pal.Good, 24f);
     }
 
-    bool AssetMission => Objective == Objective.Escort || Objective == Objective.Rescue;
+    /// A mission whose win depends on a protected NPC (ESCORT/RESCUE)...
+    bool VipMission => Objective == Objective.Escort || Objective == Objective.Rescue;
+    /// ...or on getting SOMETHING out (those, plus B4's STEAL).
+    bool AssetMission => VipMission || Objective == Objective.Steal;
 
     /// The asset is out, or standing in the zone and free (so a CALL takes it along).
     bool AssetSecured => !AssetMission
-        || (Vip != null && (Aboard.Contains(Vip)
-            || (Vip.Alive && !CaptiveLocked && EvacZone.Contains((Vip.X, Vip.Y)))));
+        || (Objective == Objective.Steal ? LootSecured
+            : Vip != null && (Aboard.Contains(Vip)
+              || (Vip.Alive && !CaptiveLocked && EvacZone.Contains((Vip.X, Vip.Y)))));
+
+    /// The asset has been reached: the captive freed, or the loot in someone's hands.
+    bool AssetReached => Objective == Objective.Steal ? (Carrier != null || LootAboard)
+                       : Vip != null && Vip.Alive && !CaptiveLocked;
 
     public bool CanBoard(Unit u) =>
         ExtractionLive && u != null && u.Team == Team.Player && u.Alive && !u.Downed && u.CanAct
@@ -123,6 +132,7 @@ public partial class Game
         u.ActionsLeft = 0;
         Players.Remove(u);
         Aboard.Add(u);
+        if (u == Carrier) LootAboard = true;     // B4: the loot leaves with its carrier
         Selected = Players.FirstOrDefault(p => p.Alive && p.CanAct && !p.IsVip)
                 ?? Players.FirstOrDefault(p => p.Alive);
         AimMode = false;
@@ -140,6 +150,7 @@ public partial class Game
             if (EvacZone.Contains((p.X, p.Y)) && !(p.IsVip && CaptiveLocked))
             {
                 Players.Remove(p); Aboard.Add(p);       // in the zone: out with the rest
+                if (p == Carrier) LootAboard = true;
             }
             else
             {
@@ -190,13 +201,14 @@ public partial class Game
         }
         if (!ExtractionLive) return false;
         // a dead asset that never got out is lost exactly as before — let the objective branch say so
-        if (AssetMission && (Vip == null || (!Vip.Alive && !Aboard.Contains(Vip)))) return false;
+        if (VipMission && (Vip == null || (!Vip.Alive && !Aboard.Contains(Vip)))) return false;
         if (alivePlayers.Count == 0)
         {
             if (Aboard.Count == 0) return false;               // a true wipe: the normal valve/loss
             if (!AssetSecured)
             {
-                LoseRun(Objective == Objective.Rescue ? "CAPTIVE ABANDONED" : "VIP ABANDONED",
+                LoseRun(Objective == Objective.Rescue ? "CAPTIVE ABANDONED"
+                        : Objective == Objective.Steal ? "LOOT ABANDONED" : "VIP ABANDONED",
                         $"The squad pulled out without the asset on mission {_run.Mission}.");
                 return true;
             }
@@ -219,8 +231,7 @@ public partial class Game
     /// Once the asset is reached, hostiles arrive one or two at a time from the extraction's half of
     /// the board, every player turn, until the squad is out — so the walk out gets harder the longer
     /// it takes. Replaces the pressure clock's reinforcements on these missions.
-    public bool WithdrawalLive => WithdrawalWaves && ExtractionLive && AssetMission
-                                  && Vip != null && Vip.Alive && !CaptiveLocked;
+    public bool WithdrawalLive => WithdrawalWaves && ExtractionLive && AssetMission && AssetReached;
 
     /// Harness read: hostiles the withdrawal has fielded this mission.
     public int WithdrawalSpawned;

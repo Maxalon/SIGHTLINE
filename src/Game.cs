@@ -10,7 +10,7 @@ public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, Wa
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
-public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
+public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate, Steal }   // B4 appends Steal
 // APPEND-ONLY: treat like the persisted enums above (new members at the END only; never reorder or
 // remove — SaveGame.SelfTest guards the tail ordinal). W10 appends three PLAYSTYLE bonuses: Ghost
 // (stay concealed through turn 2), Demolition (destroy 3 cover/barrels), Bounty (kill the mission's
@@ -1271,12 +1271,12 @@ public partial class Game
     public List<(int x, int y)> SabotageSites = new();
     public HashSet<int> SabotageBlown = new();
     public bool HasSabotage => Objective == Objective.Sabotage;
-    public bool HasHackAction => HasTerminal || HasSabotage;
+    public bool HasHackAction => HasTerminal || HasSabotage || HasLoot;   // B4: GRAB / PASS share the slot
     // EXTRACT (lift-out): on the zone-based extraction objectives, a soldier standing in the
     // evac zone can haul an adjacent ally / VIP / freed captive aboard — pulling them the last
     // step into the zone. Cuts the long Evac/Escort "everyone walk to the corner" drag.
     public bool HasExtractAction => Objective == Objective.Evac || Objective == Objective.Escort
-                                    || Objective == Objective.Rescue;
+                                    || Objective == Objective.Rescue || Objective == Objective.Steal;
 
     // DECAPITATE: one designated enemy is the High-Value Target; killing it WINS the
     // mission outright (no need to clear the map). Designated from the Enemies list in
@@ -1302,6 +1302,7 @@ public partial class Game
         if (HasTerminal) return !HackedThisTurn && HackProgress < HackRequired
                               && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
         if (HasSabotage) return NearestSabotageSite(u) >= 0;
+        if (HasLoot) return CanGrab(u) || CanPass(u);   // B4
         return false;
     }
 
@@ -2118,6 +2119,8 @@ public partial class Game
         if (Mode == GameMode.Training) Objective = Objective.Eliminate;
         // B3: on a big board ESCORT and RESCUE are one mission — the asset is reached, not brought.
         if (EscortIsRescue && Objective == Objective.Escort) Objective = Objective.Rescue;
+        // B4: on a big board EVAC ("walk to the exit") plays as STEAL — the exit, with something to take out.
+        if (EvacIsSteal && Objective == Objective.Evac) Objective = Objective.Steal;
         EvacZone.Clear();
         Aboard.Clear(); LeftBehindLastMission = 0;   // B1: nobody is aboard at the start of a mission
         WithdrawalSpawned = 0;                        // B3
@@ -2141,7 +2144,8 @@ public partial class Game
         // no Util.Rng draw occurs in SetupMission before the Build call, so the moved roll is the
         // first draw of mission setup either way.
         Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
-        bool wantEvac = Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue;
+        bool wantEvac = Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue
+                        || Objective == Objective.Steal;   // B4
         var plan = Mission.PlanBoard(n,
                                      needEvac: wantEvac,
                                      needTerminal: Objective == Objective.Hack,
@@ -2154,7 +2158,8 @@ public partial class Game
         {
             foreach (var t in plan.Evac) EvacZone.Add(t);   // the arena said where extraction is
         }
-        else if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
+        else if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue
+                 || Objective == Objective.Steal)
         {
             // A 2x4 extraction block (8 tiles) in the top-right. CRITICAL: with deploy-growth the
             // squad can field up to DeployCapMax soldiers, and EVAC requires ALL of them to stand
@@ -2369,6 +2374,8 @@ public partial class Game
             Vip.Mobility = 0;              // can't move while caged
             Vip.SyncPos();
         }
+        if (Objective == Objective.Steal) SeatLoot();   // B4: the loot sits mid-board, reachable
+        else { Carrier = null; LootAboard = false; }
         if (Objective == Objective.Decapitate) DesignateHvt();
         // CROSSFIRE (Wave 2): expose the full live roster to Combat.ComputeOdds so it can see an
         // attacker's squadmates (the converging-fire bonus) without threading the list through every
@@ -3421,6 +3428,7 @@ public partial class Game
         // telemetry the flywheel ranks (UNDERTOW W1). The queued-reaction purge below is the primary
         // guard; this makes KillUnit robust to every double-call path.
         if (!d.Alive) return;
+        if (d == Carrier) DropLoot(d);   // B4: a carrier that goes down or dies lets go of the loot
         // FUL-7 LAST LIGHT: the whole bleed-out state machine enters HERE — the single lethal
         // seam (ShotAnim/GrenadeAnim/EnvDamage/siege/barrel all funnel through KillUnit). A
         // soldier's FIRST lethal event becomes a 3-turn DOWN instead of a death; the VIP/captive
@@ -4523,6 +4531,10 @@ public partial class Game
         else if (Objective == Objective.Decapitate) // kill the marked HVT; the rest don't matter
         {
             if (Hvt == null || !Hvt.Alive) EnterBarracks();
+        }
+        else if (Objective == Objective.Steal) // B4 (18x11 / flag off): the carrier stands in the zone
+        {
+            if (Carrier != null && Carrier.Alive && EvacZone.Contains((Carrier.X, Carrier.Y))) EnterBarracks();
         }
         else // Evac: every surviving soldier must stand in the extraction zone
         {
@@ -6502,6 +6514,7 @@ public partial class Game
     void DoHack()
     {
         if (!CanHack(Selected)) return;
+        if (HasLoot) { DoGrabOrPass(); return; }   // B4
         Selected.ActionsLeft -= 1;
         AimMode = false;
         Stats.RecordAction(HasSabotage ? "PLANT" : "HACK");   // W2 verb telemetry
