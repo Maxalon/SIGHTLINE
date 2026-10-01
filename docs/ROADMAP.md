@@ -24,9 +24,24 @@ block re-orders it and adds to it.
       between the HUD plates (`View3D.FitHudBand`) on every board size. `SIGHTLINE_VIEWDEFAULTTEST`.
       **Left open:** at Zoom > 1 the projected pan clamp still lets the edge rows reach the SCREEN
       edge, not the band edge (the flat view got that in P60).
-- [ ] **B. A MISSION THAT DOES NOT END AT THE TASK — the extraction model** (item 2 of the block
-      below). P59: on a big board the task completes before the fight arrives, so every campaign wins.
-      Until this lands, "90% big" means "90% trivial". **It gates C.**
+- [ ] **B. A MISSION THAT DOES NOT END AT THE TASK — the extraction model, as the owner specified
+      it** (`docs/DESIGN.md` §6.6, "The owner's answers"). P59: on a big board the task completes
+      before the fight arrives, so every campaign wins. **It gates C.** Live on BIG boards only, so
+      the 18x11 tutorial band and every gate pinned to it keep today's rules. In waves:
+      - [ ] **B1. BOARD and CALL EXTRACTION.** A soldier in the zone boards (leaves the board, safe).
+            The mission never ends on its own while a living soldier is on the ground. Once one has
+            boarded, CALL EXTRACTION ends it: aboard + in-zone get out, everyone else is lost (KIA).
+            The evac zone is placed far from the objective (several turns).
+      - [ ] **B2. HACK / SABOTAGE:** the evac spawns when the task is done, and the mission ALSO ends
+            when every hostile is dead. No reinforcements on these two (sneak or clear, both real).
+      - [ ] **B3. RESCUE and ESCORT converge:** the asset is REACHED mid-board, never brought. Evac
+            required, with the withdrawal opposed (§6.5: reinforcements 1-2 at a time from the
+            extraction's half of the board).
+      - [ ] **B4. STEAL — a new objective** (appended to `Objective`): pick up a carryable object,
+            PASS it to an adjacent soldier, get it out through the extraction.
+      - [ ] **B5. REMOVE THE VETERAN RESERVE.** Owner decision. Recall gone from the draft, stored
+            veterans discarded on load, `StandingReserve`/`DeepReserve` re-meant as power-curve
+            unlocks (members kept: append-only). `SIGHTLINE_VETTEST` is retired or repurposed.
 - [ ] **C. THE CAMPAIGN'S BOARD CURVE.** Tutorial and the first missions on 18x11; most of the run on
       big boards, sized per node (`Cfg.SetBoard` is already runtime). Re-baseline the heat ladder on
       the new game: a new instrument, never compared with the 18x11 ladder of record.
@@ -44,13 +59,7 @@ block re-orders it and adds to it.
       abilities), never carried soldiers (they retire). A fresh run must feel unique through a big
       mission and map library. The heat ladder must then be set against the GROWN squad, which is
       why F is measured after C, not before.
-      **⚠ CONFLICT TO RESOLVE WITH THE OWNER BEFORE F:** the game ALREADY carries soldiers between
-      runs. W9 SIGNAL's veteran reserve enshrines promoted survivors and lets a later run's draft
-      recall them for a price (`SaveGame.MaxVeterans` 12; WAR ROOM unlocks `StandingReserve` and
-      `DeepReserve` extend it; `SIGHTLINE_VETTEST`). The owner's direction says soldiers retire after
-      one run. Either the reserve goes (and the two unlocks become something else, `MetaUnlock` being
-      append-only), or it is redefined as something that is not a carried soldier. Do not remove it
-      without that answer.
+      **The veteran conflict is RESOLVED: the owner chose removal — item B5.**
 
 ## ⚑ OWNER DIRECTION (2026-09-16) — THE BOARD IS THE COMMITMENT. This supersedes the insertion-frame plan.
 
