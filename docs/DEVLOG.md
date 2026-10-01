@@ -19712,6 +19712,26 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P69. THE NEW BASELINE (item C3)
+
+Base `65e34a9`. The round is in `docs/measurements/c3/` (README, tables, every chunk). It has two
+arms, 6 rungs x 16 CRN slot sets, n=320/rung/arm and 3,840 campaigns. Zero BAD, ARM CHECK PASS.
+
+- **The shipped game:** RECRUIT 65.0 / h0 50.6 / h2 33.8 / h4 18.8 / h6 5.6 / h8 2.5. The ladder is
+  monotone and every step is resolved. The h6->h8 step is 3.1 points, near the floor.
+- **The owner's target is not met by the autopilot.** A fresh profile starts on RECRUIT, and the
+  autopilot wins 65% there (the sloppy policy, 66%). This instrument cannot measure a human
+  beginner, so no lever was shipped. It is ROADMAP C4, a design call.
+- **The board curve does not move the campaign total** (paired against `SIGHTLINE_BOARDCURVE=0`).
+  The sign alternates; only h4 reaches |z| 2.18. It moves WHERE runs end:
+  - mission 3, the first big board, is a spike at h6/h8;
+  - the big-board DECAPITATE finale kills at the low rungs;
+  - CAPTIVE LOST rises at the top.
+
+  Missions 1-2 are loss-for-loss identical in both arms, because the opener is the same world.
+- **A ten-mission run on 18x11 stalls at 5.1%** (the flat arm). The curve stalls at 1.9%, mostly
+  big-board RESCUE.
+
 ## P68. THE BOARD CURVE (item C2)
 
 Base `841aaf3`. The owner: "1-2 short", and board size should "vary per mission with size-ranges per

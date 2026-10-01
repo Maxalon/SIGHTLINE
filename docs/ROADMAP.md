@@ -82,8 +82,22 @@ block re-orders it and adds to it.
             autoplay and the balance batch; OFF in self-tests (they keep the board they stage) and
             under `SIGHTLINE_BIGMAP` (a pinned board). `SIGHTLINE_BOARDCURVE=0` restores; the balance
             JSON's `levers.board` reads `curve:18x11@64` under it. PACETEST leg (E).
-      - [ ] **C3. A NEW BASELINE** for the new game, never compared with the 18x11 ladder of record.
-            Target: an inexperienced first run usually loses, but can win.
+      - [x] **C3. A NEW BASELINE — P69** (`docs/measurements/c3/`, base `65e34a9`, n=320/rung/arm).
+            Curve: RECRUIT 65.0 / h0 50.6 / h2 33.8 / h4 18.8 / h6 5.6 / h8 2.5, monotone. Against the
+            curve-off control: the sign alternates and there is no campaign-level effect.
+            **The target is NOT met by the autopilot.** A fresh profile starts on RECRUIT, and the
+            autopilot wins 65% there (sloppy 66%). The instrument cannot say how a human beginner
+            does. Left open below as C4.
+      - [ ] **C4. THE FIRST RUN'S RUNG.** The owner's target ("an inexperienced first run usually loses,
+            but can win") against C3's 65% on the RECRUIT default. Candidates: start a fresh profile on
+            h0 (50.6 / sloppy 46.2); harden RECRUIT; or accept that a human beginner plays well below
+            the autopilot. **A design call**: which rung a first run is on, and what stands in
+            for "inexperienced".
+      - [ ] **C5. THE SPIKES C3 FOUND** (where campaigns end, not how often):
+            - mission 2 ends more runs than mission 1 at every rung;
+            - mission 3, the first big board, ends 78/99 at h6/h8 (RESCUE, STEAL, DECAPITATE);
+            - the big-board DECAPITATE finale ends 48 runs at RECRUIT+h0 against 15 flat;
+            - big-board RESCUE stalls (16 of 36 stalemates).
 - [ ] **G. ACTS** (later). Act 1 = today's run. Beating act 1 unlocks act 2 and act 2 unlocks act 3,
       each a fresh run. Act 4 is unlocked by a secret/puzzle and leads to the true ending. Needs a
       persisted act-progress field in the meta profile (append-only) and per-act content (enemy
