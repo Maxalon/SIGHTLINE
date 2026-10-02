@@ -2491,7 +2491,11 @@ public partial class Game
         if (Mode != GameMode.Training && !Grid.AnyRift)
             Mission.StampBuildings(Grid, Players, Enemies);
 
+        // P70: a new mission starts with nothing scanned. Without this the scan memory carried over
+        // from the previous mission whenever the two boards were the same size.
+        if (Vision.Enabled) Vision.Reset(Grid);
         FrameCameraOnSquad();   // P29: a board bigger than the screen must open ON the squad
+        if (View3D.Enabled) View3D.FrameOnSquad(Grid, Players);   // P70: the projected camera too
         if (ShotFlatZoom > 0f)   // P58 harness (+ 0d's edge pan)
         {
             CamZoom = MathF.Max(FlatZoomFloor, ShotFlatZoom); _autoCamManual = true;
@@ -3200,6 +3204,33 @@ public partial class Game
         foreach (var u in Players) if (u.Alive && u.X == x && u.Y == y) return u;
         foreach (var u in Enemies) if (u.Alive && u.X == x && u.Y == y) return u;
         return null;
+    }
+
+    /// P70 — hostiles under a line of fire are contacts even past the scan's reach (see
+    /// `Vision.Contacts`). Ammo is deliberately ignored: an empty magazine does not blind anyone.
+    public void RefreshContacts()
+    {
+        Vision.Contacts.Clear();
+        if (!Vision.Enabled) return;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive) continue;
+            foreach (var p in Players)
+            {
+                if (!p.Alive || Util.TileDist(p.X, p.Y, e.X, e.Y) > p.Weapon.MaxRange) continue;
+                bool commanding = Grid.HeightAt(p.X, p.Y) - Grid.HeightAt(e.X, e.Y) >= 2;
+                if (Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y, commanding)) { Vision.Contacts.Add(e); break; }
+            }
+        }
+    }
+
+    /// The unit the operator can SEE on a tile: `UnitAt`, minus hostiles the scan has not shown.
+    /// Every cursor read goes through this, so hovering an empty-looking tile never names a
+    /// contact the picture is hiding.
+    public Unit SeenUnitAt(int x, int y)
+    {
+        var u = UnitAt(x, y);
+        return u != null && Vision.Shows(u) ? u : null;
     }
 
     public bool CanTarget(Unit a, Unit d)
@@ -5043,6 +5074,7 @@ public partial class Game
                 Mix((e.Active ? 1 : 0) | (e.Ammo > 0 ? 2 : 0) | (e.OnOverwatch ? 4 : 0) | (e.OwFocused ? 8 : 0)
                     | (e.Hp << 8) | (e.Routed << 16) | (e.Pinned << 20) | (e.Suppress << 24));
                 Mix(e.OwDirX * 7 + e.OwDirY);
+                Mix(Vision.Shows(e) ? 1 : 0);   // P70: a contact appearing changes the forecast
             }
             foreach (var p in Players) { if (!p.Alive) continue; Mix(p.X * 31 + p.Y); Mix(p.Hp); }   // crossfire reads squadmates
             // mutable terrain layers (cover can be chipped, smoke/fire tick, barrels blow up)
@@ -5081,7 +5113,9 @@ public partial class Game
         List<Unit> foes = null;
         if (!untouchable)
             foreach (var e in Enemies)
-                if (e.Alive && e.Active && e.Ammo > 0 && e.Weapon != null)
+                // P70: the forecast is built from CONTACTS — a tick from a hostile the picture is
+                // hiding would announce it. (Always true with the scan layer off: every harness path.)
+                if (e.Alive && e.Active && e.Ammo > 0 && e.Weapon != null && Vision.Shows(e))
                     (foes ??= new List<Unit>()).Add(e);
         if (foes == null) { _threatClock.Stop(); ThreatMs = _threatClock.Elapsed.TotalMilliseconds; return; }
 
@@ -5166,7 +5200,7 @@ public partial class Game
         HoverValid = PickTile(Hud.Mouse(), out HoverX, out HoverY);   // PARALLAX: through the harness pin (NaN = live)
         if (KbCursor) { HoverX = CurX; HoverY = CurY; HoverValid = Grid.InBounds(CurX, CurY); }
 
-        Unit hovered = HoverValid ? UnitAt(HoverX, HoverY) : null;
+        Unit hovered = HoverValid ? SeenUnitAt(HoverX, HoverY) : null;
 
         if (GrenadeMode)
         {
@@ -5337,7 +5371,7 @@ public partial class Game
     void BoardAct(int hx, int hy)
     {
         if (!Grid.InBounds(hx, hy)) return;
-        var hovered = UnitAt(hx, hy);
+        var hovered = SeenUnitAt(hx, hy);
 
         if (GrenadeMode)
         {
@@ -5629,6 +5663,7 @@ public partial class Game
             focus = _aiUnits[_aiIdx];
 
         if (focus == null || !focus.Alive) return;
+        if (!Vision.Shows(focus)) return;   // P70: the camera does not follow a contact nobody has
 
         var targetPan = AutoCamPan(focus.X, focus.Y, BoardCenter);
 
@@ -9193,6 +9228,15 @@ public partial class Game
         else
         {
             Raylib.ClearBackground(Pal.Bg);
+            // P70: the flat board reads the scan layer too, so it must keep it current (the
+            // projected view refreshes inside DrawPlayable).
+            if (Vision.Enabled)
+            {
+                Vision.Stamp = Turn;
+                var all = new List<Unit>(Players); all.AddRange(Enemies);
+                Vision.Refresh(Grid, all);
+                RefreshContacts();
+            }
             Raylib.BeginMode2D(ViewCamera(true));
             Renderer.DrawBoard(this);
             Raylib.EndMode2D();

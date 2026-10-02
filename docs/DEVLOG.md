@@ -19712,6 +19712,43 @@ The next lever is that geometry — a second site, a second door, or the room's 
 of the mission's headcount rather than out of it — not the fight inside the room, which this round
 says is now good.
 
+## P70. THE HOLOGRAM (items H1 + H2)
+
+Base `56ef0cf`. The owner asked "why is it 2d?" of a C2 screenshot, and then restated the direction:
+a holographic projection built from every soldier's LiDAR, "details in shapes, not entities", units
+represented, not rendered. Then they warned against the obvious failure: "if we limit colours and
+styling too much it will look bland and boring very fast."
+
+- **Why it read as 2D, and it was not the renderer.** The screenshot was a harness shot, and the
+  harness always uses the flat view. But in 3D the opening camera was 52 deg tilt and **zero orbit**:
+  square-on, an orthographic box shows its top and one face. On a big board fitted to the screen,
+  that is a plan drawing. It now opens at 40/30 (top and two faces) and on the squad. It is zoomed
+  in on a big board (`View3D.FrameOnSquad`); the 3D camera had never re-framed between missions.
+- **The hologram** (`src/View3D.Holo.cs`, `View3D.Holo`, `SIGHTLINE_HOLO=0`):
+  - Draws through the existing primitives: `Solid`/`CoverProp`/the wall pass got one branch each.
+    So walls, cover, plateaus, barrels and the prop kit all changed through one seam.
+  - The plate is dark with a lattice and scan returns.
+  - Structures are bright edges (under P39's scan shader) over 16% bodies. The bodies are drawn twice:
+    once blended with depth writes off (they never hide the edges), then once DEPTH-ONLY. So they still
+    hide floor paint and chips behind them. **DECALTEST (C) caught it**: the first cut let a threat
+    zone paint through a wall.
+- **Colour.** Each biome has a KEY/SECOND/GROUND/GLOW set, and a height ramp runs from ground to glow.
+  The first cut had three clashes, which leg (A) now guards: VERDANT's low cover was objective
+  yellow, ASH's second was 29 RGB units from hostile red, and MAGMA's second was gold. Rule: 55 units
+  from every reserved colour; MAGMA's key is exempt by name.
+- **The scan layer on, in both views.** Default-off since P32 because only 3D honoured it, so `I`
+  revealed the map. Now the flat board veils too, and both views hide unseen hostiles through one
+  predicate. Gaps found and closed on the way:
+  - **The scan carried over between missions** on same-sized boards (no reset at setup).
+  - **A sniper reaches 20 tiles, the scan 9.** So FIRE could light for an undrawn target. Fixed:
+    "what you can shoot, you can see".
+  - The cursor, the forecast, overwatch lanes, auras, the acting enemy's plan and the flat autocam
+    each leaked hidden hostiles. All now read contacts only. Artillery target zones stay visible on
+    purpose (they warn about the player's tile).
+- **Gate:** `SIGHTLINE_HOLOTEST` (A)-(F). It went red under four simultaneous sabotages: no mission
+  reset, contacts without line of sight, no flat veil, and ASH's coral restored. Every harness path
+  keeps the layer off, so the balance instrument and autoplay are untouched by construction.
+
 ## P69. THE NEW BASELINE (item C3)
 
 Base `65e34a9`. The round is in `docs/measurements/c3/` (README, tables, every chunk). It has two

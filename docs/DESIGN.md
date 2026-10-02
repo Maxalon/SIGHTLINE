@@ -516,6 +516,54 @@ palettes (`SIGHTLINE_CB=1`).
 
 ---
 
+### H.1 THE HOLOGRAM — the board is a scan, and colour carries meaning (owner direction, 2026-10-02)
+
+> Remember we want the game to look like a holographic projection of the battlefield. Details in
+> shapes, not entities. See it as a LiDAR scanner on every soldier's person that scans the
+> environment. The soldiers themselves are represented, not rendered.
+
+> ...but be careful with the visual style. If we limit colours and styling too much it will look
+> bland and boring very fast. Visual identity and colours help a lot with that.
+
+**What that settles.** The projected view is a RECONSTRUCTION the operator reads at HQ, not a lit
+model of a place. Nothing in it is lit; everything in it EMITS. Its vocabulary:
+
+- **The plate.** Known ground is a dark plate with a lattice and scan RETURNS (short ticks), denser and
+  brighter where the observer stood close. Unknown ground is not drawn at all.
+- **Structures are edges over a translucent body.** The edges are the information; the body is there so
+  a wall reads as a surface rather than a cage. Bodies never hide edges, but they do hide the floor
+  paint and the chips behind them (P44's occlusion rule still holds).
+- **Units are represented, not rendered.** Chips and markers, never figures. (The marker pass is
+  ROADMAP H4.)
+
+**Colour is information, and there is a lot of it.** A single-hue hologram is the bland failure the
+owner warned about. Each biome has its own hologram set (`View3D.HoloFor`) with four roles:
+KEY (structures), SECOND (low cover and props, so head-high and waist-high never share a hue),
+GROUND (plate and returns) and GLOW (the top of the height ramp: plateaus shade from ground toward
+glow by tier, so height is a colour as well as a shape). The eight KEYs are pairwise distinct, so the
+rooms read as different places at a glance.
+
+**Reserved hues.** Squad cyan, hostile red, boss orange, objective gold and the accent amber keep
+their meanings, so terrain stays at least 55 RGB units from all of them. `SIGHTLINE_HOLOTEST` leg (A)
+asserts it. **MAGMA's key is the one named exemption**: ember IS that room.
+
+**The tiers keep their meanings.** VISIBLE is the set at full strength, scaled by how close the look
+was. REMEMBERED is the room's key cooled toward grey, still in lines (P38/P39). UNSEEN is nothing.
+
+**The scan layer is the player's default, in both views.** It is presentation, not a rule change:
+the AI, combat and the autopilot do not read it. The P32 objection (pressing `I` would reveal the
+map) is answered by making the flat board honour it too. One rule closes a gap the scan alone would
+open: **what you can shoot, you can see.** A hostile under any soldier's line of fire is on the
+picture even past the scan's reach (`Vision.Contacts`), so the FIRE verb never lights for a target
+the operator cannot see. The incoming-fire forecast, overwatch lanes, banner auras, the acting
+enemy's plan and the flat autocam are all built from contacts only. Artillery target zones are
+deliberately NOT gated: the warning is about the player's tile, not the gun's.
+
+**What this changes that the autopilot cannot see.** For a human player this is fog of war: hostiles
+past the scan are not on the board. The balance instrument never reads `Vision`, so this is unpriced
+by construction, and it makes the game harder for a person, not for the autopilot. §5's "fog of war
+deferred" decision is superseded for presentation; it still stands for the RULES.
+
 ## 4. SIGHTLINE — honest scorecard
 
 Graded against the pillars/principles above. "Strong" = a genuine strength to protect;
