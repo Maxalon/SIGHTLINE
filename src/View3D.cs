@@ -39,10 +39,10 @@ public static partial class View3D
 
     /// Camera elevation above the horizon, degrees. 90 = straight down (today's game), 0 = ground
     /// level. The whole point of the prototype is that we do not know what this should be.
-    public static float PitchDeg = 52f;
+    public static float PitchDeg = DefaultPitch;
 
     /// Rotation around the board's vertical axis, degrees. 0 = today's orientation (north up).
-    public static float YawDeg = 0f;
+    public static float YawDeg = DefaultYaw;
 
     /// Framing slack. 1.0 fits the board's rotated bounding box exactly; >1 pulls back.
     public static float Margin = 1.04f;
@@ -65,7 +65,33 @@ public static partial class View3D
 
     /// Back to the framing every mission opens on. Bound to the same C the flat camera resets with,
     /// so one key means "show me the board again" in either projection.
-    public static void ResetCamera() { PitchDeg = 52f; YawDeg = 0f; Zoom = 1f; Pan = Vector2.Zero; }
+    public static void ResetCamera() { PitchDeg = DefaultPitch; YawDeg = DefaultYaw; Zoom = 1f; Pan = Vector2.Zero; }
+
+    /// P70 — THE OPENING ANGLE. It was 52 degrees of tilt and NO orbit, and square-on to the grid an
+    /// orthographic box shows its top and ONE face, so the board read as a plan drawing at any zoom
+    /// that fits a big map. 40 and 30 show a box's top and TWO faces, which is what makes a volume
+    /// read as a volume; 30 is two of the 15-degree orbit stops, so the orbit keys still land on it.
+    public const float DefaultPitch = 40f, DefaultYaw = 30f;
+
+    /// Set by the harness (`SIGHTLINE_VIEW3DCAM`) so a staged camera survives mission setup.
+    public static bool CameraPinned;
+
+    /// P70 — OPEN ON THE SQUAD. The flat camera has done this since P29; the projected one kept
+    /// whatever framing the last mission left. On the home board the whole board still fits at
+    /// zoom 1; on a big one the camera comes in to roughly a home board's width of ground around
+    /// the squad, because a whole 40-wide board at fit zoom is a map, not a place.
+    public static void FrameOnSquad(Grid g, List<Unit> squad)
+    {
+        if (CameraPinned || g == null) return;
+        ResetCamera();
+        if (g.W <= 18 && g.H <= 11) return;
+        Zoom = Util.Clamp(g.W / 20f, ZoomMin, 2.4f);
+        int n = 0; float sx = 0f, sz = 0f;
+        if (squad != null)
+            foreach (var u in squad) if (u.Alive) { sx += u.X + 0.5f; sz += u.Y + 0.5f; n++; }
+        if (n > 0) Pan = new Vector2(sx / n - g.W * 0.5f, sz / n - g.H * 0.5f);
+        ClampPan(g);
+    }
 
     /// How far the target may stray and still leave the view full of board.
     ///
@@ -238,6 +264,9 @@ public static partial class View3D
         // scan of a box actually tells you, so this primitive states them directly instead of
         // extracting them from a mesh whose chamfer is a lighting device.
         if (_wire) { Wire.Box(centre, w, h, d, WireTint(_wireDim)); return; }
+        // P70 — the hologram's two passes: bright edges, then a translucent body.
+        if (_holoPass == HoloLines) { Wire.Box(centre, w, h, d, _holoCol); return; }
+        if (_holoPass == HoloFill) { Raylib.DrawCube(centre, w, h, d, Fade(_holoCol, FillA)); return; }
         // The bake only ever darkens, so tint with a LIFT: the lit top face then lands where the
         // old flat cap sat instead of a third under it.
         var tint = Pal.RGBA(Math.Min(255, top.R * 5 / 4), Math.Min(255, top.G * 5 / 4),
@@ -279,6 +308,7 @@ public static partial class View3D
     /// since a memory this layer stops drawing is a memory the player is not told they have.
     static Color WireTint(float conf)
     {
+        if (Holo) return HoloMemory(conf);   // P70: the room's own key, cooled, not a fixed blue
         float k = Util.Clamp(conf, 0f, 1f);
         var hot = Pal.Mix(Scene.Edge, Pal.RGBA(150, 214, 240), 0.72f);
         var cold = Pal.Mix(hot, Pal.RGBA(96, 116, 132), 0.55f);      // less sure -> less colour
@@ -403,6 +433,20 @@ public static partial class View3D
             else if ((v & 1) == 0) { m = _crate; sc = high ? 1.45f : 0.95f; }
             else { Solid(TileWorld(x, y, baseY + (high ? HighH : LowH) * 0.5f),
                          high ? 0.92f : 0.86f, high ? HighH : LowH, high ? 0.92f : 0.86f, tint, tint); return; }
+            if (_holoPass == HoloLines)
+            {
+                Wire.Draw(SpeciesKey(high), m, TileWorld(x, y, baseY), Vector3.UnitY,
+                          (v * 37) % 360, Vector3.One * sc, _holoCol);
+                return;
+            }
+            if (_holoPass == HoloFill)
+            {
+                Rlgl.DrawRenderBatchActive();
+                Raylib.DrawModelEx(m, TileWorld(x, y, baseY), Vector3.UnitY, (v * 37) % 360,
+                                   Vector3.One * sc, Fade(_holoCol, FillA * 1.4f));
+                Rlgl.DrawRenderBatchActive();
+                return;
+            }
             if (_wire)
             {
                 // THIS is where the extractor earns its keep: a tree, a boulder, a slag heap and a
@@ -505,6 +549,7 @@ public static partial class View3D
                 // the half-thickness above.
                 _wire = Math.Max(w0, w1) == Vision.Remembered;
                 _wireDim = _wire ? Vision.ConfidenceV(x, y) : vf;
+                if (_holoPass != HoloOff) _holoCol = HoloStrength(Pal.Mix(HS.Key, HS.Glow, 0.15f), Vision.ConfidenceV(x, y));
                 if (k == EdgeKind.Door)
                 {
                     Slab(at with { Z = y + 0.18f }, th, HighH * 0.95f, 0.36f, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
@@ -529,6 +574,7 @@ public static partial class View3D
                 var at = new Vector3(x + 0.5f, 0f, y + off);
                 _wire = Math.Max(n0, n1) == Vision.Remembered;
                 _wireDim = _wire ? Vision.ConfidenceH(x, y) : vf;
+                if (_holoPass != HoloOff) _holoCol = HoloStrength(Pal.Mix(HS.Key, HS.Glow, 0.15f), Vision.ConfidenceH(x, y));
                 if (k == EdgeKind.Door)
                 {
                     Slab(at with { X = x + 0.18f }, 0.36f, HighH * 0.95f, th, Known(Biomed(Pal.CoverHi), vf), Known(Biomed(Pal.CoverHiTop), vf));
@@ -543,6 +589,7 @@ public static partial class View3D
 
     public static void DrawTerrain(Grid g)
     {
+        if (Holo) { DrawTerrainHolo(g); return; }   // P70
         // Floor: a slab per tile in the board's own checker, so the ground reads as TILES rather
         // than as a void with things standing in it. Same FloorA/FloorB alternation as the 2D board.
         for (int y = 0; y < g.H; y++)
@@ -827,8 +874,7 @@ public static partial class View3D
     /// but a soldier who was seen an hour ago has moved. Drawing a stale hostile at a stale tile
     /// would be an outright lie rather than an honest memory. Friendlies are always drawn — HQ
     /// knows where it sent its own people.
-    static bool Shown(Unit u) =>
-        u.Team == Team.Player || !Vision.Enabled || Vision.At(u.X, u.Y) == Vision.Visible;
+    static bool Shown(Unit u) => Vision.Shows(u);
 
     public static void DrawChips(Grid g, List<Unit> units)
     {
@@ -1046,7 +1092,7 @@ public static partial class View3D
         // that forgets zoom or pan strands the player looking at a corner with no way back.
         PitchDeg = 11f; YawDeg = 123f; Zoom = 3.4f; Pan = new Vector2(4f, 4f);
         ResetCamera();
-        if (PitchDeg != 52f || YawDeg != 0f || Zoom != 1f || Pan != Vector2.Zero)
+        if (PitchDeg != DefaultPitch || YawDeg != DefaultYaw || Zoom != 1f || Pan != Vector2.Zero)
             fails.Add($"reset: left p{PitchDeg:0}/y{YawDeg:0}/z{Zoom:0.0}/pan{Pan.X:0.0},{Pan.Y:0.0}");
 
         PitchDeg = savedP; YawDeg = savedY; Zoom = savedZ; Pan = savedPan;
@@ -1439,6 +1485,7 @@ public static partial class View3D
         Raylib.ClearBackground(Pal.Bg);
         Vision.Stamp = g.Turn;          // P39: the clock a memory's AGE is measured against
         Vision.Refresh(g.Grid, AllUnits(g));
+        g.RefreshContacts();            // P70: what a soldier can shoot is on the picture
         var cam = MakeCamera(g.Grid, (float)Cfg.ScreenW / Cfg.ScreenH);
         ApplyShake(ref cam, g.Fx.ShakeOffset, g.CamPulse);
         if (DecalLayer) BakeDecals(g);              // binds its own framebuffer — before BeginMode3D

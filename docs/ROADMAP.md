@@ -98,6 +98,32 @@ block re-orders it and adds to it.
             - mission 3, the first big board, ends 78/99 at h6/h8 (RESCUE, STEAL, DECAPITATE);
             - the big-board DECAPITATE finale ends 48 runs at RECRUIT+h0 against 15 flat;
             - big-board RESCUE stalls (16 of 36 stalemates).
+- [ ] **H. THE HOLOGRAM** (owner, 2026-10-02: `docs/DESIGN.md` §3.H.1). The board is a LiDAR
+      reconstruction from the squad's own scanners; units are represented, not rendered; and it must
+      not go bland ("colours help a lot").
+      - [x] **H1. THE SCAN LAYER IS THE PLAYER'S DEFAULT, IN BOTH VIEWS — P70.** The flat board blanks
+            unscanned ground and veils remembered ground (`Renderer.DrawScanVeil`); unseen hostiles are
+            not drawn in either view (`Vision.Shows`). **What you can shoot, you can see** (`Vision.Contacts`).
+            The forecast, overwatch lanes, auras, enemy intent and autocam read contacts only. The scan
+            resets per mission (it carried over between same-sized boards). `SIGHTLINE_DISCOVERY=0`
+            turns it off for one launch.
+      - [x] **H2. THE HOLOGRAM DRAWS THE BOARD — P70.** `View3D.Holo` (`SIGHTLINE_HOLO=0` restores the
+            lit board): scan plate, emissive edges over translucent bodies, per-biome KEY/SECOND/
+            GROUND/GLOW sets, and a height ramp. Opens at 40 deg tilt / 30 deg orbit (square-on showed
+            one face of every box) and on the squad, zoomed in on a big board. `SIGHTLINE_HOLOTEST`.
+      - [ ] **H3. EACH SOLDIER IS THE SCANNER.** A faint sweep out from a soldier when it moves, so
+            the player sees where knowledge comes from. The confidence shader already sweeps once
+            across the board; make it per-soldier and centred on them.
+      - [ ] **H4. UNITS AS MARKERS.** A ground ring and a floating glyph per unit, in the
+            friend/foe colours; a LAST-SEEN marker where a contact was last on the picture (a memory,
+            visibly stale, never a position).
+      - [ ] **H5. THE WHOLE-BOARD VIEW.** At zoom 1 a big board still reads small. Try a lower plate
+            alpha and thicker edges at low zoom, and judge it on a real screen.
+      - [ ] **H6. JUDGE THE PALETTES ON A REAL SCREEN.** Eight sets were tuned from headless shots
+            only. NEON and MAGMA are the riskiest: MAGMA's key is near the hostile colour by design.
+      - [ ] **Open from P70:** the per-frame scan refresh is O(soldiers x tiles x LoS); unmeasured on
+            a 48x30 board on a real machine. The HUD's hostile COUNT still counts unseen hostiles
+            (briefing-level intel; a design call whether it should).
 - [ ] **G. ACTS** (later). Act 1 = today's run. Beating act 1 unlocks act 2 and act 2 unlocks act 3,
       each a fresh run. Act 4 is unlocked by a secret/puzzle and leads to the true ending. Needs a
       persisted act-progress field in the meta profile (append-only) and per-act content (enemy

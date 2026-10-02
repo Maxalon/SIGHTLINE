@@ -245,6 +245,9 @@ public static class Program
         // board through a bypass path and exits), this sets the same flag the I key toggles, so the
         // game runs normally: full HUD, full input, the 3D board underneath.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3D") == "1") View3D.Enabled = true;
+        // P70 — the projected view draws a HOLOGRAM (scan plate, emissive edges, per-biome colour
+        // sets). `=0` restores the lit board. Presentation only.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HOLO") == "0") View3D.Holo = false;
         // P33 — SIGHTLINE_VIEW3DCAM=pitch:yaw:zoom[:panX:panY] stages the projected camera before
         // the first frame, so SIGHTLINE_SHOT can photograph a state that otherwise needs a hand on
         // the keyboard. Parse-or-leave-alone: a field that does not read is skipped rather than
@@ -254,6 +257,7 @@ public static class Program
         if (!string.IsNullOrEmpty(v3cam))
         {
             var f = v3cam.Split(':');
+            View3D.CameraPinned = true;   // P70: mission setup must not re-frame a staged camera
             if (f.Length > 0 && float.TryParse(f[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float cp))
                 View3D.PitchDeg = Util.Clamp(cp, View3D.PitchMin, View3D.PitchMax);
             if (f.Length > 1 && float.TryParse(f[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float cy))
@@ -1040,6 +1044,17 @@ public static class Program
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "fxbridgetest");
             LoadGameFonts();   // leg (E) measures GLYPH INK; without the real atlases it measures nothing
             Console.WriteLine(View3D.FxBridgeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_HOLOTEST=1 : P70 — the hologram's colour discipline, the scan layer in both views,
+        // line-of-fire contacts, the per-mission reset and the opening camera. Reads pixels.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HOLOTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "holotest");
+            LoadGameFonts();
+            Console.WriteLine(View3D.HoloSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -1893,6 +1908,10 @@ public static class Program
         // forces flat for one launch.
         if (!(shot || autoplay))
             View3D.Enabled = View3D.LaunchEnabled(Environment.GetEnvironmentVariable("SIGHTLINE_VIEW3D"), Display.FlatView);
+        // P70 — the scan layer is the player's default too, in BOTH views (the flat board honours it
+        // since P70, which is what made this safe). Harness paths keep SIGHTLINE_DISCOVERY's opt-in.
+        if (!(shot || autoplay))
+            Vision.Enabled = Vision.LaunchEnabled(Environment.GetEnvironmentVariable("SIGHTLINE_DISCOVERY"));
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 

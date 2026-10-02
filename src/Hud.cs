@@ -2576,7 +2576,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // STALE tile's unit (and mis-label an enemy that walked onto it). Display-only.
             if (g.PickTile(Mouse(), out int hx, out int hy))
             {
-                var u = g.UnitAt(hx, hy);
+                var u = g.SeenUnitAt(hx, hy);
                 if (u != null && u.Team == Team.Enemy) d = u;
             }
         }

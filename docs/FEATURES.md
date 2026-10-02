@@ -629,6 +629,15 @@ seeds (mix of WIN/LOSE, no exceptions):
   it to an adjacent soldier, a carrier who goes down drops it, and it must leave through the
   extraction (the CALL is refused without it). On a big board EVAC nodes play as STEAL;
   `SIGHTLINE_OBJ=steal` forces it anywhere.
+- **The hologram + the scan layer (P70):** the projected view draws a LiDAR reconstruction:
+  - a scan plate with returns;
+  - emissive edges over translucent bodies;
+  - a per-biome hologram colour set (KEY/SECOND/GROUND/GLOW) with a height ramp.
+
+  The scan layer is on for the player in both views: unscanned ground is not drawn, hostiles appear
+  only on scanned ground or under a soldier's line of fire, and the scan resets per mission. The
+  camera opens angled (40/30) and on the squad. `SIGHTLINE_HOLO=0` / `SIGHTLINE_DISCOVERY=0`;
+  `SIGHTLINE_HOLOTEST`.
 - **A ten-mission run on a board curve (P67 + P68):** a campaign is 10 missions walking the tuned
   depth curve in finer steps (`Run.Pace`). Missions 1-2 are on 18x11; 3-10 are big boards sized per
   mission type (kill 30-36 wide, HACK/SABOTAGE 36-42, extraction/asset missions 40-48).

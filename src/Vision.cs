@@ -125,6 +125,22 @@ public static class Vision
         : Math.Max(FaceH[x, y, 0] == Unseen ? 0f : Score(FaceHAtT[x, y, 0], FaceHDist[x, y, 0]),
                    FaceH[x, y, 1] == Unseen ? 0f : Score(FaceHAtT[x, y, 1], FaceHDist[x, y, 1]));
 
+    /// P70 — is this unit on the operator's picture? Friendlies always (HQ knows where it sent its
+    /// own people); a hostile only while a soldier has eyes on its tile. ONE predicate, read by both
+    /// renderers, so switching view can never reveal or hide a contact.
+    public static bool Shows(Unit u) =>
+        u == null || u.Team == Team.Player || !Enabled || At(u.X, u.Y) == Visible || Contacts.Contains(u);
+
+    /// Hostiles a soldier can put fire on this frame, whatever the scan reaches. A sniper reaches
+    /// 20 tiles and the scan 9, so without this the FIRE verb could light for a target nobody can
+    /// see. What you can shoot, you can see. `Game.RefreshContacts` fills it after each refresh.
+    public static readonly HashSet<Unit> Contacts = new();
+
+    /// P70 — the scan layer is ON for a player and OFF for every harness path, the same split as
+    /// the projected view (`View3D.LaunchEnabled`). `SIGHTLINE_DISCOVERY=0` turns it off for one
+    /// launch; `=1` turns it on for a harness run.
+    public static bool LaunchEnabled(string env) => env != "0";
+
     public static byte At(int x, int y) =>
         !Enabled ? Visible
         : (Tile == null || x < 0 || y < 0 || x >= _w || y >= _h) ? Unseen : Tile[x, y];

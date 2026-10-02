@@ -121,6 +121,7 @@ echo -n "DECALTEST  : "; verdict "$(SIGHTLINE_DECALTEST=1 run | grep -oE "DECALT
 echo -n "WALKTEST   : "; verdict "$(SIGHTLINE_WALKTEST=1 run | grep -oE "WALKTEST: (PASS|FAIL)" | head -1)"
 # P46: a unit's own state, at the unit, in the projected view. Framebuffer differential; window.
 echo -n "UNITSTATETEST: "; verdict "$(SIGHTLINE_UNITSTATETEST=1 run | grep -oE "UNITSTATETEST: (PASS|FAIL)" | head -1)"
+echo -n "HOLOTEST: "; verdict "$(SIGHTLINE_HOLOTEST=1 run | grep -oE "HOLOTEST: (PASS|FAIL)" | head -1)"
 # P47: the double-resolution template format -- walls on tile boundaries. Pure parsing, no window.
 echo -n "ARENAEDGETEST: "; verdict "$(SIGHTLINE_ARENAEDGETEST=1 run | grep -oE "ARENAEDGETEST: (PASS|FAIL)" | head -1)"
 echo -n "VIPHEATTEST: "; verdict "$(SIGHTLINE_VIPHEATTEST=1 run | grep -oE "VIPHEATTEST: (PASS|FAIL)" | head -1)"

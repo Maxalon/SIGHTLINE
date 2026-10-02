@@ -936,6 +936,7 @@ public static class Renderer
         DrawCover(g);
         DrawEdges(g);            // P28: walls that live on tile BOUNDARIES, not on tiles
         DrawBarrels(g);           // explosive drums — objects at cover/terrain level (under the figures)
+        DrawScanVeil(g);          // P70: the flat board honours the scan layer, as the projected one does
         DrawHoverAndShields(g);
         DrawKbCursor(g);
         DrawEnemyIntent(g);       // telegraph: the acting hostile's planned move + target + threat
@@ -1876,6 +1877,7 @@ public static class Renderer
         foreach (var e in g.Enemies)
         {
             if (!e.Alive || !e.Active || !e.HasBanner) continue;
+            if (!Vision.Shows(e)) continue;   // P70
             int x0 = Math.Max(0, e.X - Game.BannerRange), x1 = Math.Min(g.Grid.W - 1, e.X + Game.BannerRange);
             int y0 = Math.Max(0, e.Y - Game.BannerRange), y1 = Math.Min(g.Grid.H - 1, e.Y + Game.BannerRange);
             var tl = Util.TileRect(x0, y0);
@@ -1973,6 +1975,7 @@ public static class Renderer
         foreach (var e in g.Enemies)
         {
             if (!e.Alive || !e.Active || !e.OnOverwatch || e.Ammo <= 0) continue;
+            if (!Vision.Shows(e)) continue;   // P70: an unseen watcher's lane would announce it
             (watchers ??= new System.Collections.Generic.List<Unit>()).Add(e);
         }
         if (watchers == null) return;
@@ -2095,6 +2098,7 @@ public static class Renderer
         var e = g.IntentUnit;
         var plan = g.IntentPlan;
         if (e == null || plan == null || !e.Alive) return;
+        if (!Vision.Shows(e)) return;   // P70: an unseen hostile's plan is not on the picture
 
         float t = (float)Now();
         float pulse = 0.6f + 0.4f * MathF.Sin(t * 5f);
@@ -2880,14 +2884,35 @@ public static class Renderer
         }
     }
 
+    /// P70 — THE FLAT BOARD KNOWS WHAT THE SQUAD KNOWS. With the scan layer on for a player, the
+    /// projected view draws only scanned ground; this board drew everything, so the I key REVEALED
+    /// the map (the incoherence that kept discovery default-off since P32). Unscanned tiles are
+    /// blanked to the backing and remembered ones take a veil, over terrain and its overlays but
+    /// under the figures — and unseen hostiles are not drawn at all (`Vision.Shows`).
+    static void DrawScanVeil(Game g)
+    {
+        if (!Vision.Enabled) return;
+        Color unseen = Pal.RGBA(7, 10, 14);
+        Color memory = Raylib.Fade(Pal.Mix(Pal.RGBA(7, 10, 14), g.Biome.Tint, 0.12f), 0.52f);
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                byte st = Vision.At(x, y);
+                if (st == Vision.Visible) continue;
+                var r = Util.TileRect(x, y);
+                Raylib.DrawRectangleRec(new Rectangle(r.X - 0.5f, r.Y - 0.5f, r.Width + 1f, r.Height + 1f),
+                                        st == Vision.Unseen ? unseen : memory);
+            }
+    }
+
     static void DrawUnits(Game g)
     {
-        foreach (var u in g.Enemies) DrawUnit(g, u);
+        foreach (var u in g.Enemies) if (Vision.Shows(u)) DrawUnit(g, u);   // P70: contacts only
         foreach (var u in g.Players) DrawUnit(g, u);
         // SIGNAL W3 (review): status chips draw AFTER every figure — an opaque chip pill on a
         // bottom unit must never be buried under a vertically-adjacent body drawn later in list
         // order; decision-critical state outranks silhouettes.
-        foreach (var u in g.Enemies) DrawUnitStatusChips(g, u, null);
+        foreach (var u in g.Enemies) if (Vision.Shows(u)) DrawUnitStatusChips(g, u, null);
         foreach (var u in g.Players) DrawUnitStatusChips(g, u, null);
     }
 
